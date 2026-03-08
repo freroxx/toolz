@@ -38,4 +38,7 @@ sealed class Screen(val route: String) {
     object BatteryInfo : Screen("battery_info")
     object VoiceRecorder : Screen("voice_recorder")
     object FlipCoin : Screen("flip_coin")
+    
+    // Media
+    object MusicPlayer : Screen("music_player")
 }
