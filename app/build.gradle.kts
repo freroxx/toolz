@@ -81,7 +81,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.barcode.scanning)
     implementation(libs.exp4j)
-    
+
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

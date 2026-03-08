@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="8dp"
+    android:background="@drawable/widget_background">
+
+    <ImageView
+        android:id="@+id/widget_compass_dial"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@android:drawable/ic_menu_compass"
+        android:layout_centerInParent="true"
+        android:scaleType="centerInside" />
+
+    <ImageView
+        android:id="@+id/widget_compass_needle"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@android:drawable/ic_menu_directions"
+        android:layout_centerInParent="true"
+        android:tint="#FF0000"
+        android:scaleType="centerInside" />
+
+</RelativeLayout>

@@ -59,7 +59,7 @@ class FlashlightViewModel @Inject constructor(
             try {
                 cameraId?.let { id ->
                     val characteristics = cameraManager.getCameraCharacteristics(id)
-                    val maxLevel = characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL)
+                    val maxLevel = characteristics.off get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL)
                     
                     if (maxLevel != null && maxLevel > 1) {
                         _uiState.update { it.copy(
