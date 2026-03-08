@@ -6,7 +6,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.Location
 import androidx.lifecycle.ViewModel
 import com.google.android.gms.location.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,7 +36,8 @@ class AltimeterViewModel @Inject constructor(
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            if (pressureSensor == null) {
+            // Only use GPS altitude if barometer is not available or hasn't provided a value yet
+            if (pressureSensor == null || _uiState.value.pressureHpa == 0f) {
                 result.lastLocation?.let { location ->
                     _uiState.update { it.copy(altitudeMeters = location.altitude, source = "GPS") }
                 }
@@ -51,7 +51,7 @@ class AltimeterViewModel @Inject constructor(
             sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI)
         }
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
-        fusedLocationClient.requestLocationUpdates(request, locationCallback, null)
+        fusedLocationClient.requestLocationUpdates(request, locationCallback, context.mainLooper)
     }
 
     fun stopListening() {
@@ -62,6 +62,7 @@ class AltimeterViewModel @Inject constructor(
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type == Sensor.TYPE_PRESSURE) {
             val pressure = event.values[0]
+            // Standard barometric formula for altitude
             val altitude = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, pressure)
             _uiState.update { it.copy(altitudeMeters = altitude.toDouble(), pressureHpa = pressure, source = "Barometer") }
         }

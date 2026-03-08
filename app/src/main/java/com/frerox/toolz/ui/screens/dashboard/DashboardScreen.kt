@@ -1,6 +1,5 @@
 package com.frerox.toolz.ui.screens.dashboard
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -16,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.navigation.Screen
 
 data class ToolCategory(
@@ -92,7 +92,7 @@ fun DashboardScreen(
                     Text(
                         "Toolz",
                         style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold
                     ) 
                 },
                 actions = {
@@ -123,7 +123,7 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
                     )
                 }
                 items(category.items) { tool ->
@@ -143,8 +143,8 @@ fun ToolCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(140.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.outlinedCardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -153,25 +153,25 @@ fun ToolCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(20.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Icon(
                 imageVector = tool.icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(36.dp)
             )
             Column {
                 Text(
                     text = tool.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1
                 )
                 Text(
                     text = tool.description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2
                 )
