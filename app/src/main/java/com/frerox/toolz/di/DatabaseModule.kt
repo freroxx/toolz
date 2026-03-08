@@ -2,8 +2,9 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import androidx.room.Room
+import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
-import com.frerox.toolz.data.notepad.NoteDatabase
+import com.frerox.toolz.data.music.MusicDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -17,18 +18,23 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideNoteDatabase(@ApplicationContext context: Context): NoteDatabase {
+    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         return Room.databaseBuilder(
             context,
-            NoteDatabase::class.java,
-            "note_db"
+            AppDatabase::class.java,
+            "toolz_db"
         )
         .fallbackToDestructiveMigration()
         .build()
     }
 
     @Provides
-    fun provideNoteDao(database: NoteDatabase): NoteDao {
+    fun provideNoteDao(database: AppDatabase): NoteDao {
         return database.noteDao()
+    }
+
+    @Provides
+    fun provideMusicDao(database: AppDatabase): MusicDao {
+        return database.musicDao()
     }
 }

@@ -296,7 +296,7 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Toolz v1.5.1", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Toolz v1.5.2", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("The ultimate toolkit for daily needs", style = MaterialTheme.typography.bodyMedium)
                     Text("Made by frerox", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     Spacer(modifier = Modifier.height(24.dp))

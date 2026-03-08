@@ -37,6 +37,7 @@ import com.frerox.toolz.ui.screens.light.*
 import com.frerox.toolz.ui.screens.sensors.*
 import com.frerox.toolz.ui.screens.notepad.*
 import com.frerox.toolz.ui.screens.settings.*
+import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -123,6 +124,7 @@ class MainActivity : ComponentActivity() {
                 "step_counter" -> Screen.StepCounter.route
                 "compass" -> Screen.Compass.route
                 "world_clock" -> Screen.WorldClock.route
+                "music_player" -> Screen.MusicPlayer.route
                 else -> null
             }
             route?.let { 
@@ -183,7 +185,10 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
             PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
         }
         
-        // Light & Optics
+        // Media & Optics
+        composable(Screen.MusicPlayer.route) {
+            MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
         composable(Screen.Flashlight.route) { 
             FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
         }

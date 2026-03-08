@@ -43,8 +43,9 @@ val categories = listOf(
         )
     ),
     ToolCategory(
-        "Light & Optics",
+        "Media & Optics",
         listOf(
+            ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Offline music library"),
             ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Steady, SOS, Strobe"),
             ToolItem("Screen Light", Icons.Rounded.LightMode, Screen.ScreenLight.route, "Customizable light"),
             ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom"),
