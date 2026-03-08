@@ -36,4 +36,6 @@ sealed class Screen(val route: String) {
     object PasswordGenerator : Screen("password_generator")
     object Notepad : Screen("notepad")
     object BatteryInfo : Screen("battery_info")
+    object VoiceRecorder : Screen("voice_recorder")
+    object FlipCoin : Screen("flip_coin")
 }
