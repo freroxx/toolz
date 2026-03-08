@@ -1,9 +1,16 @@
 package com.frerox.toolz.ui.screens.light
 
 import android.Manifest
-import android.app.Activity
+import android.content.ContentValues
+import android.content.Context
 import android.media.MediaPlayer
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -26,7 +33,8 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
@@ -41,15 +49,56 @@ fun MagnifierScreen(
     
     var zoomLevel by remember { mutableStateOf(0f) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    val imageCapture = remember { ImageCapture.Builder().build() }
 
     fun playShutterSound() {
         scope.launch {
             if (settingsRepository.shutterSoundEnabled.first()) {
-                val mp = MediaPlayer.create(context, android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
-                mp?.start()
-                mp?.setOnCompletionListener { it.release() }
+                val customUri = settingsRepository.shutterSoundUri.first()
+                val mediaPlayer = if (!customUri.isNullOrEmpty()) {
+                    try {
+                        MediaPlayer.create(context, Uri.parse(customUri))
+                    } catch (e: Exception) {
+                        MediaPlayer.create(context, android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
+                    }
+                } else {
+                    MediaPlayer.create(context, android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
+                }
+                mediaPlayer?.start()
+                mediaPlayer?.setOnCompletionListener { it.release() }
             }
         }
+    }
+
+    fun captureImage() {
+        val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis())
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Toolz-Magnifier")
+            }
+        }
+
+        val outputOptions = ImageCapture.OutputFileOptions
+            .Builder(context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            .build()
+
+        playShutterSound()
+        
+        imageCapture.takePicture(
+            outputOptions,
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    Toast.makeText(context, "Image saved to gallery", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onError(exc: ImageCaptureException) {
+                    Toast.makeText(context, "Capture failed: ${exc.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -85,7 +134,8 @@ fun MagnifierScreen(
                                     val camera = cameraProvider.bindToLifecycle(
                                         lifecycleOwner,
                                         CameraSelector.DEFAULT_BACK_CAMERA,
-                                        preview
+                                        preview,
+                                        imageCapture
                                     )
                                     cameraControl = camera.cameraControl
                                 } catch (e: Exception) {
@@ -99,7 +149,7 @@ fun MagnifierScreen(
                     
                     // Capture Button
                     FloatingActionButton(
-                        onClick = { playShutterSound() },
+                        onClick = { captureImage() },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 32.dp),

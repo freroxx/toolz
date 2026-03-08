@@ -1,12 +1,17 @@
 package com.frerox.toolz.ui.screens.time
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -31,8 +36,37 @@ class TimerViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TimerState())
     val uiState: StateFlow<TimerState> = _uiState.asStateFlow()
 
-    private var timerJob: Job? = null
+    private var toolService: ToolService? = null
+    private var isBound = false
     private var mediaPlayer: MediaPlayer? = null
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as ToolService.LocalBinder
+            toolService = binder.getService()
+            isBound = true
+            
+            viewModelScope.launch {
+                toolService?.timerRemaining?.collect { remaining ->
+                    _uiState.update { it.copy(remainingTime = remaining) }
+                    if (remaining == 0L && _uiState.value.isRunning) {
+                        onTimerFinished()
+                    }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            toolService = null
+            isBound = false
+        }
+    }
+
+    init {
+        Intent(context, ToolService::class.java).also { intent ->
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
 
     fun setTimer(minutes: Int, seconds: Int) {
         val totalMillis = (minutes * 60 + seconds) * 1000L
@@ -40,24 +74,15 @@ class TimerViewModel @Inject constructor(
     }
 
     fun toggleStartStop() {
-        if (_uiState.value.isRunning) {
-            pause()
+        val currentlyRunning = _uiState.value.isRunning
+        if (currentlyRunning) {
+            toolService?.resetTimer()
         } else {
-            start()
-        }
-    }
-
-    private fun start() {
-        if (_uiState.value.remainingTime <= 0) return
-        
-        _uiState.update { it.copy(isRunning = true, isFinished = false) }
-        timerJob = viewModelScope.launch {
-            while (_uiState.value.remainingTime > 0) {
-                delay(100)
-                _uiState.update { it.copy(remainingTime = (it.remainingTime - 100).coerceAtLeast(0)) }
+            if (_uiState.value.remainingTime > 0) {
+                toolService?.startTimer(_uiState.value.remainingTime)
             }
-            onTimerFinished()
         }
+        _uiState.update { it.copy(isRunning = !currentlyRunning, isFinished = false) }
     }
 
     private fun onTimerFinished() {
@@ -76,10 +101,6 @@ class TimerViewModel @Inject constructor(
                     if (uri != null) {
                         setDataSource(context, uri)
                     } else {
-                        // Fallback to a system default or a resource
-                        // val assetFileDescriptor = context.resources.openRawResourceFd(R.raw.timer_end)
-                        // setDataSource(assetFileDescriptor.fileDescriptor, assetFileDescriptor.startOffset, assetFileDescriptor.length)
-                        // For now, let's use a standard notification sound if possible, or just skip if no file
                         return@launch
                     }
                     setAudioAttributes(
@@ -103,20 +124,17 @@ class TimerViewModel @Inject constructor(
         mediaPlayer = null
     }
 
-    private fun pause() {
-        _uiState.update { it.copy(isRunning = false) }
-        timerJob?.cancel()
-    }
-
     fun reset() {
-        pause()
+        toolService?.resetTimer()
         stopRingtone()
-        _uiState.update { it.copy(remainingTime = it.initialTime, isFinished = false) }
+        _uiState.update { it.copy(remainingTime = it.initialTime, isRunning = false, isFinished = false) }
     }
 
     override fun onCleared() {
         super.onCleared()
-        timerJob?.cancel()
+        if (isBound) {
+            context.unbindService(connection)
+        }
         mediaPlayer?.release()
     }
 }

@@ -58,7 +58,8 @@ val categories = listOf(
             ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Surface leveling"),
             ToolItem("Speedometer", Icons.Rounded.Speed, Screen.Speedometer.route, "GPS based speed"),
             ToolItem("Altimeter", Icons.Rounded.FilterHdr, Screen.Altimeter.route, "Altitude tracking"),
-            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Track your steps")
+            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Track your steps"),
+            ToolItem("Voice Recorder", Icons.Rounded.Mic, Screen.VoiceRecorder.route, "Record audio memo")
         )
     ),
     ToolCategory(
@@ -78,7 +79,8 @@ val categories = listOf(
             ToolItem("Color Picker", Icons.Rounded.Colorize, Screen.ColorPicker.route, "Camera hex picker"),
             ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Secure passwords"),
             ToolItem("Notepad", Icons.Rounded.NoteAlt, Screen.Notepad.route, "Simple notes"),
-            ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Detailed status")
+            ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Detailed status"),
+            ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Heads or Tails")
         )
     )
 )

@@ -1,6 +1,7 @@
 package com.frerox.toolz.data.settings
 
 import android.content.Context
+import android.media.RingtoneManager
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
@@ -22,87 +23,70 @@ class SettingsRepository @Inject constructor(
     private val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     private val CUSTOM_PRIMARY_COLOR = intPreferencesKey("custom_primary_color")
     private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
+    private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
+    
+    // Notifications
+    private val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
+    private val STEP_NOTIFICATIONS = booleanPreferencesKey("step_notifications")
+    private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
+    private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
+    
+    // Widget Design
+    private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
+    private val WIDGET_ACCENT_COLOR = intPreferencesKey("widget_accent_color")
+    private val WIDGET_OPACITY = floatPreferencesKey("widget_opacity")
 
-    val stepGoal: Flow<Int> = context.dataStore.data.map { preferences ->
-        preferences[STEP_GOAL] ?: 10000
+    private val defaultAlarmUri: String by lazy {
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
+    }
+    
+    private val defaultShutterUri: String by lazy {
+        android.provider.Settings.System.DEFAULT_NOTIFICATION_URI.toString()
     }
 
-    val ringtoneUri: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[RINGTONE_URI]
-    }
+    val stepGoal: Flow<Int> = context.dataStore.data.map { it[STEP_GOAL] ?: 10000 }
+    val ringtoneUri: Flow<String?> = context.dataStore.data.map { it[RINGTONE_URI] ?: defaultAlarmUri }
+    val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "SYSTEM" }
+    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
+    val customPrimaryColor: Flow<Int?> = context.dataStore.data.map { it[CUSTOM_PRIMARY_COLOR] }
+    val shutterSoundEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
+    val shutterSoundUri: Flow<String?> = context.dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
+    val worldClockZones: Flow<Set<String>> = context.dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
 
-    val themeMode: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[THEME_MODE] ?: "SYSTEM"
-    }
+    // Notifications Flows
+    val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
+    val stepNotifications: Flow<Boolean> = context.dataStore.data.map { it[STEP_NOTIFICATIONS] ?: true }
+    val timerNotifications: Flow<Boolean> = context.dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
+    val voiceRecordNotifications: Flow<Boolean> = context.dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
 
-    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[DYNAMIC_COLOR] ?: true
-    }
+    // Widget Flows
+    val widgetBackgroundColor: Flow<Int> = context.dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
+    val widgetAccentColor: Flow<Int> = context.dataStore.data.map { it[WIDGET_ACCENT_COLOR] ?: 0xFF4CAF50.toInt() }
+    val widgetOpacity: Flow<Float> = context.dataStore.data.map { it[WIDGET_OPACITY] ?: 0.9f }
 
-    val customPrimaryColor: Flow<Int?> = context.dataStore.data.map { preferences ->
-        preferences[CUSTOM_PRIMARY_COLOR]
-    }
-
-    val shutterSoundEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[SHUTTER_SOUND_ENABLED] ?: true
-    }
-
-    val worldClockZones: Flow<Set<String>> = context.dataStore.data.map { preferences ->
-        preferences[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo")
-    }
-
-    suspend fun setStepGoal(goal: Int) {
-        context.dataStore.edit { preferences ->
-            preferences[STEP_GOAL] = goal
-        }
-    }
-
-    suspend fun setRingtoneUri(uri: String) {
-        context.dataStore.edit { preferences ->
-            preferences[RINGTONE_URI] = uri
-        }
-    }
-
-    suspend fun setThemeMode(mode: String) {
-        context.dataStore.edit { preferences ->
-            preferences[THEME_MODE] = mode
-        }
-    }
-
-    suspend fun setDynamicColor(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[DYNAMIC_COLOR] = enabled
-        }
-    }
-
+    suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
+    suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
+    suspend fun setThemeMode(mode: String) { context.dataStore.edit { it[THEME_MODE] = mode } }
+    suspend fun setDynamicColor(enabled: Boolean) { context.dataStore.edit { it[DYNAMIC_COLOR] = enabled } }
     suspend fun setCustomPrimaryColor(color: Int?) {
-        context.dataStore.edit { preferences ->
-            if (color == null) {
-                preferences.remove(CUSTOM_PRIMARY_COLOR)
-            } else {
-                preferences[CUSTOM_PRIMARY_COLOR] = color
-            }
+        context.dataStore.edit { 
+            if (color == null) it.remove(CUSTOM_PRIMARY_COLOR) else it[CUSTOM_PRIMARY_COLOR] = color 
         }
     }
+    suspend fun setShutterSoundEnabled(enabled: Boolean) { context.dataStore.edit { it[SHUTTER_SOUND_ENABLED] = enabled } }
+    suspend fun setShutterSoundUri(uri: String) { context.dataStore.edit { it[SHUTTER_SOUND_URI] = uri } }
+    suspend fun addWorldClockZone(zone: String) { context.dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) + zone } }
+    suspend fun removeWorldClockZone(zone: String) { context.dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) - zone } }
 
-    suspend fun setShutterSoundEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[SHUTTER_SOUND_ENABLED] = enabled
-        }
-    }
+    // Notification setters
+    suspend fun setNotificationsEnabled(enabled: Boolean) { context.dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setStepNotifications(enabled: Boolean) { context.dataStore.edit { it[STEP_NOTIFICATIONS] = enabled } }
+    suspend fun setTimerNotifications(enabled: Boolean) { context.dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
+    suspend fun setVoiceRecordNotifications(enabled: Boolean) { context.dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
 
-    suspend fun addWorldClockZone(zone: String) {
-        context.dataStore.edit { preferences ->
-            val current = preferences[WORLD_CLOCK_ZONES] ?: emptySet()
-            preferences[WORLD_CLOCK_ZONES] = current + zone
-        }
-    }
-
-    suspend fun removeWorldClockZone(zone: String) {
-        context.dataStore.edit { preferences ->
-            val current = preferences[WORLD_CLOCK_ZONES] ?: emptySet()
-            preferences[WORLD_CLOCK_ZONES] = current - zone
-        }
-    }
+    // Widget setters
+    suspend fun setWidgetBackgroundColor(color: Int) { context.dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
+    suspend fun setWidgetAccentColor(color: Int) { context.dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }
+    suspend fun setWidgetOpacity(opacity: Float) { context.dataStore.edit { it[WIDGET_OPACITY] = opacity } }
 }

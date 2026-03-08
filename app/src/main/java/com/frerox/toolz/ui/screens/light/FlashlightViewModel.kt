@@ -1,7 +1,9 @@
 package com.frerox.toolz.ui.screens.light
 
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,7 +23,10 @@ enum class FlashlightMode {
 
 data class FlashlightState(
     val isOn: Boolean = false,
-    val mode: FlashlightMode = FlashlightMode.STEADY
+    val mode: FlashlightMode = FlashlightMode.STEADY,
+    val brightness: Float = 1.0f,
+    val isBrightnessSupported: Boolean = false,
+    val maxBrightness: Int = 1
 )
 
 @HiltViewModel
@@ -39,9 +44,33 @@ class FlashlightViewModel @Inject constructor(
 
     init {
         try {
-            cameraId = cameraManager.cameraIdList[0]
+            cameraId = cameraManager.cameraIdList.getOrNull(0)
+            checkBrightnessSupport()
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun checkBrightnessSupport() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                cameraId?.let { id ->
+                    val characteristics = cameraManager.getCameraCharacteristics(id)
+                    // Use a more robust way to get the key since FLASH_INFO_STRENGTH_MAX_LEVEL might not be resolved by the compiler easily if targetSdk/compileSdk are tricky
+                    val maxLevelKey = CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL
+                    val maxLevel = characteristics.get(maxLevelKey)
+                    
+                    if (maxLevel != null && maxLevel > 1) {
+                        _uiState.update { it.copy(
+                            isBrightnessSupported = true,
+                            maxBrightness = maxLevel,
+                            brightness = 1.0f
+                        ) }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -64,6 +93,13 @@ class FlashlightViewModel @Inject constructor(
         }
     }
 
+    fun setBrightness(level: Float) {
+        _uiState.update { it.copy(brightness = level) }
+        if (_uiState.value.isOn && _uiState.value.mode == FlashlightMode.STEADY) {
+            setTorch(true)
+        }
+    }
+
     private fun startMode() {
         modeJob?.cancel()
         modeJob = viewModelScope.launch {
@@ -82,7 +118,18 @@ class FlashlightViewModel @Inject constructor(
 
     private fun setTorch(enabled: Boolean) {
         try {
-            cameraId?.let { cameraManager.setTorchMode(it, enabled) }
+            cameraId?.let { id ->
+                if (enabled) {
+                    if (_uiState.value.isBrightnessSupported && Build.VERSION.SDK_INT >= 33) {
+                        val level = (_uiState.value.brightness * _uiState.value.maxBrightness).toInt().coerceIn(1, _uiState.value.maxBrightness)
+                        cameraManager.turnOnTorchWithStrengthLevel(id, level)
+                    } else {
+                        cameraManager.setTorchMode(id, true)
+                    }
+                } else {
+                    cameraManager.setTorchMode(id, false)
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
