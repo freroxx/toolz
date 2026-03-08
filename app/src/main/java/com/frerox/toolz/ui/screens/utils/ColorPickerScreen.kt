@@ -1,7 +1,6 @@
 package com.frerox.toolz.ui.screens.utils
 
 import android.Manifest
-import android.graphics.Bitmap
 import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -80,6 +79,7 @@ fun ColorPickerScreen(
                                     .build()
                                 
                                 imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                    // Use the built-in toBitmap() from CameraX 1.3.0+
                                     val bitmap = imageProxy.toBitmap()
                                     val centerX = bitmap.width / 2
                                     val centerY = bitmap.height / 2
