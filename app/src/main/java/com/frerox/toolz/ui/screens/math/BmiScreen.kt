@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,13 +29,11 @@ fun BmiScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    var isCm by remember { mutableStateOf(true) }
-    var isKg by remember { mutableStateOf(true) }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("BMI Calculator", fontWeight = FontWeight.Bold) },
+                title = { Text("BMI Calculator", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -57,6 +54,25 @@ fun BmiScreen(
             // Header Card
             ResultCard(bmi = state.bmi, category = state.category)
 
+            // Gender Selection
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                GenderCard(
+                    gender = Gender.MALE,
+                    isSelected = state.gender == Gender.MALE,
+                    onClick = { viewModel.onGenderChange(Gender.MALE) },
+                    modifier = Modifier.weight(1f)
+                )
+                GenderCard(
+                    gender = Gender.FEMALE,
+                    isSelected = state.gender == Gender.FEMALE,
+                    onClick = { viewModel.onGenderChange(Gender.FEMALE) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
             // Input Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -67,8 +83,23 @@ fun BmiScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
+                    // Age Input
+                    Column {
+                        Text("Age", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = state.age,
+                            onValueChange = { viewModel.onAgeChange(it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Enter age") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = MaterialTheme.shapes.large,
+                            leadingIcon = { Icon(Icons.Rounded.Cake, null) }
+                        )
+                    }
+
                     // Height Input
                     Column {
                         Row(
@@ -79,13 +110,13 @@ fun BmiScreen(
                             Text("Height", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             SingleChoiceSegmentedButtonRow {
                                 SegmentedButton(
-                                    selected = isCm,
-                                    onClick = { isCm = true },
+                                    selected = state.isCm,
+                                    onClick = { viewModel.toggleUnit(true) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                                 ) { Text("cm") }
                                 SegmentedButton(
-                                    selected = !isCm,
-                                    onClick = { isCm = false },
+                                    selected = !state.isCm,
+                                    onClick = { viewModel.toggleUnit(true) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                                 ) { Text("ft/in") }
                             }
@@ -95,11 +126,11 @@ fun BmiScreen(
                             value = state.height,
                             onValueChange = { viewModel.onHeightChange(it) },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(if (isCm) "0" else "0' 0\"") },
+                            placeholder = { Text(if (state.isCm) "0" else "0' 0\"") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             shape = MaterialTheme.shapes.large,
                             leadingIcon = { Icon(Icons.Rounded.Height, null) },
-                            trailingIcon = { if (isCm) Text("cm", modifier = Modifier.padding(end = 12.dp)) }
+                            trailingIcon = { if (state.isCm) Text("cm", modifier = Modifier.padding(end = 12.dp)) }
                         )
                     }
 
@@ -113,13 +144,13 @@ fun BmiScreen(
                             Text("Weight", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             SingleChoiceSegmentedButtonRow {
                                 SegmentedButton(
-                                    selected = isKg,
-                                    onClick = { isKg = true },
+                                    selected = state.isKg,
+                                    onClick = { viewModel.toggleUnit(false) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                                 ) { Text("kg") }
                                 SegmentedButton(
-                                    selected = !isKg,
-                                    onClick = { isKg = false },
+                                    selected = !state.isKg,
+                                    onClick = { viewModel.toggleUnit(false) },
                                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                                 ) { Text("lb") }
                             }
@@ -133,7 +164,7 @@ fun BmiScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             shape = MaterialTheme.shapes.large,
                             leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null) },
-                            trailingIcon = { if (isKg) Text("kg", modifier = Modifier.padding(end = 12.dp)) }
+                            trailingIcon = { if (state.isKg) Text("kg", modifier = Modifier.padding(end = 12.dp)) }
                         )
                     }
                 }
@@ -148,6 +179,48 @@ fun BmiScreen(
 }
 
 @Composable
+fun GenderCard(
+    gender: Gender,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val color = if (gender == Gender.MALE) Color(0xFF2196F3) else Color(0xFFE91E63)
+    val containerColor = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+    val icon = if (gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female
+
+    OutlinedCard(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.outlinedCardColors(containerColor = containerColor),
+        border = CardDefaults.outlinedCardBorder(enabled = isSelected).copy(
+            brush = if (isSelected) androidx.compose.ui.graphics.SolidColor(color) else androidx.compose.ui.graphics.SolidColor(Color.Transparent)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = gender.name.lowercase().replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                color = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun ResultCard(bmi: Float?, category: String) {
     val animatedBmi by animateFloatAsState(
         targetValue = bmi ?: 0f,
@@ -156,16 +229,16 @@ fun ResultCard(bmi: Float?, category: String) {
     )
 
     val color = when {
-        animatedBmi < 18.5f -> Color(0xFF4FC3F7) // Underweight - Blue
-        animatedBmi < 25f -> Color(0xFF66BB6A)   // Normal - Green
-        animatedBmi < 30f -> Color(0xFFFFA726)   // Overweight - Orange
-        else -> Color(0xFFEF5350)              // Obese - Red
+        animatedBmi < 18.5f -> Color(0xFF4FC3F7)
+        animatedBmi < 25f -> Color(0xFF66BB6A)
+        animatedBmi < 30f -> Color(0xFFFFA726)
+        else -> Color(0xFFEF5350)
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp),
+            .height(180.dp),
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
     ) {
@@ -205,8 +278,7 @@ fun BmiCategoryItem(label: String, range: String, color: Color, isSelected: Bool
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = if (isSelected) color.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface,
-        border = if (isSelected) PaddingValues(0.dp).let { null } else null // simplified
+        color = if (isSelected) color.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

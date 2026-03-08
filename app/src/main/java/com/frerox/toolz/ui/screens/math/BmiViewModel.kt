@@ -9,9 +9,13 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import kotlin.math.pow
 
+enum class Gender { MALE, FEMALE }
+
 data class BmiState(
     val weight: String = "",
     val height: String = "",
+    val age: String = "",
+    val gender: Gender = Gender.MALE,
     val bmi: Float? = null,
     val category: String = "",
     val isCm: Boolean = true,
@@ -34,11 +38,19 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         calculateBmi()
     }
 
+    fun onAgeChange(age: String) {
+        _uiState.update { it.copy(age = age.filter { it.isDigit() }) }
+        calculateBmi()
+    }
+
+    fun onGenderChange(gender: Gender) {
+        _uiState.update { it.copy(gender = gender) }
+        calculateBmi()
+    }
+
     fun toggleUnit(isHeight: Boolean) {
-        if (isHeight) {
-            _uiState.update { it.copy(isCm = !it.isCm) }
-        } else {
-            _uiState.update { it.copy(isKg = !it.isKg) }
+        _uiState.update { 
+            if (isHeight) it.copy(isCm = !it.isCm) else it.copy(isKg = !it.isKg)
         }
         calculateBmi()
     }
@@ -59,20 +71,25 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         
         if (weightInKg > 0 && heightInMeters > 0) {
             val bmiValue = weightInKg / heightInMeters.pow(2)
-            val category = when {
-                bmiValue < 18.5 -> "Underweight"
-                bmiValue < 25 -> "Normal"
-                bmiValue < 30 -> "Overweight"
-                else -> "Obese"
-            }
+            val category = getBmiCategory(bmiValue, state.age.toIntOrNull() ?: 20)
             _uiState.update { it.copy(bmi = bmiValue, category = category) }
         } else {
             _uiState.update { it.copy(bmi = null, category = "") }
         }
     }
 
+    private fun getBmiCategory(bmi: Float, age: Int): String {
+        return when {
+            bmi < 18.5 -> "Underweight"
+            bmi < 25 -> "Normal Weight"
+            bmi < 30 -> "Overweight"
+            bmi < 35 -> "Obese Class I"
+            bmi < 40 -> "Obese Class II"
+            else -> "Obese Class III"
+        }
+    }
+
     private fun parseImperialHeight(height: String): Float {
-        // Try to parse format like 5' 11" or just a number of inches
         return try {
             if (height.contains("'")) {
                 val parts = height.split("'")

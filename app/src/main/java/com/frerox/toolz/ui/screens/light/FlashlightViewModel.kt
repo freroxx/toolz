@@ -44,21 +44,22 @@ class FlashlightViewModel @Inject constructor(
 
     init {
         try {
-            cameraId = cameraManager.cameraIdList.getOrNull(0)
-            checkBrightnessSupport()
+            val ids = cameraManager.cameraIdList
+            if (ids.isNotEmpty()) {
+                cameraId = ids[0]
+                checkBrightnessSupport()
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     private fun checkBrightnessSupport() {
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
                 cameraId?.let { id ->
                     val characteristics = cameraManager.getCameraCharacteristics(id)
-                    // Use a more robust way to get the key since FLASH_INFO_STRENGTH_MAX_LEVEL might not be resolved by the compiler easily if targetSdk/compileSdk are tricky
-                    val maxLevelKey = CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL
-                    val maxLevel = characteristics.get(maxLevelKey)
+                    val maxLevel = characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL)
                     
                     if (maxLevel != null && maxLevel > 1) {
                         _uiState.update { it.copy(
@@ -120,7 +121,7 @@ class FlashlightViewModel @Inject constructor(
         try {
             cameraId?.let { id ->
                 if (enabled) {
-                    if (_uiState.value.isBrightnessSupported && Build.VERSION.SDK_INT >= 33) {
+                    if (_uiState.value.isBrightnessSupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         val level = (_uiState.value.brightness * _uiState.value.maxBrightness).toInt().coerceIn(1, _uiState.value.maxBrightness)
                         cameraManager.turnOnTorchWithStrengthLevel(id, level)
                     } else {
@@ -142,20 +143,11 @@ class FlashlightViewModel @Inject constructor(
         val letterGap = 600L
 
         while (true) {
-            // S: ...
-            repeat(3) { 
-                setTorch(true); delay(dot); setTorch(false); delay(gap) 
-            }
+            repeat(3) { setTorch(true); delay(dot); setTorch(false); delay(gap) }
             delay(letterGap)
-            // O: ---
-            repeat(3) { 
-                setTorch(true); delay(dash); setTorch(false); delay(gap) 
-            }
+            repeat(3) { setTorch(true); delay(dash); setTorch(false); delay(gap) }
             delay(letterGap)
-            // S: ...
-            repeat(3) { 
-                setTorch(true); delay(dot); setTorch(false); delay(gap) 
-            }
+            repeat(3) { setTorch(true); delay(dot); setTorch(false); delay(gap) }
             delay(2000L)
         }
     }
