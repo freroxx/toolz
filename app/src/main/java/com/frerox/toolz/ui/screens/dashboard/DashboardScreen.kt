@@ -7,9 +7,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,7 +58,7 @@ val categories = listOf(
             ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Surface leveling"),
             ToolItem("Speedometer", Icons.Rounded.Speed, Screen.Speedometer.route, "GPS based speed"),
             ToolItem("Altimeter", Icons.Rounded.FilterHdr, Screen.Altimeter.route, "Altitude tracking"),
-            ToolItem("Step Counter", Icons.Rounded.DirectionsRun, Screen.StepCounter.route, "Track your steps")
+            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Track your steps")
         )
     ),
     ToolCategory(
@@ -64,7 +66,7 @@ val categories = listOf(
         listOf(
             ToolItem("Calculator", Icons.Rounded.Calculate, Screen.Calculator.route, "Scientific math"),
             ToolItem("Unit Converter", Icons.Rounded.SyncAlt, Screen.UnitConverter.route, "Length, weight, etc"),
-            ToolItem("Tip Calc", Icons.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
+            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
             ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health index")
         )
     ),
@@ -75,7 +77,8 @@ val categories = listOf(
             ToolItem("Sound Meter", Icons.Rounded.GraphicEq, Screen.SoundMeter.route, "Decibel levels"),
             ToolItem("Color Picker", Icons.Rounded.Colorize, Screen.ColorPicker.route, "Camera hex picker"),
             ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Secure passwords"),
-            ToolItem("Notepad", Icons.Rounded.NoteAlt, Screen.Notepad.route, "Simple notes")
+            ToolItem("Notepad", Icons.Rounded.NoteAlt, Screen.Notepad.route, "Simple notes"),
+            ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Detailed status")
         )
     )
 )
@@ -85,26 +88,75 @@ val categories = listOf(
 fun DashboardScreen(
     onNavigate: (String) -> Unit
 ) {
+    var searchQuery by remember { mutableStateOf("") }
+    var active by remember { mutableStateOf(false) }
+    
+    val filteredCategories = categories.map { category ->
+        category.copy(items = category.items.filter { 
+            it.title.contains(searchQuery, ignoreCase = true) || 
+            it.description.contains(searchQuery, ignoreCase = true) 
+        })
+    }.filter { it.items.isNotEmpty() }
+
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = { 
-                    Text(
-                        "Toolz",
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.ExtraBold
-                    ) 
-                },
-                actions = {
-                    IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
-                    }
-                },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+            Column {
+                LargeTopAppBar(
+                    title = { 
+                        Text(
+                            "Toolz",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.ExtraBold
+                        ) 
+                    },
+                    actions = {
+                        IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        }
+                    },
+                    colors = TopAppBarDefaults.largeTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 )
-            )
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    SearchBar(
+                        inputField = {
+                            SearchBarDefaults.InputField(
+                                query = searchQuery,
+                                onQueryChange = { searchQuery = it },
+                                onSearch = { active = false },
+                                expanded = active,
+                                onExpandedChange = { active = it },
+                                placeholder = { Text("Search tools...") },
+                                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                                trailingIcon = { 
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Rounded.Clear, contentDescription = "Clear")
+                                        }
+                                    }
+                                }
+                            )
+                        },
+                        expanded = active,
+                        onExpandedChange = { active = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SearchBarDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        content = {
+                            // Can add suggestions here if needed
+                        }
+                    )
+                }
+            }
         }
     ) { padding ->
         LazyVerticalGrid(
@@ -116,7 +168,7 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            categories.forEach { category ->
+            filteredCategories.forEach { category ->
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         text = category.title,
@@ -128,6 +180,14 @@ fun DashboardScreen(
                 }
                 items(category.items) { tool ->
                     ToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                }
+            }
+            
+            if (filteredCategories.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxSize().padding(top = 64.dp), contentAlignment = Alignment.Center) {
+                        Text("No tools found matching \"$searchQuery\"", color = MaterialTheme.colorScheme.outline)
+                    }
                 }
             }
         }

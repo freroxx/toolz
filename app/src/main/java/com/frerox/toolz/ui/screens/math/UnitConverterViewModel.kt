@@ -17,7 +17,8 @@ data class UnitConverterState(
     val inputValue: String = "1",
     val outputValue: String = "",
     val fromUnit: String = "Meter",
-    val toUnit: String = "Kilometer"
+    val toUnit: String = "Kilometer",
+    val availableUnits: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -36,14 +37,15 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     )
 
     init {
+        val initialType = ConversionType.LENGTH
+        val units = unitsMap[initialType]!!
+        _uiState.update { it.copy(availableUnits = units, fromUnit = units[2], toUnit = units[3]) }
         convert()
     }
 
-    fun getUnits(): List<String> = unitsMap[_uiState.value.type] ?: emptyList()
-
     fun onTypeChange(type: ConversionType) {
         val units = unitsMap[type]!!
-        _uiState.update { it.copy(type = type, fromUnit = units[0], toUnit = units[1]) }
+        _uiState.update { it.copy(type = type, availableUnits = units, fromUnit = units[0], toUnit = units[1]) }
         convert()
     }
 

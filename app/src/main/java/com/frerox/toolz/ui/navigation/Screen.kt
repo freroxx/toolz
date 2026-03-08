@@ -35,4 +35,5 @@ sealed class Screen(val route: String) {
     object ColorPicker : Screen("color_picker")
     object PasswordGenerator : Screen("password_generator")
     object Notepad : Screen("notepad")
+    object BatteryInfo : Screen("battery_info")
 }

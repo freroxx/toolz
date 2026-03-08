@@ -65,11 +65,11 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun ToolzTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
+    customPrimary: Color? = null,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
+    var colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -78,16 +78,26 @@ fun ToolzTheme(
         else -> LightColorScheme
     }
 
+    if (customPrimary != null && !dynamicColor) {
+        colorScheme = if (darkTheme) {
+            colorScheme.copy(primary = customPrimary)
+        } else {
+            colorScheme.copy(primary = customPrimary)
+        }
+    }
+
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            window.navigationBarColor = Color.Transparent.toArgb()
             WindowCompat.setDecorFitsSystemWindows(window, false)
             val insetsController = WindowCompat.getInsetsController(window, view)
             insetsController.isAppearanceLightStatusBars = !darkTheme
             insetsController.isAppearanceLightNavigationBars = !darkTheme
+            
+            // Modern way to set status/nav bar colors without deprecation warnings
+            window.statusBarColor = Color.Transparent.toArgb()
+            window.navigationBarColor = Color.Transparent.toArgb()
         }
     }
 
