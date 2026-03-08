@@ -9,15 +9,15 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 enum class ConversionType {
-    LENGTH, WEIGHT, TEMPERATURE
+    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED
 }
 
 data class UnitConverterState(
     val type: ConversionType = ConversionType.LENGTH,
-    val inputValue: String = "0",
-    val outputValue: String = "0",
+    val inputValue: String = "1",
+    val outputValue: String = "",
     val fromUnit: String = "Meter",
-    val toUnit: String = "Foot"
+    val toUnit: String = "Kilometer"
 )
 
 @HiltViewModel
@@ -26,23 +26,24 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     private val _uiState = MutableStateFlow(UnitConverterState())
     val uiState: StateFlow<UnitConverterState> = _uiState.asStateFlow()
 
-    private val lengthUnits = listOf("Meter", "Foot", "Inch", "Kilometer", "Mile")
-    private val weightUnits = listOf("Kilogram", "Pound", "Gram", "Ounce")
-    private val tempUnits = listOf("Celsius", "Fahrenheit", "Kelvin")
+    private val unitsMap = mapOf(
+        ConversionType.LENGTH to listOf("Millimeter", "Centimeter", "Meter", "Kilometer", "Inch", "Foot", "Yard", "Mile"),
+        ConversionType.WEIGHT to listOf("Milligram", "Gram", "Kilogram", "Ounce", "Pound", "Stone", "Ton"),
+        ConversionType.TEMPERATURE to listOf("Celsius", "Fahrenheit", "Kelvin"),
+        ConversionType.AREA to listOf("Sq Meter", "Sq Kilometer", "Sq Foot", "Sq Mile", "Acre", "Hectare"),
+        ConversionType.VOLUME to listOf("Milliliter", "Liter", "Cubic Meter", "Gallon", "Quart", "Pint", "Cup"),
+        ConversionType.SPEED to listOf("Meters/sec", "Km/h", "Miles/h", "Knot", "Mach")
+    )
 
-    fun getUnits(): List<String> = when (_uiState.value.type) {
-        ConversionType.LENGTH -> lengthUnits
-        ConversionType.WEIGHT -> weightUnits
-        ConversionType.TEMPERATURE -> tempUnits
+    init {
+        convert()
     }
 
+    fun getUnits(): List<String> = unitsMap[_uiState.value.type] ?: emptyList()
+
     fun onTypeChange(type: ConversionType) {
-        val units = when (type) {
-            ConversionType.LENGTH -> lengthUnits
-            ConversionType.WEIGHT -> weightUnits
-            ConversionType.TEMPERATURE -> tempUnits
-        }
-        _uiState.update { it.copy(type = type, fromUnit = units[0], toUnit = units[1], inputValue = "0", outputValue = "0") }
+        val units = unitsMap[type]!!
+        _uiState.update { it.copy(type = type, fromUnit = units[0], toUnit = units[1]) }
         convert()
     }
 
@@ -61,50 +62,40 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
         convert()
     }
 
+    fun swapUnits() {
+        _uiState.update { it.copy(fromUnit = it.toUnit, toUnit = it.fromUnit) }
+        convert()
+    }
+
     private fun convert() {
         val input = _uiState.value.inputValue.toDoubleOrNull() ?: 0.0
         val result = when (_uiState.value.type) {
             ConversionType.LENGTH -> convertLength(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.WEIGHT -> convertWeight(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.TEMPERATURE -> convertTemp(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.AREA -> convertArea(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.VOLUME -> convertVolume(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.SPEED -> convertSpeed(input, _uiState.value.fromUnit, _uiState.value.toUnit)
         }
-        _uiState.update { it.copy(outputValue = String.format("%.4f", result)) }
+        _uiState.update { 
+            it.copy(outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'))
+        }
     }
 
     private fun convertLength(value: Double, from: String, to: String): Double {
-        val inMeters = when (from) {
-            "Meter" -> value
-            "Foot" -> value * 0.3048
-            "Inch" -> value * 0.0254
-            "Kilometer" -> value * 1000.0
-            "Mile" -> value * 1609.34
-            else -> value
-        }
-        return when (to) {
-            "Meter" -> inMeters
-            "Foot" -> inMeters / 0.3048
-            "Inch" -> inMeters / 0.0254
-            "Kilometer" -> inMeters / 1000.0
-            "Mile" -> inMeters / 1609.34
-            else -> inMeters
-        }
+        val toMeter = mapOf(
+            "Millimeter" to 0.001, "Centimeter" to 0.01, "Meter" to 1.0, "Kilometer" to 1000.0,
+            "Inch" to 0.0254, "Foot" to 0.3048, "Yard" to 0.9144, "Mile" to 1609.34
+        )
+        return value * (toMeter[from] ?: 1.0) / (toMeter[to] ?: 1.0)
     }
 
     private fun convertWeight(value: Double, from: String, to: String): Double {
-        val inKg = when (from) {
-            "Kilogram" -> value
-            "Pound" -> value * 0.453592
-            "Gram" -> value / 1000.0
-            "Ounce" -> value * 0.0283495
-            else -> value
-        }
-        return when (to) {
-            "Kilogram" -> inKg
-            "Pound" -> inKg / 0.453592
-            "Gram" -> inKg * 1000.0
-            "Ounce" -> inKg / 0.0283495
-            else -> inKg
-        }
+        val toKg = mapOf(
+            "Milligram" to 0.000001, "Gram" to 0.001, "Kilogram" to 1.0, "Ounce" to 0.0283495,
+            "Pound" to 0.453592, "Stone" to 6.35029, "Ton" to 1000.0
+        )
+        return value * (toKg[from] ?: 1.0) / (toKg[to] ?: 1.0)
     }
 
     private fun convertTemp(value: Double, from: String, to: String): Double {
@@ -120,5 +111,29 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             "Kelvin" -> inCelsius + 273.15
             else -> inCelsius
         }
+    }
+
+    private fun convertArea(value: Double, from: String, to: String): Double {
+        val toSqMeter = mapOf(
+            "Sq Meter" to 1.0, "Sq Kilometer" to 1000000.0, "Sq Foot" to 0.092903,
+            "Sq Mile" to 2589988.11, "Acre" to 4046.86, "Hectare" to 10000.0
+        )
+        return value * (toSqMeter[from] ?: 1.0) / (toSqMeter[to] ?: 1.0)
+    }
+
+    private fun convertVolume(value: Double, from: String, to: String): Double {
+        val toLiter = mapOf(
+            "Milliliter" to 0.001, "Liter" to 1.0, "Cubic Meter" to 1000.0,
+            "Gallon" to 3.78541, "Quart" to 0.946353, "Pint" to 0.473176, "Cup" to 0.236588
+        )
+        return value * (toLiter[from] ?: 1.0) / (toLiter[to] ?: 1.0)
+    }
+
+    private fun convertSpeed(value: Double, from: String, to: String): Double {
+        val toMs = mapOf(
+            "Meters/sec" to 1.0, "Km/h" to 0.277778, "Miles/h" to 0.44704,
+            "Knot" to 0.514444, "Mach" to 343.0
+        )
+        return value * (toMs[from] ?: 1.0) / (toMs[to] ?: 1.0)
     }
 }

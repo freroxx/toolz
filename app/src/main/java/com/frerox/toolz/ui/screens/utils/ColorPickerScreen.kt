@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -85,7 +86,7 @@ fun ColorPickerScreen(
                                     if (centerX in 0 until bitmap.width && centerY in 0 until bitmap.height) {
                                         val pixel = bitmap.getPixel(centerX, centerY)
                                         pickedColor = Color(pixel)
-                                        hexCode = String.format("#%06X", (0xFFFFFF and pixel))
+                                        hexCode = String.format(Locale.US, "#%06X", (0xFFFFFF and pixel))
                                     }
                                     imageProxy.close()
                                 }
@@ -134,7 +135,10 @@ fun ColorPickerScreen(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(text = hexCode, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                            Text(text = "RGB: ${(pickedColor.red*255).toInt()}, ${(pickedColor.green*255).toInt()}, ${(pickedColor.blue*255).toInt()}", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                text = "RGB: ${(pickedColor.red * 255).toInt()}, ${(pickedColor.green * 255).toInt()}, ${(pickedColor.blue * 255).toInt()}", 
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                         IconButton(onClick = { clipboardManager.setText(AnnotatedString(hexCode)) }) {
                             Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
