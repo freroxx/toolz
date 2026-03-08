@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "390120649624",
+    "project_id": "toolz-frerox",
+    "storage_bucket": "toolz-frerox.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:390120649624:android:417264955765b6c67e71ed",
+        "android_client_info": {
+          "package_name": "com.frerox.toolz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBAPET380toZ3LrTOgnMaznfsFZ6XfaQEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
