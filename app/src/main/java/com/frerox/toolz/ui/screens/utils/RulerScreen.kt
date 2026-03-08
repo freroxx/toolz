@@ -35,6 +35,26 @@ fun RulerScreen(
 
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val primaryColor = MaterialTheme.colorScheme.primary.toArgb()
+    
+    val strokeWidthMm = with(density) { 1.dp.toPx() }
+    val strokeWidthInch = with(density) { 1.5.dp.toPx() }
+    val strokeWidthSubInch = with(density) { 1.dp.toPx() }
+    val strokeWidthMeasure = with(density) { 2.dp.toPx() }
+    
+    val majorLen = with(density) { 40.dp.toPx() }
+    val halfLen = with(density) { 25.dp.toPx() }
+    val minorLen = with(density) { 15.dp.toPx() }
+    
+    val inchMajorLen = with(density) { 40.dp.toPx() }
+    val inchHalfLen = with(density) { 30.dp.toPx() }
+    val inchQuarterLen = with(density) { 22.dp.toPx() }
+    val inchEighthLen = with(density) { 15.dp.toPx() }
+    
+    val mmTextSize = with(density) { 12.dp.toPx() }
+    val inchTextSize = with(density) { 14.dp.toPx() }
+    val textOffset = with(density) { 5.dp.toPx() }
+    val mmLabelOffset = with(density) { 8.dp.toPx() }
+    val inchLabelOffset = with(density) { 48.dp.toPx() }
 
     Scaffold(
         topBar = {
@@ -74,27 +94,27 @@ fun RulerScreen(
                     val isMajor = mmCount % 10 == 0
                     val isHalf = mmCount % 5 == 0
                     val lineLength = when {
-                        isMajor -> 40.dp.toPx()
-                        isHalf -> 25.dp.toPx()
-                        else -> 15.dp.toPx()
+                        isMajor -> majorLen
+                        isHalf -> halfLen
+                        else -> minorLen
                     }
                     
                     drawLine(
                         color = Color(onSurfaceColor).copy(alpha = 0.6f),
                         start = Offset(0f, currentY),
                         end = Offset(lineLength, currentY),
-                        strokeWidth = 1.dp.toPx()
+                        strokeWidth = strokeWidthMm
                     )
 
                     if (isMajor) {
                         val text = (mmCount / 10).toString()
                         drawContext.canvas.nativeCanvas.drawText(
                             text,
-                            lineLength + 8.dp.toPx(),
-                            currentY + 5.dp.toPx(),
+                            lineLength + mmLabelOffset,
+                            currentY + textOffset,
                             Paint().apply {
                                 color = onSurfaceColor
-                                textSize = 12.dp.toPx()
+                                textSize = mmTextSize
                                 textAlign = Paint.Align.LEFT
                             }
                         )
@@ -113,17 +133,17 @@ fun RulerScreen(
                     drawLine(
                         color = Color(primaryColor).copy(alpha = 0.6f),
                         start = Offset(width, currentY),
-                        end = Offset(width - 40.dp.toPx(), currentY),
-                        strokeWidth = 1.5.dp.toPx()
+                        end = Offset(width - inchMajorLen, currentY),
+                        strokeWidth = strokeWidthInch
                     )
 
                     drawContext.canvas.nativeCanvas.drawText(
                         inchCount.toString(),
-                        width - 48.dp.toPx(),
-                        currentY + 5.dp.toPx(),
+                        width - inchLabelOffset,
+                        currentY + textOffset,
                         Paint().apply {
                             color = primaryColor
-                            textSize = 14.dp.toPx()
+                            textSize = inchTextSize
                             textAlign = Paint.Align.RIGHT
                             isFakeBoldText = true
                         }
@@ -133,15 +153,15 @@ fun RulerScreen(
                         val subY = currentY + i * eighth
                         if (subY >= height) break
                         val subLen = when {
-                            i % 4 == 0 -> 30.dp.toPx() // Half
-                            i % 2 == 0 -> 22.dp.toPx() // Quarter
-                            else -> 15.dp.toPx() // Eighth
+                            i % 4 == 0 -> inchHalfLen
+                            i % 2 == 0 -> inchQuarterLen
+                            else -> inchEighthLen
                         }
                         drawLine(
                             color = Color(primaryColor).copy(alpha = 0.4f),
                             start = Offset(width, subY),
                             end = Offset(width - subLen, subY),
-                            strokeWidth = 1.dp.toPx()
+                            strokeWidth = strokeWidthSubInch
                         )
                     }
                     
@@ -155,7 +175,7 @@ fun RulerScreen(
                         color = Color.Red,
                         start = Offset(0f, touchY),
                         end = Offset(width, touchY),
-                        strokeWidth = 2.dp.toPx()
+                        strokeWidth = strokeWidthMeasure
                     )
                 }
             }

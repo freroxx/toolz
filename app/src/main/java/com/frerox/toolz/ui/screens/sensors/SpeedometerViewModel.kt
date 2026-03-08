@@ -12,13 +12,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
+import kotlin.math.*
 
 data class SpeedState(
     val speedKmh: Float = 0f,
     val altitude: Double = 0.0,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
-    val isGpsEnabled: Boolean = true
+    val isGpsEnabled: Boolean = true,
+    val accuracy: Float = 0f
 )
 
 @HiltViewModel
@@ -32,17 +34,37 @@ class SpeedometerViewModel @Inject constructor(
     private val _speedState = MutableStateFlow(SpeedState())
     val speedState: StateFlow<SpeedState> = _speedState.asStateFlow()
 
+    private var lastLocation: Location? = null
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
-            locationResult.lastLocation?.let { location ->
-                _speedState.value = SpeedState(
-                    speedKmh = if (location.hasSpeed()) location.speed * 3.6f else 0f,
-                    altitude = location.altitude,
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    isGpsEnabled = isLocationEnabled()
-                )
+            val location = locationResult.lastLocation ?: return
+            
+            var speed = if (location.hasSpeed()) location.speed else 0f
+            
+            // Manual calculation fallback if speed is 0 and we have a previous location
+            if (speed == 0f && lastLocation != null) {
+                val distance = location.distanceTo(lastLocation!!)
+                val timeSec = (location.time - lastLocation!!.time) / 1000f
+                if (timeSec > 0) {
+                    val calculatedSpeed = distance / timeSec
+                    // Only use calculated speed if it's reasonable and accuracy is good
+                    if (calculatedSpeed < 100 && location.accuracy < 20) {
+                        speed = calculatedSpeed
+                    }
+                }
             }
+            
+            lastLocation = location
+            
+            _speedState.value = SpeedState(
+                speedKmh = speed * 3.6f, // Convert m/s to km/h
+                altitude = location.altitude,
+                latitude = location.latitude,
+                longitude = location.longitude,
+                isGpsEnabled = isLocationEnabled(),
+                accuracy = location.accuracy
+            )
         }
     }
 
@@ -61,6 +83,7 @@ class SpeedometerViewModel @Inject constructor(
 
     fun stopTracking() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        lastLocation = null
     }
 
     override fun onCleared() {
