@@ -1,27 +1,32 @@
 package com.frerox.toolz.ui.screens.sensors
 
+import android.content.ComponentName
 import android.content.Context
-import android.media.MediaRecorder
+import android.content.Intent
+import android.content.ServiceConnection
+import android.media.MediaPlayer
+import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.service.VoiceRecorderService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
+import java.io.IOException
 import javax.inject.Inject
 
 data class RecordingState(
     val isRecording: Boolean = false,
     val durationMillis: Long = 0L,
-    val recordings: List<File> = emptyList()
+    val recordings: List<File> = emptyList(),
+    val playingFile: File? = null,
+    val isPlaying: Boolean = false,
+    val playbackPosition: Int = 0,
+    val playbackDuration: Int = 0
 )
 
 @HiltViewModel
@@ -32,62 +37,126 @@ class VoiceRecorderViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(RecordingState())
     val uiState: StateFlow<RecordingState> = _uiState.asStateFlow()
 
-    private var mediaRecorder: MediaRecorder? = null
-    private var timerJob: Job? = null
-    private var currentFile: File? = null
+    private var recorderService: VoiceRecorderService? = null
+    private var isBound = false
+    private var mediaPlayer: MediaPlayer? = null
+    private var playbackJob: Job? = null
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as VoiceRecorderService.LocalBinder
+            recorderService = binder.getService()
+            isBound = true
+            
+            viewModelScope.launch {
+                recorderService?.isRecording?.collect { recording ->
+                    _uiState.update { it.copy(isRecording = recording) }
+                    if (!recording) loadRecordings()
+                }
+            }
+            viewModelScope.launch {
+                recorderService?.durationMillis?.collect { duration ->
+                    _uiState.update { it.copy(durationMillis = duration) }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            recorderService = null
+            isBound = false
+        }
+    }
 
     init {
+        Intent(context, VoiceRecorderService::class.java).also { intent ->
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
         loadRecordings()
     }
 
     private fun loadRecordings() {
-        val files = context.getExternalFilesDir("recordings")?.listFiles()?.toList() ?: emptyList()
-        _uiState.update { it.copy(recordings = files.sortedByDescending { f -> f.lastModified() }) }
+        val folder = context.getExternalFilesDir("recordings")
+        val files = folder?.listFiles()?.toList() ?: emptyList()
+        _uiState.update { it.copy(recordings = files.filter { f -> f.extension == "m4a" }.sortedByDescending { f -> f.lastModified() }) }
     }
 
     fun startRecording() {
-        val folder = context.getExternalFilesDir("recordings")
-        if (folder?.exists() == false) folder.mkdirs()
-        
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        currentFile = File(folder, "REC_$timeStamp.m4a")
-
-        mediaRecorder = MediaRecorder().apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setOutputFile(currentFile?.absolutePath)
-            prepare()
-            start()
-        }
-
-        _uiState.update { it.copy(isRecording = true, durationMillis = 0L) }
-        startTimer()
+        stopPlayback()
+        recorderService?.startRecording()
     }
 
-    private fun startTimer() {
-        timerJob?.cancel()
-        timerJob = viewModelScope.launch {
-            val start = System.currentTimeMillis()
-            while (_uiState.value.isRecording) {
-                delay(100)
-                _uiState.update { it.copy(durationMillis = System.currentTimeMillis() - start) }
+    fun stopRecording() {
+        recorderService?.stopRecording()
+    }
+
+    fun togglePlayback(file: File) {
+        if (_uiState.value.playingFile == file && _uiState.value.isPlaying) {
+            pausePlayback()
+        } else if (_uiState.value.playingFile == file && !_uiState.value.isPlaying) {
+            resumePlayback()
+        } else {
+            startPlayback(file)
+        }
+    }
+
+    private fun startPlayback(file: File) {
+        stopPlayback()
+        mediaPlayer = MediaPlayer().apply {
+            try {
+                setDataSource(file.absolutePath)
+                prepare()
+                start()
+                _uiState.update { 
+                    it.copy(
+                        playingFile = file, 
+                        isPlaying = true, 
+                        playbackDuration = duration,
+                        playbackPosition = 0
+                    ) 
+                }
+                startPlaybackTimer()
+                setOnCompletionListener {
+                    stopPlayback()
+                }
+            } catch (e: IOException) {
+                e.printStackTrace()
             }
         }
     }
 
-    fun stopRecording() {
-        mediaRecorder?.apply {
-            stop()
-            release()
+    private fun pausePlayback() {
+        mediaPlayer?.pause()
+        _uiState.update { it.copy(isPlaying = false) }
+        playbackJob?.cancel()
+    }
+
+    private fun resumePlayback() {
+        mediaPlayer?.start()
+        _uiState.update { it.copy(isPlaying = true) }
+        startPlaybackTimer()
+    }
+
+    private fun stopPlayback() {
+        mediaPlayer?.release()
+        mediaPlayer = null
+        playbackJob?.cancel()
+        _uiState.update { it.copy(isPlaying = false, playingFile = null, playbackPosition = 0) }
+    }
+
+    private fun startPlaybackTimer() {
+        playbackJob?.cancel()
+        playbackJob = viewModelScope.launch {
+            while (_uiState.value.isPlaying) {
+                _uiState.update { it.copy(playbackPosition = mediaPlayer?.currentPosition ?: 0) }
+                delay(100)
+            }
         }
-        mediaRecorder = null
-        timerJob?.cancel()
-        _uiState.update { it.copy(isRecording = false) }
-        loadRecordings()
     }
 
     fun deleteRecording(file: File) {
+        if (_uiState.value.playingFile == file) {
+            stopPlayback()
+        }
         if (file.exists()) {
             file.delete()
             loadRecordings()
@@ -96,6 +165,9 @@ class VoiceRecorderViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        stopRecording()
+        if (isBound) {
+            context.unbindService(connection)
+        }
+        stopPlayback()
     }
 }

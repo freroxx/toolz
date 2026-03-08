@@ -1,6 +1,5 @@
 package com.frerox.toolz.ui.screens.math
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,11 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,12 +173,12 @@ fun UnitInputSection(
                 onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
+                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
                 )
             )
             UnitDropDownSelector(unit, units, onUnitChange)
@@ -207,7 +205,7 @@ fun UnitOutputSection(
                 text = value,
                 modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 12.dp),
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             UnitDropDownSelector(unit, units, onUnitChange)
@@ -229,7 +227,7 @@ fun UnitDropDownSelector(
                 .clip(MaterialTheme.shapes.medium)
                 .clickable { expanded = true }
                 .background(MaterialTheme.colorScheme.secondaryContainer),
-            color = androidx.compose.ui.graphics.Color.Transparent
+            color = Color.Transparent
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

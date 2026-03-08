@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.FlashlightOff
 import androidx.compose.material.icons.rounded.FlashlightOn
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -118,6 +119,19 @@ fun FlashlightScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (state.isBrightnessSupported && state.mode == FlashlightMode.STEADY) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Brightness", style = MaterialTheme.typography.titleSmall)
+                        }
+                        Slider(
+                            value = state.brightness,
+                            onValueChange = { viewModel.setBrightness(it) },
+                            valueRange = 0.1f..1.0f
+                        )
+                    }
+
                     Text(
                         "Modes", 
                         style = MaterialTheme.typography.labelLarge,

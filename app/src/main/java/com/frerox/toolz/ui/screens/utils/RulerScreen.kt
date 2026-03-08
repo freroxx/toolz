@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -26,15 +28,22 @@ fun RulerScreen(
     onBack: () -> Unit
 ) {
     var touchY by remember { mutableStateOf(0f) }
+    var isFlipped by remember { mutableStateOf(false) }
     val density = LocalDensity.current
+    val context = LocalContext.current
+    val displayMetrics = context.resources.displayMetrics
     
-    // Physical constants (approximate based on standard screen DPI)
-    val ppi = 160f * density.density 
-    val mmPx = ppi / 25.4f
-    val inchPx = ppi
+    // Physical constants using actual screen DPI for better accuracy
+    val xdpi = displayMetrics.xdpi
+    val ydpi = displayMetrics.ydpi
+    
+    // Use ydpi for vertical ruler
+    val mmPx = ydpi / 25.4f
+    val inchPx = ydpi
 
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val primaryColor = MaterialTheme.colorScheme.primary.toArgb()
+    val errorColor = MaterialTheme.colorScheme.error
     
     val strokeWidthMm = with(density) { 1.dp.toPx() }
     val strokeWidthInch = with(density) { 1.5.dp.toPx() }
@@ -65,6 +74,11 @@ fun RulerScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { isFlipped = !isFlipped }) {
+                        Icon(Icons.Rounded.Flip, contentDescription = "Flip Ruler")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
                 )
@@ -87,7 +101,7 @@ fun RulerScreen(
                 val width = size.width
                 val height = size.height
                 
-                // CM / MM Side (Left)
+                // CM / MM Side
                 var currentY = 0f
                 var mmCount = 0
                 while (currentY < height) {
@@ -99,23 +113,27 @@ fun RulerScreen(
                         else -> minorLen
                     }
                     
+                    val startX = if (isFlipped) width else 0f
+                    val endX = if (isFlipped) width - lineLength else lineLength
+                    
                     drawLine(
                         color = Color(onSurfaceColor).copy(alpha = 0.6f),
-                        start = Offset(0f, currentY),
-                        end = Offset(lineLength, currentY),
+                        start = Offset(startX, currentY),
+                        end = Offset(endX, currentY),
                         strokeWidth = strokeWidthMm
                     )
 
                     if (isMajor) {
                         val text = (mmCount / 10).toString()
+                        val textX = if (isFlipped) width - lineLength - mmLabelOffset else lineLength + mmLabelOffset
                         drawContext.canvas.nativeCanvas.drawText(
                             text,
-                            lineLength + mmLabelOffset,
+                            textX,
                             currentY + textOffset,
                             Paint().apply {
                                 color = onSurfaceColor
                                 textSize = mmTextSize
-                                textAlign = Paint.Align.LEFT
+                                textAlign = if (isFlipped) Paint.Align.RIGHT else Paint.Align.LEFT
                             }
                         )
                     }
@@ -124,27 +142,31 @@ fun RulerScreen(
                     mmCount++
                 }
                 
-                // Inch Side (Right)
+                // Inch Side
                 currentY = 0f
                 var inchCount = 0
                 val eighth = inchPx / 8
                 while (currentY < height) {
+                    val startX = if (isFlipped) 0f else width
+                    val endX = if (isFlipped) inchMajorLen else width - inchMajorLen
+                    
                     // Full inch
                     drawLine(
                         color = Color(primaryColor).copy(alpha = 0.6f),
-                        start = Offset(width, currentY),
-                        end = Offset(width - inchMajorLen, currentY),
+                        start = Offset(startX, currentY),
+                        end = Offset(endX, currentY),
                         strokeWidth = strokeWidthInch
                     )
 
+                    val textX = if (isFlipped) inchLabelOffset else width - inchLabelOffset
                     drawContext.canvas.nativeCanvas.drawText(
                         inchCount.toString(),
-                        width - inchLabelOffset,
+                        textX,
                         currentY + textOffset,
                         Paint().apply {
                             color = primaryColor
                             textSize = inchTextSize
-                            textAlign = Paint.Align.RIGHT
+                            textAlign = if (isFlipped) Paint.Align.LEFT else Paint.Align.RIGHT
                             isFakeBoldText = true
                         }
                     )
@@ -157,10 +179,11 @@ fun RulerScreen(
                             i % 2 == 0 -> inchQuarterLen
                             else -> inchEighthLen
                         }
+                        val subEndX = if (isFlipped) subLen else width - subLen
                         drawLine(
                             color = Color(primaryColor).copy(alpha = 0.4f),
-                            start = Offset(width, subY),
-                            end = Offset(width - subLen, subY),
+                            start = Offset(startX, subY),
+                            end = Offset(subEndX, subY),
                             strokeWidth = strokeWidthSubInch
                         )
                     }
@@ -172,7 +195,7 @@ fun RulerScreen(
                 // Measurement line
                 if (touchY > 0) {
                     drawLine(
-                        color = Color.Red,
+                        color = errorColor,
                         start = Offset(0f, touchY),
                         end = Offset(width, touchY),
                         strokeWidth = strokeWidthMeasure

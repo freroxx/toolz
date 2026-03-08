@@ -1,12 +1,17 @@
 package com.frerox.toolz.ui.screens.time
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -36,31 +41,46 @@ class PomodoroViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PomodoroState())
     val uiState: StateFlow<PomodoroState> = _uiState.asStateFlow()
 
-    private var timerJob: Job? = null
+    private var toolService: ToolService? = null
+    private var isBound = false
     private var mediaPlayer: MediaPlayer? = null
 
-    fun toggleStartStop() {
-        if (_uiState.value.isRunning) {
-            pause()
-        } else {
-            start()
-        }
-    }
-
-    private fun start() {
-        _uiState.update { it.copy(isRunning = true, isFinished = false) }
-        timerJob = viewModelScope.launch {
-            while (_uiState.value.remainingTime > 0) {
-                delay(1000)
-                _uiState.update { it.copy(remainingTime = (it.remainingTime - 1000).coerceAtLeast(0)) }
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as ToolService.LocalBinder
+            toolService = binder.getService()
+            isBound = true
+            
+            viewModelScope.launch {
+                toolService?.pomodoroRemaining?.collect { remaining ->
+                    _uiState.update { it.copy(remainingTime = remaining) }
+                    if (remaining == 0L && _uiState.value.isRunning) {
+                        onSessionComplete()
+                    }
+                }
             }
-            onSessionComplete()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            toolService = null
+            isBound = false
         }
     }
 
-    private fun pause() {
-        _uiState.update { it.copy(isRunning = false) }
-        timerJob?.cancel()
+    init {
+        Intent(context, ToolService::class.java).also { intent ->
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    fun toggleStartStop() {
+        val currentlyRunning = _uiState.value.isRunning
+        if (currentlyRunning) {
+            toolService?.pausePomodoro()
+        } else {
+            toolService?.startPomodoro(_uiState.value.remainingTime, _uiState.value.mode.name)
+        }
+        _uiState.update { it.copy(isRunning = !currentlyRunning, isFinished = false) }
     }
 
     private fun onSessionComplete() {
@@ -93,7 +113,6 @@ class PomodoroViewModel @Inject constructor(
                     if (uri != null) {
                         setDataSource(context, uri)
                     } else {
-                        // In a real app, maybe play a default beep if no URI is set
                         return@launch
                     }
                     setAudioAttributes(
@@ -118,7 +137,7 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun reset() {
-        pause()
+        toolService?.pausePomodoro()
         stopRingtone()
         _uiState.update { 
             it.copy(
@@ -130,14 +149,16 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun skip() {
-        pause()
+        toolService?.pausePomodoro()
         stopRingtone()
         onSessionComplete()
     }
 
     override fun onCleared() {
         super.onCleared()
-        timerJob?.cancel()
+        if (isBound) {
+            context.unbindService(connection)
+        }
         mediaPlayer?.release()
     }
 }

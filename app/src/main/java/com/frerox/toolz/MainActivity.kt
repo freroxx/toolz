@@ -10,6 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -19,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -55,6 +59,12 @@ class MainActivity : ComponentActivity() {
             }
 
             val customPrimary = customPrimaryInt?.let { Color(it) }
+            val navController = rememberNavController()
+
+            // Handle widget navigation
+            LaunchedEffect(intent) {
+                handleIntent(intent, navController)
+            }
 
             // Handle service start after permission check
             val context = this
@@ -67,6 +77,12 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                   if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                       permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                   }
+                }
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
                         startStepService()
@@ -87,7 +103,31 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ToolzNavHost()
+                    ToolzNavHost(navController)
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?, navController: NavController) {
+        val navigateTo = intent?.getStringExtra("navigate_to")
+        if (navigateTo != null) {
+            val route = when (navigateTo) {
+                "notepad" -> Screen.Notepad.route
+                "voice_recorder" -> Screen.VoiceRecorder.route
+                "step_counter" -> Screen.StepCounter.route
+                "compass" -> Screen.Compass.route
+                "world_clock" -> Screen.WorldClock.route
+                else -> null
+            }
+            route?.let { 
+                navController.navigate(it) {
+                    launchSingleTop = true
                 }
             }
         }
@@ -108,11 +148,14 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ToolzNavHost() {
-    val navController = rememberNavController()
+fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Dashboard.route
+        startDestination = Screen.Dashboard.route,
+        enterTransition = { slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(400)) },
+        exitTransition = { slideOutHorizontally(targetOffsetX = { -it }, animationSpec = tween(400)) },
+        popEnterTransition = { slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) },
+        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) }
     ) {
         composable(Screen.Dashboard.route) {
             DashboardScreen(
@@ -171,6 +214,9 @@ fun ToolzNavHost() {
         composable(Screen.StepCounter.route) {
             StepCounterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
+        composable(Screen.VoiceRecorder.route) {
+            VoiceRecorderScreen(onBack = { navController.popBackStack() })
+        }
         
         // Math & Conversion
         composable(Screen.Calculator.route) { 
@@ -204,6 +250,9 @@ fun ToolzNavHost() {
         }
         composable(Screen.BatteryInfo.route) {
             BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.FlipCoin.route) {
+            FlipCoinScreen(onBack = { navController.popBackStack() })
         }
     }
 }

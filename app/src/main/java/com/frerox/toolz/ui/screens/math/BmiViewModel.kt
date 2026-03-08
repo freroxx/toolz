@@ -13,7 +13,9 @@ data class BmiState(
     val weight: String = "",
     val height: String = "",
     val bmi: Float? = null,
-    val category: String = ""
+    val category: String = "",
+    val isCm: Boolean = true,
+    val isKg: Boolean = true
 )
 
 @HiltViewModel
@@ -28,17 +30,35 @@ class BmiViewModel @Inject constructor() : ViewModel() {
     }
 
     fun onHeightChange(height: String) {
-        _uiState.update { it.copy(height = height.filter { c -> c.isDigit() || c == '.' }) }
+        _uiState.update { it.copy(height = height.filter { c -> c.isDigit() || c == '.' || c == '\'' || c == '\"' || c == ' ' }) }
+        calculateBmi()
+    }
+
+    fun toggleUnit(isHeight: Boolean) {
+        if (isHeight) {
+            _uiState.update { it.copy(isCm = !it.isCm) }
+        } else {
+            _uiState.update { it.copy(isKg = !it.isKg) }
+        }
         calculateBmi()
     }
 
     private fun calculateBmi() {
-        val w = _uiState.value.weight.toFloatOrNull() ?: 0f
-        val h = _uiState.value.height.toFloatOrNull() ?: 0f
+        val state = _uiState.value
+        val weightInKg = if (state.isKg) {
+            state.weight.toFloatOrNull() ?: 0f
+        } else {
+            (state.weight.toFloatOrNull() ?: 0f) * 0.453592f
+        }
+
+        val heightInMeters = if (state.isCm) {
+            (state.height.toFloatOrNull() ?: 0f) / 100f
+        } else {
+            parseImperialHeight(state.height) * 0.0254f
+        }
         
-        if (w > 0 && h > 0) {
-            val hInMeters = h / 100f
-            val bmiValue = w / hInMeters.pow(2)
+        if (weightInKg > 0 && heightInMeters > 0) {
+            val bmiValue = weightInKg / heightInMeters.pow(2)
             val category = when {
                 bmiValue < 18.5 -> "Underweight"
                 bmiValue < 25 -> "Normal"
@@ -48,6 +68,24 @@ class BmiViewModel @Inject constructor() : ViewModel() {
             _uiState.update { it.copy(bmi = bmiValue, category = category) }
         } else {
             _uiState.update { it.copy(bmi = null, category = "") }
+        }
+    }
+
+    private fun parseImperialHeight(height: String): Float {
+        // Try to parse format like 5' 11" or just a number of inches
+        return try {
+            if (height.contains("'")) {
+                val parts = height.split("'")
+                val feet = parts[0].trim().toFloatOrNull() ?: 0f
+                val inches = if (parts.size > 1) {
+                    parts[1].replace("\"", "").trim().toFloatOrNull() ?: 0f
+                } else 0f
+                feet * 12 + inches
+            } else {
+                height.toFloatOrNull() ?: 0f
+            }
+        } catch (e: Exception) {
+            0f
         }
     }
 }

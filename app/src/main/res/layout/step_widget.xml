@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:background="@drawable/widget_background">
+
+    <ImageView
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:src="@android:drawable/ic_menu_directions"
+        android:tint="#4CAF50" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="12dp">
+
+        <TextView
+            android:id="@+id/widget_step_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#333333" />
+
+        <TextView
+            android:id="@+id/widget_step_goal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Goal: 10000"
+            android:textSize="12sp"
+            android:textColor="#666666" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/widget_step_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:indeterminate="false"
+        android:progressDrawable="@drawable/circular_progress" />
+
+</LinearLayout>

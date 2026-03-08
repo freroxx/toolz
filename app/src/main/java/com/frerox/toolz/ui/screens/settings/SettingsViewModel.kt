@@ -33,39 +33,43 @@ class SettingsViewModel @Inject constructor(
     val shutterSoundEnabled: StateFlow<Boolean> = repository.shutterSoundEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
-    fun setStepGoal(goal: Int) {
-        viewModelScope.launch {
-            repository.setStepGoal(goal)
-        }
-    }
+    val shutterSoundUri: StateFlow<String?> = repository.shutterSoundUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    fun setRingtoneUri(uri: String) {
-        viewModelScope.launch {
-            repository.setRingtoneUri(uri)
-        }
-    }
+    // Notifications
+    val notificationsEnabled: StateFlow<Boolean> = repository.notificationsEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val stepNotifications: StateFlow<Boolean> = repository.stepNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val timerNotifications: StateFlow<Boolean> = repository.timerNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val voiceRecordNotifications: StateFlow<Boolean> = repository.voiceRecordNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
-    fun setThemeMode(mode: String) {
-        viewModelScope.launch {
-            repository.setThemeMode(mode)
-        }
-    }
+    // Widgets
+    val widgetBackgroundColor: StateFlow<Int> = repository.widgetBackgroundColor
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0xFFFFFFFF.toInt())
+    val widgetAccentColor: StateFlow<Int> = repository.widgetAccentColor
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0xFF4CAF50.toInt())
+    val widgetOpacity: StateFlow<Float> = repository.widgetOpacity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.9f)
 
-    fun setDynamicColor(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.setDynamicColor(enabled)
-        }
-    }
+    fun setStepGoal(goal: Int) { viewModelScope.launch { repository.setStepGoal(goal) } }
+    fun setRingtoneUri(uri: String) { viewModelScope.launch { repository.setRingtoneUri(uri) } }
+    fun setThemeMode(mode: String) { viewModelScope.launch { repository.setThemeMode(mode) } }
+    fun setDynamicColor(enabled: Boolean) { viewModelScope.launch { repository.setDynamicColor(enabled) } }
+    fun setCustomPrimaryColor(color: Int?) { viewModelScope.launch { repository.setCustomPrimaryColor(color) } }
+    fun setShutterSoundEnabled(enabled: Boolean) { viewModelScope.launch { repository.setShutterSoundEnabled(enabled) } }
+    fun setShutterSoundUri(uri: String) { viewModelScope.launch { repository.setShutterSoundUri(uri) } }
 
-    fun setCustomPrimaryColor(color: Int?) {
-        viewModelScope.launch {
-            repository.setCustomPrimaryColor(color)
-        }
-    }
+    // Notification setters
+    fun setNotificationsEnabled(enabled: Boolean) { viewModelScope.launch { repository.setNotificationsEnabled(enabled) } }
+    fun setStepNotifications(enabled: Boolean) { viewModelScope.launch { repository.setStepNotifications(enabled) } }
+    fun setTimerNotifications(enabled: Boolean) { viewModelScope.launch { repository.setTimerNotifications(enabled) } }
+    fun setVoiceRecordNotifications(enabled: Boolean) { viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) } }
 
-    fun setShutterSoundEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.setShutterSoundEnabled(enabled)
-        }
-    }
+    // Widget setters
+    fun setWidgetBackgroundColor(color: Int) { viewModelScope.launch { repository.setWidgetBackgroundColor(color) } }
+    fun setWidgetAccentColor(color: Int) { viewModelScope.launch { repository.setWidgetAccentColor(color) } }
+    fun setWidgetOpacity(opacity: Float) { viewModelScope.launch { repository.setWidgetOpacity(opacity) } }
 }

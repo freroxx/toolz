@@ -1,6 +1,6 @@
 package com.frerox.toolz.ui.screens.time
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,12 +13,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,18 +44,29 @@ fun WorldClockScreen(
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(clocks) { clock ->
-                ClockItem(
-                    clock = clock,
-                    onDelete = if (!clock.isLocal) { { viewModel.removeZone(clock.zoneId) } } else null
-                )
+        if (clocks.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No clocks added. Tap + to add one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(clocks) { clock ->
+                    WorldClockItemRow(
+                        clock = clock,
+                        onDelete = { viewModel.removeZone(clock.zoneId) }
+                    )
+                }
             }
         }
 
@@ -75,73 +84,48 @@ fun WorldClockScreen(
 }
 
 @Composable
-fun ClockItem(clock: WorldClockItem, onDelete: (() -> Unit)?) {
+fun WorldClockItemRow(
+    clock: WorldClockItem,
+    onDelete: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (clock.isLocal) 
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f) 
-            else 
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        shape = MaterialTheme.shapes.large
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(16.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = clock.cityName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (clock.isLocal) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                    )
-                    if (clock.isLocal) {
-                        Surface(
-                            modifier = Modifier.padding(start = 8.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = MaterialTheme.shapes.extraSmall
-                        ) {
-                            Text(
-                                "LOCAL",
-                                modifier = Modifier.padding(horizontal = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-                }
+            Column {
                 Text(
-                    text = clock.date,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (clock.isLocal) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+                    text = clock.cityName,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = clock.zoneId,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = clock.currentTime,
-                    style = MaterialTheme.typography.headlineLarge.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 32.sp
-                    ),
-                    color = if (clock.isLocal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    fontSize = 24.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium
                 )
-                
-                if (onDelete != null) {
-                    IconButton(onClick = onDelete, modifier = Modifier.padding(start = 8.dp)) {
-                        Icon(Icons.Rounded.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                if (!clock.isLocal) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Rounded.Delete,
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
                 }
             }
@@ -170,7 +154,7 @@ fun TimeZonePickerDialog(
                     placeholder = { Text("Search city or region...") },
                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.medium
+                    singleLine = true
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
