@@ -1,5 +1,7 @@
 package com.frerox.toolz
 
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,8 +15,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.ui.navigation.Screen
-import com.frerox.toolz.ui.screens.PlaceholderScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
 import com.frerox.toolz.ui.screens.math.*
 import com.frerox.toolz.ui.screens.time.*
@@ -31,6 +33,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Start Step Counter Service
+        val intent = Intent(this, StepCounterService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+
         setContent {
             ToolzTheme {
                 Surface(
