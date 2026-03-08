@@ -18,7 +18,11 @@ class SettingsRepository @Inject constructor(
 ) {
     private val STEP_GOAL = intPreferencesKey("step_goal")
     private val RINGTONE_URI = stringPreferencesKey("timer_ringtone_uri")
-    private val DARK_MODE = booleanPreferencesKey("dark_mode")
+    private val THEME_MODE = stringPreferencesKey("theme_mode") // "SYSTEM", "LIGHT", "DARK"
+    private val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+    private val CUSTOM_PRIMARY_COLOR = intPreferencesKey("custom_primary_color")
+    private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
+    private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
 
     val stepGoal: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[STEP_GOAL] ?: 10000
@@ -28,8 +32,24 @@ class SettingsRepository @Inject constructor(
         preferences[RINGTONE_URI]
     }
 
-    val darkMode: Flow<Boolean?> = context.dataStore.data.map { preferences ->
-        preferences[DARK_MODE]
+    val themeMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[THEME_MODE] ?: "SYSTEM"
+    }
+
+    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[DYNAMIC_COLOR] ?: true
+    }
+
+    val customPrimaryColor: Flow<Int?> = context.dataStore.data.map { preferences ->
+        preferences[CUSTOM_PRIMARY_COLOR]
+    }
+
+    val shutterSoundEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[SHUTTER_SOUND_ENABLED] ?: true
+    }
+
+    val worldClockZones: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        preferences[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo")
     }
 
     suspend fun setStepGoal(goal: Int) {
@@ -44,9 +64,45 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun setDarkMode(enabled: Boolean) {
+    suspend fun setThemeMode(mode: String) {
         context.dataStore.edit { preferences ->
-            preferences[DARK_MODE] = enabled
+            preferences[THEME_MODE] = mode
+        }
+    }
+
+    suspend fun setDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[DYNAMIC_COLOR] = enabled
+        }
+    }
+
+    suspend fun setCustomPrimaryColor(color: Int?) {
+        context.dataStore.edit { preferences ->
+            if (color == null) {
+                preferences.remove(CUSTOM_PRIMARY_COLOR)
+            } else {
+                preferences[CUSTOM_PRIMARY_COLOR] = color
+            }
+        }
+    }
+
+    suspend fun setShutterSoundEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[SHUTTER_SOUND_ENABLED] = enabled
+        }
+    }
+
+    suspend fun addWorldClockZone(zone: String) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[WORLD_CLOCK_ZONES] ?: emptySet()
+            preferences[WORLD_CLOCK_ZONES] = current + zone
+        }
+    }
+
+    suspend fun removeWorldClockZone(zone: String) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[WORLD_CLOCK_ZONES] ?: emptySet()
+            preferences[WORLD_CLOCK_ZONES] = current - zone
         }
     }
 }

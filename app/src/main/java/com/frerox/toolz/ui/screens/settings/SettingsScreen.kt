@@ -14,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +30,11 @@ fun SettingsScreen(
 ) {
     val stepGoal by viewModel.stepGoal.collectAsState()
     val ringtoneUri by viewModel.ringtoneUri.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
+    val dynamicColor by viewModel.dynamicColor.collectAsState()
+    val shutterSound by viewModel.shutterSoundEnabled.collectAsState()
+    val customPrimaryInt by viewModel.customPrimaryColor.collectAsState()
+    
     val context = LocalContext.current
 
     val ringtonePickerLauncher = rememberLauncherForActivityResult(
@@ -83,21 +90,81 @@ fun SettingsScreen(
                 )
             }
 
-            // UI Customization
+            // Camera Settings
+            SettingsSection(title = "Camera & Tools") {
+                SettingsToggleItem(
+                    title = "Shutter Sound",
+                    subtitle = "Play sound when capturing images",
+                    icon = Icons.Rounded.VolumeUp,
+                    checked = shutterSound,
+                    onCheckedChange = { viewModel.setShutterSoundEnabled(it) }
+                )
+            }
+
+            // Appearance
             SettingsSection(title = "Appearance") {
                 SettingsToggleItem(
                     title = "Dynamic Colors",
                     subtitle = "Use Material You theme colors",
                     icon = Icons.Rounded.Palette,
-                    checked = true,
-                    onCheckedChange = {}
+                    checked = dynamicColor,
+                    onCheckedChange = { viewModel.setDynamicColor(it) }
                 )
+                
+                if (!dynamicColor) {
+                    SettingsItem(
+                        title = "Custom Primary Color",
+                        subtitle = if (customPrimaryInt != null) "Custom color active" else "Default color",
+                        icon = Icons.Rounded.ColorLens
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            listOf(
+                                Color(0xFFFF6D00), Color(0xFF00BFA5), Color(0xFF2962FF),
+                                Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853)
+                            ).forEach { color ->
+                                val argb = color.toArgb()
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(color, MaterialTheme.shapes.small)
+                                        .clickable { viewModel.setCustomPrimaryColor(argb) }
+                                        .padding(2.dp)
+                                        .let {
+                                            if (customPrimaryInt == argb) {
+                                                it.background(Color.White.copy(alpha = 0.5f), MaterialTheme.shapes.small)
+                                            } else it
+                                        }
+                                )
+                            }
+                            IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
+                                Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset Color")
+                            }
+                        }
+                    }
+                }
+                
                 SettingsItem(
                     title = "Theme Mode",
-                    subtitle = "Follow system settings",
-                    icon = Icons.Rounded.DarkMode,
-                    onClick = {}
-                )
+                    subtitle = themeMode.lowercase().replaceFirstChar { it.uppercase() },
+                    icon = Icons.Rounded.DarkMode
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                            FilterChip(
+                                selected = themeMode == mode,
+                                onClick = { viewModel.setThemeMode(mode) },
+                                label = { Text(mode.lowercase().replaceFirstChar { it.uppercase() }) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
             }
 
             // App Info Section
@@ -121,7 +188,7 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Toolz v1.1.0", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("Toolz v1.3.0", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("The ultimate toolkit for daily needs", style = MaterialTheme.typography.bodyMedium)
                     Text("Made by frerox", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     Spacer(modifier = Modifier.height(24.dp))
@@ -181,7 +248,7 @@ fun SettingsItem(
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (onClick != null) {
-                    Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
+                    Icon(Icons.AutoMirrored.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
                 }
             }
             extraContent?.let {

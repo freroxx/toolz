@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.notepad
 
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.notepad.Note
@@ -19,15 +20,43 @@ class NotepadViewModel @Inject constructor(
     val notes: StateFlow<List<Note>> = noteDao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun addNote(title: String, content: String) {
+    fun addNote(
+        title: String,
+        content: String,
+        color: Int,
+        fontStyle: String = "SANS_SERIF",
+        isBold: Boolean = false,
+        isItalic: Boolean = false
+    ) {
         viewModelScope.launch {
-            noteDao.insertNote(Note(title = title, content = content))
+            noteDao.insertNote(
+                Note(
+                    title = title,
+                    content = content,
+                    color = color,
+                    fontStyle = fontStyle,
+                    isBold = isBold,
+                    isItalic = isItalic
+                )
+            )
+        }
+    }
+
+    fun updateNote(note: Note) {
+        viewModelScope.launch {
+            noteDao.insertNote(note)
         }
     }
 
     fun deleteNote(note: Note) {
         viewModelScope.launch {
             noteDao.deleteNote(note)
+        }
+    }
+
+    fun togglePin(note: Note) {
+        viewModelScope.launch {
+            noteDao.updatePinned(note.id, !note.isPinned)
         }
     }
 }

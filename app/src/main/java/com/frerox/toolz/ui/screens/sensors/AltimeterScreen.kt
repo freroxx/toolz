@@ -1,6 +1,8 @@
 package com.frerox.toolz.ui.screens.sensors
 
 import android.Manifest
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -26,6 +28,12 @@ fun AltimeterScreen(
     val state by viewModel.uiState.collectAsState()
     val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
 
+    val animatedAltitude by animateFloatAsState(
+        targetValue = state.altitudeMeters.toFloat(),
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "Altitude Animation"
+    )
+
     DisposableEffect(locationPermissionState.status.isGranted) {
         if (locationPermissionState.status.isGranted) {
             viewModel.startListening()
@@ -38,7 +46,7 @@ fun AltimeterScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Altimeter") },
+                title = { Text("Altimeter", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -58,7 +66,7 @@ fun AltimeterScreen(
             Icon(
                 imageVector = Icons.Rounded.FilterHdr,
                 contentDescription = null,
-                modifier = Modifier.size(100.dp),
+                modifier = Modifier.size(120.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
             
@@ -66,37 +74,47 @@ fun AltimeterScreen(
 
             if (locationPermissionState.status.isGranted) {
                 Text(
-                    text = String.format(Locale.getDefault(), "%.1f", state.altitudeMeters),
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 80.sp),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    text = String.format(Locale.getDefault(), "%.1f", animatedAltitude),
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 80.sp, fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "meters",
                     style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.secondary
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.Bold
                 )
                 
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(64.dp))
                 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    shape = MaterialTheme.shapes.extraLarge,
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            AltimeterInfoItem(label = "Source", value = state.source)
-                            if (state.pressureHpa > 0) {
-                                AltimeterInfoItem(label = "Pressure", value = String.format(Locale.getDefault(), "%.1f hPa", state.pressureHpa))
-                            }
+                    Row(
+                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AltimeterInfoItem(label = "SOURCE", value = state.source)
+                        VerticalDivider(modifier = Modifier.height(40.dp))
+                        if (state.pressureHpa > 0) {
+                            AltimeterInfoItem(label = "PRESSURE", value = String.format(Locale.getDefault(), "%.1f hPa", state.pressureHpa))
+                        } else {
+                            AltimeterInfoItem(label = "PRESSURE", value = "N/A")
                         }
                     }
                 }
             } else {
-                Text("Location permission is required for altitude if barometer is missing.")
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { locationPermissionState.launchPermissionRequest() }) {
-                    Text("Grant Permission")
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Location permission is required for altitude if barometer is missing.")
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(onClick = { locationPermissionState.launchPermissionRequest() }) {
+                            Text("Enable Location")
+                        }
+                    }
                 }
             }
         }
@@ -106,7 +124,7 @@ fun AltimeterScreen(
 @Composable
 fun AltimeterInfoItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
     }
 }
