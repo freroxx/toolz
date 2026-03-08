@@ -175,7 +175,7 @@ fun UnitInputSection(
                 onValueChange = onValueChange,
                 modifier = Modifier.weight(1f),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                     unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -207,7 +207,7 @@ fun UnitOutputSection(
                 text = value,
                 modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 12.dp),
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface
             )
             UnitDropDownSelector(unit, units, onUnitChange)

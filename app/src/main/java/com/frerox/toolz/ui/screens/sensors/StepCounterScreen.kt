@@ -107,7 +107,7 @@ fun StepCounterScreen(
                         color = if (state.steps >= state.goal) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
                     )
 
-                    if (notificationPermissionState?.status?.isGranted == false) {
+                    if (notificationPermissionState != null && !notificationPermissionState.status.isGranted) {
                         Spacer(modifier = Modifier.height(32.dp))
                         TextButton(onClick = { notificationPermissionState.launchPermissionRequest() }) {
                             Text("Enable goal tracking notifications")

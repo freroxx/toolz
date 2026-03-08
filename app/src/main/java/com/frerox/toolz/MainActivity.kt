@@ -148,7 +148,8 @@ fun ToolzNavHost() {
             ScreenLightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
         }
         composable(Screen.Magnifier.route) { 
-            MagnifierScreen(onBack = { navController.popBackStack() }) 
+            val vm: MagnifierViewModel = hiltViewModel()
+            MagnifierScreen(onBack = { navController.popBackStack() }, settingsRepository = vm.repository)
         }
         composable(Screen.Scanner.route) { 
             ScannerScreen(onBack = { navController.popBackStack() }) 
