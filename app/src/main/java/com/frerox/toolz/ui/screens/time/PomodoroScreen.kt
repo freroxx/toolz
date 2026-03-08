@@ -1,19 +1,22 @@
 package com.frerox.toolz.ui.screens.time
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.bouncyClick
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -24,10 +27,17 @@ fun PomodoroScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
+    val totalTime = state.mode.minutes * 60 * 1000L
+    val animatedProgress by animateFloatAsState(
+        targetValue = state.remainingTime.toFloat() / totalTime,
+        animationSpec = tween(durationMillis = 1000, easing = LinearEasing),
+        label = "Pomodoro Progress"
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Pomodoro Timer") },
+                title = { Text("Focus Mode", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -42,82 +52,109 @@ fun PomodoroScreen(
                 .padding(padding)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = when (state.mode) {
-                    PomodoroMode.WORK -> "Focus Time"
-                    PomodoroMode.SHORT_BREAK -> "Short Break"
-                    PomodoroMode.LONG_BREAK -> "Long Break"
-                },
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Text(
-                text = "Sessions: ${state.sessionsCompleted}",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.secondary
-            )
-
-            Spacer(modifier = Modifier.height(48.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    color = when (state.mode) {
+                        PomodoroMode.WORK -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text(
+                        text = when (state.mode) {
+                            PomodoroMode.WORK -> "FOCUS"
+                            PomodoroMode.SHORT_BREAK -> "SHORT BREAK"
+                            PomodoroMode.LONG_BREAK -> "LONG BREAK"
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = when (state.mode) {
+                            PomodoroMode.WORK -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> MaterialTheme.colorScheme.onTertiaryContainer
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Session #${state.sessionsCompleted + 1}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
 
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(280.dp)
+                modifier = Modifier.size(320.dp)
             ) {
-                val totalTime = state.mode.minutes * 60 * 1000L
                 CircularProgressIndicator(
-                    progress = { state.remainingTime.toFloat() / totalTime },
+                    progress = { animatedProgress },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 12.dp,
+                    strokeWidth = 16.dp,
+                    strokeCap = StrokeCap.Round,
                     color = when(state.mode) {
                         PomodoroMode.WORK -> MaterialTheme.colorScheme.primary
                         else -> MaterialTheme.colorScheme.tertiary
                     },
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
-                Text(
-                    text = formatPomodoroTime(state.remainingTime),
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Light
+                
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = formatPomodoroTime(state.remainingTime),
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 80.sp
+                        )
                     )
-                )
+                    if (state.isFinished && !state.isRunning) {
+                        IconButton(onClick = { viewModel.stopRingtone() }) {
+                            Icon(Icons.Rounded.NotificationsActive, contentDescription = "Stop Ringtone", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(64.dp))
-
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilledTonalIconButton(
+                OutlinedIconButton(
                     onClick = { viewModel.reset() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape
                 ) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "Reset")
                 }
 
-                FloatingActionButton(
-                    onClick = { viewModel.toggleStartStop() },
-                    modifier = Modifier.size(80.dp),
-                    containerColor = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+                LargeFloatingActionButton(
+                    onClick = { 
+                        if (state.isFinished) viewModel.stopRingtone()
+                        viewModel.toggleStartStop() 
+                    },
+                    modifier = Modifier.size(88.dp),
+                    shape = CircleShape,
+                    containerColor = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary
                 ) {
                     Icon(
                         imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (state.isRunning) "Pause" else "Start",
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                 }
 
                 FilledTonalIconButton(
                     onClick = { viewModel.skip() },
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape
                 ) {
                     Icon(Icons.Rounded.SkipNext, contentDescription = "Skip")
                 }
