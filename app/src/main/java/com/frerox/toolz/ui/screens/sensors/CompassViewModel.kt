@@ -35,6 +35,7 @@ class CompassViewModel @Inject constructor(
 ) : ViewModel(), SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
@@ -46,6 +47,9 @@ class CompassViewModel @Inject constructor(
     private var lastMagnetometer = FloatArray(3)
     private var lastAccelerometerSet = false
     private var lastMagnetometerSet = false
+    
+    private val alpha = 0.97f
+    private var filteredAzimuth = 0f
 
     init {
         viewModelScope.launch {
@@ -91,8 +95,12 @@ class CompassViewModel @Inject constructor(
     }
 
     fun startListening() {
-        accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
-        magnetometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+        if (rotationVector != null) {
+            sensorManager.registerListener(this, rotationVector, SensorManager.SENSOR_DELAY_UI)
+        } else {
+            accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            magnetometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+        }
         if (_uiState.value.showQibla) updateLocationAndQibla()
     }
 
@@ -101,40 +109,68 @@ class CompassViewModel @Inject constructor(
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            System.arraycopy(event.values, 0, lastAccelerometer, 0, event.values.size)
-            lastAccelerometerSet = true
-        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-            System.arraycopy(event.values, 0, lastMagnetometer, 0, event.values.size)
-            lastMagnetometerSet = true
+        var azimuthInDegrees = 0f
+        
+        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+            val rotationMatrix = FloatArray(9)
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+            val orientation = FloatArray(3)
+            SensorManager.getOrientation(rotationMatrix, orientation)
+            azimuthInDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+        } else {
+            if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                System.arraycopy(event.values, 0, lastAccelerometer, 0, event.values.size)
+                lastAccelerometerSet = true
+            } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+                System.arraycopy(event.values, 0, lastMagnetometer, 0, event.values.size)
+                lastMagnetometerSet = true
+            }
+
+            if (lastAccelerometerSet && lastMagnetometerSet) {
+                val r = FloatArray(9)
+                val i = FloatArray(9)
+                if (SensorManager.getRotationMatrix(r, i, lastAccelerometer, lastMagnetometer)) {
+                    val orientation = FloatArray(3)
+                    SensorManager.getOrientation(r, orientation)
+                    azimuthInDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+                } else return
+            } else return
         }
 
-        if (lastAccelerometerSet && lastMagnetometerSet) {
-            val r = FloatArray(9)
-            val i = FloatArray(9)
-            if (SensorManager.getRotationMatrix(r, i, lastAccelerometer, lastMagnetometer)) {
-                val orientation = FloatArray(3)
-                SensorManager.getOrientation(r, orientation)
-                val azimuthInRadians = orientation[0]
-                var azimuthInDegrees = Math.toDegrees(azimuthInRadians.toDouble()).toFloat()
-                
-                // Apply declination if location is available
-                _uiState.value.latitude?.let { lat ->
-                    _uiState.value.longitude?.let { lng ->
-                        val declination = GeomagneticField(
-                            lat.toFloat(), lng.toFloat(), 0f, System.currentTimeMillis()
-                        ).declination
-                        azimuthInDegrees += declination
-                    }
-                }
-
-                _uiState.update { it.copy(azimuth = (azimuthInDegrees + 360) % 360) }
+        // Apply declination if location is available
+        _uiState.value.latitude?.let { lat ->
+            _uiState.value.longitude?.let { lng ->
+                val declination = GeomagneticField(
+                    lat.toFloat(), lng.toFloat(), 0f, System.currentTimeMillis()
+                ).declination
+                azimuthInDegrees += declination
             }
         }
+
+        val targetAzimuth = (azimuthInDegrees + 360) % 360
+        
+        // Low-pass filter for stability
+        filteredAzimuth = normalizeAngle(filteredAzimuth + shortestAngleDist(filteredAzimuth, targetAzimuth) * (1 - alpha))
+        
+        _uiState.update { it.copy(azimuth = filteredAzimuth) }
+    }
+    
+    private fun shortestAngleDist(a: Float, b: Float): Float {
+        var d = b - a
+        while (d < -180) d += 360
+        while (d > 180) d -= 360
+        return d
+    }
+
+    private fun normalizeAngle(a: Float): Float {
+        var ang = a
+        while (ang < 0) ang += 360
+        while (ang >= 360) ang -= 360
+        return ang
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        if (sensor?.type == Sensor.TYPE_MAGNETIC_FIELD) {
+        if (sensor?.type == Sensor.TYPE_MAGNETIC_FIELD || sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
             _uiState.update { it.copy(accuracy = accuracy) }
         }
     }

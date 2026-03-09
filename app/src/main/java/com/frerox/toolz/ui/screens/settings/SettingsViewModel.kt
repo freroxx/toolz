@@ -28,6 +28,9 @@ class SettingsViewModel @Inject constructor(
     val customPrimaryColor: StateFlow<Int?> = repository.customPrimaryColor
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val customSecondaryColor: StateFlow<Int?> = repository.customSecondaryColor
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val shutterSoundEnabled: StateFlow<Boolean> = repository.shutterSoundEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
@@ -86,6 +89,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemeMode(mode: String) { viewModelScope.launch { repository.setThemeMode(mode) } }
     fun setDynamicColor(enabled: Boolean) { viewModelScope.launch { repository.setDynamicColor(enabled) } }
     fun setCustomPrimaryColor(color: Int?) { viewModelScope.launch { repository.setCustomPrimaryColor(color) } }
+    fun setCustomSecondaryColor(color: Int?) { viewModelScope.launch { repository.setCustomSecondaryColor(color) } }
     fun setShutterSoundEnabled(enabled: Boolean) { viewModelScope.launch { repository.setShutterSoundEnabled(enabled) } }
     fun setShutterSoundUri(uri: String) { viewModelScope.launch { repository.setShutterSoundUri(uri) } }
 
