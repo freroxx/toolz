@@ -43,6 +43,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val voiceRecordNotifications: StateFlow<Boolean> = repository.voiceRecordNotifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val musicNotifications: StateFlow<Boolean> = repository.musicNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     // Widgets
     val widgetBackgroundColor: StateFlow<Int> = repository.widgetBackgroundColor
@@ -51,6 +53,22 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0xFF4CAF50.toInt())
     val widgetOpacity: StateFlow<Float> = repository.widgetOpacity
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.9f)
+
+    // New Settings
+    val hapticFeedback: StateFlow<Boolean> = repository.hapticFeedback
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val unitSystem: StateFlow<String> = repository.unitSystem
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "METRIC")
+
+    // Music Player Settings
+    val musicAudioFocus: StateFlow<Boolean> = repository.musicAudioFocus
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val musicShakeToSkip: StateFlow<Boolean> = repository.musicShakeToSkip
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val musicPlaybackSpeed: StateFlow<Float> = repository.musicPlaybackSpeed
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1.0f)
+    val musicEqualizerPreset: StateFlow<String> = repository.musicEqualizerPreset
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Normal")
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
@@ -72,9 +90,20 @@ class SettingsViewModel @Inject constructor(
     fun setStepNotifications(enabled: Boolean) { viewModelScope.launch { repository.setStepNotifications(enabled) } }
     fun setTimerNotifications(enabled: Boolean) { viewModelScope.launch { repository.setTimerNotifications(enabled) } }
     fun setVoiceRecordNotifications(enabled: Boolean) { viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) } }
+    fun setMusicNotifications(enabled: Boolean) { viewModelScope.launch { repository.setMusicNotifications(enabled) } }
 
     // Widget setters
     fun setWidgetBackgroundColor(color: Int) { viewModelScope.launch { repository.setWidgetBackgroundColor(color) } }
     fun setWidgetAccentColor(color: Int) { viewModelScope.launch { repository.setWidgetAccentColor(color) } }
     fun setWidgetOpacity(opacity: Float) { viewModelScope.launch { repository.setWidgetOpacity(opacity) } }
+
+    // New Setters
+    fun setHapticFeedback(enabled: Boolean) { viewModelScope.launch { repository.setHapticFeedback(enabled) } }
+    fun setUnitSystem(unit: String) { viewModelScope.launch { repository.setUnitSystem(unit) } }
+
+    // Music Setters
+    fun setMusicAudioFocus(enabled: Boolean) { viewModelScope.launch { repository.setMusicAudioFocus(enabled) } }
+    fun setMusicShakeToSkip(enabled: Boolean) { viewModelScope.launch { repository.setMusicShakeToSkip(enabled) } }
+    fun setMusicPlaybackSpeed(speed: Float) { viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) } }
+    fun setMusicEqualizerPreset(preset: String) { viewModelScope.launch { repository.setMusicEqualizerPreset(preset) } }
 }

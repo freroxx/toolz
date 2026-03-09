@@ -31,11 +31,22 @@ class SettingsRepository @Inject constructor(
     private val STEP_NOTIFICATIONS = booleanPreferencesKey("step_notifications")
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
+    private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
     
     // Widget Design
     private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
     private val WIDGET_ACCENT_COLOR = intPreferencesKey("widget_accent_color")
     private val WIDGET_OPACITY = floatPreferencesKey("widget_opacity")
+
+    // New Settings
+    private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
+    private val UNIT_SYSTEM = stringPreferencesKey("unit_system") // "METRIC", "IMPERIAL"
+
+    // Music Player Settings
+    private val MUSIC_AUDIO_FOCUS = booleanPreferencesKey("music_audio_focus")
+    private val MUSIC_SHAKE_TO_SKIP = booleanPreferencesKey("music_shake_to_skip")
+    private val MUSIC_PLAYBACK_SPEED = floatPreferencesKey("music_playback_speed")
+    private val MUSIC_EQUALIZER_PRESET = stringPreferencesKey("music_equalizer_preset")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -59,11 +70,22 @@ class SettingsRepository @Inject constructor(
     val stepNotifications: Flow<Boolean> = context.dataStore.data.map { it[STEP_NOTIFICATIONS] ?: true }
     val timerNotifications: Flow<Boolean> = context.dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = context.dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
+    val musicNotifications: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
 
     // Widget Flows
     val widgetBackgroundColor: Flow<Int> = context.dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
     val widgetAccentColor: Flow<Int> = context.dataStore.data.map { it[WIDGET_ACCENT_COLOR] ?: 0xFF4CAF50.toInt() }
     val widgetOpacity: Flow<Float> = context.dataStore.data.map { it[WIDGET_OPACITY] ?: 0.9f }
+
+    // New Flows
+    val hapticFeedback: Flow<Boolean> = context.dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
+    val unitSystem: Flow<String> = context.dataStore.data.map { it[UNIT_SYSTEM] ?: "METRIC" }
+
+    // Music Flows
+    val musicAudioFocus: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
+    val musicShakeToSkip: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
+    val musicPlaybackSpeed: Flow<Float> = context.dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
+    val musicEqualizerPreset: Flow<String> = context.dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
 
     suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -84,9 +106,20 @@ class SettingsRepository @Inject constructor(
     suspend fun setStepNotifications(enabled: Boolean) { context.dataStore.edit { it[STEP_NOTIFICATIONS] = enabled } }
     suspend fun setTimerNotifications(enabled: Boolean) { context.dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { context.dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
+    suspend fun setMusicNotifications(enabled: Boolean) { context.dataStore.edit { it[MUSIC_NOTIFICATIONS] = enabled } }
 
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { context.dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
     suspend fun setWidgetAccentColor(color: Int) { context.dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }
     suspend fun setWidgetOpacity(opacity: Float) { context.dataStore.edit { it[WIDGET_OPACITY] = opacity } }
+
+    // New Setters
+    suspend fun setHapticFeedback(enabled: Boolean) { context.dataStore.edit { it[HAPTIC_FEEDBACK] = enabled } }
+    suspend fun setUnitSystem(unit: String) { context.dataStore.edit { it[UNIT_SYSTEM] = unit } }
+
+    // Music Setters
+    suspend fun setMusicAudioFocus(enabled: Boolean) { context.dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
+    suspend fun setMusicShakeToSkip(enabled: Boolean) { context.dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
+    suspend fun setMusicPlaybackSpeed(speed: Float) { context.dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
+    suspend fun setMusicEqualizerPreset(preset: String) { context.dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
 }

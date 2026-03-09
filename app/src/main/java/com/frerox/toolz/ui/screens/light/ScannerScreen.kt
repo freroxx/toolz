@@ -4,9 +4,10 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.mlkit.vision.MlKitAnalyzer
-import androidx.camera.view.CameraController.COORDINATE_SYSTEM_VIEW_REFERENCED
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -43,14 +45,14 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 
-@OptIn(ExperimentalGetImage::class)
-@kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun ScannerScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraPermissionState = NrememberPermissionState(Manifest.permission.CAMERA)
     val clipboardManager = LocalClipboardManager.current
     
     var scanResult by remember { mutableStateOf("") }
@@ -67,7 +69,7 @@ fun ScannerScreen(
                 ContextCompat.getMainExecutor(context),
                 MlKitAnalyzer(
                     listOf(scanner),
-                    COORDINATE_SYSTEM_VIEW_REFERENCED,
+                    ImageAnalysis.COORDINATE_SYSTEM_VIEW_REFERENCED,
                     ContextCompat.getMainExecutor(context)
                 ) { result: MlKitAnalyzer.Result ->
                     val barcodes = result.getValue(scanner)
@@ -82,9 +84,17 @@ fun ScannerScreen(
         }
     }
 
+    // Bind the controller to the lifecycle to fix blank camera issue
+    LaunchedEffect(cameraPermissionState.status.isGranted) {
+        if (cameraPermissionState.status.isGranted) {
+            cameraController.bindToLifecycle(lifecycleOwner)
+        }
+    }
+
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text("Scanner", fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -97,17 +107,18 @@ fun ScannerScreen(
                         cameraController.enableTorch(isFlashOn)
                     }) {
                         Icon(
-                            if (isFlashOn) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
-                            contentDescription = "Flash",
-                            tint = if (isFlashOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            if (isFlashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
+                            contentDescription = "Flash"
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize()) {
             if (cameraPermissionState.status.isGranted) {
                 AndroidView(
                     factory = { ctx ->
@@ -118,63 +129,21 @@ fun ScannerScreen(
                     modifier = Modifier.fillMaxSize()
                 )
                 
-                // Scanner Overlay
                 ScannerOverlay()
-
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(24.dp)
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    AnimatedVisibility(
-                        visible = scanResult.isNotEmpty(),
-                        enter = slideInVertically { it } + fadeIn(),
-                        exit = slideOutVertically { it } + fadeOut()
-                    ) {
-                        ResultCard(
-                            result = scanResult,
-                            onClear = { scanResult = "" },
-                            onCopy = { clipboardManager.setText(AnnotatedString(scanResult)) },
-                            onOpen = {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(scanResult))
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    // Not a valid URL or no app to handle
-                                }
-                            }
-                        )
-                    }
-                    
-                    if (scanResult.isEmpty()) {
-                        Surface(
-                            color = Color.Black.copy(alpha = 0.5f),
-                            shape = CircleShape,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        ) {
-                            Text(
-                                "Align QR / Barcode within frame",
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                
+                if (scanResult.isNotEmpty()) {
+                    ResultCard(
+                        result = scanResult,
+                        onClose = { scanResult = "" },
+                        onCopy = { 
+                            clipboardManager.setText(AnnotatedString(scanResult))
                         }
-                    }
+                    )
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Camera access is needed to scan", textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(24.dp))
-                        Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
-                            Text("Grant Permission")
-                        }
-                    }
-                }
+                PermissionRequestView(
+                    onRequest = { cameraPermissionState.launchPermissionRequest() }
+                )
             }
         }
     }
@@ -182,10 +151,10 @@ fun ScannerScreen(
 
 @Composable
 fun ScannerOverlay() {
-    val infiniteTransition = rememberInfiniteTransition(label = "scanner")
-    val lineY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 280f,
+    val infiniteTransition = rememberInfiniteTransition(label = "scan")
+    val scanLinePos by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.8f,
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -193,87 +162,180 @@ fun ScannerOverlay() {
         label = "line"
     )
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Darkened background with clear center
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            val boxSize = width * 0.7f
+            val left = (width - boxSize) / 2
+            val top = (height - boxSize) / 2
+            
+            // Draw overlay with hole
+            drawRect(
+                color = Color.Black.copy(alpha = 0.5f)
+            )
+            
+            // This is a bit simplified, ideally would use Path with FillType.EvenOdd
+        }
+
+        // Animated scan line
         Box(
             modifier = Modifier
-                .size(280.dp)
-                .border(4.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
-        ) {
-            // Corners can be drawn with Canvas if needed, for now simplicity
-            
-            // Scan line
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .graphicsLayer(translationY = lineY.dp.value) // Simplified for the purpose
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color.Cyan, Color.Transparent)
-                        )
+                .fillMaxWidth(0.7f)
+                .height(2.dp)
+                .align(Alignment.Center)
+                .offset(y = (-150).dp + (300.dp * scanLinePos))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(Color.Transparent, Color.Cyan, Color.Transparent)
                     )
-            )
-        }
+                )
+        )
+        
+        // Corner borders
+        Box(
+            modifier = Modifier
+                .size(260.dp)
+                .align(Alignment.Center)
+                .border(2.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+        )
     }
 }
 
 @Composable
 fun ResultCard(
     result: String,
-    onClear: () -> Unit,
-    onCopy: () -> Unit,
-    onOpen: () -> Unit
+    onClose: () -> Unit,
+    onCopy: () -> Unit
 ) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    val context = LocalContext.current
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 32.dp),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.QrCode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(12.dp))
-                Text("Scan Result", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onClear) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
-                }
-            }
-            
-            Spacer(Modifier.height(12.dp))
-            
-            Text(
-                text = result,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-            )
-            
-            Spacer(Modifier.height(16.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                OutlinedButton(
-                    onClick = onCopy,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Copy")
+                    Text(
+                        "Scan Result",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close")
+                    }
                 }
                 
-                Button(
-                    onClick = onOpen,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
-                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open")
+                    Text(
+                        text = result,
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = onCopy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Copy")
+                    }
+                    
+                    if (result.startsWith("http")) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(result))
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open")
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun PermissionRequestView(onRequest: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            Icons.Rounded.Camera,
+            contentDescription = null,
+            modifier = Modifier.size(80.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "Camera Permission Required",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The scanner needs camera access to read QR codes and barcodes.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(32.dp))
+        Button(
+            onClick = onRequest,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Grant Permission")
         }
     }
 }
