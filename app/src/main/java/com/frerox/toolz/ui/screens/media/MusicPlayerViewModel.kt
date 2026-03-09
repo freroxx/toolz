@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -31,7 +33,9 @@ data class MusicUiState(
     val isShuffleOn: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val sortOrder: SortOrder = SortOrder.RECENT,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val sleepTimerMinutes: Int? = null,
+    val folders: Map<String, List<MusicTrack>> = emptyMap()
 )
 
 @HiltViewModel
@@ -44,8 +48,16 @@ class MusicPlayerViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     private var progressJob: Job? = null
+    private var sleepTimerJob: Job? = null
 
     init {
+        // Configure ExoPlayer for music
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        player.setAudioAttributes(audioAttributes, true)
+
         viewModelScope.launch {
             combine(
                 repository.allTracks,
@@ -57,7 +69,13 @@ class MusicPlayerViewModel @Inject constructor(
                     SortOrder.ARTIST -> tracks.sortedBy { it.artist ?: "" }
                     SortOrder.RECENT -> tracks.reversed()
                 }
-                _uiState.update { it.copy(tracks = sortedTracks, playlists = playlists) }
+                
+                val folders = sortedTracks.groupBy { track ->
+                    val uri = Uri.parse(track.uri)
+                    uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
+                }
+
+                _uiState.update { it.copy(tracks = sortedTracks, playlists = playlists, folders = folders) }
             }.collect()
         }
 
@@ -92,6 +110,9 @@ class MusicPlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
             }
         })
+        
+        // Initial scan
+        scanMusic()
     }
 
     private fun startProgressUpdate() {
@@ -99,7 +120,7 @@ class MusicPlayerViewModel @Inject constructor(
         progressJob = viewModelScope.launch {
             while (true) {
                 _uiState.update { it.copy(progress = player.currentPosition) }
-                delay(1000)
+                delay(500)
             }
         }
     }
@@ -108,32 +129,15 @@ class MusicPlayerViewModel @Inject constructor(
         progressJob?.cancel()
     }
 
-    fun playTrack(track: MusicTrack) {
-        val currentTracks = _uiState.value.tracks
-        val mediaItems = currentTracks.map { t ->
-            MediaItem.Builder()
-                .setMediaId(t.uri)
-                .setUri(t.uri)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(t.title)
-                        .setArtist(t.artist)
-                        .setArtworkUri(t.thumbnailUri?.let { Uri.parse(it) })
-                        .build()
-                )
-                .build()
+    fun scanMusic() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            repository.scanDeviceForMusic()
+            _uiState.update { it.copy(isLoading = false) }
         }
-        
-        val startIndex = currentTracks.indexOf(track)
-        player.setMediaItems(mediaItems, startIndex, 0L)
-        player.prepare()
-        player.play()
     }
 
-    fun playPlaylist(playlist: Playlist) {
-        val tracks = _uiState.value.tracks.filter { it.uri in playlist.trackUris }
-        if (tracks.isEmpty()) return
-
+    fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
         val mediaItems = tracks.map { t ->
             MediaItem.Builder()
                 .setMediaId(t.uri)
@@ -148,9 +152,16 @@ class MusicPlayerViewModel @Inject constructor(
                 .build()
         }
         
-        player.setMediaItems(mediaItems)
+        val startIndex = tracks.indexOf(track).coerceAtLeast(0)
+        player.setMediaItems(mediaItems, startIndex, 0L)
         player.prepare()
         player.play()
+    }
+
+    fun playPlaylist(playlist: Playlist) {
+        val tracks = _uiState.value.tracks.filter { it.uri in playlist.trackUris }
+        if (tracks.isEmpty()) return
+        playTrack(tracks.first(), tracks)
     }
 
     fun togglePlayPause() {
@@ -187,26 +198,32 @@ class MusicPlayerViewModel @Inject constructor(
         _uiState.update { it.copy(sortOrder = order) }
     }
 
-    fun addTracks(uris: List<Uri>) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            uris.forEach { uri ->
-                val track = repository.extractMetadata(uri)
-                repository.addTrack(track)
+    fun setSleepTimer(minutes: Int?) {
+        sleepTimerJob?.cancel()
+        _uiState.update { it.copy(sleepTimerMinutes = minutes) }
+        if (minutes != null) {
+            sleepTimerJob = viewModelScope.launch {
+                delay(minutes * 60 * 1000L)
+                fadeOutAndStop()
             }
-            _uiState.update { it.copy(isLoading = false) }
         }
     }
 
-    fun deleteTrack(track: MusicTrack) {
-        viewModelScope.launch {
-            repository.deleteTrack(track)
+    private suspend fun fadeOutAndStop() {
+        var volume = 1.0f
+        while (volume > 0) {
+            volume -= 0.05f
+            player.volume = volume.coerceAtLeast(0f)
+            delay(100)
         }
+        player.pause()
+        player.volume = 1.0f
+        _uiState.update { it.copy(sleepTimerMinutes = null) }
     }
 
-    fun createPlaylist(name: String, trackUris: List<String>, thumbnailUri: String? = null) {
+    fun createPlaylist(name: String, thumbnailUri: String? = null) {
         viewModelScope.launch {
-            repository.createPlaylist(Playlist(name = name, trackUris = trackUris, thumbnailUri = thumbnailUri))
+            repository.createPlaylist(Playlist(name = name, thumbnailUri = thumbnailUri))
         }
     }
 
@@ -217,14 +234,34 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
+    fun removeTrackFromPlaylist(playlist: Playlist, trackUri: String) {
+        viewModelScope.launch {
+            val newList = playlist.trackUris - trackUri
+            repository.createPlaylist(playlist.copy(trackUris = newList))
+        }
+    }
+    
+    fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
+        viewModelScope.launch {
+            repository.createPlaylist(playlist.copy(thumbnailUri = uri.toString()))
+        }
+    }
+
     fun deletePlaylist(playlist: Playlist) {
         viewModelScope.launch {
             repository.deletePlaylist(playlist)
         }
     }
 
+    fun deleteTrack(track: MusicTrack) {
+        viewModelScope.launch {
+            repository.deleteTrack(track)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopProgressUpdate()
+        sleepTimerJob?.cancel()
     }
 }
