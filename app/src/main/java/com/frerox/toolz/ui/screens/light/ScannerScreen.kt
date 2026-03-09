@@ -1,10 +1,13 @@
-@file:OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.camera.core.ExperimentalGetImage::class)
-
 package com.frerox.toolz.ui.screens.light
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.camera.view.LifecycleCameraController
@@ -39,24 +42,38 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 
+@OptIn(ExperimentalGetImage::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ScannerScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
     val clipboardManager = LocalClipboardManager.current
     
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+    }
+
     var scanResult by remember { mutableStateOf("") }
     var isFlashOn by remember { mutableStateOf(false) }
     
@@ -86,8 +103,8 @@ fun ScannerScreen(
         }
     }
 
-    LaunchedEffect(cameraPermissionState.status.isGranted) {
-        if (cameraPermissionState.status.isGranted) {
+    LaunchedEffect(hasCameraPermission) {
+        if (hasCameraPermission) {
             cameraController.bindToLifecycle(lifecycleOwner)
         }
     }
@@ -119,8 +136,8 @@ fun ScannerScreen(
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (cameraPermissionState.status.isGranted) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).apply {
@@ -148,7 +165,7 @@ fun ScannerScreen(
                 }
             } else {
                 PermissionRequestView(
-                    onRequest = { cameraPermissionState.launchPermissionRequest() }
+                    onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 )
             }
         }
@@ -287,7 +304,7 @@ fun ResultCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Rounded.QrCodeScanner,
+                        Icons.Rounded.CenterFocusWeak,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)

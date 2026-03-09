@@ -59,6 +59,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val unitSystem: StateFlow<String> = repository.unitSystem
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "METRIC")
+    val showQibla: StateFlow<Boolean> = repository.showQibla
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // Music Player Settings
     val musicAudioFocus: StateFlow<Boolean> = repository.musicAudioFocus
@@ -102,6 +104,7 @@ class SettingsViewModel @Inject constructor(
     // New Setters
     fun setHapticFeedback(enabled: Boolean) { viewModelScope.launch { repository.setHapticFeedback(enabled) } }
     fun setUnitSystem(unit: String) { viewModelScope.launch { repository.setUnitSystem(unit) } }
+    fun setShowQibla(enabled: Boolean) { viewModelScope.launch { repository.setShowQibla(enabled) } }
 
     // Music Setters
     fun setMusicAudioFocus(enabled: Boolean) { viewModelScope.launch { repository.setMusicAudioFocus(enabled) } }

@@ -35,6 +35,9 @@ class TimerViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TimerState())
     val uiState: StateFlow<TimerState> = _uiState.asStateFlow()
 
+    val hapticEnabled: StateFlow<Boolean> = settingsRepository.hapticFeedback
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     private var toolService: ToolService? = null
     private var isBound = false
     private var mediaPlayer: MediaPlayer? = null
@@ -70,6 +73,15 @@ class TimerViewModel @Inject constructor(
     fun setTimer(minutes: Int, seconds: Int) {
         val totalMillis = (minutes * 60 + seconds) * 1000L
         _uiState.update { it.copy(remainingTime = totalMillis, initialTime = totalMillis, isFinished = false, isPaused = false) }
+    }
+
+    fun addTime(millis: Long) {
+        val current = _uiState.value.remainingTime
+        val newTotal = current + millis
+        _uiState.update { it.copy(remainingTime = newTotal, initialTime = if (it.isRunning) it.initialTime + millis else newTotal) }
+        if (_uiState.value.isRunning) {
+            toolService?.startTimer(newTotal)
+        }
     }
 
     fun toggleStartStop() {
@@ -127,7 +139,7 @@ class TimerViewModel @Inject constructor(
     fun reset() {
         toolService?.resetTimer()
         stopRingtone()
-        _uiState.update { it.copy(remainingTime = it.initialTime, isRunning = false, isFinished = false, isPaused = false) }
+        _uiState.update { it.copy(remainingTime = 0, initialTime = 0, isRunning = false, isFinished = false, isPaused = false) }
     }
 
     override fun onCleared() {

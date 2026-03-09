@@ -1,11 +1,17 @@
 package com.frerox.toolz.service
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.widget.RemoteViews
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -29,6 +35,9 @@ class MusicPlayerService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         
+        // Fix for ForegroundServiceDidNotStartInTimeException
+        startForeground(NOTIFICATION_ID, createInitialNotification())
+
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
         }
@@ -51,6 +60,25 @@ class MusicPlayerService : MediaSessionService() {
                 updateWidgets()
             }
         })
+    }
+
+    private fun createInitialNotification(): Notification {
+        val channelId = "music_player_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId, "Music Playback", NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        return NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Music Player")
+            .setContentText("Preparing playback...")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
     }
 
     private fun updateWidgets() {
@@ -109,11 +137,13 @@ class MusicPlayerService : MediaSessionService() {
 
     override fun onDestroy() {
         mediaSession?.run {
-            // DO NOT release the singleton player here.
-            // Just release the media session.
             release()
             mediaSession = null
         }
         super.onDestroy()
+    }
+
+    companion object {
+        private const val NOTIFICATION_ID = 2002
     }
 }

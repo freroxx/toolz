@@ -79,11 +79,7 @@ fun ToolzTheme(
     }
 
     if (customPrimary != null && !dynamicColor) {
-        colorScheme = if (darkTheme) {
-            colorScheme.copy(primary = customPrimary)
-        } else {
-            colorScheme.copy(primary = customPrimary)
-        }
+        colorScheme = colorScheme.copy(primary = customPrimary)
     }
 
     val view = LocalView.current

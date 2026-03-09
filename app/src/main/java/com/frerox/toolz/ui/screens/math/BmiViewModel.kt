@@ -18,8 +18,12 @@ data class BmiState(
     val gender: Gender = Gender.MALE,
     val bmi: Float? = null,
     val category: String = "",
+    val bmr: Float? = null,
+    val tdee: Float? = null,
+    val ibw: Float? = null,
     val isCm: Boolean = true,
-    val isKg: Boolean = true
+    val isKg: Boolean = true,
+    val healthyRange: Pair<Float, Float> = 18.5f to 24.9f
 )
 
 @HiltViewModel
@@ -30,63 +34,103 @@ class BmiViewModel @Inject constructor() : ViewModel() {
 
     fun onWeightChange(weight: String) {
         _uiState.update { it.copy(weight = weight.filter { c -> c.isDigit() || c == '.' }) }
-        calculateBmi()
+        calculateMetrics()
     }
 
     fun onHeightChange(height: String) {
         _uiState.update { it.copy(height = height.filter { c -> c.isDigit() || c == '.' || c == '\'' || c == '\"' || c == ' ' }) }
-        calculateBmi()
+        calculateMetrics()
     }
 
     fun onAgeChange(age: String) {
         _uiState.update { it.copy(age = age.filter { it.isDigit() }) }
-        calculateBmi()
+        calculateMetrics()
     }
 
     fun onGenderChange(gender: Gender) {
         _uiState.update { it.copy(gender = gender) }
-        calculateBmi()
+        calculateMetrics()
     }
 
     fun toggleUnit(isHeight: Boolean) {
         _uiState.update { 
             if (isHeight) it.copy(isCm = !it.isCm) else it.copy(isKg = !it.isKg)
         }
-        calculateBmi()
+        calculateMetrics()
     }
 
-    private fun calculateBmi() {
+    private fun calculateMetrics() {
         val state = _uiState.value
-        val weightInKg = if (state.isKg) {
-            state.weight.toFloatOrNull() ?: 0f
-        } else {
-            (state.weight.toFloatOrNull() ?: 0f) * 0.453592f
-        }
+        val weightVal = state.weight.toFloatOrNull() ?: 0f
+        val heightVal = state.height.toFloatOrNull() ?: 0f
+        val ageVal = state.age.toIntOrNull() ?: 0
 
-        val heightInMeters = if (state.isCm) {
-            (state.height.toFloatOrNull() ?: 0f) / 100f
+        val weightInKg = if (state.isKg) weightVal else weightVal * 0.453592f
+        val heightInCm = if (state.isCm) {
+            heightVal
         } else {
-            parseImperialHeight(state.height) * 0.0254f
+            parseImperialHeight(state.height) * 2.54f
         }
+        val heightInMeters = heightInCm / 100f
         
         if (weightInKg > 0 && heightInMeters > 0) {
+            // 1. BMI Calculation
             val bmiValue = weightInKg / heightInMeters.pow(2)
-            val category = getBmiCategory(bmiValue, state.age.toIntOrNull() ?: 20)
-            _uiState.update { it.copy(bmi = bmiValue, category = category) }
+            
+            // 2. Adjust categories based on age
+            val (category, range) = getBmiCategoryAndRange(bmiValue, ageVal)
+            
+            // 3. BMR (Mifflin-St Jeor Equation)
+            val bmrValue = if (state.gender == Gender.MALE) {
+                (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) + 5f
+            } else {
+                (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) - 161f
+            }
+
+            // 4. TDEE (Sedentary baseline)
+            val tdeeValue = bmrValue * 1.2f
+
+            // 5. Ideal Body Weight (Devine Formula)
+            val heightInInches = heightInCm / 2.54f
+            val inchesOver5Feet = (heightInInches - 60).coerceAtLeast(0f)
+            val ibwValue = if (state.gender == Gender.MALE) {
+                50f + (2.3f * inchesOver5Feet)
+            } else {
+                45.5f + (2.3f * inchesOver5Feet)
+            }
+
+            _uiState.update { 
+                it.copy(
+                    bmi = bmiValue, 
+                    category = category,
+                    bmr = bmrValue,
+                    tdee = tdeeValue,
+                    ibw = ibwValue,
+                    healthyRange = range
+                ) 
+            }
         } else {
-            _uiState.update { it.copy(bmi = null, category = "") }
+            _uiState.update { it.copy(bmi = null, category = "", bmr = null, tdee = null, ibw = null) }
         }
     }
 
-    private fun getBmiCategory(bmi: Float, age: Int): String {
-        return when {
-            bmi < 18.5 -> "Underweight"
-            bmi < 25 -> "Normal Weight"
+    private fun getBmiCategoryAndRange(bmi: Float, age: Int): Pair<String, Pair<Float, Float>> {
+        val range = if (age >= 65) {
+            22.0f to 27.0f
+        } else {
+            18.5f to 24.9f
+        }
+
+        val category = when {
+            bmi < range.first -> "Underweight"
+            bmi <= range.second -> "Normal Weight"
             bmi < 30 -> "Overweight"
             bmi < 35 -> "Obese Class I"
             bmi < 40 -> "Obese Class II"
             else -> "Obese Class III"
         }
+        
+        return category to range
     }
 
     private fun parseImperialHeight(height: String): Float {

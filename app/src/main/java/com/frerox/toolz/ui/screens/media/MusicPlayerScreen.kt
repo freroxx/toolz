@@ -82,12 +82,6 @@ fun MusicPlayerScreen(
         rememberPermissionState(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
-    LaunchedEffect(musicPermission.status.isGranted) {
-        if (musicPermission.status.isGranted) {
-            viewModel.scanMusic()
-        }
-    }
-
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
@@ -144,6 +138,9 @@ fun MusicPlayerScreen(
                                         Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Add Folder")
                                     }
                                 }
+                                IconButton(onClick = { viewModel.scanMusic() }) {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = "Refresh Library")
+                                }
                                 IconButton(onClick = { showSortMenu = true }) {
                                     Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort")
                                 }
@@ -172,7 +169,7 @@ fun MusicPlayerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        placeholder = { Text("Search your library...") },
+                        placeholder = { Text("Search library...") },
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -251,6 +248,14 @@ fun MusicPlayerScreen(
                         }
                     }
                 }
+            } else if (state.isLoading && state.tracks.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Scanning library...", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             } else {
                 AnimatedContent(
                     targetState = currentTab,
@@ -271,12 +276,6 @@ fun MusicPlayerScreen(
                             }
                         )
                     }
-                }
-            }
-
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
                 }
             }
         }
@@ -358,13 +357,17 @@ fun TrackList(tracks: List<MusicTrack>, state: MusicUiState, viewModel: MusicPla
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
     ) {
-        if (tracks.isEmpty()) {
+        if (tracks.isEmpty() && !state.isLoading) {
             item {
                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                         Spacer(Modifier.height(16.dp))
                         Text("No tracks found", color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { viewModel.scanMusic() }) {
+                            Text("Refresh Library")
+                        }
                     }
                 }
             }
@@ -529,7 +532,7 @@ fun PlaylistSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Your Playlists", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+            Text("Playlists", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
             IconButton(
                 onClick = onCreatePlaylist,
                 colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -538,15 +541,18 @@ fun PlaylistSection(
             }
         }
         
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(20.dp), 
-            contentPadding = PaddingValues(vertical = 24.dp)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             items(state.playlists) { playlist ->
                 PlaylistCard(
                     playlist = playlist, 
                     onClick = { onPlaylistClick(playlist) },
-                    onLongClick = { onUpdateThumb(playlist) }
+                    onLongClick = { onUpdateThumb(playlist) },
+                    onPlay = { viewModel.playPlaylist(playlist) }
                 )
             }
         }
@@ -569,6 +575,7 @@ fun FullPlayerView(
 ) {
     val track = state.currentTrack ?: return
     var showSleepTimer by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
@@ -591,7 +598,8 @@ fun FullPlayerView(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp, top = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -602,18 +610,47 @@ fun FullPlayerView(
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Close", modifier = Modifier.size(32.dp))
                 }
-                Text("Now Playing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { 
-                    val intent = Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL)
-                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
-                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, 0)
-                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
-                    try {
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
+                Text("Now Playing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                
+                Box {
+                    IconButton(onClick = { showOverflowMenu = true }) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "More options")
                     }
-                }) {
-                    Icon(Icons.Rounded.Equalizer, null)
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Equalizer") },
+                            onClick = {
+                                showOverflowMenu = false
+                                val intent = Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL)
+                                intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                                intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, 0)
+                                intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {}
+                            },
+                            leadingIcon = { Icon(Icons.Rounded.Equalizer, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Sleep Timer") },
+                            onClick = {
+                                showOverflowMenu = false
+                                showSleepTimer = true
+                            },
+                            leadingIcon = { Icon(Icons.Rounded.Timer, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Stop Playback", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                showOverflowMenu = false
+                                onStop()
+                            },
+                            leadingIcon = { Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error) }
+                        )
+                    }
                 }
             }
 
@@ -660,7 +697,7 @@ fun FullPlayerView(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
-                        error = painterResource(android.R.drawable.ic_menu_report_image)
+                        error = painterResource(android.R.drawable.ic_media_play)
                     )
                 }
             }
@@ -760,25 +797,23 @@ fun FullPlayerView(
                 }
             }
             
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(32.dp))
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { showSleepTimer = true }) {
-                    Icon(Icons.Rounded.Timer, null, tint = if (state.sleepTimerMinutes != null) MaterialTheme.colorScheme.primary else LocalContentColor.current)
-                }
-                Spacer(Modifier.width(16.dp))
-                TextButton(
-                    onClick = onStop,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            if (state.sleepTimerMinutes != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Rounded.Stop, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Stop", fontWeight = FontWeight.ExtraBold)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Timer, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sleep timer active", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-            
-            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -958,38 +993,85 @@ fun PlaylistDetailView(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(
-        modifier = Modifier.width(150.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Unit, onPlay: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
-        Surface(
-            modifier = Modifier
-                .size(150.dp)
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = onLongClick
-                ),
-            shape = RoundedCornerShape(36.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-            tonalElevation = 4.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (playlist.thumbnailUri != null) {
-                    AsyncImage(
-                        model = playlist.thumbnailUri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (playlist.thumbnailUri != null) {
+                AsyncImage(
+                    model = playlist.thumbnailUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().alpha(0.4f)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface)
+                            )
+                        )
+                )
+            }
+            
+            // Play Button on Card
+            Surface(
+                onClick = onPlay,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(48.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                tonalElevation = 6.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.onPrimary)
                 }
             }
+
+            Column(
+                modifier = Modifier.padding(20.dp).align(Alignment.BottomStart)
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.QueueMusic, 
+                            null, 
+                            modifier = Modifier.size(24.dp), 
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    playlist.name, 
+                    style = MaterialTheme.typography.titleLarge, 
+                    fontWeight = FontWeight.Black, 
+                    maxLines = 1, 
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${playlist.trackUris.size} tracks", 
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        Spacer(Modifier.height(12.dp))
-        Text(playlist.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -1013,35 +1095,33 @@ fun TrackItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         color = when {
             isSelected -> MaterialTheme.colorScheme.primaryContainer
-            isCurrent -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-            else -> Color.Transparent
+            isCurrent -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
         }
     ) {
         Row(
             modifier = Modifier.padding(12.dp), 
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant), 
-                contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape = RoundedCornerShape(16.dp),
+                tonalElevation = 4.dp
             ) {
                 AsyncImage(
                     model = track.thumbnailUri, 
                     contentDescription = null, 
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    error = painterResource(android.R.drawable.ic_menu_report_image)
+                    error = painterResource(android.R.drawable.ic_media_play)
                 )
                 if (isSelected) {
                     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
@@ -1053,16 +1133,16 @@ fun TrackItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title, 
-                    fontWeight = FontWeight.Bold, 
+                    fontWeight = FontWeight.ExtraBold, 
                     maxLines = 1, 
                     overflow = TextOverflow.Ellipsis, 
                     color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     track.artist ?: "Unknown Artist", 
-                    style = MaterialTheme.typography.bodySmall, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    style = MaterialTheme.typography.bodyMedium, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
             
@@ -1073,9 +1153,16 @@ fun TrackItem(
                     colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                 )
             } else if (isCurrent) {
-                Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                Icon(
+                    Icons.Rounded.GraphicEq, 
+                    null, 
+                    tint = MaterialTheme.colorScheme.primary, 
+                    modifier = Modifier.size(24.dp)
+                )
             } else {
-                IconButton(onClick = { showMenu = true }) { Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.outline) }
+                IconButton(onClick = { showMenu = true }) { 
+                    Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.outline) 
+                }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("Add to Playlist") }, 
@@ -1139,7 +1226,7 @@ fun MiniPlayer(track: MusicTrack, isPlaying: Boolean, onTogglePlay: () -> Unit, 
                 contentDescription = null, 
                 modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)), 
                 contentScale = ContentScale.Crop,
-                error = painterResource(android.R.drawable.ic_menu_report_image)
+                error = painterResource(android.R.drawable.ic_media_play)
             )
             Column(modifier = Modifier.weight(1f).padding(horizontal = 16.dp)) {
                 Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
@@ -1213,7 +1300,7 @@ fun MultiSelectPlaylistPicker(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = { onDismiss() }) { Text("Cancel") }
         }
     )
 }

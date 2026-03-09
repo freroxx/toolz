@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.ui.MainViewModel
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.ui.screens.LoadingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
 import com.frerox.toolz.ui.screens.math.*
 import com.frerox.toolz.ui.screens.time.*
@@ -153,12 +154,22 @@ class MainActivity : ComponentActivity() {
 fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Dashboard.route,
+        startDestination = Screen.Loading.route,
         enterTransition = { slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(400)) },
         exitTransition = { slideOutHorizontally(targetOffsetX = { -it }, animationSpec = tween(400)) },
         popEnterTransition = { slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) },
         popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) }
     ) {
+        composable(Screen.Loading.route) {
+            LoadingScreen(
+                onLoadingComplete = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Loading.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Screen.Dashboard.route) {
             DashboardScreen(
                 onNavigate = { route ->
@@ -258,6 +269,9 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
         }
         composable(Screen.FlipCoin.route) {
             FlipCoinScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.PeriodicTable.route) {
+            PeriodicTableScreen(onBack = { navController.popBackStack() })
         }
     }
 }
