@@ -4,10 +4,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -29,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +47,7 @@ fun SettingsScreen(
     val shutterSound by viewModel.shutterSoundEnabled.collectAsState()
     val shutterSoundUri by viewModel.shutterSoundUri.collectAsState()
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState()
+    val customSecondaryInt by viewModel.customSecondaryColor.collectAsState()
 
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
     val stepNotifications by viewModel.stepNotifications.collectAsState()
@@ -96,6 +101,15 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .fadingEdge(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.05f to Color.Black,
+                        0.95f to Color.Black,
+                        1f to Color.Transparent
+                    ),
+                    length = 20.dp
+                )
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -262,7 +276,7 @@ fun SettingsScreen(
                 }
             }
 
-            if (matches(searchQuery, "appearance", "theme", "dark mode", "colors")) {
+            if (matches(searchQuery, "appearance", "theme", "dark mode", "colors", "secondary")) {
                 SettingsSection(title = "Appearance") {
                     SettingsToggleItem(
                         title = "Dynamic Colors",
@@ -274,16 +288,43 @@ fun SettingsScreen(
                     
                     if (!dynamicColor) {
                         SettingsItem(
-                            title = "Custom Primary Color",
-                            subtitle = if (customPrimaryInt != null) "Custom color active" else "Default color",
+                            title = "Theme Colors",
+                            subtitle = "Primary and secondary app colors",
                             icon = Icons.Rounded.ColorLens
                         ) {
-                            ColorPickerRow(
-                                selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                onColorSelected = { viewModel.setCustomPrimaryColor(it) }
-                            )
-                            IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
-                                Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset Color")
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Column {
+                                    Text("Primary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        ColorPickerRow(
+                                            selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+                                            onColorSelected = { viewModel.setCustomPrimaryColor(it) }
+                                        )
+                                        IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
+                                            Icon(Icons.Rounded.RestartAlt, null)
+                                        }
+                                    }
+                                }
+                                
+                                Column {
+                                    Text("Secondary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        ColorPickerRow(
+                                            selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+                                            onColorSelected = { viewModel.setCustomSecondaryColor(it) }
+                                        )
+                                        IconButton(onClick = { viewModel.setCustomSecondaryColor(null) }) {
+                                            Icon(Icons.Rounded.RestartAlt, null)
+                                        }
+                                    }
+                                }
+                                
+                                CustomHexColorPicker(
+                                    primaryColor = customPrimaryInt,
+                                    secondaryColor = customSecondaryInt,
+                                    onPrimarySelected = { viewModel.setCustomPrimaryColor(it) },
+                                    onSecondarySelected = { viewModel.setCustomSecondaryColor(it) }
+                                )
                             }
                         }
                     }
@@ -378,6 +419,59 @@ private fun matches(query: String, vararg keywords: String): Boolean {
 }
 
 @Composable
+fun CustomHexColorPicker(
+    primaryColor: Int?,
+    secondaryColor: Int?,
+    onPrimarySelected: (Int) -> Unit,
+    onSecondarySelected: (Int) -> Unit
+) {
+    var hexInput by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        OutlinedTextField(
+            value = hexInput,
+            onValueChange = { 
+                hexInput = it
+                isError = false
+            },
+            label = { Text("Custom Hex Code") },
+            placeholder = { Text("#RRGGBB") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            isError = isError,
+            supportingText = { if (isError) Text("Invalid hex code") },
+            trailingIcon = {
+                Row {
+                    IconButton(onClick = {
+                        try {
+                            val color = Color(android.graphics.Color.parseColor(if (hexInput.startsWith("#")) hexInput else "#$hexInput"))
+                            onPrimarySelected(color.toArgb())
+                            hexInput = ""
+                        } catch (e: Exception) {
+                            isError = true
+                        }
+                    }) {
+                        Icon(Icons.Rounded.Colorize, "Apply Primary", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    IconButton(onClick = {
+                        try {
+                            val color = Color(android.graphics.Color.parseColor(if (hexInput.startsWith("#")) hexInput else "#$hexInput"))
+                            onSecondarySelected(color.toArgb())
+                            hexInput = ""
+                        } catch (e: Exception) {
+                            isError = true
+                        }
+                    }) {
+                        Icon(Icons.Rounded.Brush, "Apply Secondary", tint = MaterialTheme.colorScheme.secondary)
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
 fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     OutlinedTextField(
         value = query,
@@ -435,7 +529,7 @@ fun AboutSection() {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text("Toolz", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-            Text("Version 1.6.0", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            Text("Version 1.6.5", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
             Spacer(modifier = Modifier.height(24.dp))
             Text(
                 "The ultimate toolkit for daily needs, made and designed by frerox",
@@ -457,27 +551,28 @@ fun AboutSection() {
 @Composable
 fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         val colors = listOf(
             Color(0xFFFF6D00), Color(0xFF00BFA5), Color(0xFF2962FF),
-            Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853), Color.White, Color.Black
+            Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853),
+            Color(0xFFE91E63), Color(0xFF673AB7), Color(0xFF03A9F4),
+            Color.White, Color.Black
         )
         colors.forEach { color ->
             val argb = color.toArgb()
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(40.dp)
+                    .clip(CircleShape)
                     .background(color)
-                    .clickable { onColorSelected(argb) }
-                    .then(
-                        if (selectedColor == argb) {
-                            Modifier.background(Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                        } else Modifier
+                    .border(
+                        width = if (selectedColor == argb) 3.dp else 1.dp,
+                        color = if (selectedColor == argb) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.3f),
+                        shape = CircleShape
                     )
-                    .padding(2.dp)
+                    .clickable { onColorSelected(argb) }
             )
         }
     }

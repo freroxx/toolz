@@ -25,11 +25,19 @@ class MusicRepository @Inject constructor(
 ) {
     val allTracks: Flow<List<MusicTrack>> = musicDao.getAllTracks()
     val allPlaylists: Flow<List<Playlist>> = musicDao.getAllPlaylists()
+    val favoriteTracks: Flow<List<MusicTrack>> = musicDao.getFavoriteTracks()
 
     suspend fun addTrack(track: MusicTrack) = musicDao.insertTrack(track)
+    suspend fun updateTrack(track: MusicTrack) = musicDao.updateTrack(track)
     suspend fun deleteTrack(track: MusicTrack) = musicDao.deleteTrack(track)
     
+    suspend fun toggleFavorite(track: MusicTrack) {
+        val updatedTrack = track.copy(isFavorite = !track.isFavorite)
+        musicDao.updateTrack(updatedTrack)
+    }
+
     suspend fun createPlaylist(playlist: Playlist) = musicDao.insertPlaylist(playlist)
+    suspend fun updatePlaylist(playlist: Playlist) = musicDao.updatePlaylist(playlist)
     suspend fun deletePlaylist(playlist: Playlist) = musicDao.deletePlaylist(playlist)
 
     suspend fun scanDeviceForMusic(): List<MusicTrack> = withContext(Dispatchers.IO) {
@@ -46,7 +54,8 @@ class MusicRepository @Inject constructor(
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.DURATION
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DATA
         )
 
         val selection = "${MediaStore.Audio.Media.DURATION} >= ?"
@@ -76,6 +85,9 @@ class MusicRepository @Inject constructor(
                 val duration = cursor.getLong(durationColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                 
+                // Check if track already exists to preserve favorites
+                val existingTrack = musicDao.getTrackByUri(contentUri.toString())
+                
                 tracks.add(
                     MusicTrack(
                         uri = contentUri.toString(),
@@ -84,7 +96,8 @@ class MusicRepository @Inject constructor(
                         album = album,
                         albumId = albumId,
                         duration = duration,
-                        thumbnailUri = getAlbumArtUri(albumId).toString()
+                        thumbnailUri = getAlbumArtUri(albumId).toString(),
+                        isFavorite = existingTrack?.isFavorite ?: false
                     )
                 )
             }
@@ -149,22 +162,27 @@ class MusicRepository @Inject constructor(
                 thumbnailUri = Uri.fromFile(file).toString()
             }
 
+            val existingTrack = musicDao.getTrackByUri(uri.toString())
+
             MusicTrack(
                 uri = uri.toString(),
                 title = title,
                 artist = artist,
                 album = album,
                 duration = duration,
-                thumbnailUri = thumbnailUri ?: uri.toString()
+                thumbnailUri = thumbnailUri ?: uri.toString(),
+                isFavorite = existingTrack?.isFavorite ?: false
             )
         } catch (e: Exception) {
+            val existingTrack = musicDao.getTrackByUri(uri.toString())
             MusicTrack(
                 uri = uri.toString(),
                 title = uri.lastPathSegment?.substringBeforeLast(".") ?: "Unknown",
                 artist = "Unknown Artist",
                 album = "Unknown Album",
                 duration = 0,
-                thumbnailUri = uri.toString()
+                thumbnailUri = uri.toString(),
+                isFavorite = existingTrack?.isFavorite ?: false
             )
         } finally {
             try {

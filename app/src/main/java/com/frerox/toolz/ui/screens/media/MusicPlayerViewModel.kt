@@ -34,6 +34,7 @@ enum class SortOrder {
 data class MusicUiState(
     val tracks: List<MusicTrack> = emptyList(),
     val playlists: List<Playlist> = emptyList(),
+    val favoriteTracks: List<MusicTrack> = emptyList(),
     val currentTrack: MusicTrack? = null,
     val isPlaying: Boolean = false,
     val progress: Long = 0L,
@@ -46,7 +47,9 @@ data class MusicUiState(
     val folders: Map<String, List<MusicTrack>> = emptyMap(),
     val selectedTracks: Set<String> = emptySet(),
     val isSelectionMode: Boolean = false,
-    val showVisualizer: Boolean = true
+    val showVisualizer: Boolean = true,
+    val artShape: String = "CIRCLE",
+    val rotationEnabled: Boolean = true
 )
 
 @HiltViewModel
@@ -71,6 +74,18 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicArtShape.collect { shape ->
+                _uiState.update { it.copy(artShape = shape) }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicRotationEnabled.collect { enabled ->
+                _uiState.update { it.copy(rotationEnabled = enabled) }
             }
         }
 
@@ -100,8 +115,9 @@ class MusicPlayerViewModel @Inject constructor(
             combine(
                 repository.allTracks,
                 repository.allPlaylists,
+                repository.favoriteTracks,
                 _uiState.map { it.sortOrder }.distinctUntilChanged()
-            ) { tracks, playlists, sortOrder ->
+            ) { tracks, playlists, favorites, sortOrder ->
                 val sortedTracks = when (sortOrder) {
                     SortOrder.TITLE -> tracks.sortedBy { it.title }
                     SortOrder.ARTIST -> tracks.sortedBy { it.artist ?: "" }
@@ -113,7 +129,15 @@ class MusicPlayerViewModel @Inject constructor(
                     uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
                 }
 
-                _uiState.update { it.copy(tracks = sortedTracks, playlists = playlists, folders = folders) }
+                _uiState.update { 
+                    it.copy(
+                        tracks = sortedTracks, 
+                        playlists = playlists, 
+                        favoriteTracks = favorites,
+                        folders = folders,
+                        currentTrack = sortedTracks.find { t -> t.uri == it.currentTrack?.uri }
+                    ) 
+                }
             }.collect()
         }
 
@@ -130,7 +154,7 @@ class MusicPlayerViewModel @Inject constructor(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val uri = mediaItem?.mediaId
+                val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
                 val track = _uiState.value.tracks.find { it.uri == uri }
                 _uiState.update { 
                     it.copy(
@@ -152,6 +176,11 @@ class MusicPlayerViewModel @Inject constructor(
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                 _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
+            }
+            
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                super.onPlayerError(error)
+                player.prepare()
             }
         })
     }
@@ -278,7 +307,7 @@ class MusicPlayerViewModel @Inject constructor(
         val mediaItems = tracks.map { t ->
             MediaItem.Builder()
                 .setMediaId(t.uri)
-                .setUri(t.uri)
+                .setUri(Uri.parse(t.uri))
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(t.title)
@@ -362,6 +391,18 @@ class MusicPlayerViewModel @Inject constructor(
         _uiState.update { it.copy(sleepTimerMinutes = null) }
     }
 
+    fun setArtShape(shape: String) {
+        viewModelScope.launch {
+            settingsRepository.setMusicArtShape(shape)
+        }
+    }
+
+    fun toggleRotation() {
+        viewModelScope.launch {
+            settingsRepository.setMusicRotationEnabled(!_uiState.value.rotationEnabled)
+        }
+    }
+
     fun createPlaylist(name: String, thumbnailUri: String? = null) {
         viewModelScope.launch {
             repository.createPlaylist(Playlist(name = name, thumbnailUri = thumbnailUri))
@@ -371,14 +412,14 @@ class MusicPlayerViewModel @Inject constructor(
     fun addTrackToPlaylist(playlist: Playlist, track: MusicTrack) {
         viewModelScope.launch {
             val newList = (playlist.trackUris + track.uri).distinct()
-            repository.createPlaylist(playlist.copy(trackUris = newList))
+            repository.updatePlaylist(playlist.copy(trackUris = newList))
         }
     }
 
     fun addSelectedTracksToPlaylist(playlist: Playlist) {
         viewModelScope.launch {
             val newList = (playlist.trackUris + _uiState.value.selectedTracks).distinct()
-            repository.createPlaylist(playlist.copy(trackUris = newList))
+            repository.updatePlaylist(playlist.copy(trackUris = newList))
             clearSelection()
         }
     }
@@ -386,13 +427,13 @@ class MusicPlayerViewModel @Inject constructor(
     fun removeTrackFromPlaylist(playlist: Playlist, trackUri: String) {
         viewModelScope.launch {
             val newList = playlist.trackUris - trackUri
-            repository.createPlaylist(playlist.copy(trackUris = newList))
+            repository.updatePlaylist(playlist.copy(trackUris = newList))
         }
     }
     
     fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
         viewModelScope.launch {
-            repository.createPlaylist(playlist.copy(thumbnailUri = uri.toString()))
+            repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString()))
         }
     }
 
@@ -405,6 +446,12 @@ class MusicPlayerViewModel @Inject constructor(
     fun deleteTrack(track: MusicTrack) {
         viewModelScope.launch {
             repository.deleteTrack(track)
+        }
+    }
+    
+    fun toggleFavorite(track: MusicTrack) {
+        viewModelScope.launch {
+            repository.toggleFavorite(track)
         }
     }
 

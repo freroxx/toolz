@@ -18,10 +18,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -97,20 +102,66 @@ fun CompassScreen(
 
             Spacer(Modifier.weight(1f))
 
-            // Compass Dial
+            // Modern Compass Dial
             Box(
-                modifier = Modifier.size(320.dp),
+                modifier = Modifier
+                    .size(320.dp)
+                    .drawBehind {
+                        // Background glow
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFE91E63).copy(alpha = 0.15f),
+                                    Color.Transparent
+                                ),
+                                center = center,
+                                radius = size.width / 1.5f
+                            )
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                CompassDial(rotation = -animatedAzimuth, state = state)
-                
-                // Fixed Reference Marker
+                // Fixed indicators
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val radius = size.width / 2
+                    // North indicator (Top)
+                    drawPath(
+                        path = Path().apply {
+                            moveTo(center.x, center.y - radius - 10.dp.toPx())
+                            lineTo(center.x - 10.dp.toPx(), center.y - radius + 10.dp.toPx())
+                            lineTo(center.x + 10.dp.toPx(), center.y - radius + 10.dp.toPx())
+                            close()
+                        },
+                        color = Color(0xFFE91E63)
+                    )
+                }
+
+                // Rotating Part
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .size(4.dp, 24.dp)
-                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-                )
+                        .fillMaxSize()
+                        .rotate(-animatedAzimuth)
+                ) {
+                    ModernCompassDial(state = state)
+                }
+                
+                // Center Decoration
+                Surface(
+                    modifier = Modifier.size(60.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Place, 
+                            null, 
+                            modifier = Modifier.size(24.dp), 
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.weight(1f))
@@ -186,89 +237,101 @@ fun CompassScreen(
 }
 
 @Composable
-fun CompassDial(rotation: Float, state: CompassState) {
-    val primaryColor = MaterialTheme.colorScheme.primary
+fun ModernCompassDial(state: CompassState) {
     val onSurface = MaterialTheme.colorScheme.onSurface
+    val primaryColor = MaterialTheme.colorScheme.primary
     
     Canvas(modifier = Modifier.fillMaxSize()) {
-        rotate(rotation) {
-            val center = center
-            val radius = size.width / 2
+        val center = center
+        val radius = size.width / 2
+        val innerRadius = radius - 40.dp.toPx()
+        
+        // Circular lines
+        drawCircle(
+            color = onSurface.copy(alpha = 0.1f),
+            radius = radius,
+            style = Stroke(width = 1.dp.toPx())
+        )
+        drawCircle(
+            color = onSurface.copy(alpha = 0.05f),
+            radius = innerRadius,
+            style = Stroke(width = 1.dp.toPx())
+        )
+
+        // Ticks and Labels
+        for (i in 0 until 360 step 2) {
+            val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
+            val isMain = i % 30 == 0
+            val isCardinal = i % 90 == 0
             
-            // Outer Ring
-            drawCircle(
-                color = onSurface.copy(alpha = 0.05f),
-                radius = radius,
-                center = center
+            val tickLength = when {
+                isCardinal -> 24.dp.toPx()
+                isMain -> 16.dp.toPx()
+                else -> 8.dp.toPx()
+            }
+            
+            val color = when {
+                isCardinal -> primaryColor
+                isMain -> onSurface
+                else -> onSurface.copy(alpha = 0.2f)
+            }
+
+            val start = Offset(
+                center.x + (radius - tickLength) * cos(angleRad),
+                center.y + (radius - tickLength) * sin(angleRad)
             )
-
-            // Tick Marks
-            for (i in 0 until 360 step 5) {
-                val isMajor = i % 30 == 0
-                val length = if (isMajor) 15.dp.toPx() else 8.dp.toPx()
-                val thickness = if (isMajor) 2.dp.toPx() else 1.dp.toPx()
-                val color = if (isMajor) onSurface else onSurface.copy(alpha = 0.3f)
-                
-                val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
-                val start = Offset(
-                    center.x + (radius - length) * cos(angleRad),
-                    center.y + (radius - length) * sin(angleRad)
-                )
-                val end = Offset(
-                    center.x + radius * cos(angleRad),
-                    center.y + radius * sin(angleRad)
-                )
-                drawLine(color, start, end, thickness)
-            }
-
-            // Cardinal Points (Simple drawing)
-            val nAngle = Math.toRadians(-90.0).toFloat()
-            val nPath = Path().apply {
-                val x = center.x + (radius - 40.dp.toPx()) * cos(nAngle)
-                val y = center.y + (radius - 40.dp.toPx()) * sin(nAngle)
-                moveTo(x, y - 10.dp.toPx())
-                lineTo(x + 8.dp.toPx(), y + 10.dp.toPx())
-                lineTo(x - 8.dp.toPx(), y + 10.dp.toPx())
-                close()
-            }
-            drawPath(nPath, Color.Red)
+            val end = Offset(
+                center.x + radius * cos(angleRad),
+                center.y + radius * sin(angleRad)
+            )
             
-            // Qibla Marker
-            val qiblaAngle = state.qiblaAngle
-            if (state.showQibla && qiblaAngle != null) {
-                val qAngle = Math.toRadians(qiblaAngle.toDouble() - 90).toFloat()
-                val qRadius = radius - 60.dp.toPx()
+            drawLine(
+                color = color,
+                start = start,
+                end = end,
+                strokeWidth = if (isMain) 2.dp.toPx() else 1.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            
+            if (isCardinal) {
+                val label = when(i) {
+                    0 -> "N"
+                    90 -> "E"
+                    180 -> "S"
+                    270 -> "W"
+                    else -> ""
+                }
+                // We'd use drawText here, but for simplicity in this Canvas, 
+                // cardinal points are handled by fixed overlays or icons usually.
+                // Instead, let's draw a small circle for cardinal points
                 drawCircle(
-                    color = Color(0xFF4CAF50),
-                    radius = 8.dp.toPx(),
+                    color = color,
+                    radius = 4.dp.toPx(),
                     center = Offset(
-                        center.x + qRadius * cos(qAngle),
-                        center.y + qRadius * sin(qAngle)
+                        center.x + (radius - 40.dp.toPx()) * cos(angleRad),
+                        center.y + (radius - 40.dp.toPx()) * sin(angleRad)
                     )
-                )
-                // Line to Qibla
-                drawLine(
-                    color = Color(0xFF4CAF50).copy(alpha = 0.3f),
-                    start = center,
-                    end = Offset(
-                        center.x + (radius - 20.dp.toPx()) * cos(qAngle),
-                        center.y + (radius - 20.dp.toPx()) * sin(qAngle)
-                    ),
-                    strokeWidth = 2.dp.toPx()
                 )
             }
         }
-        
-        // Inner Glow / Circle
-        drawCircle(
-            brush = Brush.radialGradient(
-                listOf(primaryColor.copy(alpha = 0.1f), Color.Transparent),
-                center = center,
-                radius = 100.dp.toPx()
-            ),
-            radius = 100.dp.toPx(),
-            center = center
-        )
+
+        // Qibla Marker
+        val qiblaAngle = state.qiblaAngle
+        if (state.showQibla && qiblaAngle != null) {
+            val qAngle = Math.toRadians(qiblaAngle.toDouble() - 90).toFloat()
+            val qRadius = radius - 20.dp.toPx()
+            
+            // Draw Qibla Arrow
+            rotate(degrees = qiblaAngle, pivot = center) {
+                val arrowPath = Path().apply {
+                    moveTo(center.x, center.y - radius + 30.dp.toPx())
+                    lineTo(center.x - 10.dp.toPx(), center.y - radius + 50.dp.toPx())
+                    lineTo(center.x + 10.dp.toPx(), center.y - radius + 50.dp.toPx())
+                    close()
+                }
+                drawPath(arrowPath, Color(0xFF4CAF50))
+            }
+        }
     }
 }
 

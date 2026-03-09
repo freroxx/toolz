@@ -22,6 +22,7 @@ class SettingsRepository @Inject constructor(
     private val THEME_MODE = stringPreferencesKey("theme_mode") // "SYSTEM", "LIGHT", "DARK"
     private val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     private val CUSTOM_PRIMARY_COLOR = intPreferencesKey("custom_primary_color")
+    private val CUSTOM_SECONDARY_COLOR = intPreferencesKey("custom_secondary_color")
     private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
@@ -49,6 +50,8 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_PLAYBACK_SPEED = floatPreferencesKey("music_playback_speed")
     private val MUSIC_EQUALIZER_PRESET = stringPreferencesKey("music_equalizer_preset")
     private val SHOW_MUSIC_VISUALIZER = booleanPreferencesKey("show_music_visualizer")
+    private val MUSIC_ART_SHAPE = stringPreferencesKey("music_art_shape") // "CIRCLE", "SQUARE"
+    private val MUSIC_ROTATION_ENABLED = booleanPreferencesKey("music_rotation_enabled")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -63,6 +66,7 @@ class SettingsRepository @Inject constructor(
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "SYSTEM" }
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val customPrimaryColor: Flow<Int?> = context.dataStore.data.map { it[CUSTOM_PRIMARY_COLOR] }
+    val customSecondaryColor: Flow<Int?> = context.dataStore.data.map { it[CUSTOM_SECONDARY_COLOR] }
     val shutterSoundEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = context.dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = context.dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
@@ -90,6 +94,8 @@ class SettingsRepository @Inject constructor(
     val musicPlaybackSpeed: Flow<Float> = context.dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
     val musicEqualizerPreset: Flow<String> = context.dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
     val showMusicVisualizer: Flow<Boolean> = context.dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: true }
+    val musicArtShape: Flow<String> = context.dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
+    val musicRotationEnabled: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
 
     suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -98,6 +104,11 @@ class SettingsRepository @Inject constructor(
     suspend fun setCustomPrimaryColor(color: Int?) {
         context.dataStore.edit { 
             if (color == null) it.remove(CUSTOM_PRIMARY_COLOR) else it[CUSTOM_PRIMARY_COLOR] = color 
+        }
+    }
+    suspend fun setCustomSecondaryColor(color: Int?) {
+        context.dataStore.edit { 
+            if (color == null) it.remove(CUSTOM_SECONDARY_COLOR) else it[CUSTOM_SECONDARY_COLOR] = color
         }
     }
     suspend fun setShutterSoundEnabled(enabled: Boolean) { context.dataStore.edit { it[SHUTTER_SOUND_ENABLED] = enabled } }
@@ -128,4 +139,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicPlaybackSpeed(speed: Float) { context.dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
     suspend fun setMusicEqualizerPreset(preset: String) { context.dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
     suspend fun setShowMusicVisualizer(enabled: Boolean) { context.dataStore.edit { it[SHOW_MUSIC_VISUALIZER] = enabled } }
+    suspend fun setMusicArtShape(shape: String) { context.dataStore.edit { it[MUSIC_ART_SHAPE] = shape } }
+    suspend fun setMusicRotationEnabled(enabled: Boolean) { context.dataStore.edit { it[MUSIC_ROTATION_ENABLED] = enabled } }
 }
