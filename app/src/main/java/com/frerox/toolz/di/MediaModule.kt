@@ -1,6 +1,8 @@
 package com.frerox.toolz.di
 
 import android.content.Context
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.Module
 import dagger.Provides
@@ -15,7 +17,22 @@ object MediaModule {
 
     @Provides
     @Singleton
-    fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer {
-        return ExoPlayer.Builder(context).build()
+    fun provideAudioAttributes(): AudioAttributes {
+        return AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideExoPlayer(
+        @ApplicationContext context: Context,
+        audioAttributes: AudioAttributes
+    ): ExoPlayer {
+        return ExoPlayer.Builder(context)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true) // Automatically pause on headphone unplug
+            .build()
     }
 }

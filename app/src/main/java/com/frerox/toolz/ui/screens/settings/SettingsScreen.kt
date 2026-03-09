@@ -61,6 +61,7 @@ fun SettingsScreen(
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState()
     val musicPlaybackSpeed by viewModel.musicPlaybackSpeed.collectAsState()
     val musicEqualizerPreset by viewModel.musicEqualizerPreset.collectAsState()
+    val showMusicVisualizer by viewModel.showMusicVisualizer.collectAsState()
     
     val searchQuery by viewModel.searchQuery.collectAsState()
     val context = LocalContext.current
@@ -190,7 +191,7 @@ fun SettingsScreen(
                 }
             }
 
-            if (matches(searchQuery, "music", "audio", "player", "speed", "equalizer")) {
+            if (matches(searchQuery, "music", "audio", "player", "speed", "equalizer", "visualizer")) {
                 SettingsSection(title = "Music Player") {
                     SettingsToggleItem(
                         title = "Audio Focus",
@@ -200,6 +201,14 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                     )
                     
+                    SettingsToggleItem(
+                        title = "Visualizer",
+                        subtitle = "Show animated bars in player",
+                        icon = Icons.Rounded.BarChart,
+                        checked = showMusicVisualizer,
+                        onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
+                    )
+
                     SettingsToggleItem(
                         title = "Shake to Skip",
                         subtitle = "Shake device to play next track",

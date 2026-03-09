@@ -135,8 +135,7 @@ fun TimerScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(72.dp)
-                            .bouncyClick { },
+                            .height(72.dp),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Text("START TIMER", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
