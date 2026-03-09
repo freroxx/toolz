@@ -17,7 +17,9 @@ data class WorldClockItem(
     val zoneId: String,
     val currentTime: String,
     val date: String,
-    val isLocal: Boolean = false
+    val isLocal: Boolean = false,
+    val offset: String,
+    val isNight: Boolean
 )
 
 @HiltViewModel
@@ -42,37 +44,62 @@ class WorldClockViewModel @Inject constructor(
     }
 
     private fun updateClocks(zones: Set<String>) {
-        val formatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-        val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
-        
         val localZone = ZoneId.systemDefault()
         val items = mutableListOf<WorldClockItem>()
         
         // Always add local time first
         val nowLocal = ZonedDateTime.now(localZone)
-        items.add(WorldClockItem(
-            cityName = "Current Location",
-            zoneId = localZone.id,
-            currentTime = nowLocal.format(formatter),
-            date = nowLocal.format(dateFormatter),
-            isLocal = true
-        ))
+        items.add(createClockItem("Current Location", localZone.id, nowLocal, true))
 
         zones.filter { it != localZone.id }.forEach { zoneId ->
             try {
                 val now = ZonedDateTime.now(ZoneId.of(zoneId))
-                items.add(WorldClockItem(
-                    cityName = zoneId.substringAfter("/").replace("_", " "),
-                    zoneId = zoneId,
-                    currentTime = now.format(formatter),
-                    date = now.format(dateFormatter),
-                    isLocal = false
+                items.add(createClockItem(
+                    zoneId.substringAfter("/").replace("_", " "),
+                    zoneId,
+                    now,
+                    false
                 ))
             } catch (e: Exception) {
                 // Skip invalid zones
             }
         }
         _clocks.value = items
+    }
+
+    private fun createClockItem(name: String, zoneId: String, dateTime: ZonedDateTime, isLocal: Boolean): WorldClockItem {
+        val formatter = DateTimeFormatter.ofPattern("HH:mm")
+        val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+        
+        val hour = dateTime.hour
+        val isNight = hour < 6 || hour >= 18
+        
+        val localOffset = ZonedDateTime.now(ZoneId.systemDefault()).offset
+        val targetOffset = dateTime.offset
+        val secondsDiff = targetOffset.totalSeconds - localOffset.totalSeconds
+        val hoursDiff = secondsDiff / 3600
+        val minsDiff = (secondsDiff % 3600) / 60
+        
+        val offsetText = when {
+            isLocal -> "Local Time"
+            hoursDiff == 0 && minsDiff == 0 -> "Same as local"
+            else -> {
+                val sign = if (secondsDiff >= 0) "+" else "-"
+                val h = Math.abs(hoursDiff)
+                val m = Math.abs(minsDiff)
+                if (m == 0) "$sign${h}h" else "$sign${h}h ${m}m"
+            }
+        }
+
+        return WorldClockItem(
+            cityName = name,
+            zoneId = zoneId,
+            currentTime = dateTime.format(formatter),
+            date = dateTime.format(dateFormatter),
+            isLocal = isLocal,
+            offset = offsetText,
+            isNight = isNight
+        )
     }
 
     fun addZone(zoneId: String) {

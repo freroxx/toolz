@@ -14,8 +14,6 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,7 +22,8 @@ data class TimerState(
     val remainingTime: Long = 0L,
     val initialTime: Long = 0L,
     val isRunning: Boolean = false,
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+    val isPaused: Boolean = false
 )
 
 @HiltViewModel
@@ -70,30 +69,31 @@ class TimerViewModel @Inject constructor(
 
     fun setTimer(minutes: Int, seconds: Int) {
         val totalMillis = (minutes * 60 + seconds) * 1000L
-        _uiState.update { it.copy(remainingTime = totalMillis, initialTime = totalMillis, isFinished = false) }
+        _uiState.update { it.copy(remainingTime = totalMillis, initialTime = totalMillis, isFinished = false, isPaused = false) }
     }
 
     fun toggleStartStop() {
         val currentlyRunning = _uiState.value.isRunning
         if (currentlyRunning) {
-            toolService?.resetTimer()
+            toolService?.pauseTimer()
+            _uiState.update { it.copy(isRunning = false, isPaused = true) }
         } else {
             if (_uiState.value.remainingTime > 0) {
                 toolService?.startTimer(_uiState.value.remainingTime)
+                _uiState.update { it.copy(isRunning = true, isPaused = false, isFinished = false) }
             }
         }
-        _uiState.update { it.copy(isRunning = !currentlyRunning, isFinished = false) }
     }
 
     private fun onTimerFinished() {
-        _uiState.update { it.copy(isRunning = false, isFinished = true) }
+        _uiState.update { it.copy(isRunning = false, isFinished = true, isPaused = false) }
         playRingtone()
     }
 
     private fun playRingtone() {
         viewModelScope.launch {
             val ringtoneUriStr = settingsRepository.ringtoneUri.first()
-            val uri = if (ringtoneUriStr != null) Uri.parse(ringtoneUriStr) else null
+            val uri = if (!ringtoneUriStr.isNullOrEmpty()) Uri.parse(ringtoneUriStr) else null
             
             try {
                 mediaPlayer?.release()
@@ -127,7 +127,7 @@ class TimerViewModel @Inject constructor(
     fun reset() {
         toolService?.resetTimer()
         stopRingtone()
-        _uiState.update { it.copy(remainingTime = it.initialTime, isRunning = false, isFinished = false) }
+        _uiState.update { it.copy(remainingTime = it.initialTime, isRunning = false, isFinished = false, isPaused = false) }
     }
 
     override fun onCleared() {

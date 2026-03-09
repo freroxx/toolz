@@ -94,10 +94,15 @@ class ToolService : Service() {
     fun startTimer(durationMillis: Long) {
         _timerRemaining.value = durationMillis
         isTimerRunning = true
+        timerJob?.cancel()
         timerJob = serviceScope.launch {
+            var lastUpdate = System.currentTimeMillis()
             while (_timerRemaining.value > 0 && isTimerRunning) {
                 delay(100)
-                _timerRemaining.value = (_timerRemaining.value - 100).coerceAtLeast(0)
+                val now = System.currentTimeMillis()
+                val diff = now - lastUpdate
+                _timerRemaining.value = (_timerRemaining.value - diff).coerceAtLeast(0)
+                lastUpdate = now
                 updateTimerNotification()
             }
             if (_timerRemaining.value == 0L) {
@@ -105,6 +110,12 @@ class ToolService : Service() {
             }
         }
         startForeground(TIMER_NOTIFICATION_ID, createTimerNotification())
+    }
+
+    fun pauseTimer() {
+        isTimerRunning = false
+        timerJob?.cancel()
+        updateTimerNotification("Paused")
     }
 
     fun resetTimer() {
@@ -124,10 +135,15 @@ class ToolService : Service() {
         _pomodoroRemaining.value = durationMillis
         pomodoroMode = mode
         isPomodoroRunning = true
+        pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
+            var lastUpdate = System.currentTimeMillis()
             while (_pomodoroRemaining.value > 0 && isPomodoroRunning) {
                 delay(1000)
-                _pomodoroRemaining.value = (_pomodoroRemaining.value - 1000).coerceAtLeast(0)
+                val now = System.currentTimeMillis()
+                val diff = now - lastUpdate
+                _pomodoroRemaining.value = (_pomodoroRemaining.value - diff).coerceAtLeast(0)
+                lastUpdate = now
                 updatePomodoroNotification()
             }
             if (_pomodoroRemaining.value == 0L) {
@@ -141,7 +157,7 @@ class ToolService : Service() {
     fun pausePomodoro() {
         isPomodoroRunning = false
         pomodoroJob?.cancel()
-        updatePomodoroNotification()
+        updatePomodoroNotification("Paused")
     }
 
     private fun createNotificationChannel() {
