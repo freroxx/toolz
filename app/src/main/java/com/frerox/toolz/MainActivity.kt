@@ -71,28 +71,34 @@ class MainActivity : ComponentActivity() {
             // Handle service start after permission check
             val context = this
             val permissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { isGranted ->
-                if (isGranted) {
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { permissions ->
+                if (permissions[Manifest.permission.ACTIVITY_RECOGNITION] == true) {
                     startStepService()
                 }
             }
 
             LaunchedEffect(Unit) {
+                val permissionsToRequest = mutableListOf<String>()
+                
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                   if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                       permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                   }
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
-                        startStepService()
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                        permissionsToRequest.add(Manifest.permission.ACTIVITY_RECOGNITION)
                     } else {
-                        permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                        startStepService()
                     }
                 } else {
                     startStepService()
+                }
+
+                if (permissionsToRequest.isNotEmpty()) {
+                    permissionLauncher.launch(permissionsToRequest.toTypedArray())
                 }
             }
 
