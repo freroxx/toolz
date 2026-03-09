@@ -1,6 +1,9 @@
 package com.frerox.toolz.ui.screens.media
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -12,7 +15,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
+import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.MusicPlayerService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -35,13 +41,18 @@ data class MusicUiState(
     val sortOrder: SortOrder = SortOrder.RECENT,
     val isLoading: Boolean = false,
     val sleepTimerMinutes: Int? = null,
-    val folders: Map<String, List<MusicTrack>> = emptyMap()
+    val folders: Map<String, List<MusicTrack>> = emptyMap(),
+    val selectedTracks: Set<String> = emptySet(),
+    val isSelectionMode: Boolean = false,
+    val showVisualizer: Boolean = true
 )
 
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
     private val repository: MusicRepository,
-    val player: ExoPlayer
+    private val settingsRepository: SettingsRepository,
+    val player: ExoPlayer,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MusicUiState())
@@ -51,12 +62,11 @@ class MusicPlayerViewModel @Inject constructor(
     private var sleepTimerJob: Job? = null
 
     init {
-        // Configure ExoPlayer for music
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(C.USAGE_MEDIA)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .build()
-        player.setAudioAttributes(audioAttributes, true)
+        viewModelScope.launch {
+            settingsRepository.showMusicVisualizer.collect { show ->
+                _uiState.update { it.copy(showVisualizer = show) }
+            }
+        }
 
         viewModelScope.launch {
             combine(
@@ -82,7 +92,12 @@ class MusicPlayerViewModel @Inject constructor(
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.update { it.copy(isPlaying = isPlaying) }
-                if (isPlaying) startProgressUpdate() else stopProgressUpdate()
+                if (isPlaying) {
+                    startProgressUpdate()
+                    startPlayerService()
+                } else {
+                    stopProgressUpdate()
+                }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -111,8 +126,20 @@ class MusicPlayerViewModel @Inject constructor(
             }
         })
         
-        // Initial scan
         scanMusic()
+    }
+
+    private fun startPlayerService() {
+        val intent = Intent(context, MusicPlayerService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun startProgressUpdate() {
@@ -137,6 +164,32 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
+    fun addCustomFolder(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            repository.scanCustomFolder(uri)
+            _uiState.update { it.copy(isLoading = false) }
+        }
+    }
+
+    fun toggleTrackSelection(uri: String) {
+        _uiState.update { state ->
+            val newSelection = if (state.selectedTracks.contains(uri)) {
+                state.selectedTracks - uri
+            } else {
+                state.selectedTracks + uri
+            }
+            state.copy(
+                selectedTracks = newSelection,
+                isSelectionMode = newSelection.isNotEmpty()
+            )
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedTracks = emptySet(), isSelectionMode = false) }
+    }
+
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
         val mediaItems = tracks.map { t ->
             MediaItem.Builder()
@@ -152,10 +205,13 @@ class MusicPlayerViewModel @Inject constructor(
                 .build()
         }
         
-        val startIndex = tracks.indexOf(track).coerceAtLeast(0)
+        val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+        player.stop()
+        player.clearMediaItems()
         player.setMediaItems(mediaItems, startIndex, 0L)
         player.prepare()
         player.play()
+        startPlayerService()
     }
 
     fun playPlaylist(playlist: Playlist) {
@@ -172,6 +228,7 @@ class MusicPlayerViewModel @Inject constructor(
         player.stop()
         player.clearMediaItems()
         _uiState.update { it.copy(currentTrack = null, isPlaying = false, progress = 0L) }
+        context.stopService(Intent(context, MusicPlayerService::class.java))
     }
 
     fun seekTo(position: Long) {
@@ -231,6 +288,14 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val newList = (playlist.trackUris + track.uri).distinct()
             repository.createPlaylist(playlist.copy(trackUris = newList))
+        }
+    }
+
+    fun addSelectedTracksToPlaylist(playlist: Playlist) {
+        viewModelScope.launch {
+            val newList = (playlist.trackUris + _uiState.value.selectedTracks).distinct()
+            repository.createPlaylist(playlist.copy(trackUris = newList))
+            clearSelection()
         }
     }
 

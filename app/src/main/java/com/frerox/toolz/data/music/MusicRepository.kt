@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
 import com.frerox.toolz.data.music.MusicDao
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
@@ -44,14 +45,13 @@ class MusicRepository @Inject constructor(
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DURATION
         )
 
-        // Filter out tracks shorter than 30 seconds (likely ringtones/notifications)
         val selection = "${MediaStore.Audio.Media.DURATION} >= ?"
-        val selectionArgs = arrayOf("30000")
-        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+        val selectionArgs = arrayOf("10000") // 10 seconds minimum
+        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
 
         context.contentResolver.query(
             collection,
@@ -64,19 +64,17 @@ class MusicRepository @Inject constructor(
             val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
             val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+            val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val title = cursor.getString(titleColumn) ?: "Unknown"
                 val artist = cursor.getString(artistColumn) ?: "Unknown Artist"
                 val album = cursor.getString(albumColumn) ?: "Unknown Album"
+                val albumId = cursor.getLong(albumIdColumn)
                 val duration = cursor.getLong(durationColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                
-                // For folder view, we can extract the parent path
-                val path = cursor.getString(dataColumn)
                 
                 tracks.add(
                     MusicTrack(
@@ -84,16 +82,51 @@ class MusicRepository @Inject constructor(
                         title = title,
                         artist = artist,
                         album = album,
+                        albumId = albumId,
                         duration = duration,
-                        thumbnailUri = null // Will be loaded on demand or cached
+                        thumbnailUri = getAlbumArtUri(albumId).toString()
                     )
                 )
             }
         }
         
-        // Save found tracks to database
         tracks.forEach { musicDao.insertTrack(it) }
         tracks
+    }
+
+    private fun getAlbumArtUri(albumId: Long): Uri {
+        return ContentUris.withAppendedId(
+            Uri.parse("content://media/external/audio/albumart"),
+            albumId
+        )
+    }
+
+    suspend fun scanCustomFolder(folderUri: Uri): List<MusicTrack> = withContext(Dispatchers.IO) {
+        val tracks = mutableListOf<MusicTrack>()
+        val rootFolder = DocumentFile.fromTreeUri(context, folderUri)
+        
+        suspend fun scanRecursive(directory: DocumentFile) {
+            directory.listFiles().forEach { file ->
+                if (file.isDirectory) {
+                    scanRecursive(file)
+                } else if (isAudioFile(file.name ?: "")) {
+                    try {
+                        val track = extractMetadata(file.uri)
+                        tracks.add(track)
+                    } catch (e: Exception) {
+                    }
+                }
+            }
+        }
+
+        rootFolder?.let { scanRecursive(it) }
+        tracks.forEach { musicDao.insertTrack(it) }
+        tracks
+    }
+
+    private fun isAudioFile(name: String): Boolean {
+        val extensions = listOf(".mp3", ".wav", ".m4a", ".ogg", ".flac")
+        return extensions.any { name.lowercase().endsWith(it) }
     }
 
     suspend fun extractMetadata(uri: Uri): MusicTrack = withContext(Dispatchers.IO) {
@@ -110,7 +143,7 @@ class MusicRepository @Inject constructor(
             val artwork = retriever.embeddedPicture
             var thumbnailUri: String? = null
             if (artwork != null) {
-                val fileName = "thumb_${uri.hashCode()}.jpg"
+                val fileName = "thumb_${uri.toString().hashCode()}.jpg"
                 val file = File(context.cacheDir, fileName)
                 FileOutputStream(file).use { it.write(artwork) }
                 thumbnailUri = Uri.fromFile(file).toString()
@@ -122,7 +155,7 @@ class MusicRepository @Inject constructor(
                 artist = artist,
                 album = album,
                 duration = duration,
-                thumbnailUri = thumbnailUri
+                thumbnailUri = thumbnailUri ?: uri.toString()
             )
         } catch (e: Exception) {
             MusicTrack(
@@ -130,10 +163,13 @@ class MusicRepository @Inject constructor(
                 title = uri.lastPathSegment?.substringBeforeLast(".") ?: "Unknown",
                 artist = "Unknown Artist",
                 album = "Unknown Album",
-                duration = 0
+                duration = 0,
+                thumbnailUri = uri.toString()
             )
         } finally {
-            retriever.release()
+            try {
+                retriever.release()
+            } catch (e: Exception) {}
         }
     }
 }

@@ -69,6 +69,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1.0f)
     val musicEqualizerPreset: StateFlow<String> = repository.musicEqualizerPreset
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Normal")
+    val showMusicVisualizer: StateFlow<Boolean> = repository.showMusicVisualizer
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
@@ -106,4 +108,5 @@ class SettingsViewModel @Inject constructor(
     fun setMusicShakeToSkip(enabled: Boolean) { viewModelScope.launch { repository.setMusicShakeToSkip(enabled) } }
     fun setMusicPlaybackSpeed(speed: Float) { viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) } }
     fun setMusicEqualizerPreset(preset: String) { viewModelScope.launch { repository.setMusicEqualizerPreset(preset) } }
+    fun setShowMusicVisualizer(enabled: Boolean) { viewModelScope.launch { repository.setShowMusicVisualizer(enabled) } }
 }

@@ -47,6 +47,7 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_SHAKE_TO_SKIP = booleanPreferencesKey("music_shake_to_skip")
     private val MUSIC_PLAYBACK_SPEED = floatPreferencesKey("music_playback_speed")
     private val MUSIC_EQUALIZER_PRESET = stringPreferencesKey("music_equalizer_preset")
+    private val SHOW_MUSIC_VISUALIZER = booleanPreferencesKey("show_music_visualizer")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -86,6 +87,7 @@ class SettingsRepository @Inject constructor(
     val musicShakeToSkip: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
     val musicPlaybackSpeed: Flow<Float> = context.dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
     val musicEqualizerPreset: Flow<String> = context.dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
+    val showMusicVisualizer: Flow<Boolean> = context.dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: true }
 
     suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -122,4 +124,5 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicShakeToSkip(enabled: Boolean) { context.dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
     suspend fun setMusicPlaybackSpeed(speed: Float) { context.dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
     suspend fun setMusicEqualizerPreset(preset: String) { context.dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
+    suspend fun setShowMusicVisualizer(enabled: Boolean) { context.dataStore.edit { it[SHOW_MUSIC_VISUALIZER] = enabled } }
 }

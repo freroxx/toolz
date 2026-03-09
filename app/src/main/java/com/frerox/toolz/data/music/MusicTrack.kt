@@ -9,6 +9,7 @@ data class MusicTrack(
     val title: String,
     val artist: String?,
     val album: String?,
+    val albumId: Long = -1,
     val duration: Long,
     val thumbnailUri: String? = null
 )
@@ -18,5 +19,5 @@ data class Playlist(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val thumbnailUri: String? = null,
-    val trackUris: List<String> = emptyList() // Stored as a converter
+    val trackUris: List<String> = emptyList()
 )
