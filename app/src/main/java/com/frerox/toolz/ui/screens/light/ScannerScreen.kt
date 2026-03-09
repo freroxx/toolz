@@ -1,10 +1,10 @@
+@file:OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.camera.core.ExperimentalGetImage::class)
+
 package com.frerox.toolz.ui.screens.light
 
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
-import androidx.annotation.OptIn
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.mlkit.vision.MlKitAnalyzer
 import androidx.camera.view.LifecycleCameraController
@@ -42,14 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 
-@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class, ExperimentalGetImage::class)
 @Composable
 fun ScannerScreen(
     onBack: () -> Unit
@@ -88,7 +86,6 @@ fun ScannerScreen(
         }
     }
 
-    // Bind the controller to the lifecycle to fix blank camera issue
     LaunchedEffect(cameraPermissionState.status.isGranted) {
         if (cameraPermissionState.status.isGranted) {
             cameraController.bindToLifecycle(lifecycleOwner)
@@ -179,7 +176,6 @@ fun ScannerOverlay() {
         val top = (height - boxSize) / 2
         val cornerRadius = 32.dp.toPx()
 
-        // Draw darkened background with transparent hole
         val path = Path().apply {
             moveTo(0f, 0f)
             lineTo(width, 0f)
@@ -197,12 +193,10 @@ fun ScannerOverlay() {
         }
         drawPath(path, Color.Black.copy(alpha = 0.7f))
         
-        // Draw corners
         val lineLength = 40.dp.toPx()
         val strokeWidth = 5.dp.toPx()
         val cornerColor = Color.Cyan
         
-        // Top Left
         drawLine(cornerColor, Offset(left, top + lineLength), Offset(left, top + cornerRadius), strokeWidth)
         drawArc(
             color = cornerColor,
@@ -215,7 +209,6 @@ fun ScannerOverlay() {
         )
         drawLine(cornerColor, Offset(left + cornerRadius, top), Offset(left + lineLength, top), strokeWidth)
         
-        // Top Right
         drawLine(cornerColor, Offset(left + boxSize - lineLength, top), Offset(left + boxSize - cornerRadius, top), strokeWidth)
         drawArc(
             color = cornerColor,
@@ -228,7 +221,6 @@ fun ScannerOverlay() {
         )
         drawLine(cornerColor, Offset(left + boxSize, top + cornerRadius), Offset(left + boxSize, top + lineLength), strokeWidth)
         
-        // Bottom Left
         drawLine(cornerColor, Offset(left, top + boxSize - lineLength), Offset(left, top + boxSize - cornerRadius), strokeWidth)
         drawArc(
             color = cornerColor,
@@ -241,7 +233,6 @@ fun ScannerOverlay() {
         )
         drawLine(cornerColor, Offset(left + cornerRadius, top + boxSize), Offset(left + lineLength, top + boxSize), strokeWidth)
         
-        // Bottom Right
         drawLine(cornerColor, Offset(left + boxSize - lineLength, top + boxSize), Offset(left + boxSize - cornerRadius, top + boxSize), strokeWidth)
         drawArc(
             color = cornerColor,
@@ -254,7 +245,6 @@ fun ScannerOverlay() {
         )
         drawLine(cornerColor, Offset(left + boxSize, top + boxSize - cornerRadius), Offset(left + boxSize, top + boxSize - lineLength), strokeWidth)
 
-        // Animated scan line
         val lineY = top + (boxSize * scanLinePos)
         drawRect(
             brush = Brush.verticalGradient(
@@ -356,7 +346,6 @@ fun ResultCard(
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
                                 context.startActivity(intent)
                             } catch (e: Exception) {
-                                // Handle error
                             }
                         },
                         modifier = Modifier.weight(1f),
