@@ -19,8 +19,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -71,11 +74,13 @@ fun MusicPlayerScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showFullPlayer by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
-    var currentTab by remember { mutableIntStateOf(0) } // 0: Tracks, 1: Library, 2: Folders
+    var currentTab by remember { mutableIntStateOf(0) }
     var searchQuery by remember { mutableStateOf("") }
     var showMultiSelectPlaylistPicker by remember { mutableStateOf(false) }
     var selectedFolderTracks by remember { mutableStateOf<Pair<String, List<MusicTrack>>?>(null) }
@@ -89,7 +94,17 @@ fun MusicPlayerScreen(
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
-        uri?.let { viewModel.addCustomFolder(it) }
+        uri?.let { 
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                viewModel.addCustomFolder(it)
+            } catch (e: Exception) {
+                viewModel.addCustomFolder(it)
+            }
+        }
     }
 
     val playlistThumbLauncher = rememberLauncherForActivityResult(
@@ -104,14 +119,19 @@ fun MusicPlayerScreen(
 
     val filteredTracks = remember(state.tracks, searchQuery) {
         if (searchQuery.isEmpty()) state.tracks
-        else state.tracks.filter { it.title.contains(searchQuery, ignoreCase = true) || (it.artist?.contains(searchQuery, ignoreCase = true) == true) }
+        else state.tracks.filter { 
+            it.title.contains(searchQuery, ignoreCase = true) || 
+            (it.artist?.contains(searchQuery, ignoreCase = true) == true) 
+        }
     }
 
     Scaffold(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     if (state.isSelectionMode) {
@@ -152,7 +172,11 @@ fun MusicPlayerScreen(
                         )
                     }
                     
-                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                    DropdownMenu(
+                        expanded = showSortMenu, 
+                        onDismissRequest = { showSortMenu = false },
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
                         SortOrder.entries.forEach { order ->
                             DropdownMenuItem(
                                 text = { Text(order.name.lowercase().replaceFirstChar { it.uppercase() }) },
@@ -185,22 +209,35 @@ fun MusicPlayerScreen(
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             unfocusedBorderColor = Color.Transparent,
                             focusedBorderColor = MaterialTheme.colorScheme.primary
                         )
                     )
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         },
         bottomBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+                tonalElevation = 12.dp,
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                modifier = Modifier.shadow(16.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
             ) {
                 Column(modifier = Modifier.navigationBarsPadding()) {
+                    if (state.currentTrack != null && !showFullPlayer) {
+                        MiniPlayer(
+                            track = state.currentTrack!!,
+                            isPlaying = state.isPlaying,
+                            progress = state.progress,
+                            duration = state.duration,
+                            onTogglePlay = { viewModel.togglePlayPause() },
+                            onClick = { showFullPlayer = true }
+                        )
+                    }
+                    
                     TabRow(
                         selectedTabIndex = currentTab,
                         containerColor = Color.Transparent,
@@ -209,7 +246,7 @@ fun MusicPlayerScreen(
                             TabRowDefaults.SecondaryIndicator(
                                 Modifier.tabIndicatorOffset(tabPositions[currentTab]),
                                 color = MaterialTheme.colorScheme.primary,
-                                height = 3.dp
+                                height = 4.dp
                             )
                         },
                         divider = {}
@@ -228,16 +265,6 @@ fun MusicPlayerScreen(
                             )
                         }
                     }
-                    if (state.currentTrack != null && !showFullPlayer) {
-                        MiniPlayer(
-                            track = state.currentTrack!!,
-                            isPlaying = state.isPlaying,
-                            progress = state.progress,
-                            duration = state.duration,
-                            onTogglePlay = { viewModel.togglePlayPause() },
-                            onClick = { showFullPlayer = true }
-                        )
-                    }
                 }
             }
         }
@@ -246,31 +273,34 @@ fun MusicPlayerScreen(
             if (!musicPermission.status.isGranted) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Icon(Icons.Rounded.MusicNote, null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                        Spacer(Modifier.height(16.dp))
-                        Text("Permission needed to access music files", textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
+                        Icon(Icons.Rounded.MusicNote, null, modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                         Spacer(Modifier.height(24.dp))
+                        Text("Music is missing!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Grant permission to see your local files.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(32.dp))
                         Button(
                             onClick = { musicPermission.launchPermissionRequest() },
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.height(56.dp).fillMaxWidth(0.7f)
                         ) {
-                            Text("Grant Permission")
+                            Text("Grant Permission", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             } else if (state.isLoading && state.tracks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(strokeCap = StrokeCap.Round)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Scanning library...", style = MaterialTheme.typography.labelLarge)
+                        CircularProgressIndicator(strokeCap = StrokeCap.Round, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(20.dp))
+                        Text("Syncing Library...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
                     }
                 }
             } else {
                 AnimatedContent(
                     targetState = currentTab,
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                        (fadeIn(animationSpec = tween(500, easing = EaseInOutQuart)) + scaleIn(initialScale = 0.92f, animationSpec = tween(500, easing = EaseInOutQuart))) togetherWith 
+                        (fadeOut(animationSpec = tween(500, easing = EaseInOutQuart)) + scaleOut(targetScale = 0.92f, animationSpec = tween(500, easing = EaseInOutQuart)))
                     },
                     label = "TabContent"
                 ) { targetTab ->
@@ -368,18 +398,20 @@ fun MusicPlayerScreen(
 fun TrackList(tracks: List<MusicTrack>, state: MusicUiState, viewModel: MusicPlayerViewModel) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
+        contentPadding = PaddingValues(bottom = 180.dp, top = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (tracks.isEmpty() && !state.isLoading) {
             item {
                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         Spacer(Modifier.height(16.dp))
-                        Text("No tracks found", color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
+                        Text("Library is empty", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Add music or scan your device.", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
                         TextButton(onClick = { viewModel.scanMusic() }) {
-                            Text("Refresh Library")
+                            Text("Refresh Now")
                         }
                     }
                 }
@@ -415,14 +447,14 @@ fun FolderList(state: MusicUiState, onFolderClick: (String, List<MusicTrack>) ->
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(bottom = 180.dp, top = 16.dp, start = 16.dp, end = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         if (state.folders.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No folders found", color = MaterialTheme.colorScheme.outline)
+                    Text("No music folders found.", color = MaterialTheme.colorScheme.outline)
                 }
             }
         } else {
@@ -442,25 +474,25 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(160.dp)
+            .height(180.dp)
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(72.dp)
                     .background(
                         Brush.linearGradient(
-                            listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.secondaryContainer)
                         ), 
-                        CircleShape
+                        RoundedCornerShape(24.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -468,7 +500,7 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
                     Icons.Rounded.Folder, 
                     contentDescription = null, 
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 )
             }
             Spacer(Modifier.height(16.dp))
@@ -481,9 +513,10 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                "$trackCount songs", 
+                "$trackCount tracks", 
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -500,10 +533,10 @@ fun FolderTracksDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(folderName, fontWeight = FontWeight.Bold) },
+        title = { Text(folderName, fontWeight = FontWeight.ExtraBold) },
         text = {
             Box(modifier = Modifier.height(450.dp)) {
-                LazyColumn {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(tracks) { track ->
                         TrackItem(
                             track = track,
@@ -528,8 +561,10 @@ fun FolderTracksDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        }
+            Button(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) { Text("Done") }
+        },
+        shape = RoundedCornerShape(32.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 
@@ -543,11 +578,14 @@ fun LibrarySection(
 ) {
     var showFavoritesDetail by remember { mutableStateOf(false) }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 100.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), 
+        contentPadding = PaddingValues(bottom = 180.dp)
+    ) {
         item {
-            Spacer(Modifier.height(16.dp))
-            Text("Library", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
+            Text("Your Library", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.height(20.dp))
         }
 
         item {
@@ -559,36 +597,44 @@ fun LibrarySection(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(180.dp)
+                        .height(200.dp)
                         .bouncyClick { showFavoritesDetail = true },
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 2.dp
+                    tonalElevation = 4.dp
                 ) {
-                    Box(modifier = Modifier.padding(20.dp)) {
+                    Box(modifier = Modifier.padding(24.dp)) {
                         Column(modifier = Modifier.align(Alignment.BottomStart)) {
-                            Icon(Icons.Rounded.Favorite, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                            Spacer(Modifier.height(8.dp))
+                            Icon(Icons.Rounded.Favorite, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                            Spacer(Modifier.height(12.dp))
                             Text("Favorites", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                            Text("${state.favoriteTracks.size} tracks", style = MaterialTheme.typography.labelMedium)
+                            Text("${state.favoriteTracks.size} items", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
 
-                // Recent Card or Create Playlist Card
+                // Create Playlist Card
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(180.dp)
+                        .height(200.dp)
                         .bouncyClick(onClick = onCreatePlaylist),
                     shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    tonalElevation = 1.dp
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(32.dp))
-                            Spacer(Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier.size(64.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            Spacer(Modifier.height(16.dp))
                             Text("New Playlist", fontWeight = FontWeight.Bold)
                         }
                     }
@@ -598,7 +644,7 @@ fun LibrarySection(
 
         item {
             Spacer(Modifier.height(32.dp))
-            Text("Your Playlists", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text("Playlists", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(16.dp))
         }
 
@@ -626,7 +672,7 @@ fun LibrarySection(
             allTracks = state.tracks,
             onDismiss = { showFavoritesDetail = false },
             onPlayPlaylist = { if (state.favoriteTracks.isNotEmpty()) viewModel.playTrack(state.favoriteTracks.first(), state.favoriteTracks) },
-            onDeletePlaylist = {}, // Cannot delete favorites list itself
+            onDeletePlaylist = {},
             onAddTrack = { viewModel.toggleFavorite(it) },
             onRemoveTrack = { uri -> state.favoriteTracks.find { it.uri == uri }?.let { viewModel.toggleFavorite(it) } },
             onPlayTrack = { track, tracks -> viewModel.playTrack(track, tracks) },
@@ -655,7 +701,8 @@ fun FullPlayerView(
     val track = state.currentTrack ?: return
     var showSleepTimer by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val screenHeight = configuration.screenHeightDp.dp
     
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
     val rotation by infiniteTransition.animateFloat(
@@ -672,139 +719,119 @@ fun FullPlayerView(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = null
+        dragHandle = null,
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 24.dp, top = 8.dp),
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Close", modifier = Modifier.size(32.dp))
+            Spacer(Modifier.height(16.dp))
+            Box(modifier = Modifier.fillMaxWidth()) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.CenterStart)
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Close", modifier = Modifier.size(36.dp))
                 }
-                Text("Now Playing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text(
+                    "Now Playing", 
+                    style = MaterialTheme.typography.titleMedium, 
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.align(Alignment.Center)
+                )
                 
-                Row {
-                    IconButton(onClick = { /* Queue placeholder */ }) {
-                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = "Queue")
+                Box(modifier = Modifier.align(Alignment.CenterEnd)) {
+                    IconButton(onClick = { showOverflowMenu = true }) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "More")
                     }
-                    Box {
-                        IconButton(onClick = { showOverflowMenu = true }) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(
-                            expanded = showOverflowMenu,
-                            onDismissRequest = { showOverflowMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Shape: Circular") },
-                                onClick = { onSetArtShape("CIRCLE"); showOverflowMenu = false },
-                                leadingIcon = { RadioButton(selected = state.artShape == "CIRCLE", onClick = null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Shape: Square") },
-                                onClick = { onSetArtShape("SQUARE"); showOverflowMenu = false },
-                                leadingIcon = { RadioButton(selected = state.artShape == "SQUARE", onClick = null) }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Rotation") },
-                                onClick = { onToggleRotation(); showOverflowMenu = false },
-                                leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.7f)) }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Equalizer") },
-                                onClick = {
-                                    showOverflowMenu = false
-                                    val intent = Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL)
-                                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
-                                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, 0)
-                                    intent.putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {}
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.Equalizer, null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sleep Timer") },
-                                onClick = {
-                                    showOverflowMenu = false
-                                    showSleepTimer = true
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.Timer, null) }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Stop Playback", color = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    showOverflowMenu = false
-                                    onStop()
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error) }
-                            )
-                        }
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Visuals: Circular") },
+                            onClick = { onSetArtShape("CIRCLE"); showOverflowMenu = false },
+                            leadingIcon = { RadioButton(selected = state.artShape == "CIRCLE", onClick = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Visuals: Square") },
+                            onClick = { onSetArtShape("SQUARE"); showOverflowMenu = false },
+                            leadingIcon = { RadioButton(selected = state.artShape == "SQUARE", onClick = null) }
+                        )
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        DropdownMenuItem(
+                            text = { Text("Art Rotation") },
+                            onClick = { onToggleRotation(); showOverflowMenu = false },
+                            leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Sleep Timer") },
+                            onClick = { showOverflowMenu = false; showSleepTimer = true },
+                            leadingIcon = { Icon(Icons.Rounded.Timer, null) }
+                        )
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        DropdownMenuItem(
+                            text = { Text("Stop & Close", color = MaterialTheme.colorScheme.error) },
+                            onClick = { showOverflowMenu = false; onStop() },
+                            leadingIcon = { Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error) }
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(screenHeight * 0.04f))
 
-            Box(contentAlignment = Alignment.Center) {
-                val shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(48.dp)
-                Surface(
-                    modifier = Modifier
-                        .size(300.dp)
-                        .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f)
-                        .clip(shape)
-                        .graphicsLayer {
-                            shadowElevation = 20.dp.toPx()
-                            this.shape = shape
-                            clip = true
-                        },
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    tonalElevation = 12.dp
-                ) {
-                    AsyncImage(
-                        model = track.thumbnailUri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                        error = painterResource(android.R.drawable.ic_media_play)
-                    )
-                }
+            // Enhanced Album Art
+            val artSize = (configuration.screenWidthDp * 0.85f).dp
+            val shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(56.dp)
+            Surface(
+                modifier = Modifier
+                    .size(artSize)
+                    .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f)
+                    .shadow(48.dp, shape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                shape = shape,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                tonalElevation = 8.dp
+            ) {
+                AsyncImage(
+                    model = track.thumbnailUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    error = painterResource(android.R.drawable.ic_media_play)
+                )
             }
 
             Spacer(Modifier.height(48.dp))
 
+            // Track Information
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     track.title,
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     track.artist ?: "Unknown Artist",
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    fontWeight = FontWeight.SemiBold
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(40.dp))
 
+            // Wavy Seek Bar
             WavySlider(
                 value = state.progress.toFloat(),
                 onValueChange = { onSeek(it.toLong()) },
@@ -813,29 +840,23 @@ fun FullPlayerView(
             )
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(formatDuration(state.progress), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatDuration(state.duration), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatDuration(state.progress), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatDuration(state.duration), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Spacer(Modifier.height(40.dp))
 
+            // Main Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    onClick = onSkipPrev,
-                    modifier = Modifier.size(80.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(36.dp))
-                    }
+                IconButton(onClick = onSkipPrev, modifier = Modifier.size(72.dp)) {
+                    Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(52.dp))
                 }
 
                 Surface(
@@ -843,34 +864,28 @@ fun FullPlayerView(
                     modifier = Modifier.size(100.dp),
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 4.dp
+                    shadowElevation = 12.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
                             null, 
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.size(60.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
 
-                Surface(
-                    onClick = onSkipNext,
-                    modifier = Modifier.size(80.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(36.dp))
-                    }
+                IconButton(onClick = onSkipNext, modifier = Modifier.size(72.dp)) {
+                    Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(52.dp))
                 }
             }
             
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(40.dp))
 
+            // Secondary Options
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -878,8 +893,8 @@ fun FullPlayerView(
                     Icon(
                         if (state.isShuffleOn) Icons.Rounded.ShuffleOn else Icons.Rounded.Shuffle, 
                         null, 
-                        tint = if (state.isShuffleOn) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.4f),
-                        modifier = Modifier.size(28.dp)
+                        tint = if (state.isShuffleOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(36.dp)
                     )
                 }
 
@@ -891,23 +906,23 @@ fun FullPlayerView(
                             else -> Icons.Rounded.Repeat
                         },
                         null,
-                        tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.4f),
-                        modifier = Modifier.size(28.dp)
+                        tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(36.dp)
                     )
                 }
 
                 IconButton(onClick = { onToggleFavorite(track) }) {
-                    val favScale by animateFloatAsState(if (track.isFavorite) 1.3f else 1f)
+                    val favScale by animateFloatAsState(if (track.isFavorite) 1.25f else 1f)
                     Icon(
                         if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         null,
-                        tint = if (track.isFavorite) Color.Red else LocalContentColor.current.copy(alpha = 0.4f),
-                        modifier = Modifier.size(28.dp).scale(favScale)
+                        tint = if (track.isFavorite) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(36.dp).scale(favScale)
                     )
                 }
             }
             
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(56.dp))
             Spacer(Modifier.navigationBarsPadding())
         }
     }
@@ -929,13 +944,13 @@ fun WavySlider(
         initialValue = 0f,
         targetValue = 2f * Math.PI.toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
+            animation = tween(2800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
     )
 
-    Box(modifier = Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
         Slider(
             value = value,
             onValueChange = onValueChange,
@@ -948,37 +963,38 @@ fun WavySlider(
             modifier = Modifier.fillMaxWidth()
         )
         
-        Canvas(modifier = Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 10.dp)) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 8.dp)) {
             val width = size.width
             val height = size.height
             val centerY = height / 2
             val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
             val progressX = width * progress
             
-            // Draw Inactive Track
+            // Inactive Track
             drawLine(
-                color = Color.LightGray.copy(alpha = 0.5f),
+                color = Color.LightGray.copy(alpha = 0.25f),
                 start = androidx.compose.ui.geometry.Offset(progressX, centerY),
                 end = androidx.compose.ui.geometry.Offset(width, centerY),
-                strokeWidth = 4.dp.toPx(),
+                strokeWidth = 6.dp.toPx(),
                 cap = StrokeCap.Round
             )
             
-            // Draw Wavy Active Track
+            // Wavy Active Track
             val path = Path()
             path.moveTo(0f, centerY)
             val segments = 100
             for (i in 0..segments) {
                 val x = (i.toFloat() / segments) * progressX
-                val relativeX = (i.toFloat() / segments) * 10f // frequency
-                val y = centerY + sin(relativeX - (if (isPlaying) phase else 0f)).toFloat() * 8.dp.toPx()
+                val relativeX = (i.toFloat() / segments) * 9f
+                val waveAmplitude = 7.dp.toPx()
+                val y = centerY + sin(relativeX - (if (isPlaying) phase else 0f)).toFloat() * waveAmplitude
                 path.lineTo(x, y)
             }
             
             drawPath(
                 path = path,
                 color = Color(0xFFE91E63),
-                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
             )
         }
     }
@@ -988,26 +1004,27 @@ fun WavySlider(
 fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Sleep Timer") },
+        title = { Text("Set Sleep Timer", fontWeight = FontWeight.ExtraBold) },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(15, 30, 45, 60).forEach { mins ->
                     ListItem(
-                        headlineContent = { Text("$mins Minutes") },
-                        modifier = Modifier.clickable { onSet(mins); onDismiss() },
+                        headlineContent = { Text("$mins Minutes", fontWeight = FontWeight.SemiBold) },
+                        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSet(mins); onDismiss() },
                         leadingContent = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 }
                 ListItem(
-                    headlineContent = { Text("Turn Off", color = MaterialTheme.colorScheme.error) },
-                    modifier = Modifier.clickable { onSet(null); onDismiss() },
+                    headlineContent = { Text("Cancel Timer", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSet(null); onDismiss() },
                     leadingContent = { Icon(Icons.Rounded.TimerOff, null, tint = MaterialTheme.colorScheme.error) }
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        shape = RoundedCornerShape(32.dp)
     )
 }
 
@@ -1029,30 +1046,40 @@ fun PlaylistDetailView(
         allTracks.filter { it.uri in playlist.trackUris }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.fillMaxHeight(0.9f)) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss, 
+        modifier = Modifier.fillMaxHeight(0.92f),
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outlineVariant) }
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(130.dp), 
-                    shape = RoundedCornerShape(28.dp), 
+                    shape = RoundedCornerShape(32.dp), 
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 4.dp
+                    shadowElevation = 12.dp
                 ) {
                     if (playlist.thumbnailUri != null) {
                         AsyncImage(model = playlist.thumbnailUri, contentDescription = null, contentScale = ContentScale.Crop)
                     } else {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                     }
                 }
-                Spacer(Modifier.width(20.dp))
+                Spacer(Modifier.width(24.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(playlist.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("${playlistTracks.size} tracks", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+                    Text(playlist.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                    Text("${playlistTracks.size} tracks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 if (isEditable) {
-                    IconButton(onClick = { onDeletePlaylist(playlist) }) { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                    IconButton(
+                        onClick = { onDeletePlaylist(playlist) },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), CircleShape)
+                    ) { 
+                        Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) 
+                    }
                 }
             }
             
@@ -1061,25 +1088,29 @@ fun PlaylistDetailView(
                     onClick = { onPlayPlaylist(playlist) }, 
                     modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(20.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                 ) {
-                    Icon(Icons.Rounded.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Play All")
+                    Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Shuffle Play", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 }
                 if (isEditable) {
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(16.dp))
                     FilledTonalIconButton(
                         onClick = { showAddTrack = true },
                         modifier = Modifier.size(60.dp),
                         shape = RoundedCornerShape(20.dp)
                     ) {
-                        Icon(Icons.Rounded.Add, null)
+                        Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp))
                     }
                 }
             }
 
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f), 
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 32.dp)
+            ) {
                 items(playlistTracks) { track ->
                     TrackItem(
                         track = track, 
@@ -1087,8 +1118,8 @@ fun PlaylistDetailView(
                         onClick = { onPlayTrack(track, playlistTracks) }, 
                         onDelete = { onRemoveTrack(track.uri) },
                         onAddToPlaylist = {},
-                        onToggleFavorite = { /* Handled elsewhere if needed */ },
-                        playlists = emptyList<Playlist>(),
+                        onToggleFavorite = { /* viewModel.toggleFavorite(track) */ },
+                        playlists = emptyList(),
                         deleteLabel = if (isEditable) "Remove from Playlist" else "Remove from Favorites"
                     )
                 }
@@ -1099,26 +1130,28 @@ fun PlaylistDetailView(
     if (showAddTrack) {
         AlertDialog(
             onDismissRequest = { showAddTrack = false },
-            title = { Text("Add Track to ${playlist.name}") },
+            title = { Text("Add items to ${playlist.name}", fontWeight = FontWeight.ExtraBold) },
             text = {
                 val availableTracks = allTracks.filter { it.uri !in playlist.trackUris }
                 if (availableTracks.isEmpty()) {
-                    Text("No more tracks to add.")
+                    Text("No new tracks found to add.")
                 } else {
-                    LazyColumn(modifier = Modifier.height(400.dp)) {
+                    LazyColumn(modifier = Modifier.height(400.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(availableTracks) { track ->
                             ListItem(
-                                headlineContent = { Text(track.title) },
-                                supportingContent = { Text(track.artist ?: "Unknown") },
-                                modifier = Modifier.clickable { onAddTrack(track); showAddTrack = false }
+                                headlineContent = { Text(track.title, fontWeight = FontWeight.Bold) },
+                                supportingContent = { Text(track.artist ?: "Unknown Artist") },
+                                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onAddTrack(track); showAddTrack = false },
+                                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                             )
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddTrack = false }) { Text("Close") }
-            }
+                TextButton(onClick = { showAddTrack = false }) { Text("Cancel", fontWeight = FontWeight.Bold) }
+            },
+            shape = RoundedCornerShape(32.dp)
         )
     }
 }
@@ -1129,15 +1162,15 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(220.dp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(36.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        tonalElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (playlist.thumbnailUri != null) {
@@ -1145,7 +1178,7 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                     model = playlist.thumbnailUri,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().alpha(0.4f)
+                    modifier = Modifier.fillMaxSize().alpha(0.65f)
                 )
             } else {
                 Box(
@@ -1153,43 +1186,44 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface)
+                                listOf(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f), MaterialTheme.colorScheme.surface)
                             )
                         )
                 )
             }
             
-            // Play Button on Card
+            // Floating Play Button
             Surface(
                 onClick = onPlay,
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(48.dp),
+                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(56.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primary,
-                tonalElevation = 6.dp
+                shadowElevation = 12.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(36.dp))
                 }
             }
 
             Column(
-                modifier = Modifier.padding(20.dp).align(Alignment.BottomStart)
+                modifier = Modifier.padding(24.dp).align(Alignment.BottomStart)
             ) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 6.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.AutoMirrored.Rounded.QueueMusic, 
                             null, 
-                            modifier = Modifier.size(24.dp), 
+                            modifier = Modifier.size(28.dp), 
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(16.dp))
                 Text(
                     playlist.name, 
                     style = MaterialTheme.typography.titleLarge, 
@@ -1198,9 +1232,10 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${playlist.trackUris.size} tracks", 
+                    "${playlist.trackUris.size} tracks recorded", 
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -1228,26 +1263,27 @@ fun TrackItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         color = when {
             isSelected -> MaterialTheme.colorScheme.primaryContainer
-            isCurrent -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            isCurrent -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
             else -> Color.Transparent
         }
     ) {
         Row(
-            modifier = Modifier.padding(8.dp), 
+            modifier = Modifier.padding(10.dp), 
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                tonalElevation = 2.dp
+                modifier = Modifier.size(60.dp),
+                shape = RoundedCornerShape(18.dp),
+                shadowElevation = 2.dp,
+                tonalElevation = 4.dp
             ) {
                 AsyncImage(
                     model = track.thumbnailUri, 
@@ -1257,16 +1293,16 @@ fun TrackItem(
                     error = painterResource(android.R.drawable.ic_media_play)
                 )
                 if (isSelected) {
-                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Check, null, tint = Color.White)
+                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(28.dp))
                     }
                 }
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(18.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title, 
-                    fontWeight = FontWeight.Bold, 
+                    fontWeight = FontWeight.ExtraBold, 
                     maxLines = 1, 
                     overflow = TextOverflow.Ellipsis, 
                     color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
@@ -1275,7 +1311,8 @@ fun TrackItem(
                 Text(
                     track.artist ?: "Unknown Artist", 
                     style = MaterialTheme.typography.bodySmall, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Medium
                 )
             }
             
@@ -1287,25 +1324,26 @@ fun TrackItem(
                 )
             } else {
                 IconButton(onClick = onToggleFavorite) {
-                    Icon(
-                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        null,
-                        tint = if (track.isFavorite) Color.Red else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    val favIcon = if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder
+                    val favColor = if (track.isFavorite) Color.Red else MaterialTheme.colorScheme.outline
+                    Icon(favIcon, null, tint = favColor, modifier = Modifier.size(24.dp))
                 }
                 
                 IconButton(onClick = { showMenu = true }) { 
-                    Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(20.dp)) 
+                    Icon(Icons.Rounded.MoreVert, null, tint = MaterialTheme.colorScheme.outline) 
                 }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenu(
+                    expanded = showMenu, 
+                    onDismissRequest = { showMenu = false },
+                    shape = RoundedCornerShape(20.dp)
+                ) {
                     DropdownMenuItem(
-                        text = { Text("Add to Playlist") }, 
+                        text = { Text("Add to Playlist", fontWeight = FontWeight.Medium) }, 
                         onClick = { showPlaylistPicker = true; showMenu = false }, 
                         leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null) }
                     )
                     DropdownMenuItem(
-                        text = { Text(deleteLabel) }, 
+                        text = { Text(deleteLabel, fontWeight = FontWeight.Medium) }, 
                         onClick = { onDelete(); showMenu = false }, 
                         leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
                     )
@@ -1317,25 +1355,27 @@ fun TrackItem(
     if (showPlaylistPicker) {
         AlertDialog(
             onDismissRequest = { showPlaylistPicker = false },
-            title = { Text("Add to Playlist") },
+            title = { Text("Select Playlist", fontWeight = FontWeight.ExtraBold) },
             text = {
                 if (playlists.isEmpty()) {
-                    Text("No playlists created yet.")
+                    Text("Create a playlist first to add tracks.")
                 } else {
-                    LazyColumn(modifier = Modifier.height(300.dp)) {
+                    LazyColumn(modifier = Modifier.height(300.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(playlists) { playlist ->
                             ListItem(
-                                headlineContent = { Text(playlist.name) },
-                                modifier = Modifier.clickable { onAddToPlaylist(playlist); showPlaylistPicker = false },
-                                leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) }
+                                headlineContent = { Text(playlist.name, fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable { onAddToPlaylist(playlist); showPlaylistPicker = false },
+                                leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) },
+                                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                             )
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showPlaylistPicker = false }) { Text("Cancel") }
-            }
+                TextButton(onClick = { showPlaylistPicker = false }) { Text("Cancel", fontWeight = FontWeight.Bold) }
+            },
+            shape = RoundedCornerShape(32.dp)
         )
     }
 }
@@ -1354,33 +1394,40 @@ fun MiniPlayer(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .height(72.dp)
-            .shadow(12.dp, RoundedCornerShape(24.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .height(96.dp)
+            .shadow(24.dp, RoundedCornerShape(32.dp))
             .bouncyClick(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 8.dp
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(12.dp),
+        shape = RoundedCornerShape(32.dp),
+        tonalElevation = 16.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Progress background
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(progressPercent)
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            )
+                        )
+                    )
             )
 
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(8.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    tonalElevation = 2.dp
+                    modifier = Modifier.size(64.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    shadowElevation = 6.dp,
+                    tonalElevation = 4.dp
                 ) {
                     AsyncImage(
                         model = track.thumbnailUri,
@@ -1391,49 +1438,53 @@ fun MiniPlayer(
                     )
                 }
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(18.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         track.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         track.artist ?: "Unknown Artist",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                IconButton(
+                Surface(
                     onClick = onTogglePlay,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    modifier = Modifier.size(60.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 8.dp
                 ) {
-                    Icon(
-                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = "Toggle Play",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
                 }
             }
 
-            // Thin progress line at bottom
             LinearProgressIndicator(
                 progress = { progressPercent },
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .height(2.dp),
+                    .height(6.dp),
                 color = MaterialTheme.colorScheme.primary,
-                trackColor = Color.Transparent
+                trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                strokeCap = StrokeCap.Round
             )
         }
     }
@@ -1444,26 +1495,33 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Playlist", fontWeight = FontWeight.Bold) },
+        title = { Text("New Collection", fontWeight = FontWeight.ExtraBold) },
         text = { 
             OutlinedTextField(
                 value = name, 
                 onValueChange = { name = it }, 
                 label = { Text("Playlist Name") }, 
                 modifier = Modifier.fillMaxWidth(), 
-                shape = RoundedCornerShape(16.dp),
-                singleLine = true
+                shape = RoundedCornerShape(20.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                )
             ) 
         },
         confirmButton = { 
             Button(
                 onClick = { if (name.isNotBlank()) onCreate(name) },
-                shape = RoundedCornerShape(12.dp)
-            ) { Text("Create") } 
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.height(48.dp)
+            ) { Text("Create", fontWeight = FontWeight.Bold) } 
         },
         dismissButton = { 
-            TextButton(onClick = onDismiss) { Text("Cancel") } 
-        }
+            TextButton(onClick = onDismiss) { Text("Cancel", fontWeight = FontWeight.Bold) } 
+        },
+        shape = RoundedCornerShape(36.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 
@@ -1475,25 +1533,27 @@ fun MultiSelectPlaylistPicker(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Selected to Playlist", fontWeight = FontWeight.Bold) },
+        title = { Text("Add Selection to...", fontWeight = FontWeight.ExtraBold) },
         text = {
             if (playlists.isEmpty()) {
-                Text("No playlists created yet.")
+                Text("You don't have any playlists yet.")
             } else {
-                LazyColumn(modifier = Modifier.height(300.dp)) {
+                LazyColumn(modifier = Modifier.height(300.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(playlists) { playlist ->
                         ListItem(
-                            headlineContent = { Text(playlist.name) },
-                            modifier = Modifier.clickable { onPlaylistSelected(playlist) },
-                            leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) }
+                            headlineContent = { Text(playlist.name, fontWeight = FontWeight.Bold) },
+                            modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onPlaylistSelected(playlist) },
+                            leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) },
+                            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                         )
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDismiss() }) { Text("Cancel") }
-        }
+            TextButton(onClick = { onDismiss() }) { Text("Cancel", fontWeight = FontWeight.Bold) }
+        },
+        shape = RoundedCornerShape(36.dp)
     )
 }
 
