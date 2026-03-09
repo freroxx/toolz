@@ -19,7 +19,10 @@ import javax.inject.Inject
 data class AltimeterState(
     val altitudeMeters: Double = 0.0,
     val pressureHpa: Float = 0f,
-    val source: String = "Waiting..."
+    val source: String = "Detecting...",
+    val maxAltitude: Double = 0.0,
+    val minAltitude: Double = Double.MAX_VALUE,
+    val accuracy: Float = 0f
 )
 
 @HiltViewModel
@@ -36,21 +39,33 @@ class AltimeterViewModel @Inject constructor(
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            // Only use GPS altitude if barometer is not available or hasn't provided a value yet
+            val location = result.lastLocation ?: return
             if (pressureSensor == null || _uiState.value.pressureHpa == 0f) {
-                result.lastLocation?.let { location ->
-                    _uiState.update { it.copy(altitudeMeters = location.altitude, source = "GPS") }
-                }
+                updateAltitude(location.altitude, "GPS", location.accuracy)
             }
+        }
+    }
+
+    private fun updateAltitude(altitude: Double, source: String, accuracy: Float = 0f) {
+        _uiState.update { 
+            it.copy(
+                altitudeMeters = altitude,
+                source = source,
+                maxAltitude = maxOf(it.maxAltitude, altitude),
+                minAltitude = if (it.minAltitude == Double.MAX_VALUE) altitude else minOf(it.minAltitude, altitude),
+                accuracy = accuracy
+            )
         }
     }
 
     @SuppressLint("MissingPermission")
     fun startListening() {
         if (pressureSensor != null) {
-            sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_NORMAL)
         }
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000)
+            .setMinUpdateDistanceMeters(1f)
+            .build()
         fusedLocationClient.requestLocationUpdates(request, locationCallback, context.mainLooper)
     }
 
@@ -62,9 +77,9 @@ class AltimeterViewModel @Inject constructor(
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type == Sensor.TYPE_PRESSURE) {
             val pressure = event.values[0]
-            // Standard barometric formula for altitude
             val altitude = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, pressure)
-            _uiState.update { it.copy(altitudeMeters = altitude.toDouble(), pressureHpa = pressure, source = "Barometer") }
+            _uiState.update { it.copy(pressureHpa = pressure) }
+            updateAltitude(altitude.toDouble(), "Barometer")
         }
     }
 

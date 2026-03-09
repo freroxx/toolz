@@ -14,9 +14,15 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.steps.StepDao
+import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -28,12 +34,18 @@ class StepCounterService : Service(), SensorEventListener {
     @Inject
     lateinit var stepRepository: StepRepository
 
+    @Inject
+    lateinit var stepDao: StepDao
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var sensorManager: SensorManager? = null
     private var stepSensor: Sensor? = null
 
-    private var initialSteps = -1
     private var currentGoal = 10000
+    private var isNotificationEnabled = true
+    
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    private val todayStr: String get() = dateFormat.format(Date())
 
     private val binder = LocalBinder()
 
@@ -49,8 +61,15 @@ class StepCounterService : Service(), SensorEventListener {
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         
         serviceScope.launch {
-            settingsRepository.stepGoal.collect { goal ->
+            combine(
+                settingsRepository.stepGoal,
+                settingsRepository.notificationsEnabled,
+                settingsRepository.stepNotifications
+            ) { goal, globalEnabled, stepEnabled ->
+                Triple(goal, globalEnabled, stepEnabled)
+            }.collect { (goal, global, step) ->
                 currentGoal = goal
+                isNotificationEnabled = global && step
                 updateNotification()
             }
         }
@@ -81,13 +100,32 @@ class StepCounterService : Service(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
             val totalStepsSinceBoot = event.values[0].toInt()
-            if (initialSteps == -1) {
-                initialSteps = totalStepsSinceBoot
-            }
-            val stepsToday = totalStepsSinceBoot - initialSteps
-            if (stepRepository.currentSteps.value != stepsToday) {
-                stepRepository.updateSteps(stepsToday)
-                updateNotification()
+            
+            serviceScope.launch {
+                val currentEntry = stepDao.getStepsForDate(todayStr).first()
+                
+                if (currentEntry == null) {
+                    // New day, initialize
+                    stepDao.insertOrUpdateSteps(StepEntry(todayStr, 0, totalStepsSinceBoot))
+                } else {
+                    val lastSensorValue = currentEntry.lastSensorValue
+                    
+                    if (totalStepsSinceBoot != lastSensorValue) {
+                        val stepsSinceLastUpdate = if (totalStepsSinceBoot < lastSensorValue) {
+                            // Reboot happened
+                            totalStepsSinceBoot
+                        } else {
+                            totalStepsSinceBoot - lastSensorValue
+                        }
+                        
+                        val newSteps = currentEntry.steps + stepsSinceLastUpdate
+                        stepDao.insertOrUpdateSteps(StepEntry(todayStr, newSteps, totalStepsSinceBoot))
+                        
+                        if (isNotificationEnabled) {
+                            updateNotification()
+                        }
+                    }
+                }
             }
         }
     }
@@ -111,15 +149,22 @@ class StepCounterService : Service(), SensorEventListener {
             this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
 
-        val steps = stepRepository.currentSteps.value
-        return NotificationCompat.Builder(this, channelId)
+        val steps = runBlocking { stepRepository.currentSteps.first() }
+        
+        val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Step Counter")
-            .setContentText("$steps / $currentGoal steps")
             .setSmallIcon(android.R.drawable.ic_menu_directions) 
-            .setProgress(currentGoal, steps, false)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .build()
+
+        if (isNotificationEnabled) {
+            builder.setContentText("$steps / $currentGoal steps")
+                .setProgress(currentGoal, steps, false)
+        } else {
+            builder.setContentText("Step tracking active")
+        }
+        
+        return builder.build()
     }
 
     private fun updateNotification() {

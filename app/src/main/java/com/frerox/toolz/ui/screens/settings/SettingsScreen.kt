@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,6 +56,7 @@ fun SettingsScreen(
     
     val hapticFeedback by viewModel.hapticFeedback.collectAsState()
     val unitSystem by viewModel.unitSystem.collectAsState()
+    val showQibla by viewModel.showQibla.collectAsState()
 
     // Music Player Settings
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState()
@@ -102,7 +104,7 @@ fun SettingsScreen(
                 onQueryChange = { viewModel.onSearchQueryChange(it) }
             )
 
-            if (matches(searchQuery, "step goal", "health", "units")) {
+            if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass")) {
                 SettingsSection(title = "General") {
                     SettingsItem(
                         title = "Unit System",
@@ -130,6 +132,14 @@ fun SettingsScreen(
                         icon = Icons.Rounded.Vibration,
                         checked = hapticFeedback,
                         onCheckedChange = { viewModel.setHapticFeedback(it) }
+                    )
+
+                    SettingsToggleItem(
+                        title = "Show Qibla",
+                        subtitle = "Display Kaaba direction in compass",
+                        icon = Icons.Rounded.Explore,
+                        checked = showQibla,
+                        onCheckedChange = { viewModel.setShowQibla(it) }
                     )
 
                     SettingsItem(
@@ -348,7 +358,7 @@ fun SettingsScreen(
                         SettingsItem(
                             title = "Custom Shutter Sound",
                             subtitle = if (shutterSoundUri == null) "System Default" else Uri.parse(shutterSoundUri!!).lastPathSegment ?: "Custom",
-                            icon = Icons.Rounded.QueueMusic,
+                            icon = Icons.AutoMirrored.Rounded.QueueMusic,
                             onClick = { shutterPickerLauncher.launch("audio/*") }
                         )
                     }
@@ -428,7 +438,7 @@ fun AboutSection() {
             Text("Version 1.6.0", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                "The ultimate toolkit for daily needs, designed with Material 3 expressive principles.",
+                "The ultimate toolkit for daily needs, made and designed by frerox",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )

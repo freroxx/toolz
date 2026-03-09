@@ -39,7 +39,7 @@ fun StopwatchScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Stopwatch", fontWeight = FontWeight.ExtraBold) },
+                title = { Text("STOPWATCH", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -75,19 +75,19 @@ fun StopwatchScreen(
 
                 val primaryColor = MaterialTheme.colorScheme.primary
                 
-                Canvas(modifier = Modifier.size(300.dp)) {
+                Canvas(modifier = Modifier.size(320.dp)) {
                     drawCircle(
-                        color = primaryColor.copy(alpha = 0.1f),
-                        style = Stroke(width = 12.dp.toPx())
+                        color = primaryColor.copy(alpha = 0.05f),
+                        style = Stroke(width = 20.dp.toPx())
                     )
                     
                     if (state.isRunning) {
                         drawArc(
                             color = primaryColor,
                             startAngle = rotation - 90f,
-                            sweepAngle = 60f,
+                            sweepAngle = 90f,
                             useCenter = false,
-                            style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                            style = Stroke(width = 20.dp.toPx(), cap = StrokeCap.Round)
                         )
                     }
                 }
@@ -97,7 +97,7 @@ fun StopwatchScreen(
                         text = formatTime(state.elapsedTime),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 64.sp,
+                            fontSize = 72.sp,
                             fontWeight = FontWeight.Black,
                             letterSpacing = (-2).sp
                         ),
@@ -105,12 +105,18 @@ fun StopwatchScreen(
                     )
                     
                     val lapTime = if (state.laps.isEmpty()) state.elapsedTime else state.elapsedTime - state.laps.first()
-                    Text(
-                        text = "Current Lap: ${formatTime(lapTime)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = formatTime(lapTime),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
             
@@ -122,59 +128,73 @@ fun StopwatchScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Reset Button
-                OutlinedIconButton(
+                Surface(
                     onClick = { viewModel.reset() },
                     modifier = Modifier.size(72.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    border = IconButtonDefaults.outlinedIconButtonBorder(enabled = true)
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = 2.dp
                 ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
+                    }
                 }
                 
                 // Start/Stop Button
-                FilledTonalIconButton(
+                Surface(
                     onClick = { viewModel.toggleStartStop() },
-                    modifier = Modifier.size(96.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
-                    )
+                    modifier = Modifier.size(100.dp),
+                    shape = CircleShape,
+                    color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 8.dp
                 ) {
-                    Icon(
-                        imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (state.isRunning) "Pause" else "Start",
-                        modifier = Modifier.size(48.dp),
-                        tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (state.isRunning) "Pause" else "Start",
+                            modifier = Modifier.size(56.dp),
+                            tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
                 
                 // Lap Button
-                FilledIconButton(
-                    onClick = { viewModel.lap() },
+                Surface(
+                    onClick = { if (state.isRunning) viewModel.lap() },
                     modifier = Modifier.size(72.dp),
                     enabled = state.isRunning,
-                    shape = RoundedCornerShape(20.dp)
+                    shape = CircleShape,
+                    color = if (state.isRunning) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    tonalElevation = 2.dp
                 ) {
-                    Icon(Icons.Rounded.Flag, contentDescription = "Lap", modifier = Modifier.size(32.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Flag, 
+                            contentDescription = "Lap", 
+                            modifier = Modifier.size(32.dp),
+                            tint = if (state.isRunning) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        )
+                    }
                 }
             }
             
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-            ) {
+            Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                Text(
+                    "LAPS", 
+                    style = MaterialTheme.typography.labelLarge, 
+                    fontWeight = FontWeight.Black, 
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
                 if (state.laps.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No laps recorded", color = MaterialTheme.colorScheme.outline)
+                        Text("No laps recorded", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         itemsIndexed(state.laps) { index, lapTime ->
                             val duration = if (index == state.laps.size - 1) {
@@ -198,8 +218,8 @@ fun StopwatchScreen(
 @Composable
 fun LapItem(lapNumber: Int, totalTime: Long, lapDuration: Long) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -207,23 +227,46 @@ fun LapItem(lapNumber: Int, totalTime: Long, lapDuration: Long) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = lapNumber.toString(),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "Lap Time",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Text(
+                        text = formatTime(lapDuration),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "LAP $lapNumber",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "Total",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = formatTime(lapDuration),
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace)
+                    text = formatTime(totalTime),
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                text = formatTime(totalTime),
-                style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

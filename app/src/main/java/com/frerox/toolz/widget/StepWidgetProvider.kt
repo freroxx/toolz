@@ -10,6 +10,8 @@ import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.steps.StepRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -20,9 +22,7 @@ class StepWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (appWidgetId in appWidgetIds) {
-            val steps = stepRepository.currentSteps.value
-            // In a real app, we'd fetch the goal from settings too.
-            // For widget, we can't easily collect flows, so we use the current value.
+            val steps = runBlocking { stepRepository.currentSteps.first() }
             
             val views = RemoteViews(context.packageName, R.layout.step_widget)
             views.setTextViewText(R.id.widget_step_count, steps.toString())

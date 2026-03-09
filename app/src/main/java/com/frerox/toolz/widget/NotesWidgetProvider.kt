@@ -18,7 +18,6 @@ class NotesWidgetProvider : AppWidgetProvider() {
 
             // Intent to start the app when clicking "Add Note"
             val addNoteIntent = Intent(context, MainActivity::class.java).apply {
-                // You could add an extra to tell the app to open the notepad directly
                 putExtra("navigate_to", "notepad") 
             }
             val addNotePendingIntent = PendingIntent.getActivity(
@@ -31,6 +30,7 @@ class NotesWidgetProvider : AppWidgetProvider() {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
+            // Use setRemoteAdapter with (int viewId, Intent intent) which is recommended
             views.setRemoteAdapter(R.id.widget_notes_list, serviceIntent)
             views.setEmptyView(R.id.widget_notes_list, android.R.id.empty)
 

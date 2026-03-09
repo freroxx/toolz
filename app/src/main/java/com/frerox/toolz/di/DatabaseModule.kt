@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
+import com.frerox.toolz.data.steps.StepDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -36,5 +37,10 @@ object DatabaseModule {
     @Provides
     fun provideMusicDao(database: AppDatabase): MusicDao {
         return database.musicDao()
+    }
+
+    @Provides
+    fun provideStepDao(database: AppDatabase): StepDao {
+        return database.stepDao()
     }
 }

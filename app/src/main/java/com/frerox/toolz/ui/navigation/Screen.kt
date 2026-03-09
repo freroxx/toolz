@@ -1,6 +1,7 @@
 package com.frerox.toolz.ui.navigation
 
 sealed class Screen(val route: String) {
+    object Loading : Screen("loading")
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
     
@@ -38,6 +39,7 @@ sealed class Screen(val route: String) {
     object BatteryInfo : Screen("battery_info")
     object VoiceRecorder : Screen("voice_recorder")
     object FlipCoin : Screen("flip_coin")
+    object PeriodicTable : Screen("periodic_table")
     
     // Media
     object MusicPlayer : Screen("music_player")

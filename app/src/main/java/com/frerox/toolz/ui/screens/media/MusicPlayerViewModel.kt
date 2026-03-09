@@ -2,6 +2,9 @@ package com.frerox.toolz.ui.screens.media
 
 import android.content.Context
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorManager
+import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.ViewModel
@@ -9,8 +12,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -60,11 +62,37 @@ class MusicPlayerViewModel @Inject constructor(
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
+    
+    private var equalizer: Equalizer? = null
+    private var shakeDetector: ShakeDetector? = null
+    private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
     init {
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicPlaybackSpeed.collect { speed ->
+                player.playbackParameters = PlaybackParameters(speed)
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicShakeToSkip.collect { enabled ->
+                if (enabled) {
+                    startShakeDetection()
+                } else {
+                    stopShakeDetection()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicEqualizerPreset.collect { preset ->
+                applyEqualizerPreset(preset)
             }
         }
 
@@ -95,6 +123,7 @@ class MusicPlayerViewModel @Inject constructor(
                 if (isPlaying) {
                     startProgressUpdate()
                     startPlayerService()
+                    initEqualizer()
                 } else {
                     stopProgressUpdate()
                 }
@@ -125,8 +154,63 @@ class MusicPlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
             }
         })
-        
-        scanMusic()
+    }
+
+    private fun startShakeDetection() {
+        if (shakeDetector == null) {
+            shakeDetector = ShakeDetector {
+                if (player.isPlaying) {
+                    skipNext()
+                }
+            }
+        }
+        sensorManager.registerListener(
+            shakeDetector,
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            SensorManager.SENSOR_DELAY_UI
+        )
+    }
+
+    private fun stopShakeDetection() {
+        shakeDetector?.let { sensorManager.unregisterListener(it) }
+    }
+
+    private fun initEqualizer() {
+        if (equalizer == null && player.audioSessionId != 0) {
+            try {
+                equalizer = Equalizer(0, player.audioSessionId).apply {
+                    enabled = true
+                }
+                viewModelScope.launch {
+                    applyEqualizerPreset(settingsRepository.musicEqualizerPreset.first())
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun applyEqualizerPreset(preset: String) {
+        val eq = equalizer ?: return
+        try {
+            val numPresets = eq.numberOfPresets
+            for (i in 0 until numPresets) {
+                if (eq.getPresetName(i.toShort()).equals(preset, ignoreCase = true)) {
+                    eq.usePreset(i.toShort())
+                    return
+                }
+            }
+            if (preset == "Bass Boost") {
+                for (i in 0 until eq.numberOfBands.toInt()) {
+                    val freq = eq.getCenterFreq(i.toShort())
+                    if (freq < 500000) {
+                        eq.setBandLevel(i.toShort(), 1000)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun startPlayerService() {
@@ -327,6 +411,8 @@ class MusicPlayerViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         stopProgressUpdate()
+        stopShakeDetection()
         sleepTimerJob?.cancel()
+        equalizer?.release()
     }
 }

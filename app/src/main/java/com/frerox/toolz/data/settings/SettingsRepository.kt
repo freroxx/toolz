@@ -41,6 +41,7 @@ class SettingsRepository @Inject constructor(
     // New Settings
     private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
     private val UNIT_SYSTEM = stringPreferencesKey("unit_system") // "METRIC", "IMPERIAL"
+    private val SHOW_QIBLA = booleanPreferencesKey("show_qibla")
 
     // Music Player Settings
     private val MUSIC_AUDIO_FOCUS = booleanPreferencesKey("music_audio_focus")
@@ -81,6 +82,7 @@ class SettingsRepository @Inject constructor(
     // New Flows
     val hapticFeedback: Flow<Boolean> = context.dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
     val unitSystem: Flow<String> = context.dataStore.data.map { it[UNIT_SYSTEM] ?: "METRIC" }
+    val showQibla: Flow<Boolean> = context.dataStore.data.map { it[SHOW_QIBLA] ?: false }
 
     // Music Flows
     val musicAudioFocus: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
@@ -118,6 +120,7 @@ class SettingsRepository @Inject constructor(
     // New Setters
     suspend fun setHapticFeedback(enabled: Boolean) { context.dataStore.edit { it[HAPTIC_FEEDBACK] = enabled } }
     suspend fun setUnitSystem(unit: String) { context.dataStore.edit { it[UNIT_SYSTEM] = unit } }
+    suspend fun setShowQibla(enabled: Boolean) { context.dataStore.edit { it[SHOW_QIBLA] = enabled } }
 
     // Music Setters
     suspend fun setMusicAudioFocus(enabled: Boolean) { context.dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
