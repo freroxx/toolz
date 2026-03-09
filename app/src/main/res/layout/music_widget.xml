@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -10,11 +12,13 @@
 
     <ImageView
         android:id="@+id/widget_music_album_art"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
         android:src="@android:drawable/ic_menu_gallery"
         android:scaleType="centerCrop"
         android:background="@drawable/widget_item_background"
+        tools:targetApi="s"
+        android:clipToOutline="true"
         android:contentDescription="Album Art" />
 
     <LinearLayout
@@ -22,55 +26,66 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_marginStart="12dp">
+        android:layout_marginStart="14dp">
 
         <TextView
             android:id="@+id/widget_music_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Track Title"
-            android:textSize="14sp"
+            android:text="Not Playing"
+            android:textSize="15sp"
             android:textStyle="bold"
-            android:textColor="#333333"
-            android:singleLine="true" />
+            android:textColor="#1C1B1F"
+            android:singleLine="true"
+            android:ellipsize="marquee" />
 
         <TextView
             android:id="@+id/widget_music_artist"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Artist Name"
-            android:textSize="12sp"
-            android:textColor="#666666"
+            android:text="Select a track"
+            android:textSize="13sp"
+            android:textColor="#49454F"
             android:singleLine="true" />
     </LinearLayout>
 
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <ImageButton
             android:id="@+id/widget_music_prev"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:src="@android:drawable/ic_media_previous"
             android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            app:tint="#49454F"
             android:contentDescription="Previous" />
 
         <ImageButton
             android:id="@+id/widget_music_play_pause"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:src="@android:drawable/ic_media_play"
             android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            app:tint="#1C1B1F"
             android:contentDescription="Play/Pause" />
 
         <ImageButton
             android:id="@+id/widget_music_next"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:src="@android:drawable/ic_media_next"
             android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="6dp"
+            android:scaleType="fitCenter"
+            app:tint="#49454F"
             android:contentDescription="Next" />
     </LinearLayout>
 

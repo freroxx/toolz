@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.notepad
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontFamily
@@ -51,45 +53,52 @@ fun NotepadScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("Notepad", fontWeight = FontWeight.ExtraBold) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        if (notes.isNotEmpty()) {
-                            IconButton(onClick = { /* Sort logic */ }) {
-                                Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp
+            ) {
+                Column {
+                    TopAppBar(
+                        title = { Text("Notepad", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium) },
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        actions = {
+                            if (notes.isNotEmpty()) {
+                                IconButton(onClick = { /* Sort logic */ }) {
+                                    Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort")
+                                }
                             }
                         }
-                    }
-                )
-                
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search your notes...") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                    )
+                    
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search your notes...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                                }
                             }
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary
-                    ),
-                    singleLine = true
-                )
+                        },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary
+                        ),
+                        singleLine = true
+                    )
+                }
             }
         },
         floatingActionButton = {
@@ -100,7 +109,7 @@ fun NotepadScreen(
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(28.dp)
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = "Add Note", modifier = Modifier.size(36.dp))
             }
@@ -112,13 +121,13 @@ fun NotepadScreen(
                     Icon(
                         if (searchQuery.isEmpty()) Icons.Rounded.Description else Icons.Rounded.SearchOff, 
                         contentDescription = null, 
-                        modifier = Modifier.size(100.dp), 
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        modifier = Modifier.size(120.dp), 
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                     )
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(24.dp))
                     Text(
                         if (searchQuery.isEmpty()) "Your thoughts belong here" else "No matching notes", 
-                        style = MaterialTheme.typography.bodyLarge, 
+                        style = MaterialTheme.typography.titleMedium, 
                         color = MaterialTheme.colorScheme.outline
                     )
                 }
@@ -127,9 +136,9 @@ fun NotepadScreen(
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(2),
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 80.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalItemSpacing = 12.dp
+                contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalItemSpacing = 16.dp
             ) {
                 items(filteredNotes, key = { it.id }) { note ->
                     ImprovedNoteItem(
@@ -183,16 +192,16 @@ fun ImprovedNoteItem(
         modifier = Modifier
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = noteColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Text(
                     text = note.title.ifEmpty { "Untitled" }, 
                     style = MaterialTheme.typography.titleMedium, 
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     color = onNoteColor,
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
@@ -202,13 +211,13 @@ fun ImprovedNoteItem(
                     Icon(
                         Icons.Rounded.PushPin, 
                         contentDescription = "Pinned", 
-                        modifier = Modifier.size(14.dp).padding(start = 4.dp), 
+                        modifier = Modifier.size(16.dp).padding(start = 4.dp), 
                         tint = onNoteColor
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             
             Text(
                 text = note.content, 
@@ -220,14 +229,14 @@ fun ImprovedNoteItem(
                     },
                     fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
                     fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                    lineHeight = 20.sp
+                    lineHeight = 22.sp
                 ),
-                color = onNoteColor.copy(alpha = 0.8f),
-                maxLines = 10,
+                color = onNoteColor.copy(alpha = 0.7f),
+                maxLines = 12,
                 overflow = TextOverflow.Ellipsis
             )
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -236,27 +245,27 @@ fun ImprovedNoteItem(
             ) {
                 Surface(
                     onClick = onTogglePin,
-                    color = Color.Transparent,
+                    color = onNoteColor.copy(alpha = 0.05f),
                     shape = CircleShape,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Rounded.PushPin,
+                            imageVector = if (note.isPinned) Icons.Rounded.PushPin else Icons.Rounded.PushPin,
                             contentDescription = "Pin",
-                            tint = if (note.isPinned) onNoteColor else onNoteColor.copy(alpha = 0.2f),
+                            tint = if (note.isPinned) onNoteColor else onNoteColor.copy(alpha = 0.3f),
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
                 
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(8.dp))
                 
                 Surface(
                     onClick = onDelete,
-                    color = Color.Transparent,
+                    color = onNoteColor.copy(alpha = 0.05f),
                     shape = CircleShape,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -304,18 +313,23 @@ fun NoteEditorDialog(
             
             Column {
                 TopAppBar(
-                    title = { Text(if (note == null) "New Note" else "Edit Note", color = onBgColor) },
+                    title = { Text(if (note == null) "New Note" else "Edit Note", color = onBgColor, fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onDismiss) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = onBgColor)
                         }
                     },
                     actions = {
-                        TextButton(
+                        Button(
                             onClick = { onSave(title, content, selectedColor, fontStyle, isBold, isItalic) },
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.padding(end = 12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = onBgColor,
+                                contentColor = Color(selectedColor)
+                            ),
+                            shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text("Save", fontWeight = FontWeight.Bold, color = onBgColor)
+                            Text("Save", fontWeight = FontWeight.Black)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -325,9 +339,9 @@ fun NoteEditorDialog(
                     TextField(
                         value = title,
                         onValueChange = { title = it },
-                        placeholder = { Text("Title", style = MaterialTheme.typography.headlineMedium, color = onBgColor.copy(alpha = 0.5f)) },
+                        placeholder = { Text("Title", style = MaterialTheme.typography.headlineMedium, color = onBgColor.copy(alpha = 0.3f)) },
                         modifier = Modifier.fillMaxWidth(),
-                        textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold, color = onBgColor),
+                        textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black, color = onBgColor),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -338,29 +352,35 @@ fun NoteEditorDialog(
                     )
                     
                     // Toolbar
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        color = onBgColor.copy(alpha = 0.05f)
                     ) {
-                        IconButton(onClick = { isBold = !isBold }) {
-                            Icon(Icons.Rounded.FormatBold, contentDescription = "Bold", tint = if (isBold) MaterialTheme.colorScheme.primary else onBgColor)
-                        }
-                        IconButton(onClick = { isItalic = !isItalic }) {
-                            Icon(Icons.Rounded.FormatItalic, contentDescription = "Italic", tint = if (isItalic) MaterialTheme.colorScheme.primary else onBgColor)
-                        }
-                        
-                        Box {
-                            var showFontMenu by remember { mutableStateOf(false) }
-                            TextButton(onClick = { showFontMenu = true }) {
-                                Icon(Icons.Rounded.FontDownload, contentDescription = null, modifier = Modifier.size(18.dp), tint = onBgColor)
-                                Spacer(Modifier.width(8.dp))
-                                Text(fontStyle.replace("_", " "), color = onBgColor)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { isBold = !isBold }) {
+                                Icon(Icons.Rounded.FormatBold, contentDescription = "Bold", tint = if (isBold) MaterialTheme.colorScheme.primary else onBgColor)
                             }
-                            DropdownMenu(expanded = showFontMenu, onDismissRequest = { showFontMenu = false }) {
-                                DropdownMenuItem(text = { Text("Sans Serif") }, onClick = { fontStyle = "SANS_SERIF"; showFontMenu = false })
-                                DropdownMenuItem(text = { Text("Serif") }, onClick = { fontStyle = "SERIF"; showFontMenu = false })
-                                DropdownMenuItem(text = { Text("Monospace") }, onClick = { fontStyle = "MONOSPACE"; showFontMenu = false })
+                            IconButton(onClick = { isItalic = !isItalic }) {
+                                Icon(Icons.Rounded.FormatItalic, contentDescription = "Italic", tint = if (isItalic) MaterialTheme.colorScheme.primary else onBgColor)
+                            }
+                            
+                            Box {
+                                var showFontMenu by remember { mutableStateOf(false) }
+                                TextButton(onClick = { showFontMenu = true }) {
+                                    Icon(Icons.Rounded.FontDownload, contentDescription = null, modifier = Modifier.size(18.dp), tint = onBgColor)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(fontStyle.replace("_", " "), color = onBgColor, fontWeight = FontWeight.Bold)
+                                }
+                                DropdownMenu(expanded = showFontMenu, onDismissRequest = { showFontMenu = false }) {
+                                    DropdownMenuItem(text = { Text("Sans Serif") }, onClick = { fontStyle = "SANS_SERIF"; showFontMenu = false })
+                                    DropdownMenuItem(text = { Text("Serif") }, onClick = { fontStyle = "SERIF"; showFontMenu = false })
+                                    DropdownMenuItem(text = { Text("Monospace") }, onClick = { fontStyle = "MONOSPACE"; showFontMenu = false })
+                                }
                             }
                         }
                     }
@@ -369,15 +389,15 @@ fun NoteEditorDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp)
+                            .padding(vertical = 12.dp)
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         colors.forEach { color ->
                             val argb = color.toArgb()
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
                                     .background(color)
                                     .clickable { selectedColor = argb }
@@ -385,8 +405,13 @@ fun NoteEditorDialog(
                                         width = if (selectedColor == argb) 3.dp else 1.dp,
                                         color = if (selectedColor == argb) onBgColor else onBgColor.copy(alpha = 0.1f),
                                         shape = CircleShape
-                                    )
-                            )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selectedColor == argb) {
+                                    Icon(Icons.Rounded.Check, null, tint = onBgColor, modifier = Modifier.size(20.dp))
+                                }
+                            }
                         }
                     }
 
@@ -395,7 +420,7 @@ fun NoteEditorDialog(
                     TextField(
                         value = content,
                         onValueChange = { content = it },
-                        placeholder = { Text("Write something...", style = MaterialTheme.typography.bodyLarge, color = onBgColor.copy(alpha = 0.5f)) },
+                        placeholder = { Text("Start typing your thoughts...", style = MaterialTheme.typography.bodyLarge, color = onBgColor.copy(alpha = 0.3f)) },
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
                             fontFamily = when(fontStyle) {

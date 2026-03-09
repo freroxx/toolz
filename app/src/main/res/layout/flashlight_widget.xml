@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
-    android:padding="12dp"
+    android:padding="16dp"
     android:gravity="center"
     android:background="@drawable/widget_background">
 
@@ -18,20 +18,24 @@
 
         <ImageButton
             android:id="@+id/widget_flashlight_button"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:src="@android:drawable/ic_lock_power_off"
             android:background="@drawable/circle_background"
-            android:tint="#4CAF50"
+            android:backgroundTint="#FFD54F"
+            android:tint="#000000"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
             android:contentDescription="Toggle" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Toggle"
-            android:textSize="10sp"
-            android:textColor="#333333"
-            android:layout_marginTop="4dp" />
+            android:text="Power"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#1C1B1F"
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
     <LinearLayout
@@ -43,20 +47,23 @@
 
         <ImageButton
             android:id="@+id/widget_flashlight_strobe"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:src="@android:drawable/ic_menu_compass"
             android:background="@drawable/circle_background"
-            android:tint="#2196F3"
+            android:backgroundTint="#E1E2EC"
+            android:tint="#1C1B1F"
+            android:padding="14dp"
+            android:scaleType="fitCenter"
             android:contentDescription="Strobe" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Strobe"
-            android:textSize="10sp"
-            android:textColor="#333333"
-            android:layout_marginTop="4dp" />
+            android:textSize="12sp"
+            android:textColor="#49454F"
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
     <LinearLayout
@@ -68,20 +75,23 @@
 
         <ImageButton
             android:id="@+id/widget_flashlight_sos"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:src="@android:drawable/ic_menu_help"
             android:background="@drawable/circle_background"
-            android:tint="#F44336"
+            android:backgroundTint="#F9DEDC"
+            android:tint="#410E0B"
+            android:padding="14dp"
+            android:scaleType="fitCenter"
             android:contentDescription="SOS" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="SOS"
-            android:textSize="10sp"
-            android:textColor="#333333"
-            android:layout_marginTop="4dp" />
+            android:textSize="12sp"
+            android:textColor="#49454F"
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
 </LinearLayout>

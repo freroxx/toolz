@@ -4,36 +4,30 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
+import androidx.room.Room
 import com.frerox.toolz.R
+import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.Note
-import com.frerox.toolz.data.notepad.NoteDatabase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
 class NotesRemoteViewsFactory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
 
     private var notes: List<Note> = emptyList()
-    private val database = NoteDatabase::class.java // This is not how we get it in Factory, usually via a singleton or manual init
 
     override fun onCreate() {
-        // Initialization if needed
     }
 
     override fun onDataSetChanged() {
-        // This is called when the widget is updated
         // Room doesn't allow database access on main thread, and widget factory can be picky.
-        // In a real app, we'd use a ContentProvider or a singleton.
-        // For simplicity here, we'll try to get it from the database manually.
         runBlocking {
             try {
-                // This is a bit hacky but for a demo/tool environment it works. 
-                // Ideally use a DI-managed singleton.
-                val db = androidx.room.Room.databaseBuilder(
+                val db = Room.databaseBuilder(
                     context,
-                    com.frerox.toolz.data.notepad.NoteDatabase::class.java,
-                    "note_db"
+                    AppDatabase::class.java,
+                    "toolz_db"
                 ).build()
-                notes = db.noteDao().getAllNotes().first().take(5)
+                notes = db.noteDao().getAllNotes().first().take(10)
                 db.close()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -52,18 +46,24 @@ class NotesRemoteViewsFactory(private val context: Context) : RemoteViewsService
         
         val note = notes[position]
         val views = RemoteViews(context.packageName, R.layout.note_widget_item)
-        views.setTextViewText(R.id.widget_note_title, note.title)
+        views.setTextViewText(R.id.widget_note_title, note.title.ifEmpty { "Note" })
         views.setTextViewText(R.id.widget_note_content, note.content)
         
-        // Set background color based on note color
-        // RemoteViews support for background color is limited to setInt(id, "setBackgroundColor", color)
-        views.setInt(R.id.widget_note_container, "setBackgroundColor", note.color)
+        // Material Expressive: Use a cleaner background if color is transparent or default
+        val color = if (note.color == 0) 0xFFF5F5F5.toInt() else note.color
+        views.setInt(R.id.widget_note_container, "setBackgroundColor", color)
+
+        val fillInIntent = Intent().apply {
+            putExtra("note_id", note.id)
+            putExtra("navigate_to", "notepad")
+        }
+        views.setOnClickFillInIntent(R.id.widget_note_container, fillInIntent)
 
         return views
     }
 
     override fun getLoadingView(): RemoteViews? = null
     override fun getViewTypeCount(): Int = 1
-    override fun getItemId(position: Int): Long = notes[position].id.toLong()
+    override fun getItemId(position: Int): Long = try { notes[position].id.toLong() } catch (e: Exception) { position.toLong() }
     override fun hasStableIds(): Boolean = true
 }
