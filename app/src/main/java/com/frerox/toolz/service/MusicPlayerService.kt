@@ -1,7 +1,12 @@
 package com.frerox.toolz.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -20,8 +25,15 @@ class MusicPlayerService : MediaSessionService() {
     @Inject
     lateinit var player: ExoPlayer
 
+    companion object {
+        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_ID = "music_playback_channel"
+    }
+
     override fun onCreate() {
         super.onCreate()
+        
+        createNotificationChannel()
         
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
@@ -46,7 +58,33 @@ class MusicPlayerService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
             .build()
+            
+        // Immediately start foreground to avoid ForegroundServiceDidNotStartInTimeException
+        startForeground(NOTIFICATION_ID, createInitialNotification())
     }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Music Playback"
+            val descriptionText = "Controls for music playback"
+            val importance = NotificationManager.IMPORTANCE_LOW
+            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+                setSound(null, null)
+                enableVibration(false)
+            }
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createInitialNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.ic_media_play)
+        .setContentTitle("Music Player")
+        .setContentText("Initializing...")
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setOngoing(true)
+        .build()
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
