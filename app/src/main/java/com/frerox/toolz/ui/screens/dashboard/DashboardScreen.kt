@@ -18,14 +18,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import java.util.*
 
 data class ToolCategory(
@@ -44,10 +51,12 @@ data class ToolItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    onNavigate: (String) -> Unit
+    onNavigate: (String) -> Unit,
+    musicViewModel: MusicPlayerViewModel = hiltViewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
+    val musicState by musicViewModel.uiState.collectAsState()
     
     val filteredCategories = categories.map { category ->
         category.copy(items = category.items.filter { 
@@ -92,34 +101,118 @@ fun DashboardScreen(
             }
         }
     ) { padding ->
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 150.dp),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp, top = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            filteredCategories.forEach { category ->
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text(
-                        text = category.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp),
-                        letterSpacing = 1.sp
-                    )
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 150.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .fadingEdge(
+                        brush = Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.02f to Color.Black,
+                            0.98f to Color.Black,
+                            1f to Color.Transparent
+                        ),
+                        length = 16.dp
+                    ),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 100.dp, top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                filteredCategories.forEach { category ->
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(
+                            text = category.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp),
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    items(category.items) { tool ->
+                        ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                    }
                 }
-                items(category.items) { tool ->
-                    ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                
+                if (filteredCategories.isEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmptySearchState(searchQuery)
+                    }
                 }
             }
-            
-            if (filteredCategories.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    EmptySearchState(searchQuery)
+
+            // Now Playing Pill
+            AnimatedVisibility(
+                visible = musicState.currentTrack != null,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            ) {
+                musicState.currentTrack?.let { track ->
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 24.dp)
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .shadow(12.dp, RoundedCornerShape(36.dp))
+                            .bouncyClick { onNavigate(Screen.MusicPlayer.route) },
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(36.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(56.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                AsyncImage(
+                                    model = track.thumbnailUri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            
+                            Spacer(Modifier.width(16.dp))
+                            
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    track.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    track.artist ?: "Unknown Artist",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            
+                            IconButton(
+                                onClick = { musicViewModel.togglePlayPause() },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            ) {
+                                Icon(
+                                    if (musicState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -61,6 +61,7 @@ import coil.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -269,7 +270,19 @@ fun MusicPlayerScreen(
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 20.dp
+            )
+        ) {
             if (!musicPermission.status.isGranted) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -281,7 +294,9 @@ fun MusicPlayerScreen(
                         Button(
                             onClick = { musicPermission.launchPermissionRequest() },
                             shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier.height(56.dp).fillMaxWidth(0.7f)
+                            modifier = Modifier
+                                .height(56.dp)
+                                .fillMaxWidth(0.7f)
                         ) {
                             Text("Grant Permission", fontWeight = FontWeight.Bold)
                         }
@@ -579,7 +594,9 @@ fun LibrarySection(
     var showFavoritesDetail by remember { mutableStateOf(false) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), 
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp), 
         contentPadding = PaddingValues(bottom = 180.dp)
     ) {
         item {
@@ -831,20 +848,32 @@ fun FullPlayerView(
 
             Spacer(Modifier.height(40.dp))
 
-            // Wavy Seek Bar
-            WavySlider(
-                value = state.progress.toFloat(),
-                onValueChange = { onSeek(it.toLong()) },
-                valueRange = 0f..(state.duration.toFloat().coerceAtLeast(1f)),
-                isPlaying = state.isPlaying
-            )
+            // Redesigned Progress Section
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                WavySlider(
+                    value = state.progress.toFloat(),
+                    onValueChange = { onSeek(it.toLong()) },
+                    valueRange = 0f..(state.duration.toFloat().coerceAtLeast(1f)),
+                    isPlaying = state.isPlaying
+                )
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(formatDuration(state.progress), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatDuration(state.duration), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        formatDuration(state.progress),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        formatDuration(state.duration),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(Modifier.height(40.dp))
@@ -885,7 +914,9 @@ fun FullPlayerView(
 
             // Secondary Options
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -917,7 +948,9 @@ fun FullPlayerView(
                         if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         null,
                         tint = if (track.isFavorite) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(36.dp).scale(favScale)
+                        modifier = Modifier
+                            .size(36.dp)
+                            .scale(favScale)
                     )
                 }
             }
@@ -950,32 +983,39 @@ fun WavySlider(
         label = "phase"
     )
 
-    Box(modifier = Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+
+    Box(modifier = Modifier
+        .fillMaxWidth()
+        .height(52.dp), contentAlignment = Alignment.Center) {
         Slider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
             colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
+                thumbColor = primaryColor,
                 activeTrackColor = Color.Transparent,
                 inactiveTrackColor = Color.Transparent
             ),
             modifier = Modifier.fillMaxWidth()
         )
         
-        Canvas(modifier = Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 8.dp)) {
+        Canvas(modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .padding(horizontal = 8.dp)) {
             val width = size.width
             val height = size.height
             val centerY = height / 2
             val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
             val progressX = width * progress
             
-            // Inactive Track
+            // Inactive Track (Modern dashed or solid thin line)
             drawLine(
                 color = Color.LightGray.copy(alpha = 0.25f),
                 start = androidx.compose.ui.geometry.Offset(progressX, centerY),
                 end = androidx.compose.ui.geometry.Offset(width, centerY),
-                strokeWidth = 6.dp.toPx(),
+                strokeWidth = 4.dp.toPx(),
                 cap = StrokeCap.Round
             )
             
@@ -985,16 +1025,23 @@ fun WavySlider(
             val segments = 100
             for (i in 0..segments) {
                 val x = (i.toFloat() / segments) * progressX
-                val relativeX = (i.toFloat() / segments) * 9f
-                val waveAmplitude = 7.dp.toPx()
+                val relativeX = (i.toFloat() / segments) * 12f // Tighter waves
+                val waveAmplitude = if (isPlaying) 6.dp.toPx() else 1.dp.toPx()
                 val y = centerY + sin(relativeX - (if (isPlaying) phase else 0f)).toFloat() * waveAmplitude
                 path.lineTo(x, y)
             }
             
             drawPath(
                 path = path,
-                color = Color(0xFFE91E63),
-                style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+                color = primaryColor,
+                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+            )
+            
+            // Thumb glow effect
+            drawCircle(
+                color = primaryColor.copy(alpha = 0.15f),
+                radius = 16.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(progressX, centerY)
             )
         }
     }
@@ -1010,13 +1057,17 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                 listOf(15, 30, 45, 60).forEach { mins ->
                     ListItem(
                         headlineContent = { Text("$mins Minutes", fontWeight = FontWeight.SemiBold) },
-                        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSet(mins); onDismiss() },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onSet(mins); onDismiss() },
                         leadingContent = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 }
                 ListItem(
                     headlineContent = { Text("Cancel Timer", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSet(null); onDismiss() },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onSet(null); onDismiss() },
                     leadingContent = { Icon(Icons.Rounded.TimerOff, null, tint = MaterialTheme.colorScheme.error) }
                 )
             }
@@ -1052,7 +1103,9 @@ fun PlaylistDetailView(
         shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
         dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outlineVariant) }
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(130.dp), 
@@ -1086,7 +1139,9 @@ fun PlaylistDetailView(
             Row(modifier = Modifier.padding(vertical = 24.dp)) {
                 Button(
                     onClick = { onPlayPlaylist(playlist) }, 
-                    modifier = Modifier.weight(1f).height(60.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(60.dp),
                     shape = RoundedCornerShape(20.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                 ) {
@@ -1141,7 +1196,9 @@ fun PlaylistDetailView(
                             ListItem(
                                 headlineContent = { Text(track.title, fontWeight = FontWeight.Bold) },
                                 supportingContent = { Text(track.artist ?: "Unknown Artist") },
-                                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onAddTrack(track); showAddTrack = false },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable { onAddTrack(track); showAddTrack = false },
                                 colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                             )
                         }
@@ -1178,7 +1235,9 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                     model = playlist.thumbnailUri,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().alpha(0.65f)
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.65f)
                 )
             } else {
                 Box(
@@ -1195,7 +1254,10 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
             // Floating Play Button
             Surface(
                 onClick = onPlay,
-                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(56.dp),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(20.dp)
+                    .size(56.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primary,
                 shadowElevation = 12.dp
@@ -1206,7 +1268,9 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
             }
 
             Column(
-                modifier = Modifier.padding(24.dp).align(Alignment.BottomStart)
+                modifier = Modifier
+                    .padding(24.dp)
+                    .align(Alignment.BottomStart)
             ) {
                 Surface(
                     modifier = Modifier.size(52.dp),
@@ -1293,7 +1357,9 @@ fun TrackItem(
                     error = painterResource(android.R.drawable.ic_media_play)
                 )
                 if (isSelected) {
-                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(28.dp))
                     }
                 }
@@ -1364,7 +1430,9 @@ fun TrackItem(
                         items(playlists) { playlist ->
                             ListItem(
                                 headlineContent = { Text(playlist.name, fontWeight = FontWeight.Bold) },
-                                modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable { onAddToPlaylist(playlist); showPlaylistPicker = false },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .clickable { onAddToPlaylist(playlist); showPlaylistPicker = false },
                                 leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) },
                                 colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                             )
@@ -1542,7 +1610,9 @@ fun MultiSelectPlaylistPicker(
                     items(playlists) { playlist ->
                         ListItem(
                             headlineContent = { Text(playlist.name, fontWeight = FontWeight.Bold) },
-                            modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onPlaylistSelected(playlist) },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { onPlaylistSelected(playlist) },
                             leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) },
                             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                         )
