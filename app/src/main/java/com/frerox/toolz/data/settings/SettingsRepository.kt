@@ -41,6 +41,7 @@ class SettingsRepository @Inject constructor(
 
     // New Settings
     private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
+    private val HAPTIC_INTENSITY = floatPreferencesKey("haptic_intensity")
     private val UNIT_SYSTEM = stringPreferencesKey("unit_system") // "METRIC", "IMPERIAL"
     private val SHOW_QIBLA = booleanPreferencesKey("show_qibla")
 
@@ -85,6 +86,7 @@ class SettingsRepository @Inject constructor(
 
     // New Flows
     val hapticFeedback: Flow<Boolean> = context.dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
+    val hapticIntensity: Flow<Float> = context.dataStore.data.map { it[HAPTIC_INTENSITY] ?: 0.5f }
     val unitSystem: Flow<String> = context.dataStore.data.map { it[UNIT_SYSTEM] ?: "METRIC" }
     val showQibla: Flow<Boolean> = context.dataStore.data.map { it[SHOW_QIBLA] ?: false }
 
@@ -130,6 +132,7 @@ class SettingsRepository @Inject constructor(
 
     // New Setters
     suspend fun setHapticFeedback(enabled: Boolean) { context.dataStore.edit { it[HAPTIC_FEEDBACK] = enabled } }
+    suspend fun setHapticIntensity(intensity: Float) { context.dataStore.edit { it[HAPTIC_INTENSITY] = intensity } }
     suspend fun setUnitSystem(unit: String) { context.dataStore.edit { it[UNIT_SYSTEM] = unit } }
     suspend fun setShowQibla(enabled: Boolean) { context.dataStore.edit { it[SHOW_QIBLA] = enabled } }
 

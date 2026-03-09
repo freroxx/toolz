@@ -60,6 +60,7 @@ fun SettingsScreen(
     val widgetOpacity by viewModel.widgetOpacity.collectAsState()
     
     val hapticFeedback by viewModel.hapticFeedback.collectAsState()
+    val hapticIntensity by viewModel.hapticIntensity.collectAsState()
     val unitSystem by viewModel.unitSystem.collectAsState()
     val showQibla by viewModel.showQibla.collectAsState()
 
@@ -118,7 +119,7 @@ fun SettingsScreen(
                 onQueryChange = { viewModel.onSearchQueryChange(it) }
             )
 
-            if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass")) {
+            if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration")) {
                 SettingsSection(title = "General") {
                     SettingsItem(
                         title = "Unit System",
@@ -147,6 +148,21 @@ fun SettingsScreen(
                         checked = hapticFeedback,
                         onCheckedChange = { viewModel.setHapticFeedback(it) }
                     )
+
+                    if (hapticFeedback) {
+                        SettingsItem(
+                            title = "Haptic Intensity",
+                            subtitle = "${(hapticIntensity * 100).toInt()}%",
+                            icon = Icons.Rounded.GraphicEq
+                        ) {
+                            Slider(
+                                value = hapticIntensity,
+                                onValueChange = { viewModel.setHapticIntensity(it) },
+                                valueRange = 0.1f..1f,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+                    }
 
                     SettingsToggleItem(
                         title = "Show Qibla",

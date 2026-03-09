@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +54,15 @@ fun StopwatchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .fadingEdge(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.02f to Color.Black,
+                        0.98f to Color.Black,
+                        1f to Color.Transparent
+                    ),
+                    length = 16.dp
+                )
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -107,7 +118,7 @@ fun StopwatchScreen(
                     val lapTime = if (state.laps.isEmpty()) state.elapsedTime else state.elapsedTime - state.laps.first()
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Text(
                             text = formatTime(lapTime),
@@ -144,7 +155,7 @@ fun StopwatchScreen(
                 Surface(
                     onClick = { viewModel.toggleStartStop() },
                     modifier = Modifier.size(100.dp),
-                    shape = CircleShape,
+                    shape = RoundedCornerShape(32.dp),
                     color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
                     shadowElevation = 8.dp
                 ) {
@@ -178,7 +189,9 @@ fun StopwatchScreen(
                 }
             }
             
-            Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            Column(modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)) {
                 Text(
                     "LAPS", 
                     style = MaterialTheme.typography.labelLarge, 
@@ -194,7 +207,8 @@ fun StopwatchScreen(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp)
                     ) {
                         itemsIndexed(state.laps) { index, lapTime ->
                             val duration = if (index == state.laps.size - 1) {
@@ -219,7 +233,7 @@ fun StopwatchScreen(
 fun LapItem(lapNumber: Int, totalTime: Long, lapDuration: Long) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -230,8 +244,8 @@ fun LapItem(lapNumber: Int, totalTime: Long, lapDuration: Long) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     color = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape,
-                    modifier = Modifier.size(32.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(

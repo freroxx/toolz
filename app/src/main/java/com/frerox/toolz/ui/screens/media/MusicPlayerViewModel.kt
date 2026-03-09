@@ -7,6 +7,9 @@ import android.hardware.SensorManager
 import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -49,7 +52,8 @@ data class MusicUiState(
     val isSelectionMode: Boolean = false,
     val showVisualizer: Boolean = true,
     val artShape: String = "CIRCLE",
-    val rotationEnabled: Boolean = true
+    val rotationEnabled: Boolean = true,
+    val hapticIntensity: Float = 0.5f
 )
 
 @HiltViewModel
@@ -69,6 +73,12 @@ class MusicPlayerViewModel @Inject constructor(
     private var equalizer: Equalizer? = null
     private var shakeDetector: ShakeDetector? = null
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    }
 
     init {
         viewModelScope.launch {
@@ -112,30 +122,42 @@ class MusicPlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            settingsRepository.hapticIntensity.collect { intensity ->
+                _uiState.update { it.copy(hapticIntensity = intensity) }
+            }
+        }
+
+        viewModelScope.launch {
             combine(
                 repository.allTracks,
                 repository.allPlaylists,
                 repository.favoriteTracks,
                 _uiState.map { it.sortOrder }.distinctUntilChanged()
             ) { tracks, playlists, favorites, sortOrder ->
-                val sortedTracks = when (sortOrder) {
+                val sortedBase = when (sortOrder) {
                     SortOrder.TITLE -> tracks.sortedBy { it.title }
-                    SortOrder.ARTIST -> tracks.sortedBy { it.artist ?: "" }
+                    SortOrder.ARTIST -> tracks.sortedBy { it.artist ?: "Unknown" }
                     SortOrder.RECENT -> tracks.reversed()
                 }
+
+                // Prioritize tracks with thumbnails and real artists
+                val prioritizedTracks = sortedBase.sortedWith(
+                    compareByDescending<MusicTrack> { it.thumbnailUri != null }
+                        .thenByDescending { it.artist != null && it.artist != "Unknown Artist" && it.artist != "<unknown>" }
+                )
                 
-                val folders = sortedTracks.groupBy { track ->
+                val folders = prioritizedTracks.groupBy { track ->
                     val uri = Uri.parse(track.uri)
                     uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
                 }
 
                 _uiState.update { 
                     it.copy(
-                        tracks = sortedTracks, 
+                        tracks = prioritizedTracks, 
                         playlists = playlists, 
                         favoriteTracks = favorites,
                         folders = folders,
-                        currentTrack = sortedTracks.find { t -> t.uri == it.currentTrack?.uri }
+                        currentTrack = prioritizedTracks.find { t -> t.uri == it.currentTrack?.uri }
                     ) 
                 }
             }.collect()
@@ -148,8 +170,10 @@ class MusicPlayerViewModel @Inject constructor(
                     startProgressUpdate()
                     startPlayerService()
                     initEqualizer()
+                    performHapticFeedback()
                 } else {
                     stopProgressUpdate()
+                    performHapticFeedback()
                 }
             }
 
@@ -162,6 +186,9 @@ class MusicPlayerViewModel @Inject constructor(
                         duration = player.duration.coerceAtLeast(0L)
                     ) 
                 }
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                     performHapticFeedback()
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -172,10 +199,12 @@ class MusicPlayerViewModel @Inject constructor(
 
             override fun onRepeatModeChanged(repeatMode: Int) {
                 _uiState.update { it.copy(repeatMode = repeatMode) }
+                performHapticFeedback()
             }
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                 _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
+                performHapticFeedback()
             }
             
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -183,6 +212,21 @@ class MusicPlayerViewModel @Inject constructor(
                 player.prepare()
             }
         })
+    }
+
+    private fun performHapticFeedback() {
+        viewModelScope.launch {
+            if (settingsRepository.hapticFeedback.first()) {
+                val intensityValue = uiState.value.hapticIntensity
+                val amplitude = (intensityValue * 255).toInt().coerceIn(1, 255)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(VibrationEffect.createOneShot(20, amplitude))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(20)
+                }
+            }
+        }
     }
 
     private fun startShakeDetection() {

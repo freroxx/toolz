@@ -17,7 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -28,6 +30,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.fadingEdge
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,9 +65,23 @@ fun TimerScreen(
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 20.dp
+            )
+        ) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
@@ -79,7 +96,9 @@ fun TimerScreen(
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth().height(260.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -94,7 +113,9 @@ fun TimerScreen(
                         Text(
                             ":", 
                             style = MaterialTheme.typography.displayLarge,
-                            modifier = Modifier.padding(start = 20.dp, end = 20.dp).padding(bottom = 48.dp),
+                            modifier = Modifier
+                                .padding(start = 20.dp, end = 20.dp)
+                                .padding(bottom = 48.dp),
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -121,8 +142,10 @@ fun TimerScreen(
                                     selectedSeconds = 0
                                     if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
-                                modifier = Modifier.weight(1f).height(56.dp),
-                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(56.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                             ) {
@@ -141,8 +164,10 @@ fun TimerScreen(
                                 viewModel.toggleStartStop()
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().height(80.dp),
-                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        shape = RoundedCornerShape(32.dp),
                         color = MaterialTheme.colorScheme.primary,
                         shadowElevation = 8.dp
                     ) {
@@ -159,7 +184,9 @@ fun TimerScreen(
                     // ACTIVE UI
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(340.dp).padding(16.dp)
+                        modifier = Modifier
+                            .size(340.dp)
+                            .padding(16.dp)
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             drawCircle(
@@ -191,7 +218,7 @@ fun TimerScreen(
                             if (state.isPaused) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
                                         "PAUSED", 
@@ -215,7 +242,9 @@ fun TimerScreen(
                                     viewModel.addTime(sec * 1000L)
                                     if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 },
-                                modifier = Modifier.weight(1f).height(56.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(56.dp),
                                 shape = RoundedCornerShape(20.dp),
                                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
                             ) {
@@ -229,7 +258,9 @@ fun TimerScreen(
                     Spacer(Modifier.weight(1f))
                     
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -322,11 +353,15 @@ fun ModernTimePicker(
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            modifier = Modifier.width(100.dp).height(180.dp),
+            modifier = Modifier
+                .width(100.dp)
+                .height(180.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().height(70.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(70.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                 shape = RoundedCornerShape(20.dp)
             ) {}
@@ -359,7 +394,10 @@ fun ModernTimePicker(
 @Composable
 fun TimerFinishedOverlay(onDismiss: () -> Unit) {
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -375,7 +413,9 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
             )
 
             Surface(
-                modifier = Modifier.size(140.dp).scale(pulseScale),
+                modifier = Modifier
+                    .size(140.dp)
+                    .scale(pulseScale),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.error,
                 shadowElevation = 16.dp
@@ -389,7 +429,9 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
             Spacer(Modifier.height(60.dp))
             Surface(
                 onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth().height(80.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(80.dp),
                 shape = RoundedCornerShape(24.dp),
                 color = Color.White
             ) {

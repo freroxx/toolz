@@ -60,6 +60,8 @@ class SettingsViewModel @Inject constructor(
     // New Settings
     val hapticFeedback: StateFlow<Boolean> = repository.hapticFeedback
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val hapticIntensity: StateFlow<Float> = repository.hapticIntensity
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.5f)
     val unitSystem: StateFlow<String> = repository.unitSystem
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "METRIC")
     val showQibla: StateFlow<Boolean> = repository.showQibla
@@ -107,6 +109,7 @@ class SettingsViewModel @Inject constructor(
 
     // New Setters
     fun setHapticFeedback(enabled: Boolean) { viewModelScope.launch { repository.setHapticFeedback(enabled) } }
+    fun setHapticIntensity(intensity: Float) { viewModelScope.launch { repository.setHapticIntensity(intensity) } }
     fun setUnitSystem(unit: String) { viewModelScope.launch { repository.setUnitSystem(unit) } }
     fun setShowQibla(enabled: Boolean) { viewModelScope.launch { repository.setShowQibla(enabled) } }
 
