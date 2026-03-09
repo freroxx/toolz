@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -13,6 +15,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -36,17 +40,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +93,25 @@ fun MusicPlayerScreen(
         rememberPermissionState(Manifest.permission.READ_MEDIA_AUDIO)
     } else {
         rememberPermissionState(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+    var isManageStorageGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                true
+            }
+        )
+    }
+
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            isManageStorageGranted = Environment.isExternalStorageManager()
+            if (isManageStorageGranted) viewModel.scanMusic()
+        }
     }
 
     val folderLauncher = rememberLauncherForActivityResult(
@@ -283,22 +305,44 @@ fun MusicPlayerScreen(
                 length = 20.dp
             )
         ) {
-            if (!musicPermission.status.isGranted) {
+            if (!musicPermission.status.isGranted || !isManageStorageGranted) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Icon(Icons.Rounded.MusicNote, null, modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        Icon(Icons.Rounded.FolderSpecial, null, modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                         Spacer(Modifier.height(24.dp))
-                        Text("Music is missing!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("Grant permission to see your local files.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "To show all your music files, Toolz needs full file access permission.", 
+                            textAlign = TextAlign.Center, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(Modifier.height(32.dp))
-                        Button(
-                            onClick = { musicPermission.launchPermissionRequest() },
-                            shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier
-                                .height(56.dp)
-                                .fillMaxWidth(0.7f)
-                        ) {
-                            Text("Grant Permission", fontWeight = FontWeight.Bold)
+                        
+                        if (!musicPermission.status.isGranted) {
+                            Button(
+                                onClick = { musicPermission.launchPermissionRequest() },
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier.fillMaxWidth(0.8f).height(56.dp)
+                            ) {
+                                Text("Grant Media Access", fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        
+                        if (!isManageStorageGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    manageStorageLauncher.launch(intent)
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                modifier = Modifier.fillMaxWidth(0.8f).height(56.dp)
+                            ) {
+                                Text("Grant All Files Access", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -858,7 +902,7 @@ fun FullPlayerView(
                 )
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
@@ -972,26 +1016,79 @@ fun WavySlider(
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isDragged by interactionSource.collectIsDraggedAsState()
+    
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * Math.PI.toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(2800, easing = LinearEasing),
+            animation = tween(2500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
     )
 
     val primaryColor = MaterialTheme.colorScheme.primary
+    val trackHeight = 12.dp
 
     Box(modifier = Modifier
         .fillMaxWidth()
-        .height(52.dp), contentAlignment = Alignment.Center) {
+        .height(64.dp), contentAlignment = Alignment.Center) {
+        
+        // Background track with Canvas
+        Canvas(modifier = Modifier
+            .fillMaxWidth()
+            .height(trackHeight)
+            .padding(horizontal = 2.dp)) {
+            val width = size.width
+            val centerY = size.height / 2
+            val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start).coerceAtLeast(1f)
+            val progressX = width * progress
+            
+            // Inactive Track
+            drawLine(
+                color = primaryColor.copy(alpha = 0.15f),
+                start = Offset(progressX, centerY),
+                end = Offset(width, centerY),
+                strokeWidth = trackHeight.toPx(),
+                cap = StrokeCap.Round
+            )
+            
+            // Wavy Active Track
+            val path = Path()
+            path.moveTo(0f, centerY)
+            val segments = (width / 4).toInt().coerceAtLeast(50)
+            for (i in 0..segments) {
+                val x = (i.toFloat() / segments) * progressX
+                if (x > progressX) break
+                
+                // Frequency increases when playing
+                val frequency = if (isPlaying) 15f else 10f
+                val relativeX = (i.toFloat() / segments) * frequency
+                
+                // Amplitude increases when playing or dragged
+                val baseAmplitude = if (isPlaying) 8.dp.toPx() else 2.dp.toPx()
+                val dragAmplitude = if (isDragged) 4.dp.toPx() else 0f
+                val y = centerY + sin(relativeX - (if (isPlaying) phase else 0f)).toFloat() * (baseAmplitude + dragAmplitude)
+                
+                path.lineTo(x, y)
+            }
+            
+            drawPath(
+                path = path,
+                color = primaryColor,
+                style = Stroke(width = (if (isDragged) 8.dp else 6.dp).toPx(), cap = StrokeCap.Round)
+            )
+        }
+
+        // Invisible slider to handle interactions
         Slider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
+            interactionSource = interactionSource,
             colors = SliderDefaults.colors(
                 thumbColor = primaryColor,
                 activeTrackColor = Color.Transparent,
@@ -999,51 +1096,6 @@ fun WavySlider(
             ),
             modifier = Modifier.fillMaxWidth()
         )
-        
-        Canvas(modifier = Modifier
-            .fillMaxWidth()
-            .height(36.dp)
-            .padding(horizontal = 8.dp)) {
-            val width = size.width
-            val height = size.height
-            val centerY = height / 2
-            val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
-            val progressX = width * progress
-            
-            // Inactive Track (Modern dashed or solid thin line)
-            drawLine(
-                color = Color.LightGray.copy(alpha = 0.25f),
-                start = androidx.compose.ui.geometry.Offset(progressX, centerY),
-                end = androidx.compose.ui.geometry.Offset(width, centerY),
-                strokeWidth = 4.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            
-            // Wavy Active Track
-            val path = Path()
-            path.moveTo(0f, centerY)
-            val segments = 100
-            for (i in 0..segments) {
-                val x = (i.toFloat() / segments) * progressX
-                val relativeX = (i.toFloat() / segments) * 12f // Tighter waves
-                val waveAmplitude = if (isPlaying) 6.dp.toPx() else 1.dp.toPx()
-                val y = centerY + sin(relativeX - (if (isPlaying) phase else 0f)).toFloat() * waveAmplitude
-                path.lineTo(x, y)
-            }
-            
-            drawPath(
-                path = path,
-                color = primaryColor,
-                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-            )
-            
-            // Thumb glow effect
-            drawCircle(
-                color = primaryColor.copy(alpha = 0.15f),
-                radius = 16.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(progressX, centerY)
-            )
-        }
     }
 }
 

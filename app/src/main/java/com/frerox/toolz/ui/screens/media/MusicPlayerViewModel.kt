@@ -267,26 +267,37 @@ class MusicPlayerViewModel @Inject constructor(
         val eq = equalizer ?: return
         try {
             val numPresets = eq.numberOfPresets
-            for (i in 0 until numPresets) {
-                if (eq.getPresetName(i.toShort()).equals(preset, ignoreCase = true)) {
-                    eq.usePreset(i.toShort())
-                    return
-                }
-            }
-            if (preset == "Bass Boost") {
-                for (i in 0 until eq.numberOfBands.toInt()) {
-                    val freq = eq.getCenterFreq(i.toShort())
-                    if (freq < 500000) {
-                        eq.setBandLevel(i.toShort(), 1000)
+            if (numPresets > 0) {
+                for (i in 0 until numPresets.toInt()) {
+                    try {
+                        val presetName = eq.getPresetName(i.toShort())
+                        if (presetName.equals(preset, ignoreCase = true)) {
+                            eq.usePreset(i.toShort())
+                            return
+                        }
+                    } catch (e: Exception) {
+                        // Skip individual preset if it fails
                     }
                 }
             }
+            
+            if (preset == "Bass Boost") {
+                for (i in 0 until eq.numberOfBands.toInt()) {
+                    try {
+                        val freq = eq.getCenterFreq(i.toShort())
+                        if (freq < 500000) {
+                            eq.setBandLevel(i.toShort(), 1000.toShort())
+                        }
+                    } catch (e: Exception) {}
+                }
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
+            // Silently fail to avoid crashing the whole viewmodel
         }
     }
 
     private fun startPlayerService() {
+        if (!player.isPlaying) return
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -355,7 +366,9 @@ class MusicPlayerViewModel @Inject constructor(
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(t.title)
-                        .setArtist(t.artist)
+                        .setArtist(t.artist ?: "Unknown Artist")
+                        .setDisplayTitle(t.title)
+                        .setIsPlayable(true)
                         .setArtworkUri(t.thumbnailUri?.let { Uri.parse(it) })
                         .build()
                 )
@@ -368,7 +381,6 @@ class MusicPlayerViewModel @Inject constructor(
         player.setMediaItems(mediaItems, startIndex, 0L)
         player.prepare()
         player.play()
-        startPlayerService()
     }
 
     fun playPlaylist(playlist: Playlist) {
@@ -385,7 +397,6 @@ class MusicPlayerViewModel @Inject constructor(
         player.stop()
         player.clearMediaItems()
         _uiState.update { it.copy(currentTrack = null, isPlaying = false, progress = 0L) }
-        context.stopService(Intent(context, MusicPlayerService::class.java))
     }
 
     fun seekTo(position: Long) {
@@ -478,6 +489,12 @@ class MusicPlayerViewModel @Inject constructor(
     fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
         viewModelScope.launch {
             repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString()))
+        }
+    }
+
+    fun createPlaylistWithTracks(name: String, trackUris: List<String>) {
+        viewModelScope.launch {
+            repository.createPlaylist(Playlist(name = name, trackUris = trackUris))
         }
     }
 
