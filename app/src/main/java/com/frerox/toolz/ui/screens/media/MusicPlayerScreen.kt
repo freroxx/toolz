@@ -1,7 +1,9 @@
 package com.frerox.toolz.ui.screens.media
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -52,10 +54,13 @@ import coil.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.ui.components.bouncyClick
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 import java.util.*
 import kotlin.random.Random
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalPermissionsApi::class)
 @Composable
 fun MusicPlayerScreen(
     viewModel: MusicPlayerViewModel,
@@ -70,6 +75,18 @@ fun MusicPlayerScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showMultiSelectPlaylistPicker by remember { mutableStateOf(false) }
     var selectedFolderTracks by remember { mutableStateOf<Pair<String, List<MusicTrack>>?>(null) }
+
+    val musicPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        rememberPermissionState(Manifest.permission.READ_MEDIA_AUDIO)
+    } else {
+        rememberPermissionState(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+    LaunchedEffect(musicPermission.status.isGranted) {
+        if (musicPermission.status.isGranted) {
+            viewModel.scanMusic()
+        }
+    }
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -94,138 +111,166 @@ fun MusicPlayerScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
-                if (state.isSelectionMode) {
-                    TopAppBar(
-                        title = { Text("${state.selectedTracks.size} Selected", fontWeight = FontWeight.Bold) },
-                        navigationIcon = {
-                            IconButton(onClick = { viewModel.clearSelection() }) {
-                                Icon(Icons.Rounded.Close, "Clear Selection")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { showMultiSelectPlaylistPicker = true }) {
-                                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, "Add to Playlist")
-                            }
-                        }
-                    )
-                } else {
-                    TopAppBar(
-                        title = { Text("Music", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium) },
-                        navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        actions = {
-                            if (currentTab == 1) {
-                                IconButton(onClick = { folderLauncher.launch(null) }) {
-                                    Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Add Folder")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp
+            ) {
+                Column {
+                    if (state.isSelectionMode) {
+                        TopAppBar(
+                            title = { Text("${state.selectedTracks.size} Selected", fontWeight = FontWeight.Bold) },
+                            navigationIcon = {
+                                IconButton(onClick = { viewModel.clearSelection() }) {
+                                    Icon(Icons.Rounded.Close, "Clear Selection")
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { showMultiSelectPlaylistPicker = true }) {
+                                    Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, "Add to Playlist")
                                 }
                             }
-                            IconButton(onClick = { showSortMenu = true }) {
-                                Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort")
-                            }
-                        }
-                    )
-                }
-                
-                DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                    SortOrder.entries.forEach { order ->
-                        DropdownMenuItem(
-                            text = { Text(order.name.lowercase().replaceFirstChar { it.uppercase() }) },
-                            onClick = {
-                                viewModel.setSortOrder(order)
-                                showSortMenu = false
+                        )
+                    } else {
+                        TopAppBar(
+                            title = { Text("Music", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium) },
+                            navigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                                }
                             },
-                            leadingIcon = {
-                                if (state.sortOrder == order) Icon(Icons.Rounded.Check, null)
+                            actions = {
+                                if (currentTab == 1) {
+                                    IconButton(onClick = { folderLauncher.launch(null) }) {
+                                        Icon(Icons.Rounded.CreateNewFolder, contentDescription = "Add Folder")
+                                    }
+                                }
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort")
+                                }
                             }
                         )
                     }
-                }
-
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Search your library...") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Close, null)
-                            }
+                    
+                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        SortOrder.entries.forEach { order ->
+                            DropdownMenuItem(
+                                text = { Text(order.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                                onClick = {
+                                    viewModel.setSortOrder(order)
+                                    showSortMenu = false
+                                },
+                                leadingIcon = {
+                                    if (state.sortOrder == order) Icon(Icons.Rounded.Check, null)
+                                }
+                            )
                         }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary
+                    }
+
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        placeholder = { Text("Search your library...") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Rounded.Close, null)
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(24.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary
+                        )
                     )
-                )
+                }
             }
         },
         bottomBar = {
-            Column {
-                TabRow(
-                    selectedTabIndex = currentTab,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[currentTab]),
-                            color = MaterialTheme.colorScheme.primary,
-                            height = 3.dp
-                        )
-                    },
-                    divider = {}
-                ) {
-                    val tabs = listOf("Tracks" to Icons.Rounded.MusicNote, "Folders" to Icons.Rounded.Folder, "Playlists" to Icons.AutoMirrored.Rounded.PlaylistPlay)
-                    tabs.forEachIndexed { index, (label, icon) ->
-                        Tab(
-                            selected = currentTab == index,
-                            onClick = { currentTab = index },
-                            text = { Text(label, fontWeight = if (currentTab == index) FontWeight.Bold else FontWeight.Normal) },
-                            icon = { Icon(icon, null) }
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+            ) {
+                Column {
+                    TabRow(
+                        selectedTabIndex = currentTab,
+                        containerColor = Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        indicator = { tabPositions ->
+                            TabRowDefaults.SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[currentTab]),
+                                color = MaterialTheme.colorScheme.primary,
+                                height = 3.dp
+                            )
+                        },
+                        divider = {}
+                    ) {
+                        val tabs = listOf("Tracks" to Icons.Rounded.MusicNote, "Folders" to Icons.Rounded.Folder, "Playlists" to Icons.AutoMirrored.Rounded.PlaylistPlay)
+                        tabs.forEachIndexed { index, (label, icon) ->
+                            Tab(
+                                selected = currentTab == index,
+                                onClick = { currentTab = index },
+                                text = { Text(label, fontWeight = if (currentTab == index) FontWeight.Bold else FontWeight.Normal) },
+                                icon = { Icon(icon, null) }
+                            )
+                        }
+                    }
+                    if (state.currentTrack != null && !showFullPlayer) {
+                        MiniPlayer(
+                            track = state.currentTrack!!,
+                            isPlaying = state.isPlaying,
+                            onTogglePlay = { viewModel.togglePlayPause() },
+                            onClick = { showFullPlayer = true }
                         )
                     }
-                }
-                if (state.currentTrack != null && !showFullPlayer) {
-                    MiniPlayer(
-                        track = state.currentTrack!!,
-                        isPlaying = state.isPlaying,
-                        onTogglePlay = { viewModel.togglePlayPause() },
-                        onClick = { showFullPlayer = true }
-                    )
                 }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            AnimatedContent(
-                targetState = currentTab,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(300)) with fadeOut(animationSpec = tween(300))
-                },
-                label = "TabContent"
-            ) { targetTab ->
-                when (targetTab) {
-                    0 -> TrackList(filteredTracks, state, viewModel)
-                    1 -> FolderList(state, onFolderClick = { name, tracks -> selectedFolderTracks = name to tracks })
-                    2 -> PlaylistSection(state, viewModel, 
-                        onCreatePlaylist = { showPlaylistDialog = true },
-                        onPlaylistClick = { selectedPlaylist = it },
-                        onUpdateThumb = { 
-                            selectedPlaylist = it
-                            playlistThumbLauncher.launch("image/*") 
+            if (!musicPermission.status.isGranted) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Rounded.MusicNote, null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Permission needed to access music files", textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(24.dp))
+                        Button(
+                            onClick = { musicPermission.launchPermissionRequest() },
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("Grant Permission")
                         }
-                    )
+                    }
+                }
+            } else {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                    },
+                    label = "TabContent"
+                ) { targetTab ->
+                    when (targetTab) {
+                        0 -> TrackList(filteredTracks, state, viewModel)
+                        1 -> FolderList(state, onFolderClick = { name, tracks -> selectedFolderTracks = name to tracks })
+                        2 -> PlaylistSection(state, viewModel, 
+                            onCreatePlaylist = { showPlaylistDialog = true },
+                            onPlaylistClick = { selectedPlaylist = it },
+                            onUpdateThumb = { 
+                                selectedPlaylist = it
+                                playlistThumbLauncher.launch("image/*") 
+                            }
+                        )
+                    }
                 }
             }
 
@@ -311,13 +356,13 @@ fun MusicPlayerScreen(
 fun TrackList(tracks: List<MusicTrack>, state: MusicUiState, viewModel: MusicPlayerViewModel) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp)
+        contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
     ) {
         if (tracks.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                        Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                         Spacer(Modifier.height(16.dp))
                         Text("No tracks found", color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
                     }
@@ -380,11 +425,11 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(140.dp)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            .height(160.dp)
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -393,8 +438,13 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    .size(64.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        ), 
+                        CircleShape
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -404,7 +454,7 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
                     modifier = Modifier.size(32.dp)
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 folderName, 
                 fontWeight = FontWeight.Bold, 
@@ -416,7 +466,7 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
             Text(
                 "$trackCount songs", 
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
         }
     }
@@ -479,7 +529,7 @@ fun PlaylistSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Playlists", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text("Your Playlists", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
             IconButton(
                 onClick = onCreatePlaylist,
                 colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -489,7 +539,7 @@ fun PlaylistSection(
         }
         
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp), 
+            horizontalArrangement = Arrangement.spacedBy(20.dp), 
             contentPadding = PaddingValues(vertical = 24.dp)
         ) {
             items(state.playlists) { playlist ->
@@ -526,7 +576,7 @@ fun FullPlayerView(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing),
+            animation = tween(25000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "artRotation"
@@ -578,16 +628,16 @@ fun FullPlayerView(
 
             Box(contentAlignment = Alignment.Center) {
                 val pulseScale by animateFloatAsState(
-                    targetValue = if (state.isPlaying) 1.1f else 1f,
+                    targetValue = if (state.isPlaying) 1.08f else 1f,
                     animationSpec = infiniteRepeatable(
-                        animation = tween(1200, easing = FastOutSlowInEasing),
+                        animation = tween(1500, easing = FastOutSlowInEasing),
                         repeatMode = RepeatMode.Reverse
                     ),
                     label = "pulse"
                 )
                 
                 Surface(
-                    modifier = Modifier.size(280.dp).scale(pulseScale).alpha(0.08f),
+                    modifier = Modifier.size(280.dp).scale(pulseScale).alpha(0.06f),
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary
                 ) {}
@@ -598,7 +648,7 @@ fun FullPlayerView(
                         .rotate(if (state.isPlaying) rotation else 0f)
                         .clip(CircleShape)
                         .graphicsLayer {
-                            shadowElevation = 30.dp.toPx()
+                            shadowElevation = 40.dp.toPx()
                             shape = CircleShape
                             clip = true
                         },
@@ -667,7 +717,7 @@ fun FullPlayerView(
                     Icon(
                         if (state.isShuffleOn) Icons.Rounded.ShuffleOn else Icons.Rounded.Shuffle, 
                         null, 
-                        tint = if (state.isShuffleOn) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.5f),
+                        tint = if (state.isShuffleOn) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.4f),
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -678,7 +728,7 @@ fun FullPlayerView(
 
                 FilledIconButton(
                     onClick = onTogglePlay,
-                    modifier = Modifier.size(88.dp),
+                    modifier = Modifier.size(96.dp),
                     shape = CircleShape,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -688,7 +738,7 @@ fun FullPlayerView(
                     Icon(
                         if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
                         null, 
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(56.dp)
                     )
                 }
 
@@ -704,7 +754,7 @@ fun FullPlayerView(
                             else -> Icons.Rounded.Repeat
                         },
                         null,
-                        tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.5f),
+                        tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current.copy(alpha = 0.4f),
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -719,7 +769,8 @@ fun FullPlayerView(
                 Spacer(Modifier.width(16.dp))
                 TextButton(
                     onClick = onStop,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Rounded.Stop, null)
                     Spacer(Modifier.width(8.dp))
@@ -744,7 +795,7 @@ fun MusicVisualizer(isPlaying: Boolean, modifier: Modifier) {
             initialValue = 0.1f,
             targetValue = if (isPlaying) Random.nextFloat() * 0.8f + 0.2f else 0.1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = Random.nextInt(300, 700), easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = Random.nextInt(400, 800), easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "bar_$index"
@@ -753,7 +804,7 @@ fun MusicVisualizer(isPlaying: Boolean, modifier: Modifier) {
 
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         heights.forEach { heightState ->
@@ -783,13 +834,13 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                     ListItem(
                         headlineContent = { Text("$mins Minutes") },
                         modifier = Modifier.clickable { onSet(mins); onDismiss() },
-                        leadingContent = { Icon(Icons.Rounded.Timer, null) }
+                        leadingContent = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 }
                 ListItem(
-                    headlineContent = { Text("Turn Off") },
+                    headlineContent = { Text("Turn Off", color = MaterialTheme.colorScheme.error) },
                     modifier = Modifier.clickable { onSet(null); onDismiss() },
-                    leadingContent = { Icon(Icons.Rounded.TimerOff, null) }
+                    leadingContent = { Icon(Icons.Rounded.TimerOff, null, tint = MaterialTheme.colorScheme.error) }
                 )
             }
         },
@@ -819,11 +870,18 @@ fun PlaylistDetailView(
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.fillMaxHeight(0.9f)) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(modifier = Modifier.size(120.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                Surface(
+                    modifier = Modifier.size(130.dp), 
+                    shape = RoundedCornerShape(28.dp), 
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 4.dp
+                ) {
                     if (playlist.thumbnailUri != null) {
                         AsyncImage(model = playlist.thumbnailUri, contentDescription = null, contentScale = ContentScale.Crop)
                     } else {
-                        Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.padding(32.dp))
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
                     }
                 }
                 Spacer(Modifier.width(20.dp))
@@ -837,8 +895,9 @@ fun PlaylistDetailView(
             Row(modifier = Modifier.padding(vertical = 24.dp)) {
                 Button(
                     onClick = { onPlayPlaylist(playlist) }, 
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.weight(1f).height(60.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                 ) {
                     Icon(Icons.Rounded.PlayArrow, null)
                     Spacer(Modifier.width(8.dp))
@@ -847,8 +906,8 @@ fun PlaylistDetailView(
                 Spacer(Modifier.width(12.dp))
                 FilledTonalIconButton(
                     onClick = { showAddTrack = true },
-                    modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(16.dp)
+                    modifier = Modifier.size(60.dp),
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Icon(Icons.Rounded.Add, null)
                 }
@@ -901,19 +960,20 @@ fun PlaylistDetailView(
 @Composable
 fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(
-        modifier = Modifier.width(140.dp),
+        modifier = Modifier.width(150.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Surface(
             modifier = Modifier
-                .size(140.dp)
+                .size(150.dp)
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = onLongClick
                 ),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-            tonalElevation = 4.dp
+            shape = RoundedCornerShape(36.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+            tonalElevation = 4.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (playlist.thumbnailUri != null) {
@@ -924,12 +984,12 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(playlist.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(12.dp))
+        Text(playlist.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -953,15 +1013,15 @@ fun TrackItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         color = when {
-            isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-            isCurrent -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            isCurrent -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
             else -> Color.Transparent
         }
     ) {
@@ -971,8 +1031,8 @@ fun TrackItem(
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant), 
                 contentAlignment = Alignment.Center
             ) {
@@ -984,7 +1044,7 @@ fun TrackItem(
                     error = painterResource(android.R.drawable.ic_menu_report_image)
                 )
                 if (isSelected) {
-                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.Check, null, tint = Color.White)
                     }
                 }
@@ -1002,7 +1062,7 @@ fun TrackItem(
                 Text(
                     track.artist ?: "Unknown Artist", 
                     style = MaterialTheme.typography.bodySmall, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
             
@@ -1045,7 +1105,7 @@ fun TrackItem(
                             ListItem(
                                 headlineContent = { Text(playlist.name) },
                                 modifier = Modifier.clickable { onAddToPlaylist(playlist); showPlaylistPicker = false },
-                                leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) }
+                                leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) }
                             )
                         }
                     }
@@ -1063,11 +1123,11 @@ fun MiniPlayer(track: MusicTrack, isPlaying: Boolean, onTogglePlay: () -> Unit, 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(80.dp)
+            .height(88.dp)
             .clickable(onClick = onClick)
             .padding(8.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
-        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+        shape = RoundedCornerShape(28.dp),
         tonalElevation = 8.dp
     ) {
         Row(
@@ -1077,7 +1137,7 @@ fun MiniPlayer(track: MusicTrack, isPlaying: Boolean, onTogglePlay: () -> Unit, 
             AsyncImage(
                 model = track.thumbnailUri, 
                 contentDescription = null, 
-                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)), 
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)), 
                 contentScale = ContentScale.Crop,
                 error = painterResource(android.R.drawable.ic_menu_report_image)
             )
@@ -1087,12 +1147,12 @@ fun MiniPlayer(track: MusicTrack, isPlaying: Boolean, onTogglePlay: () -> Unit, 
             }
             IconButton(
                 onClick = onTogglePlay,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(56.dp)
             ) {
                 Icon(
                     if (isPlaying) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled, 
                     null, 
-                    modifier = Modifier.size(40.dp), 
+                    modifier = Modifier.size(48.dp), 
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
@@ -1146,7 +1206,7 @@ fun MultiSelectPlaylistPicker(
                         ListItem(
                             headlineContent = { Text(playlist.name) },
                             modifier = Modifier.clickable { onPlaylistSelected(playlist) },
-                            leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) }
+                            leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary) }
                         )
                     }
                 }

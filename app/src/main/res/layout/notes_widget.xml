@@ -4,20 +4,20 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp"
+    android:padding="16dp"
     android:background="@drawable/widget_background">
 
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="8dp">
+        android:paddingBottom="12dp">
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="My Notes"
             android:textStyle="bold"
-            android:textSize="16sp"
-            android:textColor="#333333" />
+            android:textSize="18sp"
+            android:textColor="#1C1B1F" />
         <ImageButton
             android:id="@+id/widget_add_note"
             android:layout_width="32dp"
@@ -25,6 +25,7 @@
             android:layout_alignParentEnd="true"
             android:src="@android:drawable/ic_input_add"
             android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#1C1B1F"
             android:contentDescription="Add Note" />
     </RelativeLayout>
 
@@ -35,5 +36,14 @@
         android:layout_weight="1"
         android:divider="@null"
         android:dividerHeight="8dp" />
+
+    <TextView
+        android:id="@android:id/empty"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="No notes yet"
+        android:textColor="#49454F"
+        android:visibility="gone" />
 
 </LinearLayout>
