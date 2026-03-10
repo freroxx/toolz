@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.media
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +23,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
@@ -32,6 +36,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.google.common.util.concurrent.ListenableFuture
 import javax.inject.Inject
 
 enum class SortOrder {
@@ -74,6 +79,9 @@ class MusicPlayerViewModel @Inject constructor(
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var isPlayerServiceStarted = false
+    private var mediaController: MediaController? = null
+    private var mediaControllerFuture: ListenableFuture<MediaController>? = null
     
     private var equalizer: Equalizer? = null
     private var shakeDetector: ShakeDetector? = null
@@ -94,6 +102,8 @@ class MusicPlayerViewModel @Inject constructor(
         
         player.setAudioAttributes(audioAttributes, true)
         player.setHandleAudioBecomingNoisy(true)
+
+        connectToMediaController()
 
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
@@ -327,15 +337,53 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     private fun startPlayerService() {
+        if (isPlayerServiceStarted) return
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
             // Use startService instead of startForegroundService for MediaSessionService.
             // MediaSessionService manages its own foreground state and will promote itself
             // when playback starts. This avoids the ForegroundServiceDidNotStartInTimeException.
             context.startService(intent)
+            isPlayerServiceStarted = true
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun connectToMediaController(onConnected: (() -> Unit)? = null) {
+        startPlayerService()
+
+        val existing = mediaControllerFuture
+        if (existing != null) {
+            if (onConnected != null) {
+                existing.addListener({
+                    if (mediaController != null) onConnected()
+                }, ContextCompat.getMainExecutor(context))
+            }
+            return
+        }
+
+        val sessionToken = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
+        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        mediaControllerFuture = future
+
+        future.addListener({
+            try {
+                mediaController = future.get()
+                onConnected?.invoke()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                mediaControllerFuture = null
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    private fun runWhenMediaSessionReady(action: () -> Unit) {
+        if (mediaController != null) {
+            action()
+            return
+        }
+        connectToMediaController(action)
     }
 
     private fun startProgressUpdate() {
@@ -387,30 +435,34 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
-        val mediaItems = tracks.map { t ->
-            val metadata = MediaMetadata.Builder()
-                .setTitle(t.title)
-                .setArtist(t.artist ?: "Unknown Artist")
-                .setAlbumTitle(t.album ?: "Unknown Album")
-                .setDisplayTitle(t.title)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // Required for wavy bar on Android 16/17
-                .setIsPlayable(true)
-                .setArtworkUri(t.thumbnailUri?.toUri()) // Required for color matching
-                .build()
+        // Wait for the media session connection to avoid race conditions where playback starts
+        // before Android recognizes an active MediaSessionService.
+        runWhenMediaSessionReady {
+            val mediaItems = tracks.map { t ->
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(t.title)
+                    .setArtist(t.artist ?: "Unknown Artist")
+                    .setAlbumTitle(t.album ?: "Unknown Album")
+                    .setDisplayTitle(t.title)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // Required for wavy bar on Android 16/17
+                    .setIsPlayable(true)
+                    .setArtworkUri(t.thumbnailUri?.toUri()) // Required for color matching
+                    .build()
 
-            MediaItem.Builder()
-                .setMediaId(t.uri)
-                .setUri(t.uri.toUri())
-                .setMediaMetadata(metadata)
-                .build()
+                MediaItem.Builder()
+                    .setMediaId(t.uri)
+                    .setUri(t.uri.toUri())
+                    .setMediaMetadata(metadata)
+                    .build()
+            }
+
+            val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+            player.stop()
+            player.clearMediaItems()
+            player.setMediaItems(mediaItems, startIndex, 0L)
+            player.prepare()
+            player.play()
         }
-        
-        val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-        player.stop()
-        player.clearMediaItems()
-        player.setMediaItems(mediaItems, startIndex, 0L)
-        player.prepare()
-        player.play()
     }
 
     fun playPlaylist(playlist: Playlist) {
@@ -420,7 +472,15 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun togglePlayPause() {
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.isPlaying) {
+            player.pause()
+        } else {
+            // Resume after pause should wait for media-session readiness to keep notification
+            // dynamic media content reliable on newer Android versions.
+            runWhenMediaSessionReady {
+                player.play()
+            }
+        }
     }
 
     fun stop() {
@@ -558,5 +618,8 @@ class MusicPlayerViewModel @Inject constructor(
         stopShakeDetection()
         sleepTimerJob?.cancel()
         equalizer?.release()
+        mediaController?.release()
+        mediaController = null
+        mediaControllerFuture = null
     }
 }
