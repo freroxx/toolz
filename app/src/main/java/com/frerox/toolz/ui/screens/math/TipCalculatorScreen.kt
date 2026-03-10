@@ -40,8 +40,12 @@ fun TipCalculatorScreen(
 
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                TopAppBar(
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp
+            ) {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
                     title = { Text("TIP CALCULATOR", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -59,11 +63,11 @@ fun TipCalculatorScreen(
                 .fadingEdge(
                     brush = Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.02f to Color.Black,
-                        0.98f to Color.Black,
+                        0.05f to Color.Black,
+                        0.95f to Color.Black,
                         1f to Color.Transparent
                     ),
-                    length = 16.dp
+                    length = 24.dp
                 )
         ) {
             Column(
@@ -76,10 +80,11 @@ fun TipCalculatorScreen(
                 // Main Result Card
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(40.dp),
+                    shape = RoundedCornerShape(44.dp),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shadowElevation = 12.dp
+                    shadowElevation = 16.dp,
+                    border = androidx.compose.foundation.BorderStroke(2.dp, Color.White.copy(alpha = 0.1f))
                 ) {
                     Column(
                         modifier = Modifier.padding(32.dp),
@@ -87,26 +92,27 @@ fun TipCalculatorScreen(
                     ) {
                         Text(
                             "TOTAL PER PERSON",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 2.sp,
-                            modifier = Modifier.alpha(0.8f)
+                            modifier = Modifier.alpha(0.7f)
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
                             text = String.format(Locale.getDefault(), "$%.2f", state.totalPerPerson),
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontWeight = FontWeight.Black,
-                                fontSize = 56.sp
+                                fontSize = 64.sp,
+                                letterSpacing = (-2).sp
                             )
                         )
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(32.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            ResultSubItem("Total Bill", String.format(Locale.getDefault(), "$%.2f", (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
-                            ResultSubItem("Total Tip", String.format(Locale.getDefault(), "$%.2f", state.totalTip))
+                            ResultSubItem("BILL + TIP", String.format(Locale.getDefault(), "$%.2f", (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
+                            ResultSubItem("TOTAL TIP", String.format(Locale.getDefault(), "$%.2f", state.totalTip))
                         }
                     }
                 }
@@ -116,38 +122,39 @@ fun TipCalculatorScreen(
                 // Input Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    shape = RoundedCornerShape(40.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(28.dp)) {
                         Text(
-                            "BILL DETAILS",
-                            style = MaterialTheme.typography.labelLarge,
+                            "CALCULATION DETAILS",
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.sp
+                            letterSpacing = 1.5.sp
                         )
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(24.dp))
                         
                         OutlinedTextField(
                             value = state.billAmount,
                             onValueChange = { viewModel.onBillChange(it) },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Enter Bill Amount") },
+                            label = { Text("Bill Amount", fontWeight = FontWeight.Bold) },
                             placeholder = { Text("0.00") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            prefix = { Text("$ ", fontWeight = FontWeight.Bold) },
-                            shape = RoundedCornerShape(20.dp),
+                            prefix = { Text("$ ", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
+                            shape = RoundedCornerShape(24.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                                 unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                focusedContainerColor = Color.White.copy(alpha = 0.05f)
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
                             )
                         )
 
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(36.dp))
 
                         // Tip Percentage
                         Row(
@@ -155,38 +162,39 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            Text("TIP PERCENTAGE", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
-                            Text("${state.tipPercentage.toInt()}%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                            Text("TIP PERCENTAGE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                            Text("${state.tipPercentage.toInt()}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
                         
                         Slider(
                             value = state.tipPercentage,
                             onValueChange = { viewModel.onTipChange(it) },
                             valueRange = 0f..50f,
-                            steps = 10,
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            steps = 9,
+                            modifier = Modifier.padding(vertical = 12.dp)
                         )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             listOf(10f, 15f, 20f, 25f).forEach { pct ->
-                                Button(
+                                FilledTonalButton(
                                     onClick = { viewModel.onTipChange(pct) },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (state.tipPercentage == pct) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                                    modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = if (state.tipPercentage == pct) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                        contentColor = if (state.tipPercentage == pct) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
                                     ),
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
-                                    Text("${pct.toInt()}%", fontWeight = FontWeight.Bold)
+                                    Text("${pct.toInt()}%", fontWeight = FontWeight.Black)
                                 }
                             }
                         }
 
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(40.dp))
 
                         // Split Count
                         Row(
@@ -194,37 +202,40 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("SPLIT BILL", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
+                            Text("SPLIT COUNT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                             
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
-                                    modifier = Modifier.size(44.dp).bouncyClick { viewModel.onSplitChange(state.splitCount - 1) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
+                                    modifier = Modifier.size(52.dp).bouncyClick { if (state.splitCount > 1) viewModel.onSplitChange(state.splitCount - 1) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    tonalElevation = 4.dp
                                 ) {
-                                    Icon(Icons.Rounded.Remove, null, modifier = Modifier.padding(10.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Icon(Icons.Rounded.Remove, null, modifier = Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                                 
                                 Text(
                                     text = state.splitCount.toString(),
-                                    style = MaterialTheme.typography.headlineMedium,
+                                    style = MaterialTheme.typography.displaySmall,
                                     fontWeight = FontWeight.Black,
-                                    modifier = Modifier.padding(horizontal = 20.dp)
+                                    modifier = Modifier.padding(horizontal = 24.dp),
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 
                                 Surface(
-                                    modifier = Modifier.size(44.dp).bouncyClick { viewModel.onSplitChange(state.splitCount + 1) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
+                                    modifier = Modifier.size(52.dp).bouncyClick { viewModel.onSplitChange(state.splitCount + 1) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    tonalElevation = 4.dp
                                 ) {
-                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.padding(10.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                             }
                         }
                     }
                 }
                 
-                Spacer(Modifier.height(40.dp))
+                Spacer(Modifier.height(48.dp))
             }
         }
     }
@@ -233,7 +244,7 @@ fun TipCalculatorScreen(
 @Composable
 fun ResultSubItem(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.alpha(0.7f))
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.alpha(0.6f))
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
     }
 }

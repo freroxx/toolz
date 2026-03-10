@@ -1,28 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="12dp"
+    android:padding="16dp"
     android:background="@drawable/widget_background">
 
-    <ImageView
-        android:id="@+id/widget_coin_image"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
-        android:src="@android:drawable/btn_star_big_on"
-        android:contentDescription="Coin" />
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="FLIP A COIN"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:textColor="#6750A4"
+        android:letterSpacing="0.2"
+        android:layout_marginBottom="12dp" />
+
+    <FrameLayout
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:background="@drawable/widget_button_tonal"
+        android:padding="8dp">
+
+        <ImageView
+            android:id="@+id/widget_coin_image"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@android:drawable/btn_star_big_on"
+            app:tint="#6750A4"
+            android:contentDescription="Coin" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/widget_coin_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Tap to Flip"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="#333333"
-        android:layout_marginTop="8dp" />
+        android:text="TAP TO FLIP"
+        android:textSize="12sp"
+        android:fontFamily="sans-serif-black"
+        android:textColor="#1D1B20"
+        android:layout_marginTop="12dp" />
 
 </LinearLayout>

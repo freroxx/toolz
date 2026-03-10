@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.*
@@ -62,12 +63,21 @@ fun ColorPickerScreen(
 
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                TopAppBar(
-                    title = { Text("COLOR PICKER", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp) },
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp
+            ) {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("CHROMA PICKER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { /* Help */ }) {
+                            Icon(Icons.Rounded.Help, null)
                         }
                     }
                 )
@@ -82,12 +92,13 @@ fun ColorPickerScreen(
                 // Camera Preview with Rounded Corners
                 Surface(
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1.1f)
                         .fillMaxWidth()
-                        .padding(20.dp)
-                        .shadow(12.dp, RoundedCornerShape(32.dp)),
-                    shape = RoundedCornerShape(32.dp),
-                    color = Color.Black
+                        .padding(24.dp)
+                        .shadow(24.dp, RoundedCornerShape(44.dp)),
+                    shape = RoundedCornerShape(44.dp),
+                    color = Color.Black,
+                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         AndroidView(
@@ -134,18 +145,21 @@ fun ColorPickerScreen(
                             modifier = Modifier.fillMaxSize()
                         )
 
-                        // Target Reticle (Enhanced)
+                        // Target Reticle (Premium)
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(64.dp)
                                 .align(Alignment.Center),
                             contentAlignment = Alignment.Center
                         ) {
-                            Box(modifier = Modifier.size(24.dp).border(3.dp, Color.White, CircleShape))
-                            Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.White).align(Alignment.TopCenter))
-                            Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.White).align(Alignment.BottomCenter))
-                            Box(modifier = Modifier.width(12.dp).height(2.dp).background(Color.White).align(Alignment.CenterStart))
-                            Box(modifier = Modifier.width(12.dp).height(2.dp).background(Color.White).align(Alignment.CenterEnd))
+                            Box(modifier = Modifier.size(32.dp).border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape))
+                            Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
+                            
+                            // Crosshair lines
+                            Box(modifier = Modifier.width(1.5.dp).height(12.dp).background(Color.White.copy(alpha = 0.5f)).align(Alignment.TopCenter))
+                            Box(modifier = Modifier.width(1.5.dp).height(12.dp).background(Color.White.copy(alpha = 0.5f)).align(Alignment.BottomCenter))
+                            Box(modifier = Modifier.width(12.dp).height(1.5.dp).background(Color.White.copy(alpha = 0.5f)).align(Alignment.CenterStart))
+                            Box(modifier = Modifier.width(12.dp).height(1.5.dp).background(Color.White.copy(alpha = 0.5f)).align(Alignment.CenterEnd))
                         }
                     }
                 }
@@ -154,49 +168,52 @@ fun ColorPickerScreen(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(40.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(28.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            horizontalArrangement = Arrangement.spacedBy(24.dp)
                         ) {
                             Surface(
                                 modifier = Modifier
-                                    .size(80.dp)
-                                    .shadow(8.dp, CircleShape)
+                                    .size(90.dp)
+                                    .shadow(16.dp, CircleShape)
                                     .bouncyClick {
                                         if (!colorHistory.contains(pickedColor)) {
                                             colorHistory.add(0, pickedColor)
-                                            if (colorHistory.size > 10) colorHistory.removeAt(colorHistory.lastIndex)
+                                            if (colorHistory.size > 12) colorHistory.removeAt(colorHistory.lastIndex)
                                         }
                                     },
                                 shape = CircleShape,
                                 color = pickedColor,
-                                border = androidx.compose.foundation.BorderStroke(4.dp, Color.White)
+                                border = androidx.compose.foundation.BorderStroke(4.dp, Color.White),
+                                tonalElevation = 8.dp
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.Palette, null, tint = if (pickedColor.red > 0.5f) Color.Black else Color.White, modifier = Modifier.alpha(0.3f))
+                                    Icon(Icons.Rounded.Palette, null, tint = if (pickedColor.red > 0.5f) Color.Black else Color.White, modifier = Modifier.size(32.dp).alpha(0.2f))
                                 }
                             }
                             
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = hexCode, 
-                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                    style = MaterialTheme.typography.displaySmall.copy(
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace,
-                                        letterSpacing = (-1).sp
-                                    )
+                                        letterSpacing = (-2).sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "RGB: ${(pickedColor.red * 255).toInt()}, ${(pickedColor.green * 255).toInt()}, ${(pickedColor.blue * 255).toInt()}", 
                                     style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    letterSpacing = 1.sp
                                 )
                             }
                             
@@ -205,13 +222,13 @@ fun ColorPickerScreen(
                                     clipboardManager.setText(AnnotatedString(hexCode))
                                     if (!colorHistory.contains(pickedColor)) {
                                         colorHistory.add(0, pickedColor)
-                                        if (colorHistory.size > 10) colorHistory.removeAt(colorHistory.lastIndex)
+                                        if (colorHistory.size > 12) colorHistory.removeAt(colorHistory.lastIndex)
                                     }
                                 },
-                                modifier = Modifier.size(56.dp),
-                                shape = RoundedCornerShape(16.dp)
+                                modifier = Modifier.size(64.dp).bouncyClick {},
+                                shape = RoundedCornerShape(20.dp)
                             ) {
-                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(28.dp))
                             }
                         }
                     }
@@ -221,20 +238,20 @@ fun ColorPickerScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 24.dp)
+                        .padding(bottom = 32.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.History, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline)
-                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Rounded.History, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(10.dp))
                         Text(
-                            "RECENT COLORS", 
+                            "COLOR HISTORY", 
                             style = MaterialTheme.typography.labelSmall, 
                             fontWeight = FontWeight.Black, 
-                            color = MaterialTheme.colorScheme.outline,
-                            letterSpacing = 1.sp
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.5.sp
                         )
                     }
                     
@@ -243,35 +260,40 @@ fun ColorPickerScreen(
                             .fillMaxWidth()
                             .fadingEdge(
                                 brush = Brush.horizontalGradient(
-                                    listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)
+                                    0f to Color.Transparent,
+                                    0.05f to Color.Black,
+                                    0.95f to Color.Black,
+                                    1f to Color.Transparent
                                 ),
-                                length = 24.dp
+                                length = 32.dp
                             )
                     ) {
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 24.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            contentPadding = PaddingValues(horizontal = 28.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             items(colorHistory) { color ->
                                 Surface(
                                     modifier = Modifier
-                                        .size(52.dp)
+                                        .size(60.dp)
                                         .bouncyClick {
                                             pickedColor = color
                                             hexCode = String.format(Locale.US, "#%06X", (0xFFFFFF and color.toArgb()))
                                         },
                                     shape = CircleShape,
                                     color = color,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                    tonalElevation = 4.dp
                                 ) {}
                             }
                             if (colorHistory.isEmpty()) {
                                 item {
                                     Text(
-                                        "Tap center color to save", 
-                                        style = MaterialTheme.typography.bodySmall, 
+                                        "Saved colors will appear here", 
+                                        style = MaterialTheme.typography.bodyMedium, 
                                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                        modifier = Modifier.padding(vertical = 16.dp)
+                                        modifier = Modifier.padding(vertical = 16.dp),
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
@@ -279,19 +301,33 @@ fun ColorPickerScreen(
                     }
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.fillMaxSize().padding(40.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Palette, null, modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-                        Spacer(Modifier.height(24.dp))
-                        Text("Camera Access Required", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("Toolz needs camera permission to pick colors from your surroundings.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
+                        Surface(
+                            modifier = Modifier.size(120.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Palette, null, modifier = Modifier.size(64.dp).alpha(0.2f), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         Spacer(Modifier.height(32.dp))
+                        Text("CAMERA REQUIRED", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "To pick colors from your environment, please enable camera access in permissions.", 
+                            textAlign = TextAlign.Center, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(40.dp))
                         Button(
                             onClick = { cameraPermissionState.launchPermissionRequest() },
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth().height(64.dp)
                         ) {
-                            Text("Grant Permission", fontWeight = FontWeight.Bold)
+                            Text("GRANT ACCESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         }
                     }
                 }

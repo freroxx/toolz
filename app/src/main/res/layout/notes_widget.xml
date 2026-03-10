@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -7,27 +8,34 @@
     android:padding="16dp"
     android:background="@drawable/widget_background">
 
-    <RelativeLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:paddingBottom="12dp">
+
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="My Notes"
-            android:textStyle="bold"
-            android:textSize="18sp"
-            android:textColor="#1C1B1F" />
+            android:layout_weight="1"
+            android:text="QUICK NOTES"
+            android:fontFamily="sans-serif-black"
+            android:textSize="14sp"
+            android:textColor="#6750A4"
+            android:letterSpacing="0.1" />
+
         <ImageButton
             android:id="@+id/widget_add_note"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_alignParentEnd="true"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:src="@android:drawable/ic_input_add"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:tint="#1C1B1F"
+            android:background="@drawable/widget_button_tonal"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            app:tint="#6750A4"
             android:contentDescription="Add Note" />
-    </RelativeLayout>
+    </LinearLayout>
 
     <ListView
         android:id="@+id/widget_notes_list"
@@ -42,8 +50,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center"
-        android:text="No notes yet"
+        android:text="Stay organized.\nTap + to add a note."
         android:textColor="#49454F"
+        android:textSize="14sp"
         android:visibility="gone" />
 
 </LinearLayout>

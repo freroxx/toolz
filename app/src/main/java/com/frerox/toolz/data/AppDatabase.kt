@@ -12,7 +12,7 @@ import com.frerox.toolz.data.music.MusicConverters
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepDao
 
-@Database(entities = [Note::class, MusicTrack::class, Playlist::class, StepEntry::class], version = 6, exportSchema = false)
+@Database(entities = [Note::class, MusicTrack::class, Playlist::class, StepEntry::class], version = 7, exportSchema = false)
 @TypeConverters(MusicConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao

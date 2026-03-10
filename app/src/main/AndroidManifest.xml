@@ -81,6 +81,11 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name=".service.CompassService"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Widgets -->
         <receiver android:name=".widget.FlashlightWidgetProvider"
             android:exported="true">
@@ -113,6 +118,8 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.appwidget.action.APPWIDGET_ENABLED" />
+                <action android:name="android.appwidget.action.APPWIDGET_DISABLED" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/compass_widget_info" />
@@ -131,6 +138,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="TOGGLE_PLAY" />
+                <action android:name="SKIP_NEXT" />
+                <action android:name="SKIP_PREV" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/music_widget_info" />

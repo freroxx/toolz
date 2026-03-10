@@ -3,6 +3,8 @@
     android:initialLayout="@layout/flashlight_widget"
     android:minWidth="110dp"
     android:minHeight="110dp"
+    android:minResizeWidth="100dp"
+    android:minResizeHeight="80dp"
     android:targetCellWidth="2"
     android:targetCellHeight="2"
     android:updatePeriodMillis="0"

@@ -1,50 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
-    android:padding="12dp"
-    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="16dp"
     android:background="@drawable/widget_background">
 
-    <ImageView
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:src="@android:drawable/ic_menu_directions"
-        android:tint="#4CAF50" />
-
     <LinearLayout
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:layout_marginStart="12dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@android:drawable/ic_menu_directions"
+            app:tint="#6750A4" />
 
         <TextView
-            android:id="@+id/widget_step_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0"
-            android:textSize="18sp"
+            android:text="STEPS"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:textColor="#333333" />
-
-        <TextView
-            android:id="@+id/widget_step_goal"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Goal: 10000"
-            android:textSize="12sp"
-            android:textColor="#666666" />
+            android:textColor="#6750A4"
+            android:layout_marginStart="8dp"
+            android:letterSpacing="0.1" />
     </LinearLayout>
 
-    <ProgressBar
-        android:id="@+id/widget_step_progress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:indeterminate="false"
-        android:progressDrawable="@drawable/circular_progress" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="8dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_step_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0"
+                android:textSize="32sp"
+                android:fontFamily="sans-serif-black"
+                android:textColor="#1D1B20" />
+
+            <TextView
+                android:id="@+id/widget_step_goal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="GOAL: 10,000"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="#49454F"
+                android:alpha="0.7" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/widget_step_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:indeterminate="false"
+            android:progressDrawable="@drawable/circular_progress" />
+    </LinearLayout>
 
 </LinearLayout>

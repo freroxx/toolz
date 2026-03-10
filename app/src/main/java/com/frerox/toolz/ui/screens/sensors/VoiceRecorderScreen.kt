@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,12 +47,21 @@ fun VoiceRecorderScreen(
 
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                TopAppBar(
-                    title = { Text("VOICE RECORDER", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp) },
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp
+            ) {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("VOICE RECORDER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { /* Settings */ }) {
+                            Icon(Icons.Rounded.Settings, null)
                         }
                     }
                 )
@@ -67,17 +77,18 @@ fun VoiceRecorderScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.2f),
+                    .weight(1.3f),
                 color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(bottomStart = 48.dp, bottomEnd = 48.dp),
-                tonalElevation = 2.dp
+                tonalElevation = 4.dp,
+                shadowElevation = 8.dp
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
                         if (uiState.isRecording) {
                             RecordingRippleAnimation()
                         }
@@ -86,9 +97,10 @@ fun VoiceRecorderScreen(
                             Text(
                                 text = formatDuration(uiState.durationMillis),
                                 style = MaterialTheme.typography.displayLarge.copy(
-                                    fontSize = 72.sp,
+                                    fontSize = 80.sp,
                                     fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = (-4).sp
                                 ),
                                 color = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                             )
@@ -97,18 +109,25 @@ fun VoiceRecorderScreen(
                                 enter = fadeIn() + expandVertically(),
                                 exit = fadeOut() + shrinkVertically()
                             ) {
-                                Text(
-                                    "RECORDING...",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.error,
-                                    letterSpacing = 2.sp
-                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                                    shape = CircleShape,
+                                    modifier = Modifier.padding(top = 12.dp)
+                                ) {
+                                    Text(
+                                        "RECORDING",
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.error,
+                                        letterSpacing = 2.sp
+                                    )
+                                }
                             }
                         }
                     }
                     
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(48.dp))
                     
                     RecordButton(
                         isRecording = uiState.isRecording,
@@ -131,31 +150,31 @@ fun VoiceRecorderScreen(
                             0.95f to Color.Black,
                             1f to Color.Transparent
                         ),
-                        length = 16.dp
+                        length = 32.dp
                     )
             ) {
                 Column(modifier = Modifier.padding(horizontal = 24.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "RECENT RECORDINGS",
-                            style = MaterialTheme.typography.labelMedium,
+                            "AUDIO LIBRARY",
+                            style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.outline,
-                            letterSpacing = 1.sp
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.5.sp
                         )
                         Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                            shape = CircleShape
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(
-                                uiState.recordings.size.toString(),
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                "${uiState.recordings.size} Files",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
@@ -163,10 +182,10 @@ fun VoiceRecorderScreen(
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 32.dp)
+                        contentPadding = PaddingValues(bottom = 48.dp)
                     ) {
                         items(uiState.recordings) { recording ->
-                            RecordingItem(
+                            RecordingCard(
                                 file = recording,
                                 isPlaying = uiState.playingFile == recording && uiState.isPlaying,
                                 playbackPosition = if (uiState.playingFile == recording) uiState.playbackPosition else 0,
@@ -178,23 +197,26 @@ fun VoiceRecorderScreen(
                         
                         if (uiState.recordings.isEmpty()) {
                             item {
-                                Column(
+                                Box(
                                     modifier = Modifier.fillParentMaxSize(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.MicNone, 
-                                        null, 
-                                        modifier = Modifier.size(64.dp).alpha(0.1f)
-                                    )
-                                    Spacer(Modifier.height(16.dp))
-                                    Text(
-                                        "NO RECORDINGS FOUND", 
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                    )
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Rounded.MicNone, 
+                                            null, 
+                                            modifier = Modifier.size(80.dp).alpha(0.08f),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(Modifier.height(16.dp))
+                                        Text(
+                                            "READY TO RECORD", 
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                            letterSpacing = 1.sp
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -210,18 +232,18 @@ fun RecordingRippleAnimation() {
     val infiniteTransition = rememberInfiniteTransition(label = "ripple")
     val scale1 by infiniteTransition.animateFloat(
         initialValue = 0.8f,
-        targetValue = 1.5f,
+        targetValue = 1.8f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "scale1"
     )
     val alpha1 by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
+        initialValue = 0.5f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "alpha1"
@@ -230,14 +252,14 @@ fun RecordingRippleAnimation() {
     Box(contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
-                .size(160.dp)
+                .size(180.dp)
                 .graphicsLayer(scaleX = scale1, scaleY = scale1)
                 .background(MaterialTheme.colorScheme.error.copy(alpha = alpha1), CircleShape)
         )
         Box(
             modifier = Modifier
-                .size(160.dp)
-                .graphicsLayer(scaleX = scale1 * 0.7f, scaleY = scale1 * 0.7f)
+                .size(180.dp)
+                .graphicsLayer(scaleX = scale1 * 0.75f, scaleY = scale1 * 0.75f)
                 .background(MaterialTheme.colorScheme.error.copy(alpha = alpha1), CircleShape)
         )
     }
@@ -250,10 +272,11 @@ fun RecordButton(
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(96.dp).shadow(16.dp, CircleShape),
+        modifier = Modifier.size(110.dp).bouncyClick {},
         shape = CircleShape,
         color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        tonalElevation = 8.dp
+        shadowElevation = 12.dp,
+        border = androidx.compose.foundation.BorderStroke(4.dp, Color.White.copy(alpha = 0.3f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             AnimatedContent(
@@ -267,7 +290,7 @@ fun RecordButton(
                     imageVector = if (recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(52.dp)
                 )
             }
         }
@@ -275,7 +298,7 @@ fun RecordButton(
 }
 
 @Composable
-fun RecordingItem(
+fun RecordingCard(
     file: File,
     isPlaying: Boolean,
     playbackPosition: Int,
@@ -287,36 +310,38 @@ fun RecordingItem(
 
     Surface(
         modifier = Modifier.fillMaxWidth().bouncyClick { onTogglePlay() },
-        shape = RoundedCornerShape(28.dp),
-        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(32.dp),
+        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = androidx.compose.foundation.BorderStroke(
-            1.dp, 
-            if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        )
+            1.5.dp, 
+            if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        ),
+        tonalElevation = if (isPlaying) 4.dp else 0.dp
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
+                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.AudioFile,
+                            if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
                             contentDescription = null,
-                            tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(24.dp)
+                            tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(20.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         file.name.removeSuffix(".m4a").removeSuffix(".3gp"), 
                         style = MaterialTheme.typography.titleMedium, 
                         fontWeight = FontWeight.Black, 
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                     Text(
                         SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault()).format(Date(file.lastModified())),
@@ -327,28 +352,25 @@ fun RecordingItem(
                 }
                 
                 IconButton(onClick = { showDeleteDialog = true }) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f))
+                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                 }
             }
             
             if (playbackDuration > 0 && (isPlaying || playbackPosition > 0)) {
-                Spacer(Modifier.height(16.dp))
-                Slider(
-                    value = playbackPosition.toFloat(),
-                    onValueChange = {}, // Playback control can be added to ViewModel
-                    valueRange = 0f..playbackDuration.toFloat(),
-                    modifier = Modifier.height(20.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary
-                    )
+                Spacer(Modifier.height(20.dp))
+                LinearProgressIndicator(
+                    progress = { playbackPosition.toFloat() / playbackDuration.toFloat() },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(formatDuration(playbackPosition.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    Text(formatDuration(playbackDuration.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                    Text(formatDuration(playbackPosition.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    Text(formatDuration(playbackDuration.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                 }
             }
         }
@@ -357,8 +379,8 @@ fun RecordingItem(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete recording?", fontWeight = FontWeight.Black) },
-            text = { Text("Are you sure you want to permanently delete this voice recording?") },
+            title = { Text("REMOVE RECORDING?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            text = { Text("This action will permanently delete the audio file from your device storage.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -366,17 +388,17 @@ fun RecordingItem(
                         showDeleteDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Delete", fontWeight = FontWeight.Bold)
+                    Text("DELETE", fontWeight = FontWeight.Black)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel", fontWeight = FontWeight.Bold)
+                    Text("CANCEL", fontWeight = FontWeight.Bold)
                 }
             },
-            shape = RoundedCornerShape(28.dp)
+            shape = RoundedCornerShape(36.dp)
         )
     }
 }

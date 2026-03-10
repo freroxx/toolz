@@ -46,9 +46,9 @@ fun UnitConverterScreen(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp
+                tonalElevation = 2.dp
             ) {
-                TopAppBar(
+                CenterAlignedTopAppBar(
                     modifier = Modifier.statusBarsPadding(),
                     title = { 
                         Text("UNIT CONVERTER", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp) 
@@ -69,30 +69,31 @@ fun UnitConverterScreen(
                 .fadingEdge(
                     brush = Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.02f to Color.Black,
-                        0.98f to Color.Black,
+                        0.05f to Color.Black,
+                        0.95f to Color.Black,
                         1f to Color.Transparent
                     ),
-                    length = 16.dp
+                    length = 24.dp
                 )
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Category Selector
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(32.dp),
-                modifier = Modifier.fillMaxWidth()
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(36.dp),
+                modifier = Modifier.fillMaxWidth(),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp)
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .height(200.dp)
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     userScrollEnabled = false
                 ) {
                     items(ConversionType.entries) { type ->
@@ -104,27 +105,28 @@ fun UnitConverterScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .bouncyClick { viewModel.onTypeChange(type) },
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(22.dp),
                             color = color,
                             contentColor = contentColor,
-                            tonalElevation = if (isSelected) 4.dp else 0.dp
+                            tonalElevation = if (isSelected) 6.dp else 0.dp
                         ) {
                             Column(
-                                modifier = Modifier.padding(8.dp),
+                                modifier = Modifier.padding(10.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
                                 Icon(
                                     imageVector = getIconForType(type),
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     text = type.name.lowercase().replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    textAlign = TextAlign.Center,
+                                    letterSpacing = 0.5.sp
                                 )
                             }
                         }
@@ -132,20 +134,20 @@ fun UnitConverterScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
             // Conversion UI
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(40.dp),
+                shape = RoundedCornerShape(44.dp),
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                tonalElevation = 4.dp,
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
+                Column(modifier = Modifier.padding(28.dp)) {
                     UnitSection(
                         isInput = true,
-                        label = "FROM",
+                        label = "INPUT VALUE",
                         value = state.inputValue,
                         unit = state.fromUnit,
                         units = units,
@@ -153,21 +155,22 @@ fun UnitConverterScreen(
                         onUnitChange = { viewModel.onFromUnitChange(it) }
                     )
                     
-                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                        HorizontalDivider(modifier = Modifier.alpha(0.1f))
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        HorizontalDivider(modifier = Modifier.alpha(0.15f))
                         Surface(
                             modifier = Modifier
-                                .size(64.dp)
-                                .shadow(12.dp, CircleShape)
+                                .size(68.dp)
+                                .shadow(16.dp, CircleShape)
                                 .bouncyClick { viewModel.swapUnits() },
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            tonalElevation = 8.dp
+                            tonalElevation = 10.dp,
+                            border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.SwapVert,
                                 contentDescription = "Swap",
-                                modifier = Modifier.padding(16.dp).size(32.dp),
+                                modifier = Modifier.padding(18.dp).size(34.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -175,7 +178,7 @@ fun UnitConverterScreen(
 
                     UnitSection(
                         isInput = false,
-                        label = "TO",
+                        label = "RESULT VALUE",
                         value = state.outputValue,
                         unit = state.toUnit,
                         units = units,
@@ -184,7 +187,7 @@ fun UnitConverterScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
             
             // Result Summary Card
             AnimatedVisibility(
@@ -194,52 +197,55 @@ fun UnitConverterScreen(
             ) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    shape = RoundedCornerShape(36.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                 ) {
-                    Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "CONVERSION RESULT",
+                            "CONVERSION SUMMARY",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.sp
+                            letterSpacing = 1.5.sp
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text(
                             text = "${state.inputValue} ${state.fromUnit} = ${state.outputValue} ${state.toUnit}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f)
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
             ) {
                 Row(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(22.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
                     Text(
-                        text = "Standard ISO conversion factors are used for maximum accuracy across all unit types.",
+                        text = "Standard ISO conversion factors are utilized for professional-grade accuracy.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontWeight = FontWeight.Bold,
                         lineHeight = 18.sp
                     )
                 }
             }
             
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(48.dp))
         }
     }
 }
@@ -257,12 +263,12 @@ fun UnitSection(
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label, 
-            style = MaterialTheme.typography.labelLarge, 
+            style = MaterialTheme.typography.labelSmall, 
             color = MaterialTheme.colorScheme.primary, 
             fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp
+            letterSpacing = 1.5.sp
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -275,10 +281,10 @@ fun UnitSection(
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = Color.Transparent
                     ),
@@ -287,13 +293,14 @@ fun UnitSection(
             } else {
                 Surface(
                     modifier = Modifier.weight(1f).height(64.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                 ) {
-                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp), contentAlignment = Alignment.CenterStart) {
                         Text(
                             text = value,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
@@ -319,14 +326,15 @@ fun UnitDropDownSelector(
         Surface(
             modifier = Modifier
                 .height(64.dp)
-                .width(100.dp)
+                .width(110.dp)
                 .bouncyClick { expanded = true },
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            tonalElevation = 2.dp
+            tonalElevation = 4.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp),
+                modifier = Modifier.padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -338,25 +346,25 @@ fun UnitDropDownSelector(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
+                Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
         }
         
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.heightIn(max = 300.dp)
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.heightIn(max = 350.dp)
         ) {
             units.forEach { unit ->
                 DropdownMenuItem(
-                    text = { Text(unit, fontWeight = FontWeight.Bold) },
+                    text = { Text(unit, fontWeight = FontWeight.Black) },
                     onClick = {
                         onUnitChange(unit)
                         expanded = false
                     },
                     trailingIcon = if (unit == selectedUnit) {
-                        { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
+                        { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
                     } else null
                 )
             }

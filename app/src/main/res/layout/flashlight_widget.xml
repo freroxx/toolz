@@ -1,29 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
-    android:padding="16dp"
+    android:padding="12dp"
     android:gravity="center"
     android:background="@drawable/widget_background">
 
     <LinearLayout
         android:id="@+id/widget_flashlight_toggle_container"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
+        android:layout_weight="1.2"
         android:orientation="vertical"
-        android:gravity="center">
+        android:gravity="center"
+        android:layout_margin="4dp"
+        android:background="@drawable/widget_button_tonal">
 
         <ImageButton
             android:id="@+id/widget_flashlight_button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:src="@android:drawable/ic_lock_power_off"
-            android:background="@drawable/circle_background"
-            android:backgroundTint="#FFD54F"
-            android:tint="#000000"
+            android:background="@drawable/widget_button_primary"
+            app:tint="#FFFFFF"
             android:padding="12dp"
             android:scaleType="fitCenter"
             android:contentDescription="Toggle" />
@@ -31,57 +33,53 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Power"
+            android:text="ON/OFF"
             android:textSize="12sp"
             android:textStyle="bold"
-            android:textColor="#1C1B1F"
-            android:layout_marginTop="8dp" />
+            android:textColor="#1D1B20"
+            android:layout_marginTop="8dp"
+            android:letterSpacing="0.1" />
     </LinearLayout>
 
     <LinearLayout
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:layout_weight="1"
         android:orientation="vertical"
         android:gravity="center">
 
         <ImageButton
             android:id="@+id/widget_flashlight_strobe"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:src="@android:drawable/ic_menu_compass"
-            android:background="@drawable/circle_background"
-            android:backgroundTint="#E1E2EC"
-            android:tint="#1C1B1F"
-            android:padding="14dp"
+            android:background="@drawable/widget_item_background"
+            app:tint="#49454F"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             android:contentDescription="Strobe" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Strobe"
-            android:textSize="12sp"
+            android:text="STROBE"
+            android:textSize="10sp"
+            android:textStyle="bold"
             android:textColor="#49454F"
-            android:layout_marginTop="8dp" />
-    </LinearLayout>
+            android:layout_marginTop="4dp" />
 
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center">
+        <Spacer
+            android:layout_width="match_parent"
+            android:layout_height="12dp" />
 
         <ImageButton
             android:id="@+id/widget_flashlight_sos"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:src="@android:drawable/ic_menu_help"
-            android:background="@drawable/circle_background"
-            android:backgroundTint="#F9DEDC"
-            android:tint="#410E0B"
-            android:padding="14dp"
+            android:background="@drawable/widget_item_background"
+            app:tint="#B3261E"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             android:contentDescription="SOS" />
 
@@ -89,9 +87,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="SOS"
-            android:textSize="12sp"
-            android:textColor="#49454F"
-            android:layout_marginTop="8dp" />
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#B3261E"
+            android:layout_marginTop="4dp" />
     </LinearLayout>
 
 </LinearLayout>
