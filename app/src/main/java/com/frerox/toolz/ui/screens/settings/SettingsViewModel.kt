@@ -79,6 +79,9 @@ class SettingsViewModel @Inject constructor(
     val showMusicVisualizer: StateFlow<Boolean> = repository.showMusicVisualizer
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val stepCounterEnabled: StateFlow<Boolean> = repository.stepCounterEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
@@ -119,4 +122,6 @@ class SettingsViewModel @Inject constructor(
     fun setMusicPlaybackSpeed(speed: Float) { viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) } }
     fun setMusicEqualizerPreset(preset: String) { viewModelScope.launch { repository.setMusicEqualizerPreset(preset) } }
     fun setShowMusicVisualizer(enabled: Boolean) { viewModelScope.launch { repository.setShowMusicVisualizer(enabled) } }
+
+    fun setStepCounterEnabled(enabled: Boolean) { viewModelScope.launch { repository.setStepCounterEnabled(enabled) } }
 }

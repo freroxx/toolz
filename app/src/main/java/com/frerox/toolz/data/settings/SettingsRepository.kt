@@ -55,6 +55,9 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_ROTATION_ENABLED = booleanPreferencesKey("music_rotation_enabled")
     private val MUSIC_PIP_ENABLED = booleanPreferencesKey("music_pip_enabled")
 
+    // Step Counter Toggle
+    private val STEP_COUNTER_ENABLED = booleanPreferencesKey("step_counter_enabled")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -100,6 +103,8 @@ class SettingsRepository @Inject constructor(
     val musicArtShape: Flow<String> = context.dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
     val musicRotationEnabled: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
+
+    val stepCounterEnabled: Flow<Boolean> = context.dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: true }
 
     suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -147,4 +152,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicArtShape(shape: String) { context.dataStore.edit { it[MUSIC_ART_SHAPE] = shape } }
     suspend fun setMusicRotationEnabled(enabled: Boolean) { context.dataStore.edit { it[MUSIC_ROTATION_ENABLED] = enabled } }
     suspend fun setMusicPipEnabled(enabled: Boolean) { context.dataStore.edit { it[MUSIC_PIP_ENABLED] = enabled } }
+
+    suspend fun setStepCounterEnabled(enabled: Boolean) { context.dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
 }

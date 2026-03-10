@@ -23,41 +23,63 @@ object WidgetUtils {
                 Color.blue(bgColor)
             )
 
+            // Set the background color of the root layout
             views.setInt(R.id.widget_root, "setBackgroundColor", finalBgColor)
             
-            // Calculate contrasting text color (Black or White)
+            // Calculate contrasting text color
             val luminance = 0.299 * Color.red(bgColor) + 0.587 * Color.green(bgColor) + 0.114 * Color.blue(bgColor)
-            val textColor = if (luminance > 128 || opacity < 0.5) Color.parseColor("#1D1B20") else Color.WHITE
-            val subTextColor = if (luminance > 128 || opacity < 0.5) Color.parseColor("#49454F") else Color.parseColor("#CAC4D0")
+            val isDarkBg = (luminance < 128 && opacity > 0.5)
+            
+            val textColor = if (isDarkBg) Color.WHITE else Color.parseColor("#1D1B20")
+            val subTextColor = if (isDarkBg) Color.parseColor("#CAC4D0") else Color.parseColor("#49454F")
+            val iconTint = if (isDarkBg) Color.WHITE else accentColor
 
-            // Apply text colors to common IDs if they exist
-            val textViews = intArrayOf(
-                R.id.widget_music_title, R.id.widget_step_count, R.id.widget_coin_text,
-                R.id.widget_note_title // Note: Notes widget uses ListView, handled in adapter/factory
-            )
-            for (id in textViews) {
-                try { views.setTextColor(id, textColor) } catch (e: Exception) {}
-            }
+            // Apply colors to views if they exist in the current layout
+            
+            // Main Text Colors
+            setTextViewColor(views, R.id.widget_music_title, textColor)
+            setTextViewColor(views, R.id.widget_step_count, textColor)
+            setTextViewColor(views, R.id.widget_coin_text, textColor)
+            setTextViewColor(views, R.id.widget_note_title, textColor)
 
-            val subTextViews = intArrayOf(
-                R.id.widget_music_artist, R.id.widget_step_goal
-            )
-            for (id in subTextViews) {
-                try { views.setTextColor(id, subTextColor) } catch (e: Exception) {}
-            }
+            // Subtext Colors
+            setTextViewColor(views, R.id.widget_music_artist, subTextColor)
+            setTextViewColor(views, R.id.widget_step_goal, subTextColor)
+            setTextViewColor(views, R.id.widget_step_label, subTextColor)
+            setTextViewColor(views, R.id.widget_compass_label, subTextColor)
+            setTextViewColor(views, R.id.widget_coin_label, subTextColor)
 
-            // Dynamic Tinting for Accent Elements
-            // We use setInt with "setColorFilter" or specific M3-like methods if available
+            // Icon Tints
+            setIconColor(views, R.id.widget_step_icon, iconTint)
+            setIconColor(views, R.id.widget_compass_icon, iconTint)
+            setIconColor(views, R.id.widget_music_prev, iconTint)
+            setIconColor(views, R.id.widget_music_next, iconTint)
+            
+            // Progress elements and primary buttons use accent
             try {
-                // For progress bars
+                // setProgressTintPixels is used via setInt for dynamic tinting
                 views.setInt(R.id.widget_music_progress, "setProgressTintPixels", accentColor)
                 views.setInt(R.id.widget_step_progress, "setProgressTintPixels", accentColor)
                 
                 // For primary buttons
-                views.setInt(R.id.widget_music_play_pause, "setColorFilter", Color.WHITE)
-                // Note: Changing background tint of a drawable in RemoteViews is tricky,
-                // but we can set the background color of the view itself if it's a simple shape.
+                views.setInt(R.id.widget_music_play_pause, "setBackgroundColor", accentColor)
+                views.setInt(R.id.widget_flashlight_button, "setBackgroundColor", accentColor)
             } catch (e: Exception) {}
         }
+    }
+
+    private fun setTextViewColor(views: RemoteViews, viewId: Int, color: Int) {
+        try {
+            // Check if the resource exists to avoid "Unresolved reference" during compilation 
+            // if XMLs are not yet fully processed, but since we are using R.id directly, 
+            // the build system should find them if they are in the XML files.
+            views.setTextColor(viewId, color)
+        } catch (e: Exception) {}
+    }
+
+    private fun setIconColor(views: RemoteViews, viewId: Int, color: Int) {
+        try {
+            views.setInt(viewId, "setColorFilter", color)
+        } catch (e: Exception) {}
     }
 }

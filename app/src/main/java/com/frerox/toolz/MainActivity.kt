@@ -57,7 +57,9 @@ import com.frerox.toolz.ui.screens.settings.*
 import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
@@ -91,37 +93,44 @@ class MainActivity : ComponentActivity() {
                 handleIntent(intent, navController)
             }
 
-            // Handle service start after permission check
+            // Handle service start after permission check and toggle
             val context = this
+            val scope = rememberCoroutineScope()
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
             ) { permissions ->
                 if (permissions[Manifest.permission.ACTIVITY_RECOGNITION] == true) {
-                    startStepService()
+                    scope.launch {
+                        if (settingsRepository.stepCounterEnabled.first()) {
+                            startStepService()
+                        }
+                    }
                 }
             }
 
             LaunchedEffect(Unit) {
-                val permissionsToRequest = mutableListOf<String>()
-                
+                settingsRepository.stepCounterEnabled.collectLatest { enabled ->
+                    if (enabled) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
+                                startStepService()
+                            } else {
+                                permissionLauncher.launch(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION))
+                            }
+                        } else {
+                            startStepService()
+                        }
+                    } else {
+                        stopStepService()
+                    }
+                }
+            }
+
+            LaunchedEffect(Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                        permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
                     }
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
-                        permissionsToRequest.add(Manifest.permission.ACTIVITY_RECOGNITION)
-                    } else {
-                        startStepService()
-                    }
-                } else {
-                    startStepService()
-                }
-
-                if (permissionsToRequest.isNotEmpty()) {
-                    permissionLauncher.launch(permissionsToRequest.toTypedArray())
                 }
             }
 
@@ -273,6 +282,11 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun stopStepService() {
+        val intent = Intent(this, StepCounterService::class.java)
+        stopService(intent)
     }
 }
 

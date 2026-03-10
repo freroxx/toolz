@@ -1668,7 +1668,12 @@ fun MiniPlayer(
     onTogglePlay: () -> Unit, 
     onClick: () -> Unit
 ) {
-    val progressPercent = if (duration > 0) progress.toFloat() / duration else 0f
+    val targetProgress = if (duration > 0) progress.toFloat() / duration else 0f
+    val animatedProgress by animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = tween(500, easing = LinearOutSlowInEasing),
+        label = "smoothMiniProgress"
+    )
 
     Surface(
         modifier = Modifier
@@ -1685,7 +1690,7 @@ fun MiniPlayer(
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .fillMaxWidth(progressPercent)
+                    .fillMaxWidth(animatedProgress)
                     .background(
                         Brush.horizontalGradient(
                             listOf(
@@ -1757,7 +1762,7 @@ fun MiniPlayer(
             }
 
             LinearProgressIndicator(
-                progress = { progressPercent },
+                progress = { animatedProgress },
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)

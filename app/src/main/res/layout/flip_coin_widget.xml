@@ -10,6 +10,7 @@
     android:background="@drawable/widget_background">
 
     <TextView
+        android:id="@+id/widget_coin_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="FLIP A COIN"
@@ -30,7 +31,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:src="@android:drawable/btn_star_big_on"
-            app:tint="#6750A4"
+            android:tint="#6750A4"
             android:contentDescription="Coin" />
     </FrameLayout>
 

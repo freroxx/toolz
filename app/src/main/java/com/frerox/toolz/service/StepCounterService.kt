@@ -64,8 +64,12 @@ class StepCounterService : Service(), SensorEventListener {
             combine(
                 settingsRepository.stepGoal,
                 settingsRepository.notificationsEnabled,
-                settingsRepository.stepNotifications
-            ) { goal, globalEnabled, stepEnabled ->
+                settingsRepository.stepNotifications,
+                settingsRepository.stepCounterEnabled
+            ) { goal, globalEnabled, stepEnabled, counterEnabled ->
+                if (!counterEnabled) {
+                    stopSelf()
+                }
                 Triple(goal, globalEnabled, stepEnabled)
             }.collect { (goal, global, step) ->
                 currentGoal = goal

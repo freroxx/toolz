@@ -1,12 +1,15 @@
 package com.frerox.toolz.ui.screens.dashboard
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -36,6 +40,10 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.time.TimerViewModel
+import com.frerox.toolz.ui.screens.time.StopwatchViewModel
+import com.frerox.toolz.ui.screens.time.PomodoroViewModel
+import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
 import java.util.*
 
 data class ToolCategory(
@@ -51,17 +59,35 @@ data class ToolItem(
     val color: Color = Color.Unspecified
 )
 
+sealed class PillPage {
+    object Music : PillPage()
+    object Timer : PillPage()
+    object Stopwatch : PillPage()
+    object Pomodoro : PillPage()
+    object Steps : PillPage()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val musicViewModel: MusicPlayerViewModel = hiltViewModel(context as ComponentActivity)
+    val activity = context as? ComponentActivity
+    
+    val musicViewModel: MusicPlayerViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val timerViewModel: TimerViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val stopwatchViewModel: StopwatchViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val pomodoroViewModel: PomodoroViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val stepViewModel: StepCounterViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
     val musicState by musicViewModel.uiState.collectAsState()
+    val timerState by timerViewModel.uiState.collectAsState()
+    val stopwatchState by stopwatchViewModel.uiState.collectAsState()
+    val pomodoroState by pomodoroViewModel.uiState.collectAsState()
+    val stepState by stepViewModel.uiState.collectAsState()
     
     val filteredCategories = categories.map { category ->
         category.copy(items = category.items.filter { 
@@ -154,86 +180,317 @@ fun DashboardScreen(
                 }
             }
 
-            // Enhanced Now Playing Pill
+            // Universal App Pill
+            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState) {
+                val pages = mutableListOf<PillPage>()
+                if (musicState.currentTrack != null) pages.add(PillPage.Music)
+                if (timerState.isRunning || timerState.isPaused) pages.add(PillPage.Timer)
+                if (stopwatchState.isRunning) pages.add(PillPage.Stopwatch)
+                if (pomodoroState.isRunning) pages.add(PillPage.Pomodoro)
+                pages.add(PillPage.Steps) // Always show steps
+                pages
+            }
+
             AnimatedVisibility(
-                visible = musicState.currentTrack != null,
+                visible = activePages.isNotEmpty(),
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp)
             ) {
-                musicState.currentTrack?.let { track ->
-                    Surface(
-                        modifier = Modifier
-                            .padding(horizontal = 24.dp)
-                            .fillMaxWidth()
-                            .height(86.dp)
-                            .shadow(32.dp, RoundedCornerShape(44.dp))
-                            .bouncyClick { onNavigate(Screen.MusicPlayer.route) },
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(44.dp),
-                        tonalElevation = 12.dp,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                modifier = Modifier.size(66.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                shadowElevation = 4.dp
-                            ) {
-                                AsyncImage(
-                                    model = track.thumbnailUri,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                val pagerState = rememberPagerState(pageCount = { activePages.size })
+                
+                Surface(
+                    modifier = Modifier
+                        .padding(horizontal = 24.dp)
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .shadow(32.dp, RoundedCornerShape(50.dp))
+                        .bouncyClick { 
+                            val currentRoute = when(activePages[pagerState.currentPage]) {
+                                PillPage.Music -> Screen.MusicPlayer.route
+                                PillPage.Timer -> Screen.Timer.route
+                                PillPage.Stopwatch -> Screen.Stopwatch.route
+                                PillPage.Pomodoro -> Screen.Pomodoro.route
+                                PillPage.Steps -> Screen.StepCounter.route
                             }
-                            
-                            Spacer(Modifier.width(18.dp))
-                            
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    track.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Black,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    track.artist ?: "Unknown Artist",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-                            
-                            IconButton(
-                                onClick = { musicViewModel.togglePlayPause() },
-                                modifier = Modifier
-                                    .size(60.dp)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-                            ) {
-                                Icon(
-                                    if (musicState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play/Pause",
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
+                            onNavigate(currentRoute)
+                        },
+                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(12.dp),
+                    shape = RoundedCornerShape(50.dp),
+                    tonalElevation = 12.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { pageIndex ->
+                        when (activePages[pageIndex]) {
+                            PillPage.Music -> MusicPill(musicState, musicViewModel)
+                            PillPage.Timer -> TimerPill(timerState, timerViewModel)
+                            PillPage.Stopwatch -> StopwatchPill(stopwatchState, stopwatchViewModel)
+                            PillPage.Pomodoro -> PomodoroPill(pomodoroState, pomodoroViewModel)
+                            PillPage.Steps -> StepsPill(stepState)
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: MusicPlayerViewModel) {
+    val track = state.currentTrack ?: return
+    
+    val infiniteTransition = rememberInfiniteTransition(label = "rotation")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(20000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pillRotation"
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        val targetProgress = if (state.duration > 0) state.progress.toFloat() / state.duration else 0f
+        val animatedProgress by animateFloatAsState(
+            targetValue = targetProgress,
+            animationSpec = tween(500, easing = LinearOutSlowInEasing),
+            label = "smoothProgress"
+        )
+        
+        // Background Progress Fill
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(animatedProgress)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        )
+
+        Row(
+            modifier = Modifier.padding(12.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier
+                    .size(76.dp)
+                    .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f),
+                shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shadowElevation = 4.dp
+            ) {
+                AsyncImage(
+                    model = track.thumbnailUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            
+            Spacer(Modifier.width(16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    track.artist ?: "Unknown Artist",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    letterSpacing = 0.5.sp
+                )
+            }
+            
+            IconButton(
+                onClick = { viewModel.togglePlayPause() },
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+            ) {
+                Icon(
+                    if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(38.dp)
+                )
+            }
+        }
+        
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(4.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = Color.Transparent
+        )
+    }
+}
+
+@Composable
+fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: TimerViewModel) {
+    Row(
+        modifier = Modifier.padding(16.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(68.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(34.dp))
+            }
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("TIMER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
+            Text(
+                formatTimeDashboard(state.remainingTime),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+        IconButton(
+            onClick = { viewModel.toggleStartStop() },
+            modifier = Modifier.size(60.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
+        ) {
+            Icon(
+                if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                null,
+                tint = MaterialTheme.colorScheme.onSecondary,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewModel: StopwatchViewModel) {
+    Row(
+        modifier = Modifier.padding(16.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(68.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.tertiaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(34.dp))
+            }
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("STOPWATCH", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
+            Text(
+                formatTimeDashboard(state.elapsedTime),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+        IconButton(
+            onClick = { viewModel.toggleStartStop() },
+            modifier = Modifier.size(60.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape)
+        ) {
+            Icon(
+                if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                null,
+                tint = MaterialTheme.colorScheme.onTertiary,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewModel: PomodoroViewModel) {
+    Row(
+        modifier = Modifier.padding(16.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(68.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.errorContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(34.dp))
+            }
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(state.mode.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+            Text(
+                formatTimeDashboard(state.remainingTime),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+        IconButton(
+            onClick = { viewModel.toggleStartStop() },
+            modifier = Modifier.size(60.dp).background(MaterialTheme.colorScheme.error, CircleShape)
+        ) {
+            Icon(
+                if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                null,
+                tint = MaterialTheme.colorScheme.onError,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
+    val progress = if (state.goal > 0) (state.steps.toFloat() / state.goal.toFloat()).coerceIn(0f, 1f) else 0f
+    Row(
+        modifier = Modifier.padding(16.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(68.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xFF4CAF50),
+                trackColor = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                strokeWidth = 7.dp,
+                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+            )
+            Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("DAILY STEPS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
+            Text(
+                "${state.steps}",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("${(progress * 100).toInt()}%", fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
+            Text("GOAL: ${state.goal}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.alpha(0.6f))
+        }
+    }
+}
+
+private fun formatTimeDashboard(millis: Long): String {
+    val totalSeconds = (millis + 999) / 1000
+    val min = totalSeconds / 60
+    val sec = totalSeconds % 60
+    return String.format(Locale.getDefault(), "%02d:%02d", min, sec)
 }
 
 @Composable

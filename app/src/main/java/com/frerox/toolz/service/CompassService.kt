@@ -12,10 +12,18 @@ import android.hardware.SensorManager
 import android.os.IBinder
 import android.widget.RemoteViews
 import com.frerox.toolz.R
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.CompassWidgetProvider
+import com.frerox.toolz.widget.WidgetUtils
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class CompassService : Service(), SensorEventListener {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     private var sensorManager: SensorManager? = null
     private var rotationVector: Sensor? = null
@@ -54,8 +62,10 @@ class CompassService : Service(), SensorEventListener {
         val componentName = ComponentName(this, CompassWidgetProvider::class.java)
         val views = RemoteViews(packageName, R.layout.compass_widget)
 
+        // Apply theme settings
+        WidgetUtils.applyTheme(this, views, settingsRepository)
+
         // Rotate the dial
-        // We use setInt(viewId, "setRotation", value) for RemoteViews
         views.setFloat(R.id.widget_compass_dial, "setRotation", -azimuth)
         
         appWidgetManager.updateAppWidget(componentName, views)
