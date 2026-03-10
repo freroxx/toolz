@@ -34,6 +34,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,9 +56,10 @@ fun NotepadScreen(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
             ) {
-                Column {
+                Column(modifier = Modifier.statusBarsPadding()) {
                     TopAppBar(
                         title = { Text("Notepad", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineMedium) },
                         navigationIcon = {
@@ -80,8 +82,8 @@ fun NotepadScreen(
                         placeholder = { Text("Search your notes...") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
@@ -89,15 +91,16 @@ fun NotepadScreen(
                                 }
                             }
                         },
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(20.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                             unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                         ),
                         singleLine = true
                     )
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         },
@@ -109,47 +112,60 @@ fun NotepadScreen(
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(28.dp)
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier.padding(bottom = 16.dp, end = 16.dp)
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = "Add Note", modifier = Modifier.size(36.dp))
             }
         }
     ) { padding ->
-        if (filteredNotes.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        if (searchQuery.isEmpty()) Icons.Rounded.Description else Icons.Rounded.SearchOff, 
-                        contentDescription = null, 
-                        modifier = Modifier.size(120.dp), 
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Text(
-                        if (searchQuery.isEmpty()) "Your thoughts belong here" else "No matching notes", 
-                        style = MaterialTheme.typography.titleMedium, 
-                        color = MaterialTheme.colorScheme.outline
-                    )
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (filteredNotes.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            if (searchQuery.isEmpty()) Icons.Rounded.Description else Icons.Rounded.SearchOff, 
+                            contentDescription = null, 
+                            modifier = Modifier.size(120.dp), 
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        )
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            if (searchQuery.isEmpty()) "Your thoughts belong here" else "No matching notes", 
+                            style = MaterialTheme.typography.titleMedium, 
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
                 }
-            }
-        } else {
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalItemSpacing = 16.dp
-            ) {
-                items(filteredNotes, key = { it.id }) { note ->
-                    ImprovedNoteItem(
-                        note = note, 
-                        onClick = { 
-                            noteToEdit = note
-                            showEditor = true
-                        },
-                        onDelete = { viewModel.deleteNote(note) },
-                        onTogglePin = { viewModel.togglePin(note) }
-                    )
+            } else {
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .fadingEdge(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.05f to Color.Black,
+                                0.95f to Color.Black,
+                                1f to Color.Transparent
+                            ),
+                            length = 24.dp
+                        ),
+                    contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalItemSpacing = 16.dp
+                ) {
+                    items(filteredNotes, key = { it.id }) { note ->
+                        ImprovedNoteItem(
+                            note = note, 
+                            onClick = { 
+                                noteToEdit = note
+                                showEditor = true
+                            },
+                            onDelete = { viewModel.deleteNote(note) },
+                            onTogglePin = { viewModel.togglePin(note) }
+                        )
+                    }
                 }
             }
         }

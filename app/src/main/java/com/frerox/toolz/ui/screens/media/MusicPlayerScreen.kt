@@ -447,7 +447,8 @@ fun MusicPlayerScreen(
                 onSetSleepTimer = { viewModel.setSleepTimer(it) },
                 onToggleFavorite = { viewModel.toggleFavorite(it) },
                 onSetArtShape = { viewModel.setArtShape(it) },
-                onToggleRotation = { viewModel.toggleRotation() }
+                onToggleRotation = { viewModel.toggleRotation() },
+                onTogglePip = { viewModel.togglePipEnabled() }
             )
         }
     }
@@ -757,7 +758,8 @@ fun FullPlayerView(
     onSetSleepTimer: (Int?) -> Unit,
     onToggleFavorite: (MusicTrack) -> Unit,
     onSetArtShape: (String) -> Unit,
-    onToggleRotation: () -> Unit
+    onToggleRotation: () -> Unit,
+    onTogglePip: () -> Unit
 ) {
     val track = state.currentTrack ?: return
     var showSleepTimer by remember { mutableStateOf(false) }
@@ -830,6 +832,11 @@ fun FullPlayerView(
                             text = { Text("Art Rotation") },
                             onClick = { onToggleRotation(); showOverflowMenu = false },
                             leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Picture-in-Picture") },
+                            onClick = { onTogglePip(); showOverflowMenu = false },
+                            leadingIcon = { Switch(checked = state.pipEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) }
                         )
                         DropdownMenuItem(
                             text = { Text("Sleep Timer") },

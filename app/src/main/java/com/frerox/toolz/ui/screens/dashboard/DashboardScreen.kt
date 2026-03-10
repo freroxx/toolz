@@ -23,11 +23,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.activity.ComponentActivity
 import coil.compose.AsyncImage
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
@@ -51,9 +53,11 @@ data class ToolItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    onNavigate: (String) -> Unit,
-    musicViewModel: MusicPlayerViewModel = hiltViewModel()
+    onNavigate: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val musicViewModel: MusicPlayerViewModel = hiltViewModel(context as ComponentActivity)
+
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
     val musicState by musicViewModel.uiState.collectAsState()
@@ -67,37 +71,45 @@ fun DashboardScreen(
 
     Scaffold(
         topBar = {
-            Column(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.background)
-                    .statusBarsPadding()
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
             ) {
-                WelcomeHeader(onSettingsClick = { onNavigate(Screen.Settings.route) })
-                
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search 30+ tools...") },
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    trailingIcon = { 
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                        .background(MaterialTheme.colorScheme.background)
+                        .statusBarsPadding()
+                ) {
+                    WelcomeHeader(onSettingsClick = { onNavigate(Screen.Settings.route) })
+                    
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search 30+ tools...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingIcon = { 
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                                }
                             }
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        )
                     )
-                )
+                    Spacer(Modifier.height(8.dp))
+                }
             }
         }
     ) { padding ->
@@ -116,7 +128,7 @@ fun DashboardScreen(
                         ),
                         length = 16.dp
                     ),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 100.dp, top = 8.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp, top = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -143,7 +155,7 @@ fun DashboardScreen(
                 }
             }
 
-            // Now Playing Pill
+            // Enhanced Now Playing Pill
             AnimatedVisibility(
                 visible = musicState.currentTrack != null,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -157,20 +169,22 @@ fun DashboardScreen(
                         modifier = Modifier
                             .padding(horizontal = 24.dp)
                             .fillMaxWidth()
-                            .height(72.dp)
-                            .shadow(12.dp, RoundedCornerShape(36.dp))
+                            .height(80.dp)
+                            .shadow(24.dp, RoundedCornerShape(40.dp))
                             .bouncyClick { onNavigate(Screen.MusicPlayer.route) },
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(36.dp)
+                        shape = RoundedCornerShape(40.dp),
+                        tonalElevation = 8.dp
                     ) {
                         Row(
                             modifier = Modifier.padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(
-                                modifier = Modifier.size(56.dp),
+                                modifier = Modifier.size(64.dp),
                                 shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surface
+                                color = MaterialTheme.colorScheme.surface,
+                                shadowElevation = 4.dp
                             ) {
                                 AsyncImage(
                                     model = track.thumbnailUri,
@@ -185,15 +199,16 @@ fun DashboardScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     track.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Black,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     track.artist ?: "Unknown Artist",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -202,13 +217,14 @@ fun DashboardScreen(
                             IconButton(
                                 onClick = { musicViewModel.togglePlayPause() },
                                 modifier = Modifier
-                                    .size(48.dp)
+                                    .size(56.dp)
                                     .background(MaterialTheme.colorScheme.primary, CircleShape)
                             ) {
                                 Icon(
                                     if (musicState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                     contentDescription = "Play/Pause",
-                                    tint = MaterialTheme.colorScheme.onPrimary
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(32.dp)
                                 )
                             }
                         }

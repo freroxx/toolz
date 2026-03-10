@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.fadingEdge
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,77 +38,122 @@ fun BmiScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Health Index", fontWeight = FontWeight.Black) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
-            // Main Result Display
-            ResultCard(bmi = state.bmi, category = state.category, range = state.healthyRange)
-
-            // Gender Selection
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
             ) {
-                GenderCard(
-                    gender = Gender.MALE,
-                    isSelected = state.gender == Gender.MALE,
-                    onClick = { viewModel.onGenderChange(Gender.MALE) },
-                    modifier = Modifier.weight(1f)
-                )
-                GenderCard(
-                    gender = Gender.FEMALE,
-                    isSelected = state.gender == Gender.FEMALE,
-                    onClick = { viewModel.onGenderChange(Gender.FEMALE) },
-                    modifier = Modifier.weight(1f)
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("Health Index", fontWeight = FontWeight.Black) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    }
                 )
             }
-
-            // Input Section
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(32.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        }
+    ) { padding ->
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                // Main Result Display
+                ResultCard(bmi = state.bmi, category = state.category, range = state.healthyRange)
+
+                // Gender Selection
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Age & Weight Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    GenderCard(
+                        gender = Gender.MALE,
+                        isSelected = state.gender == Gender.MALE,
+                        onClick = { viewModel.onGenderChange(Gender.MALE) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    GenderCard(
+                        gender = Gender.FEMALE,
+                        isSelected = state.gender == Gender.FEMALE,
+                        onClick = { viewModel.onGenderChange(Gender.FEMALE) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Input Section
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        BmiInput(
-                            label = "Age",
-                            value = state.age,
-                            onValueChange = { viewModel.onAgeChange(it) },
-                            icon = Icons.Rounded.Cake,
-                            placeholder = "Years",
-                            modifier = Modifier.weight(1f)
-                        )
-                        
-                        Column(modifier = Modifier.weight(1.2f)) {
+                        // Age & Weight Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            BmiInput(
+                                label = "Age",
+                                value = state.age,
+                                onValueChange = { viewModel.onAgeChange(it) },
+                                icon = Icons.Rounded.Cake,
+                                placeholder = "Years",
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            Column(modifier = Modifier.weight(1.2f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Weight", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.weight(1f))
+                                    Text(
+                                        if (state.isKg) "KG" else "LB",
+                                        modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)).padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = state.weight,
+                                    onValueChange = { viewModel.onWeightChange(it) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("0") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    shape = RoundedCornerShape(16.dp),
+                                    leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null, tint = MaterialTheme.colorScheme.primary) }
+                                )
+                            }
+                        }
+
+                        // Height Input
+                        Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Weight", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Text("Height", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.weight(1f))
                                 Text(
-                                    if (state.isKg) "KG" else "LB",
+                                    if (state.isCm) "CM" else "FT/IN",
                                     modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)).padding(horizontal = 8.dp, vertical = 2.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
@@ -114,64 +161,40 @@ fun BmiScreen(
                             }
                             Spacer(Modifier.height(8.dp))
                             OutlinedTextField(
-                                value = state.weight,
-                                onValueChange = { viewModel.onWeightChange(it) },
+                                value = state.height,
+                                onValueChange = { viewModel.onHeightChange(it) },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("0") },
+                                placeholder = { Text(if (state.isCm) "0" else "0' 0\"") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 shape = RoundedCornerShape(16.dp),
-                                leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null, tint = MaterialTheme.colorScheme.primary) }
+                                leadingIcon = { Icon(Icons.Rounded.Height, null, tint = MaterialTheme.colorScheme.primary) }
                             )
                         }
-                    }
-
-                    // Height Input
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Height", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                if (state.isCm) "CM" else "FT/IN",
-                                modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)).padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = state.height,
-                            onValueChange = { viewModel.onHeightChange(it) },
+                        
+                        Button(
+                            onClick = { viewModel.toggleUnit(true); viewModel.toggleUnit(false) },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(if (state.isCm) "0" else "0' 0\"") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(16.dp),
-                            leadingIcon = { Icon(Icons.Rounded.Height, null, tint = MaterialTheme.colorScheme.primary) }
-                        )
-                    }
-                    
-                    Button(
-                        onClick = { viewModel.toggleUnit(true); viewModel.toggleUnit(false) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Rounded.Sync, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Switch Units")
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Rounded.Sync, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Switch Units")
+                        }
                     }
                 }
-            }
 
-            // Advanced Metrics Section
-            if (state.bmi != null) {
-                AdvancedMetrics(state)
-            }
+                // Advanced Metrics Section
+                if (state.bmi != null) {
+                    AdvancedMetrics(state)
+                }
 
-            // Classification Info
-            if (state.bmi != null) {
-                BmiInfoSection(bmi = state.bmi!!, healthyRange = state.healthyRange)
+                // Classification Info
+                if (state.bmi != null) {
+                    BmiInfoSection(bmi = state.bmi!!, healthyRange = state.healthyRange)
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
             }
-            
-            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }

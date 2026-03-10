@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.steps.StepEntry
+import com.frerox.toolz.ui.components.fadingEdge
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -46,39 +48,59 @@ fun StepCounterScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Fitness Tracker", fontWeight = FontWeight.Black) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                TopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("Fitness Tracker", fontWeight = FontWeight.ExtraBold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { /* Could add settings here */ }) {
+                            Icon(Icons.Rounded.History, contentDescription = "History")
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = { /* Could add settings here */ }) {
-                        Icon(Icons.Rounded.History, contentDescription = "History")
-                    }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         val hasActivityPermission = activityPermissionState?.status?.isGranted ?: true
         
-        if (!hasActivityPermission) {
-            PermissionDeniedState { activityPermissionState?.launchPermissionRequest() }
-        } else if (!state.isSensorPresent) {
-            NoSensorState()
-        } else {
-            StepContent(padding, state)
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
+            )
+        ) {
+            if (!hasActivityPermission) {
+                PermissionDeniedState { activityPermissionState?.launchPermissionRequest() }
+            } else if (!state.isSensorPresent) {
+                NoSensorState()
+            } else {
+                StepContent(state)
+            }
         }
     }
 }
 
 @Composable
-fun StepContent(padding: PaddingValues, state: StepState) {
+fun StepContent(state: StepState) {
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
@@ -116,6 +138,10 @@ fun StepContent(padding: PaddingValues, state: StepState) {
         
         item {
             DailyGoalSection(state.goal)
+        }
+        
+        item {
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -223,7 +249,7 @@ fun StatCard(
 fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(32.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
@@ -287,7 +313,7 @@ fun DailyGoalSection(goal: Int) {
         )
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
             Row(

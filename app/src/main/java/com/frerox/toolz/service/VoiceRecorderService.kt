@@ -32,6 +32,7 @@ class VoiceRecorderService : Service() {
     private var mediaRecorder: MediaRecorder? = null
     private var timerJob: Job? = null
     private var currentFile: File? = null
+    private var startTime: Long = 0L
 
     private val binder = LocalBinder()
 
@@ -72,6 +73,7 @@ class VoiceRecorderService : Service() {
 
             _isRecording.value = true
             _durationMillis.value = 0L
+            startTime = System.currentTimeMillis()
             startTimer()
             startForeground(NOTIFICATION_ID, createNotification())
         } catch (e: Exception) {
@@ -82,11 +84,11 @@ class VoiceRecorderService : Service() {
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
-            val start = System.currentTimeMillis()
             while (_isRecording.value) {
-                delay(100)
-                _durationMillis.value = System.currentTimeMillis() - start
-                updateNotification()
+                _durationMillis.value = System.currentTimeMillis() - startTime
+                // We update the notification less often if using chronometer, but still need it for text if not using chronometer
+                // Or just update UI state flow
+                delay(200)
             }
         }
     }
@@ -113,14 +115,18 @@ class VoiceRecorderService : Service() {
                 CHANNEL_ID,
                 "Voice Recording",
                 NotificationManager.IMPORTANCE_LOW
-            )
+            ).apply {
+                setShowBadge(false)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
 
     private fun createNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("navigate_to", "voice_recorder")
+        }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
@@ -128,25 +134,22 @@ class VoiceRecorderService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Recording Audio...")
-            .setContentText(formatTime(_durationMillis.value))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
             .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setShowWhen(false)
+            .setUsesChronometer(true)
+            .setWhen(startTime)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Recording", stopPendingIntent)
+            .setColor(0xFFE91E63.toInt()) // Standardize with a color
             .build()
     }
 
     private fun updateNotification() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, createNotification())
-    }
-
-    private fun formatTime(millis: Long): String {
-        val totalSeconds = millis / 1000
-        val min = totalSeconds / 60
-        val sec = totalSeconds % 60
-        return String.format(Locale.getDefault(), "%02d:%02d", min, sec)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

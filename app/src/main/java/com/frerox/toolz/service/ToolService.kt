@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -14,7 +15,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import java.util.*
 import javax.inject.Inject
 
@@ -35,12 +35,14 @@ class ToolService : Service() {
     val stopwatchTime: StateFlow<Long> = _stopwatchTime
     private var stopwatchJob: Job? = null
     private var isStopwatchRunning = false
+    private var stopwatchBase: Long = 0L
 
     // Timer State
     private val _timerRemaining = MutableStateFlow(0L)
     val timerRemaining: StateFlow<Long> = _timerRemaining
     private var timerJob: Job? = null
     private var isTimerRunning = false
+    private var timerEndTimestamp: Long = 0L
 
     // Pomodoro State
     private val _pomodoroRemaining = MutableStateFlow(0L)
@@ -48,6 +50,7 @@ class ToolService : Service() {
     private var pomodoroJob: Job? = null
     private var isPomodoroRunning = false
     private var pomodoroMode = "WORK"
+    private var pomodoroEndTimestamp: Long = 0L
 
     private val binder = LocalBinder()
 
@@ -91,13 +94,12 @@ class ToolService : Service() {
     fun startStopwatch() {
         if (isStopwatchRunning) return
         isStopwatchRunning = true
-        val startTimestamp = System.currentTimeMillis() - _stopwatchTime.value
+        stopwatchBase = SystemClock.elapsedRealtime() - _stopwatchTime.value
         stopwatchJob = serviceScope.launch {
             while (isStopwatchRunning) {
-                _stopwatchTime.value = System.currentTimeMillis() - startTimestamp
-                if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-                    updateStopwatchNotification()
-                }
+                _stopwatchTime.value = SystemClock.elapsedRealtime() - stopwatchBase
+                // For live feel, we update less frequently if chronometer is used, 
+                // but we keep the flow updated for UI.
                 delay(100)
             }
         }
@@ -120,18 +122,12 @@ class ToolService : Service() {
     fun startTimer(durationMillis: Long) {
         _timerRemaining.value = durationMillis
         isTimerRunning = true
+        timerEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         timerJob?.cancel()
         timerJob = serviceScope.launch {
-            var lastUpdate = System.currentTimeMillis()
             while (_timerRemaining.value > 0 && isTimerRunning) {
+                _timerRemaining.value = (timerEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
                 delay(100)
-                val now = System.currentTimeMillis()
-                val diff = now - lastUpdate
-                _timerRemaining.value = (_timerRemaining.value - diff).coerceAtLeast(0)
-                lastUpdate = now
-                if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-                    updateTimerNotification()
-                }
             }
             if (_timerRemaining.value == 0L) {
                 onTimerFinished()
@@ -163,18 +159,12 @@ class ToolService : Service() {
         _pomodoroRemaining.value = durationMillis
         pomodoroMode = mode
         isPomodoroRunning = true
+        pomodoroEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
-            var lastUpdate = System.currentTimeMillis()
             while (_pomodoroRemaining.value > 0 && isPomodoroRunning) {
+                _pomodoroRemaining.value = (pomodoroEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
                 delay(1000)
-                val now = System.currentTimeMillis()
-                val diff = now - lastUpdate
-                _pomodoroRemaining.value = (_pomodoroRemaining.value - diff).coerceAtLeast(0)
-                lastUpdate = now
-                if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-                    updatePomodoroNotification()
-                }
             }
             if (_pomodoroRemaining.value == 0L) {
                 isPomodoroRunning = false
@@ -194,16 +184,21 @@ class ToolService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Active Tools",
+                "Toolz Active Tools",
                 NotificationManager.IMPORTANCE_LOW
-            )
+            ).apply {
+                description = "Live notifications for active tools like Stopwatch and Timer"
+                setShowBadge(false)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
 
     private fun createStopwatchNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("navigate_to", "stopwatch")
+        }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_TOGGLE }
@@ -215,6 +210,8 @@ class ToolService : Service() {
             .setOngoing(isStopwatchRunning)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(
                 if (isStopwatchRunning) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (isStopwatchRunning) "Pause" else "Resume",
@@ -222,7 +219,12 @@ class ToolService : Service() {
             )
 
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            builder.setContentText(formatTime(_stopwatchTime.value))
+            builder.setUsesChronometer(true)
+            builder.setWhen(System.currentTimeMillis() - _stopwatchTime.value)
+            if (!isStopwatchRunning) {
+                builder.setContentText("Paused: ${formatTime(_stopwatchTime.value)}")
+                builder.setUsesChronometer(false)
+            }
         } else {
             builder.setContentText("Stopwatch is active")
         }
@@ -236,7 +238,9 @@ class ToolService : Service() {
     }
 
     private fun createTimerNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("navigate_to", "timer")
+        }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_STOP }
@@ -248,9 +252,19 @@ class ToolService : Service() {
             .setOngoing(isTimerRunning)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
         
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            builder.setContentText(text ?: formatTime(_timerRemaining.value))
+            if (isTimerRunning) {
+                builder.setUsesChronometer(true)
+                builder.setWhen(System.currentTimeMillis() + _timerRemaining.value)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    builder.setChronometerCountDown(true)
+                }
+            } else {
+                builder.setContentText(text ?: formatTime(_timerRemaining.value))
+            }
         } else {
             builder.setContentText("Timer is active")
         }
@@ -268,7 +282,9 @@ class ToolService : Service() {
     }
 
     private fun createPomodoroNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("navigate_to", "pomodoro")
+        }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_TOGGLE }
@@ -280,6 +296,8 @@ class ToolService : Service() {
             .setOngoing(isPomodoroRunning)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(
                 if (isPomodoroRunning) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (isPomodoroRunning) "Pause" else "Resume",
@@ -287,7 +305,15 @@ class ToolService : Service() {
             )
 
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            builder.setContentText(text ?: formatTime(_pomodoroRemaining.value))
+            if (isPomodoroRunning) {
+                builder.setUsesChronometer(true)
+                builder.setWhen(System.currentTimeMillis() + _pomodoroRemaining.value)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    builder.setChronometerCountDown(true)
+                }
+            } else {
+                builder.setContentText(text ?: formatTime(_pomodoroRemaining.value))
+            }
         } else {
             builder.setContentText("Pomodoro session active")
         }
@@ -301,7 +327,7 @@ class ToolService : Service() {
     }
 
     private fun formatTime(millis: Long): String {
-        val totalSeconds = millis / 1000
+        val totalSeconds = (millis + 999) / 1000
         val min = totalSeconds / 60
         val sec = totalSeconds % 60
         return String.format(Locale.getDefault(), "%02d:%02d", min, sec)
