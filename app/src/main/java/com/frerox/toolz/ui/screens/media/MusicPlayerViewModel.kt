@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.AudioAttributes
@@ -18,6 +19,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -64,7 +66,7 @@ class MusicPlayerViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val settingsRepository: SettingsRepository,
     val player: ExoPlayer,
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MusicUiState())
@@ -165,7 +167,7 @@ class MusicPlayerViewModel @Inject constructor(
                 )
                 
                 val folders = prioritizedTracks.groupBy { track ->
-                    val uri = Uri.parse(track.uri)
+                    val uri = track.uri.toUri()
                     uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
                 }
 
@@ -275,6 +277,7 @@ class MusicPlayerViewModel @Inject constructor(
         shakeDetector?.let { sensorManager.unregisterListener(it) }
     }
 
+    @UnstableApi
     private fun initEqualizer() {
         if (equalizer == null && player.audioSessionId != 0) {
             try {
@@ -388,17 +391,17 @@ class MusicPlayerViewModel @Inject constructor(
             val metadata = MediaMetadata.Builder()
                 .setTitle(t.title)
                 .setArtist(t.artist ?: "Unknown Artist")
-                .setAlbumTitle(t.album ?: "Unknown Album") // Helpful for Samsung
+                .setAlbumTitle(t.album ?: "Unknown Album")
                 .setDisplayTitle(t.title)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // CRITICAL: Tells the OS this is MUSIC
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // Required for wavy bar on Android 16/17
                 .setIsPlayable(true)
-                .setArtworkUri(t.thumbnailUri?.let { Uri.parse(it) })
+                .setArtworkUri(t.thumbnailUri?.toUri()) // Required for color matching
                 .build()
 
             MediaItem.Builder()
                 .setMediaId(t.uri)
-                .setUri(Uri.parse(t.uri))
-                .setMediaMetadata(metadata) // Attach the rich metadata here
+                .setUri(t.uri.toUri())
+                .setMediaMetadata(metadata)
                 .build()
         }
         

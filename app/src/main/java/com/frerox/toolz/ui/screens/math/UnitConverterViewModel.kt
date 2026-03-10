@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 enum class ConversionType {
-    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED
+    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY
 }
 
 data class UnitConverterState(
@@ -33,7 +33,10 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
         ConversionType.TEMPERATURE to listOf("Celsius", "Fahrenheit", "Kelvin"),
         ConversionType.AREA to listOf("Sq Meter", "Sq Kilometer", "Sq Foot", "Sq Mile", "Acre", "Hectare"),
         ConversionType.VOLUME to listOf("Milliliter", "Liter", "Cubic Meter", "Gallon", "Quart", "Pint", "Cup"),
-        ConversionType.SPEED to listOf("Meters/sec", "Km/h", "Miles/h", "Knot", "Mach")
+        ConversionType.SPEED to listOf("Meters/sec", "Km/h", "Miles/h", "Knot", "Mach"),
+        ConversionType.TIME to listOf("Second", "Minute", "Hour", "Day", "Week", "Month", "Year"),
+        ConversionType.DIGITAL_STORAGE to listOf("Bit", "Byte", "Kilobyte", "Megabyte", "Gigabyte", "Terabyte", "Petabyte"),
+        ConversionType.ENERGY to listOf("Joule", "Kilojoule", "Calorie", "Kilocalorie", "Watt-hour", "Kilowatt-hour", "Electronvolt")
     )
 
     init {
@@ -78,6 +81,9 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             ConversionType.AREA -> convertArea(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.VOLUME -> convertVolume(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.SPEED -> convertSpeed(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.TIME -> convertTime(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.DIGITAL_STORAGE -> convertDigital(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.ENERGY -> convertEnergy(input, _uiState.value.fromUnit, _uiState.value.toUnit)
         }
         _uiState.update { 
             it.copy(outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'))
@@ -137,5 +143,30 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             "Knot" to 0.514444, "Mach" to 343.0
         )
         return value * (toMs[from] ?: 1.0) / (toMs[to] ?: 1.0)
+    }
+
+    private fun convertTime(value: Double, from: String, to: String): Double {
+        val toSecond = mapOf(
+            "Second" to 1.0, "Minute" to 60.0, "Hour" to 3600.0, "Day" to 86400.0,
+            "Week" to 604800.0, "Month" to 2629800.0, "Year" to 31557600.0
+        )
+        return value * (toSecond[from] ?: 1.0) / (toSecond[to] ?: 1.0)
+    }
+
+    private fun convertDigital(value: Double, from: String, to: String): Double {
+        val toBit = mapOf(
+            "Bit" to 1.0, "Byte" to 8.0, "Kilobyte" to 8192.0, "Megabyte" to 8388608.0,
+            "Gigabyte" to 8589934592.0, "Terabyte" to 8796093022208.0, "Petabyte" to 9007199254740992.0
+        )
+        return value * (toBit[from] ?: 1.0) / (toBit[to] ?: 1.0)
+    }
+
+    private fun convertEnergy(value: Double, from: String, to: String): Double {
+        val toJoule = mapOf(
+            "Joule" to 1.0, "Kilojoule" to 1000.0, "Calorie" to 4.184,
+            "Kilocalorie" to 4184.0, "Watt-hour" to 3600.0, "Kilowatt-hour" to 3600000.0,
+            "Electronvolt" to 1.602176634e-19
+        )
+        return value * (toJoule[from] ?: 1.0) / (toJoule[to] ?: 1.0)
     }
 }

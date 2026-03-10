@@ -5,28 +5,42 @@ import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -44,17 +58,20 @@ fun ColorPickerScreen(
     
     var pickedColor by remember { mutableStateOf(Color.White) }
     var hexCode by remember { mutableStateOf("#FFFFFF") }
+    val colorHistory = remember { mutableStateListOf<Color>() }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Color Picker") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                TopAppBar(
+                    title = { Text("COLOR PICKER", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(
@@ -62,93 +79,220 @@ fun ColorPickerScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (cameraPermissionState.status.isGranted) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    AndroidView(
-                        factory = { ctx ->
-                            val previewView = PreviewView(ctx)
-                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                            cameraProviderFuture.addListener({
-                                val cameraProvider = cameraProviderFuture.get()
-                                val preview = Preview.Builder().build().also {
-                                    it.setSurfaceProvider(previewView.surfaceProvider)
-                                }
-                                
-                                val imageAnalysis = ImageAnalysis.Builder()
-                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                                    .build()
-                                
-                                imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
-                                    // Use the built-in toBitmap() from CameraX 1.3.0+
-                                    val bitmap = imageProxy.toBitmap()
-                                    val centerX = bitmap.width / 2
-                                    val centerY = bitmap.height / 2
-                                    if (centerX in 0 until bitmap.width && centerY in 0 until bitmap.height) {
-                                        val pixel = bitmap.getPixel(centerX, centerY)
-                                        pickedColor = Color(pixel)
-                                        hexCode = String.format(Locale.US, "#%06X", (0xFFFFFF and pixel))
-                                    }
-                                    imageProxy.close()
-                                }
-                                
-                                try {
-                                    cameraProvider.unbindAll()
-                                    cameraProvider.bindToLifecycle(
-                                        lifecycleOwner,
-                                        CameraSelector.DEFAULT_BACK_CAMERA,
-                                        preview,
-                                        imageAnalysis
-                                    )
-                                } catch (e: Exception) {
-                                    Log.e("ColorPicker", "Binding failed", e)
-                                }
-                            }, ContextCompat.getMainExecutor(ctx))
-                            previewView
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    // Target Reticle
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .border(2.dp, Color.White, CircleShape)
-                            .align(Alignment.Center)
-                    )
-                }
-                
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                // Camera Preview with Rounded Corners
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                        .shadow(12.dp, RoundedCornerShape(32.dp)),
+                    shape = RoundedCornerShape(32.dp),
+                    color = Color.Black
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AndroidView(
+                            factory = { ctx ->
+                                val previewView = PreviewView(ctx)
+                                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                                cameraProviderFuture.addListener({
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(previewView.surfaceProvider)
+                                    }
+                                    
+                                    val imageAnalysis = ImageAnalysis.Builder()
+                                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                                        .build()
+                                    
+                                    imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                        val bitmap = imageProxy.toBitmap()
+                                        val centerX = bitmap.width / 2
+                                        val centerY = bitmap.height / 2
+                                        if (centerX in 0 until bitmap.width && centerY in 0 until bitmap.height) {
+                                            val pixel = bitmap.getPixel(centerX, centerY)
+                                            pickedColor = Color(pixel)
+                                            hexCode = String.format(Locale.US, "#%06X", (0xFFFFFF and pixel))
+                                        }
+                                        imageProxy.close()
+                                    }
+                                    
+                                    try {
+                                        cameraProvider.unbindAll()
+                                        cameraProvider.bindToLifecycle(
+                                            lifecycleOwner,
+                                            CameraSelector.DEFAULT_BACK_CAMERA,
+                                            preview,
+                                            imageAnalysis
+                                        )
+                                    } catch (e: Exception) {
+                                        Log.e("ColorPicker", "Binding failed", e)
+                                    }
+                                }, ContextCompat.getMainExecutor(ctx))
+                                previewView
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Target Reticle (Enhanced)
                         Box(
                             modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(pickedColor)
-                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = hexCode, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = "RGB: ${(pickedColor.red * 255).toInt()}, ${(pickedColor.green * 255).toInt()}, ${(pickedColor.blue * 255).toInt()}", 
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                                .size(48.dp)
+                                .align(Alignment.Center),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(modifier = Modifier.size(24.dp).border(3.dp, Color.White, CircleShape))
+                            Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.White).align(Alignment.TopCenter))
+                            Box(modifier = Modifier.width(2.dp).height(12.dp).background(Color.White).align(Alignment.BottomCenter))
+                            Box(modifier = Modifier.width(12.dp).height(2.dp).background(Color.White).align(Alignment.CenterStart))
+                            Box(modifier = Modifier.width(12.dp).height(2.dp).background(Color.White).align(Alignment.CenterEnd))
                         }
-                        IconButton(onClick = { clipboardManager.setText(AnnotatedString(hexCode)) }) {
-                            Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                    }
+                }
+                
+                // Color Info Card
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .shadow(8.dp, CircleShape)
+                                    .bouncyClick {
+                                        if (!colorHistory.contains(pickedColor)) {
+                                            colorHistory.add(0, pickedColor)
+                                            if (colorHistory.size > 10) colorHistory.removeAt(colorHistory.lastIndex)
+                                        }
+                                    },
+                                shape = CircleShape,
+                                color = pickedColor,
+                                border = androidx.compose.foundation.BorderStroke(4.dp, Color.White)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Palette, null, tint = if (pickedColor.red > 0.5f) Color.Black else Color.White, modifier = Modifier.alpha(0.3f))
+                                }
+                            }
+                            
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = hexCode, 
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        letterSpacing = (-1).sp
+                                    )
+                                )
+                                Text(
+                                    text = "RGB: ${(pickedColor.red * 255).toInt()}, ${(pickedColor.green * 255).toInt()}, ${(pickedColor.blue * 255).toInt()}", 
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            
+                            FilledTonalIconButton(
+                                onClick = { 
+                                    clipboardManager.setText(AnnotatedString(hexCode))
+                                    if (!colorHistory.contains(pickedColor)) {
+                                        colorHistory.add(0, pickedColor)
+                                        if (colorHistory.size > 10) colorHistory.removeAt(colorHistory.lastIndex)
+                                    }
+                                },
+                                modifier = Modifier.size(56.dp),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                            }
+                        }
+                    }
+                }
+
+                // History Section
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.History, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "RECENT COLORS", 
+                            style = MaterialTheme.typography.labelSmall, 
+                            fontWeight = FontWeight.Black, 
+                            color = MaterialTheme.colorScheme.outline,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fadingEdge(
+                                brush = Brush.horizontalGradient(
+                                    listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)
+                                ),
+                                length = 24.dp
+                            )
+                    ) {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(colorHistory) { color ->
+                                Surface(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .bouncyClick {
+                                            pickedColor = color
+                                            hexCode = String.format(Locale.US, "#%06X", (0xFFFFFF and color.toArgb()))
+                                        },
+                                    shape = CircleShape,
+                                    color = color,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {}
+                            }
+                            if (colorHistory.isEmpty()) {
+                                item {
+                                    Text(
+                                        "Tap center color to save", 
+                                        style = MaterialTheme.typography.bodySmall, 
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                        modifier = Modifier.padding(vertical = 16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
-                        Text("Grant Camera Permission")
+                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Palette, null, modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        Spacer(Modifier.height(24.dp))
+                        Text("Camera Access Required", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Toolz needs camera permission to pick colors from your surroundings.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.height(32.dp))
+                        Button(
+                            onClick = { cameraPermissionState.launchPermissionRequest() },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                        ) {
+                            Text("Grant Permission", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
