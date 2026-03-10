@@ -15,12 +15,15 @@
         android:gravity="center_vertical">
 
         <ImageView
+            android:id="@+id/widget_step_icon"
             android:layout_width="20dp"
             android:layout_height="20dp"
             android:src="@android:drawable/ic_menu_directions"
-            app:tint="#6750A4" />
+            android:tint="#6750A4"
+            android:contentDescription="Steps" />
 
         <TextView
+            android:id="@+id/widget_step_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="STEPS"

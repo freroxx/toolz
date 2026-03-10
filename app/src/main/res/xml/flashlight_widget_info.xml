@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/flashlight_widget"
-    android:minWidth="110dp"
-    android:minHeight="110dp"
-    android:minResizeWidth="100dp"
+    android:minWidth="80dp"
+    android:minHeight="80dp"
+    android:minResizeWidth="80dp"
     android:minResizeHeight="80dp"
     android:targetCellWidth="2"
     android:targetCellHeight="2"

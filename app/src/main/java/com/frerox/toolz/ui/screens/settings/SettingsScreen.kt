@@ -64,6 +64,7 @@ fun SettingsScreen(
     val hapticIntensity by viewModel.hapticIntensity.collectAsState()
     val unitSystem by viewModel.unitSystem.collectAsState()
     val showQibla by viewModel.showQibla.collectAsState()
+    val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState()
 
     // Music Player Settings
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState()
@@ -132,8 +133,16 @@ fun SettingsScreen(
                     onQueryChange = { viewModel.onSearchQueryChange(it) }
                 )
 
-                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration")) {
+                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker")) {
                     SettingsSection(title = "General") {
+                        SettingsToggleItem(
+                            title = "Step Counter",
+                            subtitle = "Enable background tracking",
+                            icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                            checked = stepCounterEnabled,
+                            onCheckedChange = { viewModel.setStepCounterEnabled(it) }
+                        )
+
                         SettingsItem(
                             title = "Unit System",
                             subtitle = unitSystem.lowercase().replaceFirstChar { it.uppercase() },
@@ -559,10 +568,10 @@ fun AboutSection() {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text("Toolz", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-            Text("Version 1.7.3 ALPHA", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            Text("Version 1.7.3 Beta", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                "The ultimate toolkit for daily needs, made and designed by frerox",
+                "The ultimate toolkit for daily needs. Made and designed by frerox",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
