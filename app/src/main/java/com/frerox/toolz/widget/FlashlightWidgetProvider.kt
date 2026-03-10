@@ -10,8 +10,15 @@ import android.hardware.camera2.CameraManager
 import android.widget.RemoteViews
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.settings.SettingsRepository
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class FlashlightWidgetProvider : AppWidgetProvider() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (appWidgetId in appWidgetIds) {
@@ -24,7 +31,6 @@ class FlashlightWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
             ACTION_TOGGLE -> toggleFlashlight(context)
             ACTION_STROBE, ACTION_SOS -> {
-                // For Strobe and SOS, we'll open the app's flashlight screen as it requires complex timing
                 val appIntent = Intent(context, MainActivity::class.java).apply {
                     putExtra("navigate_to", "flashlight")
                     putExtra("mode", if (intent.action == ACTION_STROBE) "strobe" else "sos")
@@ -44,13 +50,11 @@ class FlashlightWidgetProvider : AppWidgetProvider() {
 
     private fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
         val views = RemoteViews(context.packageName, R.layout.flashlight_widget)
+        WidgetUtils.applyTheme(context, views, settingsRepository)
         
         views.setOnClickPendingIntent(R.id.widget_flashlight_button, getPendingSelfIntent(context, ACTION_TOGGLE))
         views.setOnClickPendingIntent(R.id.widget_flashlight_strobe, getPendingSelfIntent(context, ACTION_STROBE))
         views.setOnClickPendingIntent(R.id.widget_flashlight_sos, getPendingSelfIntent(context, ACTION_SOS))
-        
-        // Update color based on state if we could track it reliably
-        // For now, just ensure it's responsive
         
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
