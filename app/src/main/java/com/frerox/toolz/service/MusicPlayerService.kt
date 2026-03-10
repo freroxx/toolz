@@ -2,7 +2,8 @@ package com.frerox.toolz.service
 
 import android.app.PendingIntent
 import android.content.Intent
-import androidx.media3.common.Player
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -10,6 +11,7 @@ import com.frerox.toolz.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
+@UnstableApi
 @AndroidEntryPoint
 class MusicPlayerService : MediaSessionService() {
 
@@ -18,6 +20,7 @@ class MusicPlayerService : MediaSessionService() {
     @Inject
     lateinit var player: ExoPlayer
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         
@@ -36,17 +39,12 @@ class MusicPlayerService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
             .build()
-            
-        // Samsung and other devices rely heavily on the Player state
-        // ExoPlayer's default behavior is usually sufficient if MediaSession is active.
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    @OptIn(UnstableApi::class)
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
-        // MediaSessionService manages foreground state automatically.
-        // On some Samsung versions, explicit notification management helps, 
-        // but Media3 is designed to handle this.
         super.onUpdateNotification(session, startInForegroundRequired)
     }
 

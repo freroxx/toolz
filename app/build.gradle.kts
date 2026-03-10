@@ -44,6 +44,12 @@ kotlin {
     jvmToolchain(11)
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        freeCompilerArgs += "-opt-in=androidx.media3.common.util.UnstableApi"
+    }
+}
+
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     
@@ -86,6 +92,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
+    implementation(libs.media3.common)
 
     // Hilt
     implementation(libs.hilt.android)

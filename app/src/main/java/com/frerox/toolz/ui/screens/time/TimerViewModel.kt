@@ -97,6 +97,12 @@ class TimerViewModel @Inject constructor(
         }
     }
 
+    fun toggleHaptic() {
+        viewModelScope.launch {
+            settingsRepository.setHapticFeedback(!hapticEnabled.value)
+        }
+    }
+
     private fun onTimerFinished() {
         _uiState.update { it.copy(isRunning = false, isFinished = true, isPaused = false) }
         playRingtone()

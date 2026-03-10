@@ -12,8 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.Place
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,7 +23,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -58,6 +56,9 @@ fun CompassScreen(
         label = "Azimuth"
     )
 
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+
     DisposableEffect(Unit) {
         viewModel.startListening()
         onDispose {
@@ -69,13 +70,11 @@ fun CompassScreen(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
-                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
-                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                tonalElevation = 0.dp
             ) {
-                CenterAlignedTopAppBar(
+                TopAppBar(
                     modifier = Modifier.statusBarsPadding(),
-                    title = { Text("COMPASS", fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp) },
+                    title = { Text("COMPASS", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -105,59 +104,63 @@ fun CompassScreen(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Orientation Display
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Header Display
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(top = 16.dp)
+                ) {
                     Text(
                         text = "${state.azimuth.toInt()}°",
                         style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = 80.sp, 
+                            fontSize = 86.sp, 
                             fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = (-4).sp
                         ),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        text = getDirectionLabel(state.azimuth).uppercase(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.secondary,
-                        letterSpacing = 2.sp
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text(
+                            text = getDirectionLabel(state.azimuth).uppercase(),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            letterSpacing = 2.sp
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(48.dp))
 
-                // Modern Compass Dial
+                // Premium Compass Dial
                 Box(
                     modifier = Modifier
-                        .size(320.dp)
+                        .size(340.dp)
                         .drawBehind {
-                            // Background glow
                             drawCircle(
                                 brush = Brush.radialGradient(
                                     colors = listOf(
-                                        Color(0xFFE91E63).copy(alpha = 0.15f),
+                                        primaryColor.copy(alpha = 0.08f),
                                         Color.Transparent
                                     ),
                                     center = center,
-                                    radius = size.width / 1.5f
+                                    radius = size.width / 1.2f
                                 )
                             )
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Fixed indicators
+                    // Outer decorative ring
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val radius = size.width / 2
-                        // North indicator (Top)
-                        drawPath(
-                            path = Path().apply {
-                                moveTo(center.x, center.y - radius - 10.dp.toPx())
-                                lineTo(center.x - 10.dp.toPx(), center.y - radius + 10.dp.toPx())
-                                lineTo(center.x + 10.dp.toPx(), center.y - radius + 10.dp.toPx())
-                                close()
-                            },
-                            color = Color(0xFFE91E63)
+                        drawCircle(
+                            color = onSurface.copy(alpha = 0.05f),
+                            radius = size.width / 2,
+                            style = Stroke(width = 2.dp.toPx())
                         )
                     }
 
@@ -170,99 +173,124 @@ fun CompassScreen(
                         ModernCompassDial(state = state)
                     }
                     
-                    // Center Decoration
+                    // Fixed Center needle / Indicator
+                    Canvas(modifier = Modifier.size(40.dp)) {
+                        val path = Path().apply {
+                            moveTo(size.width / 2, 0f)
+                            lineTo(size.width, size.height)
+                            lineTo(size.width / 2, size.height * 0.8f)
+                            lineTo(0f, size.height)
+                            close()
+                        }
+                        drawPath(path, Color(0xFFE91E63))
+                    }
+                    
+                    // Glass effect cover
                     Surface(
-                        modifier = Modifier.size(60.dp),
+                        modifier = Modifier.size(64.dp),
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surface,
-                        shadowElevation = 8.dp,
-                        tonalElevation = 8.dp,
-                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                        tonalElevation = 12.dp,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.Place, 
-                                null, 
-                                modifier = Modifier.size(24.dp), 
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Rounded.MyLocation, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
 
                 Spacer(Modifier.height(48.dp))
 
-                // Bottom Status Card
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        if (state.showQibla) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.Place, null, tint = Color(0xFF4CAF50))
-                                    Spacer(Modifier.width(12.dp))
-                                    Text("Qibla Direction", fontWeight = FontWeight.Bold)
-                                }
-                                val qAngle = state.qiblaAngle
-                                if (qAngle != null) {
-                                    Text("${qAngle.toInt()}°", fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
-                                } else {
-                                    Text("Locating...", style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp).alpha(0.3f))
+                // Stats Cards
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SensorInfoCard(
+                        modifier = Modifier.weight(1f),
+                        label = "ACCURACY",
+                        value = when(state.accuracy) {
+                            3 -> "HIGH"
+                            2 -> "MEDIUM"
+                            else -> "LOW"
+                        },
+                        icon = Icons.Rounded.PrecisionManufacturing,
+                        color = when(state.accuracy) {
+                            3 -> Color(0xFF4CAF50)
+                            2 -> Color(0xFFFFC107)
+                            else -> Color(0xFFF44336)
                         }
+                    )
+                    SensorInfoCard(
+                        modifier = Modifier.weight(1f),
+                        label = "TILT",
+                        value = String.format(Locale.getDefault(), "%.1f°", 0f),
+                        icon = Icons.Rounded.ScreenRotation,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
 
+                Spacer(Modifier.height(16.dp))
+
+                if (state.showQibla) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(28.dp),
+                        color = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.2f))
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.padding(20.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                val accuracyColor = when(state.accuracy) {
-                                    3 -> Color(0xFF4CAF50)
-                                    2 -> Color(0xFFFFC107)
-                                    else -> Color(0xFFF44336)
-                                }
-                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(accuracyColor))
-                                Spacer(Modifier.width(12.dp))
-                                Text("Sensor Accuracy", style = MaterialTheme.typography.bodyMedium)
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4CAF50).copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Place, null, tint = Color(0xFF4CAF50))
                             }
-                            Text(
-                                when(state.accuracy) {
-                                    3 -> "High"
-                                    2 -> "Medium"
-                                    else -> "Low / Unreliable"
-                                },
-                                fontWeight = FontWeight.Bold
-                            )
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("QIBLA DIRECTION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
+                                val qAngle = state.qiblaAngle
+                                Text(
+                                    if (qAngle != null) "${qAngle.toInt()}° North-East" else "LOCATING...",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (!locationPermissionState.status.isGranted) {
+                                Button(
+                                    onClick = { locationPermissionState.launchPermissionRequest() },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                                ) {
+                                    Text("GRANT", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
                 
-                if (state.showQibla && !locationPermissionState.status.isGranted) {
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = { locationPermissionState.launchPermissionRequest() },
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
-                    ) {
-                        Icon(Icons.Rounded.LocationOn, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Grant Location for Qibla", fontWeight = FontWeight.Bold)
-                    }
-                }
-                
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(40.dp))
             }
+        }
+    }
+}
+
+@Composable
+fun SensorInfoCard(modifier: Modifier, label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
+            Spacer(Modifier.height(12.dp))
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -275,20 +303,7 @@ fun ModernCompassDial(state: CompassState) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val center = center
         val radius = size.width / 2
-        val innerRadius = radius - 40.dp.toPx()
         
-        // Circular lines
-        drawCircle(
-            color = onSurface.copy(alpha = 0.1f),
-            radius = radius,
-            style = Stroke(width = 1.dp.toPx())
-        )
-        drawCircle(
-            color = onSurface.copy(alpha = 0.05f),
-            radius = innerRadius,
-            style = Stroke(width = 1.dp.toPx())
-        )
-
         // Ticks and Labels
         for (i in 0 until 360 step 2) {
             val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
@@ -296,9 +311,9 @@ fun ModernCompassDial(state: CompassState) {
             val isCardinal = i % 90 == 0
             
             val tickLength = when {
-                isCardinal -> 24.dp.toPx()
-                isMain -> 16.dp.toPx()
-                else -> 8.dp.toPx()
+                isCardinal -> 28.dp.toPx()
+                isMain -> 18.dp.toPx()
+                else -> 10.dp.toPx()
             }
             
             val color = when {
@@ -320,7 +335,7 @@ fun ModernCompassDial(state: CompassState) {
                 color = color,
                 start = start,
                 end = end,
-                strokeWidth = if (isMain) 2.dp.toPx() else 1.dp.toPx(),
+                strokeWidth = if (isMain) 3.dp.toPx() else 1.5.dp.toPx(),
                 cap = StrokeCap.Round
             )
             
@@ -329,8 +344,8 @@ fun ModernCompassDial(state: CompassState) {
                     color = color,
                     radius = 4.dp.toPx(),
                     center = Offset(
-                        center.x + (radius - 40.dp.toPx()) * cos(angleRad),
-                        center.y + (radius - 40.dp.toPx()) * sin(angleRad)
+                        center.x + (radius - 50.dp.toPx()) * cos(angleRad),
+                        center.y + (radius - 50.dp.toPx()) * sin(angleRad)
                     )
                 )
             }
@@ -342,8 +357,8 @@ fun ModernCompassDial(state: CompassState) {
             rotate(degrees = qiblaAngle, pivot = center) {
                 val arrowPath = Path().apply {
                     moveTo(center.x, center.y - radius + 30.dp.toPx())
-                    lineTo(center.x - 10.dp.toPx(), center.y - radius + 50.dp.toPx())
-                    lineTo(center.x + 10.dp.toPx(), center.y - radius + 50.dp.toPx())
+                    lineTo(center.x - 12.dp.toPx(), center.y - radius + 55.dp.toPx())
+                    lineTo(center.x + 12.dp.toPx(), center.y - radius + 55.dp.toPx())
                     close()
                 }
                 drawPath(arrowPath, Color(0xFF4CAF50))
