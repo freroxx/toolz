@@ -74,6 +74,7 @@ class MusicPlayerViewModel @Inject constructor(
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var isPlayerServiceStarted = false
     
     private var equalizer: Equalizer? = null
     private var shakeDetector: ShakeDetector? = null
@@ -327,12 +328,14 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     private fun startPlayerService() {
+        if (isPlayerServiceStarted) return
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
             // Use startService instead of startForegroundService for MediaSessionService.
             // MediaSessionService manages its own foreground state and will promote itself
             // when playback starts. This avoids the ForegroundServiceDidNotStartInTimeException.
             context.startService(intent)
+            isPlayerServiceStarted = true
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -387,6 +390,10 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
+        // Ensure MediaSessionService is alive before first playback command so the
+        // media session/notification lifecycle is authoritative from the beginning.
+        startPlayerService()
+
         val mediaItems = tracks.map { t ->
             val metadata = MediaMetadata.Builder()
                 .setTitle(t.title)
@@ -420,7 +427,13 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun togglePlayPause() {
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.isPlaying) {
+            player.pause()
+        } else {
+            // Resume from pause should also guarantee that the media service session exists.
+            startPlayerService()
+            player.play()
+        }
     }
 
     fun stop() {
