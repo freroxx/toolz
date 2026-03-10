@@ -12,7 +12,9 @@ data class MusicTrack(
     val albumId: Long = -1,
     val duration: Long,
     val thumbnailUri: String? = null,
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val lastPlayed: Long = 0L,
+    val playCount: Int = 0
 )
 
 @Entity(tableName = "playlists")
@@ -20,5 +22,6 @@ data class Playlist(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val thumbnailUri: String? = null,
-    val trackUris: List<String> = emptyList()
+    val trackUris: List<String> = emptyList(),
+    val isSystemPlaylist: Boolean = false
 )

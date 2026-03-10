@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="8dp"
+    android:padding="12dp"
     android:layout_marginBottom="4dp"
     android:background="@drawable/widget_item_background">
 
@@ -13,8 +13,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:textStyle="bold"
-        android:textColor="#000000"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="#1D1B20"
         android:maxLines="1"
         android:ellipsize="end" />
 
@@ -23,8 +23,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="12sp"
-        android:textColor="#333333"
+        android:textColor="#49454F"
         android:maxLines="2"
-        android:ellipsize="end" />
+        android:ellipsize="end"
+        android:layout_marginTop="2dp" />
 
 </LinearLayout>

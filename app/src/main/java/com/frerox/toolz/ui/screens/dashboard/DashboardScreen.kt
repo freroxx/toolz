@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -73,9 +74,7 @@ fun DashboardScreen(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
-                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
-                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                tonalElevation = 2.dp
             ) {
                 Column(
                     modifier = Modifier
@@ -87,10 +86,10 @@ fun DashboardScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search 30+ tools...") },
+                        placeholder = { Text("Search 30+ precision tools...") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
                         leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = { 
                             if (searchQuery.isNotEmpty()) {
@@ -99,11 +98,11 @@ fun DashboardScreen(
                                 }
                             }
                         },
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                             unfocusedBorderColor = Color.Transparent,
                             focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                         )
@@ -115,20 +114,20 @@ fun DashboardScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
+                columns = GridCells.Adaptive(minSize = 160.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     .fadingEdge(
                         brush = Brush.verticalGradient(
                             0f to Color.Transparent,
-                            0.02f to Color.Black,
-                            0.98f to Color.Black,
+                            0.05f to Color.Black,
+                            0.95f to Color.Black,
                             1f to Color.Transparent
                         ),
-                        length = 16.dp
+                        length = 24.dp
                     ),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp, top = 16.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -136,11 +135,11 @@ fun DashboardScreen(
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Text(
                             text = category.title,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp),
-                            letterSpacing = 1.sp
+                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp, start = 8.dp),
+                            letterSpacing = 2.sp
                         )
                     }
                     items(category.items) { tool ->
@@ -162,27 +161,28 @@ fun DashboardScreen(
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp)
+                    .padding(bottom = 32.dp)
             ) {
                 musicState.currentTrack?.let { track ->
                     Surface(
                         modifier = Modifier
                             .padding(horizontal = 24.dp)
                             .fillMaxWidth()
-                            .height(80.dp)
-                            .shadow(24.dp, RoundedCornerShape(40.dp))
+                            .height(86.dp)
+                            .shadow(32.dp, RoundedCornerShape(44.dp))
                             .bouncyClick { onNavigate(Screen.MusicPlayer.route) },
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(40.dp),
-                        tonalElevation = 8.dp
+                        shape = RoundedCornerShape(44.dp),
+                        tonalElevation = 12.dp,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
                     ) {
                         Row(
-                            modifier = Modifier.padding(8.dp),
+                            modifier = Modifier.padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Surface(
-                                modifier = Modifier.size(64.dp),
-                                shape = CircleShape,
+                                modifier = Modifier.size(66.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 color = MaterialTheme.colorScheme.surface,
                                 shadowElevation = 4.dp
                             ) {
@@ -194,7 +194,7 @@ fun DashboardScreen(
                                 )
                             }
                             
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(18.dp))
                             
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -208,23 +208,24 @@ fun DashboardScreen(
                                     track.artist ?: "Unknown Artist",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.ExtraBold,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    letterSpacing = 0.5.sp
                                 )
                             }
                             
                             IconButton(
                                 onClick = { musicViewModel.togglePlayPause() },
                                 modifier = Modifier
-                                    .size(56.dp)
+                                    .size(60.dp)
                                     .background(MaterialTheme.colorScheme.primary, CircleShape)
                             ) {
                                 Icon(
                                     if (musicState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                     contentDescription = "Play/Pause",
                                     tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(36.dp)
                                 )
                             }
                         }
@@ -247,31 +248,35 @@ fun WelcomeHeader(onSettingsClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .padding(horizontal = 28.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
             Text(
-                text = greeting,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = greeting.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.5.sp
             )
             Text(
                 text = "Toolz Pro",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                letterSpacing = (-1).sp
             )
         }
         
         IconButton(
             onClick = onSettingsClick,
             modifier = Modifier
+                .size(52.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
         ) {
-            Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+            Icon(Icons.Rounded.Settings, contentDescription = "Settings", modifier = Modifier.size(28.dp))
         }
     }
 }
@@ -284,14 +289,14 @@ fun ImprovedToolCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(130.dp)
+            .height(140.dp)
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        tonalElevation = 1.dp
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        tonalElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Subtle gradient background
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -299,7 +304,7 @@ fun ImprovedToolCard(
                         Brush.linearGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.03f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
                             )
                         )
                     )
@@ -308,20 +313,20 @@ fun ImprovedToolCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Surface(
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = tool.icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                 }
@@ -330,16 +335,18 @@ fun ImprovedToolCard(
                     Text(
                         text = tool.title,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Black,
                         maxLines = 1,
-                        lineHeight = 20.sp
+                        lineHeight = 22.sp
                     )
                     Text(
-                        text = tool.description,
+                        text = tool.description.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
-                        lineHeight = 14.sp
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
                     )
                 }
             }
@@ -352,26 +359,27 @@ fun EmptySearchState(query: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 80.dp),
+            .padding(top = 100.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
             Icons.Rounded.SearchOff,
             contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+            modifier = Modifier.size(80.dp).alpha(0.1f),
+            tint = MaterialTheme.colorScheme.primary
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
         Text(
             "No tools found for \"$query\"",
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.outline
         )
         Text(
-            "Try a different keyword",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
+            "Try adjusting your search criteria",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
         )
     }
 }

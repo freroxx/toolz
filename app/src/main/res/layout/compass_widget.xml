@@ -1,28 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="8dp"
+    android:padding="12dp"
     android:background="@drawable/widget_background">
 
-    <ImageView
-        android:id="@+id/widget_compass_dial"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:src="@android:drawable/ic_menu_compass"
-        android:layout_centerInParent="true"
-        android:scaleType="centerInside"
-        android:contentDescription="Compass Dial" />
+    <LinearLayout
+        android:id="@+id/widget_compass_header"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:src="@android:drawable/ic_menu_compass"
+            app:tint="#6750A4"
+            android:contentDescription="Compass" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EXPLORE"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#6750A4"
+            android:layout_marginStart="6dp"
+            android:letterSpacing="0.1" />
+    </LinearLayout>
 
     <ImageView
-        android:id="@+id/widget_compass_needle"
+        android:id="@+id/widget_compass_guide"
+        android:layout_width="3dp"
+        android:layout_height="12dp"
+        android:layout_below="@id/widget_compass_header"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="2dp"
+        android:src="@android:color/white"
+        android:background="#6750A4"
+        android:contentDescription="Guide" />
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:src="@android:drawable/ic_menu_directions"
-        android:layout_centerInParent="true"
-        android:tint="#FF0000"
-        android:scaleType="centerInside"
-        android:contentDescription="Compass Needle" />
+        android:layout_below="@id/widget_compass_guide"
+        android:layout_marginTop="2dp">
+
+        <ImageView
+            android:id="@+id/widget_compass_dial"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@android:drawable/ic_menu_compass"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            app:tint="#49454F"
+            android:contentDescription="Dial" />
+
+        <ImageView
+            android:id="@+id/widget_compass_needle"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@android:drawable/ic_menu_directions"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            app:tint="#B3261E"
+            android:contentDescription="Needle" />
+
+        <ImageView
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_gravity="center"
+            android:src="@drawable/widget_button_tonal"
+            android:contentDescription="Center" />
+    </FrameLayout>
 
 </RelativeLayout>

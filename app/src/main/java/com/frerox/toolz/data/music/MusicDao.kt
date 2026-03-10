@@ -11,6 +11,12 @@ interface MusicDao {
     @Query("SELECT * FROM music_tracks WHERE isFavorite = 1")
     fun getFavoriteTracks(): Flow<List<MusicTrack>>
 
+    @Query("SELECT * FROM music_tracks ORDER BY lastPlayed DESC LIMIT 50")
+    fun getRecentlyPlayed(): Flow<List<MusicTrack>>
+
+    @Query("SELECT * FROM music_tracks ORDER BY playCount DESC LIMIT 50")
+    fun getMostPlayed(): Flow<List<MusicTrack>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrack(track: MusicTrack)
 
@@ -34,4 +40,7 @@ interface MusicDao {
     
     @Query("SELECT * FROM music_tracks WHERE uri = :uri")
     suspend fun getTrackByUri(uri: String): MusicTrack?
+
+    @Query("UPDATE music_tracks SET playCount = playCount + 1, lastPlayed = :timestamp WHERE uri = :uri")
+    suspend fun incrementPlayCount(uri: String, timestamp: Long)
 }

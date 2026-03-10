@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.media
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
@@ -21,11 +22,15 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.MusicPlayerService
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -42,6 +47,8 @@ data class MusicUiState(
     val tracks: List<MusicTrack> = emptyList(),
     val playlists: List<Playlist> = emptyList(),
     val favoriteTracks: List<MusicTrack> = emptyList(),
+    val recentlyPlayed: List<MusicTrack> = emptyList(),
+    val mostPlayed: List<MusicTrack> = emptyList(),
     val currentTrack: MusicTrack? = null,
     val isPlaying: Boolean = false,
     val progress: Long = 0L,
@@ -74,7 +81,10 @@ class MusicPlayerViewModel @Inject constructor(
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
-    private var isPlayerServiceStarted = false
+    
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var controller: MediaController? = null
+    private var pendingAction: (() -> Unit)? = null
     
     private var equalizer: Equalizer? = null
     private var shakeDetector: ShakeDetector? = null
@@ -86,8 +96,15 @@ class MusicPlayerViewModel @Inject constructor(
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
 
+    private data class MusicData(
+        val tracks: List<MusicTrack>,
+        val playlists: List<Playlist>,
+        val favorites: List<MusicTrack>,
+        val recent: List<MusicTrack>,
+        val most: List<MusicTrack>
+    )
+
     init {
-        // Configure Audio Attributes for proper Audio Focus handling and System integration
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -95,6 +112,8 @@ class MusicPlayerViewModel @Inject constructor(
         
         player.setAudioAttributes(audioAttributes, true)
         player.setHandleAudioBecomingNoisy(true)
+
+        connectToMediaController()
 
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
@@ -149,19 +168,23 @@ class MusicPlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            combine(
+            val combinedFlow = combine(
                 repository.allTracks,
                 repository.allPlaylists,
                 repository.favoriteTracks,
-                _uiState.map { it.sortOrder }.distinctUntilChanged()
-            ) { tracks, playlists, favorites, sortOrder ->
+                repository.recentlyPlayed,
+                repository.mostPlayed
+            ) { tracks, playlists, favorites, recent, most ->
+                MusicData(tracks, playlists, favorites, recent, most)
+            }
+
+            combinedFlow.combine(_uiState.map { it.sortOrder }.distinctUntilChanged()) { data, sortOrder ->
                 val sortedBase = when (sortOrder) {
-                    SortOrder.TITLE -> tracks.sortedBy { it.title }
-                    SortOrder.ARTIST -> tracks.sortedBy { it.artist ?: "Unknown" }
-                    SortOrder.RECENT -> tracks.reversed()
+                    SortOrder.TITLE -> data.tracks.sortedBy { it.title }
+                    SortOrder.ARTIST -> data.tracks.sortedBy { it.artist ?: "Unknown" }
+                    SortOrder.RECENT -> data.tracks.reversed()
                 }
 
-                // Prioritize tracks with thumbnails and real artists
                 val prioritizedTracks = sortedBase.sortedWith(
                     compareByDescending<MusicTrack> { it.thumbnailUri != null }
                         .thenByDescending { it.artist != null && it.artist != "Unknown Artist" && it.artist != "<unknown>" }
@@ -172,13 +195,15 @@ class MusicPlayerViewModel @Inject constructor(
                     uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
                 }
 
-                _uiState.update { 
-                    it.copy(
+                _uiState.update { state ->
+                    state.copy(
                         tracks = prioritizedTracks, 
-                        playlists = playlists, 
-                        favoriteTracks = favorites,
+                        playlists = data.playlists, 
+                        favoriteTracks = data.favorites,
+                        recentlyPlayed = data.recent,
+                        mostPlayed = data.most,
                         folders = folders,
-                        currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: it.currentTrack?.uri) },
+                        currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri) },
                         isPlaying = player.isPlaying,
                         duration = player.duration.coerceAtLeast(0L),
                         isShuffleOn = player.shuffleModeEnabled,
@@ -196,6 +221,13 @@ class MusicPlayerViewModel @Inject constructor(
                     startPlayerService()
                     initEqualizer()
                     performHapticFeedback()
+                    
+                    val currentUri = player.currentMediaItem?.mediaId
+                    if (currentUri != null) {
+                        viewModelScope.launch {
+                            repository.incrementPlayCount(currentUri)
+                        }
+                    }
                 } else {
                     stopProgressUpdate()
                     performHapticFeedback()
@@ -238,10 +270,29 @@ class MusicPlayerViewModel @Inject constructor(
             }
         })
         
-        // Ensure progress is correct even if already playing
         if (player.isPlaying) {
             startProgressUpdate()
         }
+    }
+
+    private fun connectToMediaController() {
+        val sessionToken = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
+        controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture?.addListener({
+            try {
+                controller = controllerFuture?.get()
+                // Synchronize state with player
+                _uiState.update { it.copy(
+                    isPlaying = controller?.isPlaying ?: false,
+                    isShuffleOn = controller?.shuffleModeEnabled ?: false,
+                    repeatMode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
+                )}
+                pendingAction?.invoke()
+                pendingAction = null
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, MoreExecutors.directExecutor())
     }
 
     private fun performHapticFeedback() {
@@ -307,7 +358,6 @@ class MusicPlayerViewModel @Inject constructor(
                             return
                         }
                     } catch (e: Exception) {
-                        // Skip individual preset if it fails
                     }
                 }
             }
@@ -323,19 +373,13 @@ class MusicPlayerViewModel @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            // Silently fail to avoid crashing the whole viewmodel
         }
     }
 
     private fun startPlayerService() {
-        if (isPlayerServiceStarted) return
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
-            // Use startService instead of startForegroundService for MediaSessionService.
-            // MediaSessionService manages its own foreground state and will promote itself
-            // when playback starts. This avoids the ForegroundServiceDidNotStartInTimeException.
             context.startService(intent)
-            isPlayerServiceStarted = true
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -346,7 +390,7 @@ class MusicPlayerViewModel @Inject constructor(
         progressJob = viewModelScope.launch {
             while (true) {
                 _uiState.update { it.copy(progress = player.currentPosition) }
-                delay(500)
+                delay(100)
             }
         }
     }
@@ -390,9 +434,13 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
-        // Ensure MediaSessionService is alive before first playback command so the
-        // media session/notification lifecycle is authoritative from the beginning.
         startPlayerService()
+        
+        if (controller == null) {
+            pendingAction = { playTrack(track, tracks) }
+            connectToMediaController()
+            return
+        }
 
         val mediaItems = tracks.map { t ->
             val metadata = MediaMetadata.Builder()
@@ -400,9 +448,9 @@ class MusicPlayerViewModel @Inject constructor(
                 .setArtist(t.artist ?: "Unknown Artist")
                 .setAlbumTitle(t.album ?: "Unknown Album")
                 .setDisplayTitle(t.title)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // Required for wavy bar on Android 16/17
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .setIsPlayable(true)
-                .setArtworkUri(t.thumbnailUri?.toUri()) // Required for color matching
+                .setArtworkUri(t.thumbnailUri?.toUri())
                 .build()
 
             MediaItem.Builder()
@@ -413,11 +461,20 @@ class MusicPlayerViewModel @Inject constructor(
         }
         
         val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-        player.stop()
-        player.clearMediaItems()
-        player.setMediaItems(mediaItems, startIndex, 0L)
-        player.prepare()
-        player.play()
+        
+        controller?.let { c ->
+            c.stop()
+            c.clearMediaItems()
+            c.setMediaItems(mediaItems, startIndex, 0L)
+            c.prepare()
+            c.play()
+        } ?: run {
+            player.stop()
+            player.clearMediaItems()
+            player.setMediaItems(mediaItems, startIndex, 0L)
+            player.prepare()
+            player.play()
+        }
     }
 
     fun playPlaylist(playlist: Playlist) {
@@ -427,39 +484,53 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun togglePlayPause() {
-        if (player.isPlaying) {
-            player.pause()
+        startPlayerService()
+        val p: Player = controller ?: player
+        if (p.isPlaying) {
+            p.pause()
         } else {
-            // Resume from pause should also guarantee that the media service session exists.
-            startPlayerService()
-            player.play()
+            p.play()
         }
     }
 
     fun stop() {
-        player.stop()
-        player.clearMediaItems()
+        val p: Player = controller ?: player
+        p.stop()
+        p.clearMediaItems()
         _uiState.update { it.copy(currentTrack = null, isPlaying = false, progress = 0L) }
     }
 
     fun seekTo(position: Long) {
-        player.seekTo(position)
+        val p: Player = controller ?: player
+        p.seekTo(position)
         _uiState.update { it.copy(progress = position) }
     }
 
-    fun skipNext() = player.seekToNext()
-    fun skipPrevious() = player.seekToPrevious()
+    fun skipNext() {
+        val p: Player = controller ?: player
+        p.seekToNext()
+    }
+    
+    fun skipPrevious() {
+        val p: Player = controller ?: player
+        p.seekToPrevious()
+    }
 
     fun toggleShuffle() {
-        player.shuffleModeEnabled = !player.shuffleModeEnabled
+        val p: Player = controller ?: player
+        p.shuffleModeEnabled = !p.shuffleModeEnabled
+        _uiState.update { it.copy(isShuffleOn = p.shuffleModeEnabled) }
     }
 
     fun toggleRepeat() {
-        player.repeatMode = when (player.repeatMode) {
+        val p: Player = controller ?: player
+        val newMode = when (p.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
+        p.repeatMode = newMode
+        _uiState.update { it.copy(repeatMode = newMode) }
     }
 
     fun setSortOrder(order: SortOrder) {
@@ -484,7 +555,8 @@ class MusicPlayerViewModel @Inject constructor(
             player.volume = volume.coerceAtLeast(0f)
             delay(100)
         }
-        player.pause()
+        val p: Player = controller ?: player
+        p.pause()
         player.volume = 1.0f
         _uiState.update { it.copy(sleepTimerMinutes = null) }
     }
@@ -571,5 +643,9 @@ class MusicPlayerViewModel @Inject constructor(
         stopShakeDetection()
         sleepTimerJob?.cancel()
         equalizer?.release()
+        controllerFuture?.let {
+            MediaController.releaseFuture(it)
+        }
+        controller = null
     }
 }
