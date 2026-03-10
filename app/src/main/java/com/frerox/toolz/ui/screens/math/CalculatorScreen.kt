@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,23 +39,31 @@ fun CalculatorScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Calculator", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                TopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("Calculator", fontWeight = FontWeight.ExtraBold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.onToggleMode() }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Science,
+                                contentDescription = "Toggle Mode",
+                                tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.onToggleMode() }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Science,
-                            contentDescription = "Toggle Mode",
-                            tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(
@@ -62,15 +72,15 @@ fun CalculatorScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
-            // Display Area - Revamped with better visuals
+            // Display Area
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(vertical = 16.dp),
-                shape = MaterialTheme.shapes.extraLarge,
+                shape = RoundedCornerShape(32.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                border = IconButtonDefaults.outlinedIconButtonBorder(enabled = true)
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
                 Box(
                     modifier = Modifier
@@ -197,8 +207,8 @@ fun ScientificLayout(viewModel: CalculatorViewModel) {
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
@@ -234,7 +244,7 @@ fun CalcButton(
         text == "=" -> MaterialTheme.colorScheme.primary
         isOperator -> MaterialTheme.colorScheme.primaryContainer
         isAction -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     }
     
     val contentColor = when {
@@ -257,7 +267,7 @@ fun CalcButton(
             Text(
                 text = text,
                 style = if (isScientific) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Black,
                 color = contentColor
             )
         }

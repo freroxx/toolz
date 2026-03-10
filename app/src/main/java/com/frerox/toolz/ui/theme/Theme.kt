@@ -69,17 +69,31 @@ fun ToolzTheme(
     customPrimary: Color? = null,
     content: @Composable () -> Unit
 ) {
-    var colorScheme = when {
+    val context = LocalContext.current
+    val colorScheme = when {
+        customPrimary != null && !dynamicColor -> {
+            // Simplified custom color scheme generation
+            if (darkTheme) {
+                DarkColorScheme.copy(
+                    primary = customPrimary,
+                    primaryContainer = customPrimary.copy(alpha = 0.3f),
+                    onPrimaryContainer = customPrimary,
+                    outline = customPrimary.copy(alpha = 0.5f)
+                )
+            } else {
+                LightColorScheme.copy(
+                    primary = customPrimary,
+                    primaryContainer = customPrimary.copy(alpha = 0.1f),
+                    onPrimaryContainer = customPrimary,
+                    outline = customPrimary.copy(alpha = 0.5f)
+                )
+            }
+        }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
-    }
-
-    if (customPrimary != null && !dynamicColor) {
-        colorScheme = colorScheme.copy(primary = customPrimary)
     }
 
     val view = LocalView.current
@@ -91,8 +105,9 @@ fun ToolzTheme(
             insetsController.isAppearanceLightStatusBars = !darkTheme
             insetsController.isAppearanceLightNavigationBars = !darkTheme
             
-            // Modern way to set status/nav bar colors without deprecation warnings
+            @Suppress("DEPRECATION")
             window.statusBarColor = Color.Transparent.toArgb()
+            @Suppress("DEPRECATION")
             window.navigationBarColor = Color.Transparent.toArgb()
         }
     }

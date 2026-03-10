@@ -12,6 +12,8 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -53,7 +55,8 @@ data class MusicUiState(
     val showVisualizer: Boolean = true,
     val artShape: String = "CIRCLE",
     val rotationEnabled: Boolean = true,
-    val hapticIntensity: Float = 0.5f
+    val hapticIntensity: Float = 0.5f,
+    val pipEnabled: Boolean = false
 )
 
 @HiltViewModel
@@ -81,6 +84,15 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     init {
+        // Configure Audio Attributes for proper Audio Focus handling and System integration
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        
+        player.setAudioAttributes(audioAttributes, true)
+        player.setHandleAudioBecomingNoisy(true)
+
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
@@ -126,6 +138,12 @@ class MusicPlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(hapticIntensity = intensity) }
             }
         }
+        
+        viewModelScope.launch {
+            settingsRepository.musicPipEnabled.collect { enabled ->
+                _uiState.update { it.copy(pipEnabled = enabled) }
+            }
+        }
 
         viewModelScope.launch {
             combine(
@@ -157,7 +175,11 @@ class MusicPlayerViewModel @Inject constructor(
                         playlists = playlists, 
                         favoriteTracks = favorites,
                         folders = folders,
-                        currentTrack = prioritizedTracks.find { t -> t.uri == it.currentTrack?.uri }
+                        currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: it.currentTrack?.uri) },
+                        isPlaying = player.isPlaying,
+                        duration = player.duration.coerceAtLeast(0L),
+                        isShuffleOn = player.shuffleModeEnabled,
+                        repeatMode = player.repeatMode
                     ) 
                 }
             }.collect()
@@ -212,6 +234,11 @@ class MusicPlayerViewModel @Inject constructor(
                 player.prepare()
             }
         })
+        
+        // Ensure progress is correct even if already playing
+        if (player.isPlaying) {
+            startProgressUpdate()
+        }
     }
 
     private fun performHapticFeedback() {
@@ -297,14 +324,12 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     private fun startPlayerService() {
-        if (!player.isPlaying) return
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            // Use startService instead of startForegroundService for MediaSessionService.
+            // MediaSessionService manages its own foreground state and will promote itself
+            // when playback starts. This avoids the ForegroundServiceDidNotStartInTimeException.
+            context.startService(intent)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -360,18 +385,20 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
         val mediaItems = tracks.map { t ->
+            val metadata = MediaMetadata.Builder()
+                .setTitle(t.title)
+                .setArtist(t.artist ?: "Unknown Artist")
+                .setAlbumTitle(t.album ?: "Unknown Album") // Helpful for Samsung
+                .setDisplayTitle(t.title)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC) // CRITICAL: Tells the OS this is MUSIC
+                .setIsPlayable(true)
+                .setArtworkUri(t.thumbnailUri?.let { Uri.parse(it) })
+                .build()
+
             MediaItem.Builder()
                 .setMediaId(t.uri)
                 .setUri(Uri.parse(t.uri))
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(t.title)
-                        .setArtist(t.artist ?: "Unknown Artist")
-                        .setDisplayTitle(t.title)
-                        .setIsPlayable(true)
-                        .setArtworkUri(t.thumbnailUri?.let { Uri.parse(it) })
-                        .build()
-                )
+                .setMediaMetadata(metadata) // Attach the rich metadata here
                 .build()
         }
         
@@ -455,6 +482,12 @@ class MusicPlayerViewModel @Inject constructor(
     fun toggleRotation() {
         viewModelScope.launch {
             settingsRepository.setMusicRotationEnabled(!_uiState.value.rotationEnabled)
+        }
+    }
+    
+    fun togglePipEnabled() {
+        viewModelScope.launch {
+            settingsRepository.setMusicPipEnabled(!_uiState.value.pipEnabled)
         }
     }
 

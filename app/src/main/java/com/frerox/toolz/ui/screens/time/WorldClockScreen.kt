@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,19 +39,27 @@ fun WorldClockScreen(
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = { Text("World Clock", fontWeight = FontWeight.ExtraBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                LargeTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("World Clock", fontWeight = FontWeight.ExtraBold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showAddDialog = true }) {
+                            Icon(Icons.Rounded.Language, contentDescription = "Add Clock")
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Rounded.Language, contentDescription = "Add Clock")
-                    }
-                }
-            )
+                )
+            }
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -62,13 +72,25 @@ fun WorldClockScreen(
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
+            )
+        ) {
             if (clocks.isEmpty()) {
                 EmptyClocksState()
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 100.dp),
+                    contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(clocks, key = { it.zoneId }) { clock ->

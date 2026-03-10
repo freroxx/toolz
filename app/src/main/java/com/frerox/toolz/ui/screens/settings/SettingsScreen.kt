@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -88,343 +89,356 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            LargeTopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.ExtraBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                LargeTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("Settings", fontWeight = FontWeight.ExtraBold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .fadingEdge(
-                    brush = Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.05f to Color.Black,
-                        0.95f to Color.Black,
-                        1f to Color.Transparent
-                    ),
-                    length = 20.dp
-                )
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SearchField(
-                query = searchQuery,
-                onQueryChange = { viewModel.onSearchQueryChange(it) }
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
             )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Spacer(Modifier.height(16.dp))
+                SearchField(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.onSearchQueryChange(it) }
+                )
 
-            if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration")) {
-                SettingsSection(title = "General") {
-                    SettingsItem(
-                        title = "Unit System",
-                        subtitle = unitSystem.lowercase().replaceFirstChar { it.uppercase() },
-                        icon = Icons.Rounded.SquareFoot
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration")) {
+                    SettingsSection(title = "General") {
+                        SettingsItem(
+                            title = "Unit System",
+                            subtitle = unitSystem.lowercase().replaceFirstChar { it.uppercase() },
+                            icon = Icons.Rounded.SquareFoot
                         ) {
-                            listOf("METRIC", "IMPERIAL").forEach { unit ->
-                                FilterChip(
-                                    selected = unitSystem == unit,
-                                    onClick = { viewModel.setUnitSystem(unit) },
-                                    label = { Text(unit.lowercase().replaceFirstChar { it.uppercase() }) },
-                                    modifier = Modifier.weight(1f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("METRIC", "IMPERIAL").forEach { unit ->
+                                    FilterChip(
+                                        selected = unitSystem == unit,
+                                        onClick = { viewModel.setUnitSystem(unit) },
+                                        label = { Text(unit.lowercase().replaceFirstChar { it.uppercase() }) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                        
+                        SettingsToggleItem(
+                            title = "Haptic Feedback",
+                            subtitle = "Vibrate on interactions",
+                            icon = Icons.Rounded.Vibration,
+                            checked = hapticFeedback,
+                            onCheckedChange = { viewModel.setHapticFeedback(it) }
+                        )
+
+                        if (hapticFeedback) {
+                            SettingsItem(
+                                title = "Haptic Intensity",
+                                subtitle = "${(hapticIntensity * 100).toInt()}%",
+                                icon = Icons.Rounded.GraphicEq
+                            ) {
+                                Slider(
+                                    value = hapticIntensity,
+                                    onValueChange = { viewModel.setHapticIntensity(it) },
+                                    valueRange = 0.1f..1f,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
                                 )
                             }
                         }
-                    }
-                    
-                    SettingsToggleItem(
-                        title = "Haptic Feedback",
-                        subtitle = "Vibrate on interactions",
-                        icon = Icons.Rounded.Vibration,
-                        checked = hapticFeedback,
-                        onCheckedChange = { viewModel.setHapticFeedback(it) }
-                    )
 
-                    if (hapticFeedback) {
+                        SettingsToggleItem(
+                            title = "Show Qibla",
+                            subtitle = "Display Kaaba direction in compass",
+                            icon = Icons.Rounded.Explore,
+                            checked = showQibla,
+                            onCheckedChange = { viewModel.setShowQibla(it) }
+                        )
+
                         SettingsItem(
-                            title = "Haptic Intensity",
-                            subtitle = "${(hapticIntensity * 100).toInt()}%",
-                            icon = Icons.Rounded.GraphicEq
+                            title = "Daily Step Goal",
+                            subtitle = "$stepGoal steps",
+                            icon = Icons.Rounded.Flag
                         ) {
                             Slider(
-                                value = hapticIntensity,
-                                onValueChange = { viewModel.setHapticIntensity(it) },
-                                valueRange = 0.1f..1f,
+                                value = stepGoal.toFloat(),
+                                onValueChange = { viewModel.setStepGoal(it.toInt()) },
+                                valueRange = 1000f..30000f,
+                                steps = 29,
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                         }
                     }
-
-                    SettingsToggleItem(
-                        title = "Show Qibla",
-                        subtitle = "Display Kaaba direction in compass",
-                        icon = Icons.Rounded.Explore,
-                        checked = showQibla,
-                        onCheckedChange = { viewModel.setShowQibla(it) }
-                    )
-
-                    SettingsItem(
-                        title = "Daily Step Goal",
-                        subtitle = "$stepGoal steps",
-                        icon = Icons.Rounded.Flag
-                    ) {
-                        Slider(
-                            value = stepGoal.toFloat(),
-                            onValueChange = { viewModel.setStepGoal(it.toInt()) },
-                            valueRange = 1000f..30000f,
-                            steps = 29,
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        )
-                    }
                 }
-            }
 
-            if (matches(searchQuery, "notifications", "tracker", "alerts", "music")) {
-                SettingsSection(title = "Notifications") {
-                    SettingsToggleItem(
-                        title = "Enable All Notifications",
-                        subtitle = "Global notification toggle",
-                        icon = Icons.Rounded.Notifications,
-                        checked = notificationsEnabled,
-                        onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                    )
-                    
-                    if (notificationsEnabled) {
+                if (matches(searchQuery, "notifications", "tracker", "alerts", "music")) {
+                    SettingsSection(title = "Notifications") {
                         SettingsToggleItem(
-                            title = "Step Tracker",
-                            subtitle = "Daily goals and milestones",
-                            icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                            checked = stepNotifications,
-                            onCheckedChange = { viewModel.setStepNotifications(it) }
+                            title = "Enable All Notifications",
+                            subtitle = "Global notification toggle",
+                            icon = Icons.Rounded.Notifications,
+                            checked = notificationsEnabled,
+                            onCheckedChange = { viewModel.setNotificationsEnabled(it) }
                         )
-                        SettingsToggleItem(
-                            title = "Timer & Stopwatch",
-                            subtitle = "Alerts and completion",
-                            icon = Icons.Rounded.Timer,
-                            checked = timerNotifications,
-                            onCheckedChange = { viewModel.setTimerNotifications(it) }
-                        )
-                        SettingsToggleItem(
-                            title = "Voice Recorder",
-                            subtitle = "Recording status alerts",
-                            icon = Icons.Rounded.Mic,
-                            checked = voiceRecordNotifications,
-                            onCheckedChange = { viewModel.setVoiceRecordNotifications(it) }
-                        )
-                        SettingsToggleItem(
-                            title = "Music Player",
-                            subtitle = "Playback controls and song info",
-                            icon = Icons.Rounded.MusicNote,
-                            checked = musicNotifications,
-                            onCheckedChange = { viewModel.setMusicNotifications(it) }
-                        )
-                    }
-                }
-            }
-
-            if (matches(searchQuery, "music", "audio", "player", "speed", "equalizer", "visualizer")) {
-                SettingsSection(title = "Music Player") {
-                    SettingsToggleItem(
-                        title = "Audio Focus",
-                        subtitle = "Pause music when other apps play audio",
-                        icon = Icons.Rounded.CenterFocusStrong,
-                        checked = musicAudioFocus,
-                        onCheckedChange = { viewModel.setMusicAudioFocus(it) }
-                    )
-                    
-                    SettingsToggleItem(
-                        title = "Visualizer",
-                        subtitle = "Show animated bars in player",
-                        icon = Icons.Rounded.BarChart,
-                        checked = showMusicVisualizer,
-                        onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
-                    )
-
-                    SettingsToggleItem(
-                        title = "Shake to Skip",
-                        subtitle = "Shake device to play next track",
-                        icon = Icons.Rounded.ScreenRotation,
-                        checked = musicShakeToSkip,
-                        onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
-                    )
-
-                    SettingsItem(
-                        title = "Playback Speed",
-                        subtitle = "${"%.1f".format(musicPlaybackSpeed)}x",
-                        icon = Icons.Rounded.Speed
-                    ) {
-                        Slider(
-                            value = musicPlaybackSpeed,
-                            onValueChange = { viewModel.setMusicPlaybackSpeed(it) },
-                            valueRange = 0.5f..2.0f,
-                            steps = 14,
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        )
-                    }
-
-                    SettingsItem(
-                        title = "Equalizer",
-                        subtitle = musicEqualizerPreset,
-                        icon = Icons.Rounded.Equalizer
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Bass Boost").forEach { preset ->
-                                FilterChip(
-                                    selected = musicEqualizerPreset == preset,
-                                    onClick = { viewModel.setMusicEqualizerPreset(preset) },
-                                    label = { Text(preset) }
-                                )
-                            }
+                        
+                        if (notificationsEnabled) {
+                            SettingsToggleItem(
+                                title = "Step Tracker",
+                                subtitle = "Daily goals and milestones",
+                                icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                checked = stepNotifications,
+                                onCheckedChange = { viewModel.setStepNotifications(it) }
+                            )
+                            SettingsToggleItem(
+                                title = "Timer & Stopwatch",
+                                subtitle = "Alerts and completion",
+                                icon = Icons.Rounded.Timer,
+                                checked = timerNotifications,
+                                onCheckedChange = { viewModel.setTimerNotifications(it) }
+                            )
+                            SettingsToggleItem(
+                                title = "Voice Recorder",
+                                subtitle = "Recording status alerts",
+                                icon = Icons.Rounded.Mic,
+                                checked = voiceRecordNotifications,
+                                onCheckedChange = { viewModel.setVoiceRecordNotifications(it) }
+                            )
+                            SettingsToggleItem(
+                                title = "Music Player",
+                                subtitle = "Playback controls and song info",
+                                icon = Icons.Rounded.MusicNote,
+                                checked = musicNotifications,
+                                onCheckedChange = { viewModel.setMusicNotifications(it) }
+                            )
                         }
                     }
                 }
-            }
 
-            if (matches(searchQuery, "appearance", "theme", "dark mode", "colors", "secondary")) {
-                SettingsSection(title = "Appearance") {
-                    SettingsToggleItem(
-                        title = "Dynamic Colors",
-                        subtitle = "Use Material You theme colors",
-                        icon = Icons.Rounded.Palette,
-                        checked = dynamicColor,
-                        onCheckedChange = { viewModel.setDynamicColor(it) }
-                    )
-                    
-                    if (!dynamicColor) {
+                if (matches(searchQuery, "music", "audio", "player", "speed", "equalizer", "visualizer")) {
+                    SettingsSection(title = "Music Player") {
+                        SettingsToggleItem(
+                            title = "Audio Focus",
+                            subtitle = "Pause music when other apps play audio",
+                            icon = Icons.Rounded.CenterFocusStrong,
+                            checked = musicAudioFocus,
+                            onCheckedChange = { viewModel.setMusicAudioFocus(it) }
+                        )
+                        
+                        SettingsToggleItem(
+                            title = "Visualizer",
+                            subtitle = "Show animated bars in player",
+                            icon = Icons.Rounded.BarChart,
+                            checked = showMusicVisualizer,
+                            onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
+                        )
+
+                        SettingsToggleItem(
+                            title = "Shake to Skip",
+                            subtitle = "Shake device to play next track",
+                            icon = Icons.Rounded.ScreenRotation,
+                            checked = musicShakeToSkip,
+                            onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
+                        )
+
                         SettingsItem(
-                            title = "Theme Colors",
-                            subtitle = "Primary and secondary app colors",
-                            icon = Icons.Rounded.ColorLens
+                            title = "Playback Speed",
+                            subtitle = "${"%.1f".format(musicPlaybackSpeed)}x",
+                            icon = Icons.Rounded.Speed
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Column {
-                                    Text("Primary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        ColorPickerRow(
-                                            selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                            onColorSelected = { viewModel.setCustomPrimaryColor(it) }
-                                        )
-                                        IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
-                                            Icon(Icons.Rounded.RestartAlt, null)
-                                        }
-                                    }
+                            Slider(
+                                value = musicPlaybackSpeed,
+                                onValueChange = { viewModel.setMusicPlaybackSpeed(it) },
+                                valueRange = 0.5f..2.0f,
+                                steps = 14,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+
+                        SettingsItem(
+                            title = "Equalizer",
+                            subtitle = musicEqualizerPreset,
+                            icon = Icons.Rounded.Equalizer
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Bass Boost").forEach { preset ->
+                                    FilterChip(
+                                        selected = musicEqualizerPreset == preset,
+                                        onClick = { viewModel.setMusicEqualizerPreset(preset) },
+                                        label = { Text(preset) }
+                                    )
                                 }
-                                
-                                Column {
-                                    Text("Secondary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        ColorPickerRow(
-                                            selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-                                            onColorSelected = { viewModel.setCustomSecondaryColor(it) }
-                                        )
-                                        IconButton(onClick = { viewModel.setCustomSecondaryColor(null) }) {
-                                            Icon(Icons.Rounded.RestartAlt, null)
-                                        }
-                                    }
-                                }
-                                
-                                CustomHexColorPicker(
-                                    primaryColor = customPrimaryInt,
-                                    secondaryColor = customSecondaryInt,
-                                    onPrimarySelected = { viewModel.setCustomPrimaryColor(it) },
-                                    onSecondarySelected = { viewModel.setCustomSecondaryColor(it) }
-                                )
                             }
                         }
                     }
-                    
-                    SettingsItem(
-                        title = "Theme Mode",
-                        subtitle = themeMode.lowercase().replaceFirstChar { it.uppercase() },
-                        icon = Icons.Rounded.DarkMode
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                }
+
+                if (matches(searchQuery, "appearance", "theme", "dark mode", "colors", "secondary")) {
+                    SettingsSection(title = "Appearance") {
+                        SettingsToggleItem(
+                            title = "Dynamic Colors",
+                            subtitle = "Use Material You theme colors",
+                            icon = Icons.Rounded.Palette,
+                            checked = dynamicColor,
+                            onCheckedChange = { viewModel.setDynamicColor(it) }
+                        )
+                        
+                        if (!dynamicColor) {
+                            SettingsItem(
+                                title = "Theme Colors",
+                                subtitle = "Primary and secondary app colors",
+                                icon = Icons.Rounded.ColorLens
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Column {
+                                        Text("Primary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            ColorPickerRow(
+                                                selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+                                                onColorSelected = { viewModel.setCustomPrimaryColor(it) }
+                                            )
+                                            IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
+                                                Icon(Icons.Rounded.RestartAlt, null)
+                                            }
+                                        }
+                                    }
+                                    
+                                    Column {
+                                        Text("Secondary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            ColorPickerRow(
+                                                selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+                                                onColorSelected = { viewModel.setCustomSecondaryColor(it) }
+                                            )
+                                            IconButton(onClick = { viewModel.setCustomSecondaryColor(null) }) {
+                                                Icon(Icons.Rounded.RestartAlt, null)
+                                            }
+                                        }
+                                    }
+                                    
+                                    CustomHexColorPicker(
+                                        primaryColor = customPrimaryInt,
+                                        secondaryColor = customSecondaryInt,
+                                        onPrimarySelected = { viewModel.setCustomPrimaryColor(it) },
+                                        onSecondarySelected = { viewModel.setCustomSecondaryColor(it) }
+                                    )
+                                }
+                            }
+                        }
+                        
+                        SettingsItem(
+                            title = "Theme Mode",
+                            subtitle = themeMode.lowercase().replaceFirstChar { it.uppercase() },
+                            icon = Icons.Rounded.DarkMode
                         ) {
-                            listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                                FilterChip(
-                                    selected = themeMode == mode,
-                                    onClick = { viewModel.setThemeMode(mode) },
-                                    label = { Text(mode.lowercase().replaceFirstChar { it.uppercase() }) },
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                                    FilterChip(
+                                        selected = themeMode == mode,
+                                        onClick = { viewModel.setThemeMode(mode) },
+                                        label = { Text(mode.lowercase().replaceFirstChar { it.uppercase() }) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (matches(searchQuery, "widget", "color", "opacity")) {
+                    SettingsSection(title = "Widgets") {
+                        SettingsItem(
+                            title = "Widget Background",
+                            subtitle = "Color and opacity for all widgets",
+                            icon = Icons.Rounded.SettingsSuggest
+                        ) {
+                            ColorPickerRow(
+                                selectedColor = widgetBgColor,
+                                onColorSelected = { viewModel.setWidgetBackgroundColor(it) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Opacity, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Slider(
+                                    value = widgetOpacity,
+                                    onValueChange = { viewModel.setWidgetOpacity(it) },
+                                    valueRange = 0.1f..1f,
                                     modifier = Modifier.weight(1f)
                                 )
+                                Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(32.dp))
                             }
                         }
                     }
                 }
-            }
 
-            if (matches(searchQuery, "widget", "color", "opacity")) {
-                SettingsSection(title = "Widgets") {
-                    SettingsItem(
-                        title = "Widget Background",
-                        subtitle = "Color and opacity for all widgets",
-                        icon = Icons.Rounded.SettingsSuggest
-                    ) {
-                        ColorPickerRow(
-                            selectedColor = widgetBgColor,
-                            onColorSelected = { viewModel.setWidgetBackgroundColor(it) }
+                if (matches(searchQuery, "audio", "music", "shutter", "ringtone")) {
+                    SettingsSection(title = "Audio & Media") {
+                        SettingsItem(
+                            title = "Timer Ringtone",
+                            subtitle = if (ringtoneUri.isNullOrEmpty()) "Default Ringtone" else Uri.parse(ringtoneUri!!).lastPathSegment ?: "Custom",
+                            icon = Icons.Rounded.Audiotrack,
+                            onClick = { ringtonePickerLauncher.launch("audio/*") }
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Opacity, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(8.dp))
-                            Slider(
-                                value = widgetOpacity,
-                                onValueChange = { viewModel.setWidgetOpacity(it) },
-                                valueRange = 0.1f..1f,
-                                modifier = Modifier.weight(1f)
+                        
+                        SettingsToggleItem(
+                            title = "Shutter Sound",
+                            subtitle = "Play sound when capturing images",
+                            icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                            checked = shutterSound,
+                            onCheckedChange = { viewModel.setShutterSoundEnabled(it) }
+                        )
+                        
+                        if (shutterSound) {
+                            SettingsItem(
+                                title = "Custom Shutter Sound",
+                                subtitle = if (shutterSoundUri == null) "System Default" else Uri.parse(shutterSoundUri!!).lastPathSegment ?: "Custom",
+                                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                                onClick = { shutterPickerLauncher.launch("audio/*") }
                             )
-                            Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(32.dp))
                         }
                     }
                 }
-            }
 
-            if (matches(searchQuery, "audio", "music", "shutter", "ringtone")) {
-                SettingsSection(title = "Audio & Media") {
-                    SettingsItem(
-                        title = "Timer Ringtone",
-                        subtitle = if (ringtoneUri.isNullOrEmpty()) "Default Ringtone" else Uri.parse(ringtoneUri!!).lastPathSegment ?: "Custom",
-                        icon = Icons.Rounded.Audiotrack,
-                        onClick = { ringtonePickerLauncher.launch("audio/*") }
-                    )
-                    
-                    SettingsToggleItem(
-                        title = "Shutter Sound",
-                        subtitle = "Play sound when capturing images",
-                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                        checked = shutterSound,
-                        onCheckedChange = { viewModel.setShutterSoundEnabled(it) }
-                    )
-                    
-                    if (shutterSound) {
-                        SettingsItem(
-                            title = "Custom Shutter Sound",
-                            subtitle = if (shutterSoundUri == null) "System Default" else Uri.parse(shutterSoundUri!!).lastPathSegment ?: "Custom",
-                            icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                            onClick = { shutterPickerLauncher.launch("audio/*") }
-                        )
-                    }
-                }
+                AboutSection()
+                
+                Spacer(modifier = Modifier.height(32.dp))
             }
-
-            AboutSection()
-            
-            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }

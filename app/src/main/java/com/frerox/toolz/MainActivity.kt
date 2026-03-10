@@ -1,31 +1,47 @@
 package com.frerox.toolz
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import coil.compose.AsyncImage
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.ui.MainViewModel
 import com.frerox.toolz.ui.navigation.Screen
@@ -41,9 +57,16 @@ import com.frerox.toolz.ui.screens.settings.*
 import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -57,7 +80,7 @@ class MainActivity : ComponentActivity() {
             val darkTheme = when (themeMode) {
                 "LIGHT" -> false
                 "DARK" -> true
-                else -> isSystemInDarkTheme()
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
 
             val customPrimary = customPrimaryInt?.let { Color(it) }
@@ -107,11 +130,108 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColor,
                 customPrimary = customPrimary
             ) {
+                val isPipMode = remember { mutableStateOf(false) }
+                
+                // Track PiP mode changes
+                DisposableEffect(Unit) {
+                    val listener = androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
+                        isPipMode.value = info.isInPictureInPictureMode
+                    }
+                    addOnPictureInPictureModeChangedListener(listener)
+                    onDispose { removeOnPictureInPictureModeChangedListener(listener) }
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ToolzNavHost(navController)
+                    if (isPipMode.value) {
+                        PipPlayerLayout()
+                    } else {
+                        ToolzNavHost(navController)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun PipPlayerLayout() {
+        val musicViewModel: MusicPlayerViewModel = hiltViewModel(this)
+        val state by musicViewModel.uiState.collectAsState()
+        val track = state.currentTrack
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center
+        ) {
+            if (track != null) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(60.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        AsyncImage(
+                            model = track.thumbnailUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = { musicViewModel.skipPrevious() }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = { musicViewModel.togglePlayPause() },
+                            modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
+                        ) {
+                            Icon(
+                                if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(onClick = { musicViewModel.skipNext() }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            } else {
+                Text("No Music", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runBlocking {
+                val pipEnabled = settingsRepository.musicPipEnabled.first()
+                if (pipEnabled) {
+                    val params = PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(1, 1))
+                        .build()
+                    enterPictureInPictureMode(params)
                 }
             }
         }

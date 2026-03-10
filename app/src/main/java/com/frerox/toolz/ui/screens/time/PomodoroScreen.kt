@@ -16,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,180 +46,201 @@ fun PomodoroScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("FOCUS", fontWeight = FontWeight.Black, letterSpacing = 4.sp) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("FOCUS", fontWeight = FontWeight.Black, letterSpacing = 4.sp) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
                     }
-                }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Header Info
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(
-                    color = when (state.mode) {
-                        PomodoroMode.WORK -> MaterialTheme.colorScheme.primaryContainer
-                        else -> MaterialTheme.colorScheme.tertiaryContainer
-                    },
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = when (state.mode) {
-                                PomodoroMode.WORK -> "FOCUS SESSION"
-                                PomodoroMode.SHORT_BREAK -> "SHORT BREAK"
-                                PomodoroMode.LONG_BREAK -> "LONG BREAK"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Black,
-                            color = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(20.dp))
-                
-                Text(
-                    text = "Session #${state.sessionsCompleted + 1}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.outline,
-                    fontWeight = FontWeight.Bold
                 )
             }
-
-            // Central Timer Circle
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.size(340.dp)
+        }
+    ) { padding ->
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Background Glow
-                Surface(
-                    modifier = Modifier.size(280.dp).scale(1.1f),
-                    shape = CircleShape,
-                    color = (if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.05f)
-                ) {}
-
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawCircle(
-                        color = Color.LightGray.copy(alpha = 0.1f),
-                        style = Stroke(width = 20.dp.toPx())
+                // Header Info
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        color = when (state.mode) {
+                            PomodoroMode.WORK -> MaterialTheme.colorScheme.primaryContainer
+                            else -> MaterialTheme.colorScheme.tertiaryContainer
+                        },
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = when (state.mode) {
+                                    PomodoroMode.WORK -> "FOCUS SESSION"
+                                    PomodoroMode.SHORT_BREAK -> "SHORT BREAK"
+                                    PomodoroMode.LONG_BREAK -> "LONG BREAK"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    Text(
+                        text = "Session #${state.sessionsCompleted + 1}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.outline,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                CircularProgressIndicator(
-                    progress = { animatedProgress },
-                    modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 20.dp,
-                    strokeCap = StrokeCap.Round,
-                    color = when(state.mode) {
-                        PomodoroMode.WORK -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.tertiary
-                    },
-                    trackColor = Color.Transparent,
-                )
-                
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = formatPomodoroTime(state.remainingTime),
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 90.sp,
-                            letterSpacing = (-4).sp
+                // Central Timer Circle
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(340.dp)
+                ) {
+                    // Background Glow
+                    Surface(
+                        modifier = Modifier.size(280.dp).scale(1.1f),
+                        shape = CircleShape,
+                        color = (if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.05f)
+                    ) {}
+
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(
+                            color = Color.LightGray.copy(alpha = 0.1f),
+                            style = Stroke(width = 20.dp.toPx())
                         )
+                    }
+
+                    CircularProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier.fillMaxSize(),
+                        strokeWidth = 20.dp,
+                        strokeCap = StrokeCap.Round,
+                        color = when(state.mode) {
+                            PomodoroMode.WORK -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.tertiary
+                        },
+                        trackColor = Color.Transparent,
                     )
                     
-                    AnimatedVisibility(
-                        visible = state.isFinished && !state.isRunning,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        Surface(
-                            onClick = { viewModel.stopRingtone() },
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = CircleShape,
-                            modifier = Modifier.size(64.dp).padding(top = 8.dp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = formatPomodoroTime(state.remainingTime),
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 90.sp,
+                                letterSpacing = (-4).sp
+                            )
+                        )
+                        
+                        AnimatedVisibility(
+                            visible = state.isFinished && !state.isRunning,
+                            enter = fadeIn() + scaleIn(),
+                            exit = fadeOut() + scaleOut()
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.NotificationsActive, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
+                            Surface(
+                                onClick = { viewModel.stopRingtone() },
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = CircleShape,
+                                modifier = Modifier.size(64.dp).padding(top = 8.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.NotificationsActive, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Controls
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 32.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Reset
-                Surface(
-                    onClick = { viewModel.reset() },
-                    modifier = Modifier.size(72.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    tonalElevation = 2.dp
+                // Controls
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 32.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
+                    // Reset
+                    Surface(
+                        onClick = { viewModel.reset() },
+                        modifier = Modifier.size(72.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 2.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
+                        }
                     }
-                }
 
-                // Play/Pause
-                Surface(
-                    onClick = { 
-                        if (state.isFinished) viewModel.stopRingtone()
-                        viewModel.toggleStartStop() 
-                    },
-                    modifier = Modifier.size(100.dp),
-                    shape = CircleShape,
-                    color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                    shadowElevation = 8.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (state.isRunning) "Pause" else "Start",
-                            modifier = Modifier.size(56.dp),
-                            tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
+                    // Play/Pause
+                    Surface(
+                        onClick = { 
+                            if (state.isFinished) viewModel.stopRingtone()
+                            viewModel.toggleStartStop() 
+                        },
+                        modifier = Modifier.size(100.dp),
+                        shape = CircleShape,
+                        color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                        shadowElevation = 8.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (state.isRunning) "Pause" else "Start",
+                                modifier = Modifier.size(56.dp),
+                                tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
-                }
 
-                // Skip
-                Surface(
-                    onClick = { viewModel.skip() },
-                    modifier = Modifier.size(72.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    tonalElevation = 2.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.SkipNext, contentDescription = "Skip", modifier = Modifier.size(32.dp))
+                    // Skip
+                    Surface(
+                        onClick = { viewModel.skip() },
+                        modifier = Modifier.size(72.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        tonalElevation = 2.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.SkipNext, contentDescription = "Skip", modifier = Modifier.size(32.dp))
+                        }
                     }
                 }
             }

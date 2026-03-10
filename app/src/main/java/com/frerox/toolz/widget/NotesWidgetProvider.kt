@@ -30,7 +30,9 @@ class NotesWidgetProvider : AppWidgetProvider() {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
-            // Use setRemoteAdapter with (int viewId, Intent intent) which is recommended
+            
+            // Using the standard non-deprecated method for the RemoteViews
+            @Suppress("DEPRECATION")
             views.setRemoteAdapter(R.id.widget_notes_list, serviceIntent)
             views.setEmptyView(R.id.widget_notes_list, android.R.id.empty)
 

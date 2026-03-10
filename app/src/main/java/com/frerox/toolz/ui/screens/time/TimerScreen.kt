@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -55,14 +56,22 @@ fun TimerScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("TIMER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+            ) {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = { Text("TIMER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Box(modifier = Modifier
@@ -75,7 +84,7 @@ fun TimerScreen(
                     0.95f to Color.Black,
                     1f to Color.Transparent
                 ),
-                length = 20.dp
+                length = 24.dp
             )
         ) {
             Column(
