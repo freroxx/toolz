@@ -4,7 +4,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
-import android.graphics.Bitmap
+import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.widget.RemoteViews
 import androidx.annotation.OptIn
@@ -18,9 +18,12 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.MusicWidgetProvider
+import com.frerox.toolz.widget.WidgetUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 @UnstableApi
@@ -30,9 +33,13 @@ class MusicPlayerService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var widgetUpdateJob: Job? = null
+    private var currentRotation = 0f
     
     @Inject
     lateinit var player: ExoPlayer
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -85,8 +92,12 @@ class MusicPlayerService : MediaSessionService() {
         widgetUpdateJob?.cancel()
         widgetUpdateJob = serviceScope.launch {
             while (isActive) {
+                val rotationEnabled = settingsRepository.musicRotationEnabled.first()
+                if (player.isPlaying && rotationEnabled) {
+                    currentRotation = (currentRotation + 5f) % 360f
+                }
                 updateWidget()
-                delay(1000)
+                delay(500) // Update faster for smoother rotation and progress
             }
         }
     }
@@ -101,6 +112,9 @@ class MusicPlayerService : MediaSessionService() {
         val componentName = ComponentName(this, MusicWidgetProvider::class.java)
         val views = RemoteViews(packageName, R.layout.music_widget)
 
+        // Apply custom themes and opacity
+        WidgetUtils.applyTheme(this, views, settingsRepository)
+
         val currentItem = player.currentMediaItem
         if (currentItem != null) {
             views.setTextViewText(R.id.widget_music_title, currentItem.mediaMetadata.title ?: "Unknown Title")
@@ -114,21 +128,28 @@ class MusicPlayerService : MediaSessionService() {
             views.setImageViewResource(R.id.widget_music_play_pause, 
                 if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
 
-            val artUri = currentItem.mediaMetadata.artworkUri
-            if (artUri != null) {
-                serviceScope.launch {
-                    val bitmap = loadBitmap(artUri.toString())
-                    if (bitmap != null) {
-                        views.setImageViewBitmap(R.id.widget_music_album_art, bitmap)
-                    } else {
-                        views.setImageViewResource(R.id.widget_music_album_art, R.drawable.ic_music_note)
-                    }
-                    // Re-apply intents and update
-                    setupIntents(views)
-                    appWidgetManager.updateAppWidget(componentName, views)
+            serviceScope.launch {
+                val artShape = settingsRepository.musicArtShape.first()
+                val rotationEnabled = settingsRepository.musicRotationEnabled.first()
+                val artUri = currentItem.mediaMetadata.artworkUri
+                
+                var bitmap = if (artUri != null) loadBitmap(artUri.toString()) else null
+                
+                if (bitmap == null) {
+                    // Fallback icon
+                    bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
                 }
-            } else {
-                views.setImageViewResource(R.id.widget_music_album_art, R.drawable.ic_music_note)
+
+                bitmap?.let {
+                    val processedBitmap = processThumbnail(it, artShape)
+                    views.setImageViewBitmap(R.id.widget_music_album_art, processedBitmap)
+                    if (player.isPlaying && rotationEnabled) {
+                        views.setFloat(R.id.widget_music_album_art, "setRotation", currentRotation)
+                    } else {
+                        views.setFloat(R.id.widget_music_album_art, "setRotation", 0f)
+                    }
+                }
+                
                 setupIntents(views)
                 appWidgetManager.updateAppWidget(componentName, views)
             }
@@ -138,9 +159,31 @@ class MusicPlayerService : MediaSessionService() {
             views.setProgressBar(R.id.widget_music_progress, 100, 0, false)
             views.setImageViewResource(R.id.widget_music_play_pause, android.R.drawable.ic_media_play)
             views.setImageViewResource(R.id.widget_music_album_art, R.drawable.ic_music_note)
+            views.setFloat(R.id.widget_music_album_art, "setRotation", 0f)
             setupIntents(views)
             appWidgetManager.updateAppWidget(componentName, views)
         }
+    }
+
+    private fun processThumbnail(bitmap: Bitmap, shape: String): Bitmap {
+        val size = minOf(bitmap.width, bitmap.height)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val rect = Rect(0, 0, size, size)
+
+        if (shape == "CIRCLE") {
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+            canvas.drawBitmap(bitmap, rect, rect, paint)
+        } else {
+            // Rounded Square
+            val cornerRadius = size * 0.2f
+            canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), cornerRadius, cornerRadius, paint)
+            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+            canvas.drawBitmap(bitmap, rect, rect, paint)
+        }
+        return output
     }
 
     private fun setupIntents(views: RemoteViews) {
@@ -153,7 +196,6 @@ class MusicPlayerService : MediaSessionService() {
         val prevIntent = Intent(this, MusicWidgetProvider::class.java).apply { action = "SKIP_PREV" }
         views.setOnClickPendingIntent(R.id.widget_music_prev, PendingIntent.getBroadcast(this, 3, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
 
-        // Open app when clicking on the art or text
         val appIntent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
