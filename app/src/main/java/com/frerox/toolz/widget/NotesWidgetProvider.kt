@@ -9,12 +9,20 @@ import android.net.Uri
 import android.widget.RemoteViews
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.settings.SettingsRepository
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class NotesWidgetProvider : AppWidgetProvider() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.notes_widget)
+            WidgetUtils.applyTheme(context, views, settingsRepository)
 
             // Intent to start the app when clicking "Add Note"
             val addNoteIntent = Intent(context, MainActivity::class.java).apply {
@@ -31,8 +39,6 @@ class NotesWidgetProvider : AppWidgetProvider() {
                 data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
             }
             
-            // Using the standard non-deprecated method for the RemoteViews
-            @Suppress("DEPRECATION")
             views.setRemoteAdapter(R.id.widget_notes_list, serviceIntent)
             views.setEmptyView(R.id.widget_notes_list, android.R.id.empty)
 
