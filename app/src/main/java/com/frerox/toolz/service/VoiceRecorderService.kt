@@ -7,6 +7,7 @@ import android.media.MediaRecorder
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,6 +27,9 @@ class VoiceRecorderService : Service() {
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording
 
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused
+
     private val _durationMillis = MutableStateFlow(0L)
     val durationMillis: StateFlow<Long> = _durationMillis
 
@@ -33,6 +37,7 @@ class VoiceRecorderService : Service() {
     private var timerJob: Job? = null
     private var currentFile: File? = null
     private var startTime: Long = 0L
+    private var pausedTime: Long = 0L
 
     private val binder = LocalBinder()
 
@@ -48,8 +53,13 @@ class VoiceRecorderService : Service() {
     }
 
     fun startRecording() {
-        if (_isRecording.value) return
+        if (_isRecording.value && !_isPaused.value) return
         
+        if (_isPaused.value) {
+            resumeRecording()
+            return
+        }
+
         val folder = getExternalFilesDir("recordings")
         if (folder?.exists() == false) folder.mkdirs()
         
@@ -72,8 +82,9 @@ class VoiceRecorderService : Service() {
             }
 
             _isRecording.value = true
+            _isPaused.value = false
             _durationMillis.value = 0L
-            startTime = System.currentTimeMillis()
+            startTime = SystemClock.elapsedRealtime()
             startTimer()
             startForeground(NOTIFICATION_ID, createNotification())
         } catch (e: Exception) {
@@ -81,19 +92,47 @@ class VoiceRecorderService : Service() {
         }
     }
 
+    fun pauseRecording() {
+        if (!_isRecording.value || _isPaused.value) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                mediaRecorder?.pause()
+                _isPaused.value = true
+                pausedTime = SystemClock.elapsedRealtime() - startTime
+                timerJob?.cancel()
+                updateNotification()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun resumeRecording() {
+        if (!_isRecording.value || !_isPaused.value) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                mediaRecorder?.resume()
+                _isPaused.value = false
+                startTime = SystemClock.elapsedRealtime() - pausedTime
+                startTimer()
+                updateNotification()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     private fun startTimer() {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
-            while (_isRecording.value) {
-                _durationMillis.value = System.currentTimeMillis() - startTime
-                // We update the notification less often if using chronometer, but still need it for text if not using chronometer
-                // Or just update UI state flow
+            while (_isRecording.value && !_isPaused.value) {
+                _durationMillis.value = SystemClock.elapsedRealtime() - startTime
                 delay(200)
             }
         }
     }
 
-    fun stopRecording() {
+    fun stopRecording(save: Boolean = true) {
         try {
             mediaRecorder?.apply {
                 stop()
@@ -104,7 +143,13 @@ class VoiceRecorderService : Service() {
         }
         mediaRecorder = null
         timerJob?.cancel()
+        
+        if (!save) {
+            currentFile?.delete()
+        }
+        
         _isRecording.value = false
+        _isPaused.value = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -129,22 +174,46 @@ class VoiceRecorderService : Service() {
         }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
-        val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
-        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+        val toggleAction = if (_isPaused.value) ACTION_RESUME else ACTION_PAUSE
+        val toggleIntent = Intent(this, VoiceRecorderService::class.java).apply { action = toggleAction }
+        val togglePI = PendingIntent.getService(this, 2, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Recording Audio...")
+        val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
+        val stopPI = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(if (_isPaused.value) "Recording Paused" else "Recording Audio...")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setShowWhen(false)
-            .setUsesChronometer(true)
-            .setWhen(startTime)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Recording", stopPendingIntent)
-            .setColor(0xFFE91E63.toInt()) // Standardize with a color
-            .build()
+            .setColor(0xFFE91E63.toInt())
+
+        if (!_isPaused.value) {
+            builder.setUsesChronometer(true)
+            builder.setWhen(System.currentTimeMillis() - (_durationMillis.value))
+        } else {
+            builder.setContentText("Duration: ${formatDuration(_durationMillis.value)}")
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            builder.addAction(
+                if (_isPaused.value) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+                if (_isPaused.value) "Resume" else "Pause",
+                togglePI
+            )
+        }
+        builder.addAction(android.R.drawable.ic_menu_save, "Save", stopPI)
+
+        return builder.build()
+    }
+
+    private fun formatDuration(millis: Long): String {
+        val seconds = (millis / 1000) % 60
+        val minutes = (millis / (1000 * 60)) % 60
+        return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
     }
 
     private fun updateNotification() {
@@ -153,8 +222,10 @@ class VoiceRecorderService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopRecording()
+        when (intent?.action) {
+            ACTION_STOP -> stopRecording(true)
+            ACTION_PAUSE -> pauseRecording()
+            ACTION_RESUME -> resumeRecording()
         }
         return START_NOT_STICKY
     }
@@ -168,5 +239,7 @@ class VoiceRecorderService : Service() {
         private const val CHANNEL_ID = "voice_recorder_channel"
         private const val NOTIFICATION_ID = 3001
         const val ACTION_STOP = "com.frerox.toolz.action.STOP_RECORDING"
+        const val ACTION_PAUSE = "com.frerox.toolz.action.PAUSE_RECORDING"
+        const val ACTION_RESUME = "com.frerox.toolz.action.RESUME_RECORDING"
     }
 }

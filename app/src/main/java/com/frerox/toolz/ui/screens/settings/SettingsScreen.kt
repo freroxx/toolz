@@ -615,7 +615,7 @@ fun AboutSection() {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text("Toolz", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-            Text("Version 1.7.4 Alpha", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            Text("Version 1.7.4", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
             Spacer(modifier = Modifier.height(24.dp))
             Text(
                 "The ultimate toolkit for daily needs. Made and designed by frerox",
