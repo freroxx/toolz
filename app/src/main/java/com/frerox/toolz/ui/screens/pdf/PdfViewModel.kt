@@ -12,6 +12,7 @@ import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.data.pdf.PdfRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,6 +38,7 @@ class PdfViewModel @Inject constructor(
 
     private val _currentFileUri = MutableStateFlow<Uri?>(null)
     
+    @OptIn(ExperimentalCoroutinesApi::class)
     val annotations = _currentFileUri.flatMapLatest { uri ->
         if (uri == null) flowOf(emptyList())
         else annotationDao.getAnnotationsForFile(uri.toString())
