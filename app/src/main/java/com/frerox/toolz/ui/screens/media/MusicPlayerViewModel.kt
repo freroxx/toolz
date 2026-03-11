@@ -64,8 +64,10 @@ data class MusicUiState(
     val showVisualizer: Boolean = true,
     val artShape: String = "CIRCLE",
     val rotationEnabled: Boolean = true,
+    val hapticEnabled: Boolean = true,
     val hapticIntensity: Float = 0.5f,
-    val pipEnabled: Boolean = false
+    val pipEnabled: Boolean = false,
+    val sleepTimerActive: Boolean = false
 )
 
 @HiltViewModel
@@ -78,6 +80,9 @@ class MusicPlayerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MusicUiState())
     val uiState = _uiState.asStateFlow()
+
+    private val _showSleepTimer = MutableStateFlow(false)
+    val showSleepTimer = _showSleepTimer.asStateFlow()
 
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
@@ -152,6 +157,12 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicEqualizerPreset.collect { preset ->
                 applyEqualizerPreset(preset)
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.hapticFeedback.collect { enabled ->
+                _uiState.update { it.copy(hapticEnabled = enabled) }
             }
         }
 
@@ -297,7 +308,7 @@ class MusicPlayerViewModel @Inject constructor(
 
     private fun performHapticFeedback() {
         viewModelScope.launch {
-            if (settingsRepository.hapticFeedback.first()) {
+            if (uiState.value.hapticEnabled) {
                 val intensityValue = uiState.value.hapticIntensity
                 val amplitude = (intensityValue * 255).toInt().coerceIn(1, 255)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -539,13 +550,17 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun setSleepTimer(minutes: Int?) {
         sleepTimerJob?.cancel()
-        _uiState.update { it.copy(sleepTimerMinutes = minutes) }
+        _uiState.update { it.copy(sleepTimerMinutes = minutes, sleepTimerActive = minutes != null) }
         if (minutes != null) {
             sleepTimerJob = viewModelScope.launch {
                 delay(minutes * 60 * 1000L)
                 fadeOutAndStop()
             }
         }
+    }
+
+    fun toggleSleepTimerDialog() {
+        _showSleepTimer.update { !it }
     }
 
     private suspend fun fadeOutAndStop() {
@@ -558,7 +573,7 @@ class MusicPlayerViewModel @Inject constructor(
         val p: Player = controller ?: player
         p.pause()
         player.volume = 1.0f
-        _uiState.update { it.copy(sleepTimerMinutes = null) }
+        _uiState.update { it.copy(sleepTimerMinutes = null, sleepTimerActive = false) }
     }
 
     fun setArtShape(shape: String) {

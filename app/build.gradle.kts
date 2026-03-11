@@ -12,12 +12,21 @@ android {
 
     defaultConfig {
         applicationId = "com.frerox.toolz"
-        minSdk = 24
+        minSdk = 31
         targetSdk = 36
         versionCode = 1
         versionName = "1.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
     buildTypes {
@@ -80,6 +89,8 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.mlkit.vision)
+    implementation(libs.androidx.pdf.viewer)
+    implementation(libs.androidx.fragment.ktx)
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp)
     implementation(libs.moshi.kotlin)

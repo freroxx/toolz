@@ -7,6 +7,7 @@ import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistoryDao
+import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -48,5 +49,10 @@ object DatabaseModule {
     @Provides
     fun provideMathHistoryDao(database: AppDatabase): MathHistoryDao {
         return database.mathHistoryDao()
+    }
+
+    @Provides
+    fun providePdfAnnotationDao(database: AppDatabase): PdfAnnotationDao {
+        return database.pdfAnnotationDao()
     }
 }

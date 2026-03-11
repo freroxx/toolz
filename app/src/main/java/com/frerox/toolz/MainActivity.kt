@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -56,6 +57,7 @@ import com.frerox.toolz.ui.screens.sensors.*
 import com.frerox.toolz.ui.screens.notepad.*
 import com.frerox.toolz.ui.screens.settings.*
 import com.frerox.toolz.ui.screens.media.*
+import com.frerox.toolz.ui.screens.pdf.*
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
@@ -70,10 +72,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    private val pdfViewModel: PdfViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
+
         setContent {
             val mainViewModel: MainViewModel = hiltViewModel()
             val themeMode by mainViewModel.themeMode.collectAsState()
@@ -141,7 +145,7 @@ class MainActivity : ComponentActivity() {
                 customPrimary = customPrimary
             ) {
                 val isPipMode = remember { mutableStateOf(false) }
-                
+
                 // Track PiP mode changes
                 DisposableEffect(Unit) {
                     val listener = androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
@@ -158,7 +162,7 @@ class MainActivity : ComponentActivity() {
                     if (isPipMode.value) {
                         PipPlayerLayout()
                     } else {
-                        ToolzNavHost(navController, settingsRepository)
+                        ToolzNavHost(navController, settingsRepository, pdfViewModel)
                     }
                 }
             }
@@ -207,11 +211,11 @@ class MainActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(onClick = { musicViewModel.skipPrevious() }, modifier = Modifier.size(24.dp)) {
+                        IconButton(onClick = { musicViewModel.previous() }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(16.dp))
                         }
                         IconButton(
-                            onClick = { musicViewModel.togglePlayPause() },
+                            onClick = { musicViewModel.togglePlay() },
                             modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
                         ) {
                             Icon(
@@ -221,7 +225,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        IconButton(onClick = { musicViewModel.skipNext() }, modifier = Modifier.size(24.dp)) {
+                        IconButton(onClick = { musicViewModel.next() }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -253,6 +257,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?, navController: NavController) {
+        // Deep Link from system
+        intent?.data?.let { uri ->
+            if (intent.type == "application/pdf" || uri.toString().endsWith(".pdf")) {
+                pdfViewModel.openPdf(uri)
+                navController.navigate(Screen.PdfReader.route) {
+                    launchSingleTop = true
+                }
+                return
+            }
+        }
+
         val navigateTo = intent?.getStringExtra("navigate_to")
         if (navigateTo != null) {
             val route = when (navigateTo) {
@@ -262,9 +277,10 @@ class MainActivity : ComponentActivity() {
                 "compass" -> Screen.Compass.route
                 "world_clock" -> Screen.WorldClock.route
                 "music_player" -> Screen.MusicPlayer.route
+                "pdf_reader" -> Screen.PdfReader.route
                 else -> null
             }
-            route?.let { 
+            route?.let {
                 navController.navigate(it) {
                     launchSingleTop = true
                 }
@@ -292,9 +308,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsRepository: SettingsRepository) {
+fun ToolzNavHost(
+    navController: androidx.navigation.NavHostController,
+    settingsRepository: SettingsRepository,
+    pdfViewModel: PdfViewModel
+) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
-    
+
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -333,10 +353,10 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsR
                 settingsRepository = settingsRepository
             )
         }
-        
+
         composable(Screen.Settings.route) {
             SettingsScreen(
-                viewModel = hiltViewModel(), 
+                viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
@@ -345,54 +365,54 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsR
                 }
             )
         }
-        
+
         // Time & Productivity
-        composable(Screen.Timer.route) { 
-            TimerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Timer.route) {
+            TimerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Stopwatch.route) { 
-            StopwatchScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Stopwatch.route) {
+            StopwatchScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.WorldClock.route) { 
-            WorldClockScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.WorldClock.route) {
+            WorldClockScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Pomodoro.route) { 
-            PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Pomodoro.route) {
+            PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        
+
         // Media & Optics
         composable(Screen.MusicPlayer.route) {
             MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Flashlight.route) { 
-            FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Flashlight.route) {
+            FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.ScreenLight.route) { 
-            ScreenLightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.ScreenLight.route) {
+            ScreenLightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Magnifier.route) { 
+        composable(Screen.Magnifier.route) {
             val vm: MagnifierViewModel = hiltViewModel()
             MagnifierScreen(onBack = { navController.popBackStack() }, settingsRepository = vm.repository)
         }
-        composable(Screen.Scanner.route) { 
-            ScannerScreen(onBack = { navController.popBackStack() }) 
+        composable(Screen.Scanner.route) {
+            ScannerScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.LightMeter.route) {
             LightMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        
+
         // Sensors & Navigation
-        composable(Screen.Compass.route) { 
-            CompassScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Compass.route) {
+            CompassScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.BubbleLevel.route) { 
-            BubbleLevelScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.BubbleLevel.route) {
+            BubbleLevelScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Speedometer.route) { 
-            SpeedometerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Speedometer.route) {
+            SpeedometerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Altimeter.route) { 
-            AltimeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Altimeter.route) {
+            AltimeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.StepCounter.route) {
             StepCounterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -400,39 +420,39 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsR
         composable(Screen.VoiceRecorder.route) {
             VoiceRecorderScreen(onBack = { navController.popBackStack() })
         }
-        
+
         // Math & Conversion
-        composable(Screen.Calculator.route) { 
-            CalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Calculator.route) {
+            CalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.UnitConverter.route) { 
-            UnitConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.UnitConverter.route) {
+            UnitConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.TipCalculator.route) { 
-            TipCalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.TipCalculator.route) {
+            TipCalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.BmiCalculator.route) { 
-            BmiScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.BmiCalculator.route) {
+            BmiScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.EquationSolver.route) {
             EquationSolverScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        
+
         // Utilities
-        composable(Screen.Ruler.route) { 
-            RulerScreen(onBack = { navController.popBackStack() }) 
+        composable(Screen.Ruler.route) {
+            RulerScreen(onBack = { navController.popBackStack() })
         }
-        composable(Screen.SoundMeter.route) { 
-            SoundMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.SoundMeter.route) {
+            SoundMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.ColorPicker.route) { 
-            ColorPickerScreen(onBack = { navController.popBackStack() }) 
+        composable(Screen.ColorPicker.route) {
+            ColorPickerScreen(onBack = { navController.popBackStack() })
         }
-        composable(Screen.PasswordGenerator.route) { 
-            RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.PasswordGenerator.route) {
+            RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Notepad.route) { 
-            NotepadScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        composable(Screen.Notepad.route) {
+            NotepadScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.BatteryInfo.route) {
             BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -442,6 +462,9 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsR
         }
         composable(Screen.PeriodicTable.route) {
             PeriodicTableScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.PdfReader.route) {
+            ToolzPdfScreen(viewModel = pdfViewModel, onNavigateBack = { navController.popBackStack() })
         }
     }
 }
