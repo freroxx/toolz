@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
 import coil.compose.AsyncImage
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.navigation.Screen
@@ -70,7 +71,8 @@ sealed class PillPage {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    onNavigate: (String) -> Unit
+    onNavigate: (String) -> Unit,
+    settingsRepository: SettingsRepository
 ) {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
@@ -89,6 +91,9 @@ fun DashboardScreen(
     val pomodoroState by pomodoroViewModel.uiState.collectAsState()
     val stepState by stepViewModel.uiState.collectAsState()
     
+    val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
+    val userName by settingsRepository.userName.collectAsState(initial = "")
+
     val filteredCategories = categories.map { category ->
         category.copy(items = category.items.filter { 
             it.title.contains(searchQuery, ignoreCase = true) || 
@@ -107,7 +112,10 @@ fun DashboardScreen(
                         .background(MaterialTheme.colorScheme.background)
                         .statusBarsPadding()
                 ) {
-                    WelcomeHeader(onSettingsClick = { onNavigate(Screen.Settings.route) })
+                    WelcomeHeader(
+                        userName = userName,
+                        onSettingsClick = { onNavigate(Screen.Settings.route) }
+                    )
                     
                     OutlinedTextField(
                         value = searchQuery,
@@ -181,7 +189,8 @@ fun DashboardScreen(
             }
 
             // Universal App Pill
-            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState) {
+            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, showPillSetting) {
+                if (!showPillSetting) return@remember emptyList<PillPage>()
                 val pages = mutableListOf<PillPage>()
                 if (musicState.currentTrack != null) pages.add(PillPage.Music)
                 if (timerState.isRunning || timerState.remainingTime > 0) pages.add(PillPage.Timer)
@@ -517,13 +526,18 @@ private fun formatTimeDashboard(millis: Long): String {
 }
 
 @Composable
-fun WelcomeHeader(onSettingsClick: () -> Unit) {
+fun WelcomeHeader(
+    userName: String,
+    onSettingsClick: () -> Unit
+) {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val greeting = when (hour) {
         in 0..11 -> "Good Morning"
         in 12..16 -> "Good Afternoon"
         else -> "Good Evening"
     }
+
+    val displayName = userName.ifBlank { "Explorer" }
 
     Row(
         modifier = Modifier
@@ -534,7 +548,7 @@ fun WelcomeHeader(onSettingsClick: () -> Unit) {
     ) {
         Column {
             Text(
-                text = greeting.uppercase(),
+                text = "$greeting, $displayName".uppercase(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Black,

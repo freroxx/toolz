@@ -6,8 +6,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Backspace
@@ -17,9 +18,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,6 +39,8 @@ fun EquationSolverScreen(
     val state by viewModel.uiState.collectAsState()
     val history by viewModel.history.collectAsState()
     var showHistory by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
 
     Scaffold(
         topBar = {
@@ -58,11 +65,12 @@ fun EquationSolverScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            // Display Area
+            // Display Area with Keyboard Support
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .clickable { focusRequester.requestFocus() },
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(24.dp)
             ) {
@@ -73,14 +81,36 @@ fun EquationSolverScreen(
                     verticalArrangement = Arrangement.Bottom,
                     horizontalAlignment = Alignment.End
                 ) {
-                    Text(
-                        text = state.expression.ifEmpty { "0" },
-                        style = MaterialTheme.typography.headlineMedium.copy(
+                    TextField(
+                        value = state.expression,
+                        onValueChange = { viewModel.onExpressionChange(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        textStyle = MaterialTheme.typography.headlineMedium.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.End
                         ),
-                        textAlign = TextAlign.End,
-                        color = MaterialTheme.colorScheme.onSurface
+                        placeholder = { 
+                            Text(
+                                "0", 
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.End,
+                                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = FontFamily.Monospace)
+                            ) 
+                        },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { 
+                            viewModel.solve()
+                            focusManager.clearFocus()
+                        })
                     )
                     
                     Spacer(modifier = Modifier.height(8.dp))
@@ -120,17 +150,10 @@ fun EquationSolverScreen(
                         label = { Text(if (state.isDegreeMode) "DEG" else "RAD") }
                     )
                 }
-                val constants = listOf("π", "e", "c", "G", "h")
-                items(constants) { constant ->
-                    val value = when(constant) {
-                        "c" -> "299792458"
-                        "G" -> "6.674e-11"
-                        "h" -> "6.626e-34"
-                        else -> constant
-                    }
+                items(state.constants) { constant ->
                     AssistChip(
-                        onClick = { viewModel.appendSymbol(value) },
-                        label = { Text(constant) }
+                        onClick = { viewModel.appendSymbol(constant.value) },
+                        label = { Text(constant.symbol) }
                     )
                 }
             }
@@ -160,7 +183,10 @@ fun EquationSolverScreen(
                                     when (char) {
                                         "C" -> viewModel.clear()
                                         "BS" -> viewModel.backspace()
-                                        "=" -> viewModel.solve()
+                                        "=" -> {
+                                            viewModel.solve()
+                                            focusManager.clearFocus()
+                                        }
                                         else -> viewModel.appendSymbol(char)
                                     }
                                 },

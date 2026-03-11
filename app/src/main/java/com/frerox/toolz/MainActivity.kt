@@ -46,6 +46,7 @@ import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.ui.MainViewModel
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.LoadingScreen
+import com.frerox.toolz.ui.screens.OnboardingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
 import com.frerox.toolz.ui.screens.math.*
 import com.frerox.toolz.ui.screens.time.*
@@ -157,7 +158,7 @@ class MainActivity : ComponentActivity() {
                     if (isPipMode.value) {
                         PipPlayerLayout()
                     } else {
-                        ToolzNavHost(navController)
+                        ToolzNavHost(navController, settingsRepository)
                     }
                 }
             }
@@ -291,7 +292,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
+fun ToolzNavHost(navController: androidx.navigation.NavHostController, settingsRepository: SettingsRepository) {
+    val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
+    
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -303,8 +306,20 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
         composable(Screen.Loading.route) {
             LoadingScreen(
                 onLoadingComplete = {
-                    navController.navigate(Screen.Dashboard.route) {
+                    val nextRoute = if (onboardingCompleted) Screen.Dashboard.route else "onboarding"
+                    navController.navigate(nextRoute) {
                         popUpTo(Screen.Loading.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("onboarding") {
+            OnboardingScreen(
+                settingsRepository = settingsRepository,
+                onFinish = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo("onboarding") { inclusive = true }
                     }
                 }
             )
@@ -314,12 +329,21 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
             DashboardScreen(
                 onNavigate = { route ->
                     navController.navigate(route)
-                }
+                },
+                settingsRepository = settingsRepository
             )
         }
         
         composable(Screen.Settings.route) {
-            SettingsScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            SettingsScreen(
+                viewModel = hiltViewModel(), 
+                onBack = { navController.popBackStack() },
+                onResetOnboarding = {
+                    navController.navigate("onboarding") {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                }
+            )
         }
         
         // Time & Productivity
