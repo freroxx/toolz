@@ -120,7 +120,7 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Rounded.DirectionsRun,
+                    Icons.AutoMirrored.Rounded.DirectionsRun,
                     contentDescription = null,
                     modifier = Modifier.size(64.dp),
                     tint = MaterialTheme.colorScheme.primary
