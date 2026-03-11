@@ -33,22 +33,25 @@ class ToolService : Service() {
     // Stopwatch State
     private val _stopwatchTime = MutableStateFlow(0L)
     val stopwatchTime: StateFlow<Long> = _stopwatchTime
+    private val _isStopwatchRunning = MutableStateFlow(false)
+    val isStopwatchRunning: StateFlow<Boolean> = _isStopwatchRunning
     private var stopwatchJob: Job? = null
-    private var isStopwatchRunning = false
     private var stopwatchBase: Long = 0L
 
     // Timer State
     private val _timerRemaining = MutableStateFlow(0L)
     val timerRemaining: StateFlow<Long> = _timerRemaining
+    private val _isTimerRunning = MutableStateFlow(false)
+    val isTimerRunning: StateFlow<Boolean> = _isTimerRunning
     private var timerJob: Job? = null
-    private var isTimerRunning = false
     private var timerEndTimestamp: Long = 0L
 
     // Pomodoro State
     private val _pomodoroRemaining = MutableStateFlow(0L)
     val pomodoroRemaining: StateFlow<Long> = _pomodoroRemaining
+    private val _isPomodoroRunning = MutableStateFlow(false)
+    val isPomodoroRunning: StateFlow<Boolean> = _isPomodoroRunning
     private var pomodoroJob: Job? = null
-    private var isPomodoroRunning = false
     private var pomodoroMode = "WORK"
     private var pomodoroEndTimestamp: Long = 0L
 
@@ -62,12 +65,15 @@ class ToolService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOPWATCH_TOGGLE -> if (isStopwatchRunning) pauseStopwatch() else startStopwatch()
+            ACTION_STOPWATCH_TOGGLE -> if (_isStopwatchRunning.value) pauseStopwatch() else startStopwatch()
+            ACTION_STOPWATCH_STOP -> resetStopwatch()
+            ACTION_TIMER_TOGGLE -> if (_isTimerRunning.value) pauseTimer() else startTimer(_timerRemaining.value)
             ACTION_TIMER_STOP -> resetTimer()
             ACTION_POMODORO_TOGGLE -> {
-                if (isPomodoroRunning) pausePomodoro() 
+                if (_isPomodoroRunning.value) pausePomodoro() 
                 else startPomodoro(_pomodoroRemaining.value, pomodoroMode)
             }
+            ACTION_POMODORO_STOP -> resetPomodoro()
         }
         return START_STICKY
     }
@@ -83,23 +89,25 @@ class ToolService : Service() {
             ) { global, timer -> global to timer }.collect { (global, timer) ->
                 isGlobalNotificationsEnabled = global
                 isTimerNotificationsEnabled = timer
-                if (isStopwatchRunning) updateStopwatchNotification()
-                if (isTimerRunning) updateTimerNotification()
-                if (isPomodoroRunning) updatePomodoroNotification()
+                refreshNotifications()
             }
         }
     }
 
+    private fun refreshNotifications() {
+        if (_isStopwatchRunning.value) updateStopwatchNotification()
+        if (_isTimerRunning.value) updateTimerNotification()
+        if (_isPomodoroRunning.value) updatePomodoroNotification()
+    }
+
     // --- Stopwatch Logic ---
     fun startStopwatch() {
-        if (isStopwatchRunning) return
-        isStopwatchRunning = true
+        if (_isStopwatchRunning.value) return
+        _isStopwatchRunning.value = true
         stopwatchBase = SystemClock.elapsedRealtime() - _stopwatchTime.value
         stopwatchJob = serviceScope.launch {
-            while (isStopwatchRunning) {
+            while (_isStopwatchRunning.value) {
                 _stopwatchTime.value = SystemClock.elapsedRealtime() - stopwatchBase
-                // For live feel, we update less frequently if chronometer is used, 
-                // but we keep the flow updated for UI.
                 delay(100)
             }
         }
@@ -107,25 +115,27 @@ class ToolService : Service() {
     }
 
     fun pauseStopwatch() {
-        isStopwatchRunning = false
+        _isStopwatchRunning.value = false
         stopwatchJob?.cancel()
         updateStopwatchNotification()
     }
 
     fun resetStopwatch() {
-        pauseStopwatch()
+        _isStopwatchRunning.value = false
+        stopwatchJob?.cancel()
         _stopwatchTime.value = 0L
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     // --- Timer Logic ---
     fun startTimer(durationMillis: Long) {
+        if (durationMillis <= 0) return
         _timerRemaining.value = durationMillis
-        isTimerRunning = true
+        _isTimerRunning.value = true
         timerEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         timerJob?.cancel()
         timerJob = serviceScope.launch {
-            while (_timerRemaining.value > 0 && isTimerRunning) {
+            while (_timerRemaining.value > 0 && _isTimerRunning.value) {
                 _timerRemaining.value = (timerEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
                 delay(100)
             }
@@ -137,20 +147,20 @@ class ToolService : Service() {
     }
 
     fun pauseTimer() {
-        isTimerRunning = false
+        _isTimerRunning.value = false
         timerJob?.cancel()
         updateTimerNotification("Paused")
     }
 
     fun resetTimer() {
-        isTimerRunning = false
+        _isTimerRunning.value = false
         timerJob?.cancel()
         _timerRemaining.value = 0L
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun onTimerFinished() {
-        isTimerRunning = false
+        _isTimerRunning.value = false
         updateTimerNotification("Time is up!")
     }
 
@@ -158,16 +168,16 @@ class ToolService : Service() {
     fun startPomodoro(durationMillis: Long, mode: String) {
         _pomodoroRemaining.value = durationMillis
         pomodoroMode = mode
-        isPomodoroRunning = true
+        _isPomodoroRunning.value = true
         pomodoroEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
-            while (_pomodoroRemaining.value > 0 && isPomodoroRunning) {
+            while (_pomodoroRemaining.value > 0 && _isPomodoroRunning.value) {
                 _pomodoroRemaining.value = (pomodoroEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
                 delay(1000)
             }
             if (_pomodoroRemaining.value == 0L) {
-                isPomodoroRunning = false
+                _isPomodoroRunning.value = false
                 updatePomodoroNotification("Session finished!")
             }
         }
@@ -175,9 +185,16 @@ class ToolService : Service() {
     }
 
     fun pausePomodoro() {
-        isPomodoroRunning = false
+        _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
         updatePomodoroNotification("Paused")
+    }
+
+    fun resetPomodoro() {
+        _isPomodoroRunning.value = false
+        pomodoroJob?.cancel()
+        _pomodoroRemaining.value = 0L
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun createNotificationChannel() {
@@ -187,7 +204,7 @@ class ToolService : Service() {
                 "Toolz Active Tools",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Live notifications for active tools like Stopwatch and Timer"
+                description = "Live notifications for active tools"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -196,39 +213,34 @@ class ToolService : Service() {
     }
 
     private fun createStopwatchNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "stopwatch")
-        }
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "stopwatch") }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_TOGGLE }
-        val togglePendingIntent = PendingIntent.getService(this, 1, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+        val togglePI = PendingIntent.getService(this, 1, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+        
+        val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_STOP }
+        val stopPI = PendingIntent.getService(this, 11, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Stopwatch")
             .setSmallIcon(android.R.drawable.ic_menu_recent_history)
-            .setOngoing(isStopwatchRunning)
+            .setOngoing(_isStopwatchRunning.value)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .addAction(
-                if (isStopwatchRunning) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (isStopwatchRunning) "Pause" else "Resume",
-                togglePendingIntent
-            )
+            .addAction(if (_isStopwatchRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isStopwatchRunning.value) "Pause" else "Resume", togglePI)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
 
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            builder.setUsesChronometer(true)
-            builder.setWhen(System.currentTimeMillis() - _stopwatchTime.value)
-            if (!isStopwatchRunning) {
+            if (_isStopwatchRunning.value) {
+                builder.setUsesChronometer(true)
+                builder.setWhen(System.currentTimeMillis() - _stopwatchTime.value)
+            } else {
                 builder.setContentText("Paused: ${formatTime(_stopwatchTime.value)}")
-                builder.setUsesChronometer(false)
             }
-        } else {
-            builder.setContentText("Stopwatch is active")
         }
-
         return builder.build()
     }
 
@@ -238,41 +250,35 @@ class ToolService : Service() {
     }
 
     private fun createTimerNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "timer")
-        }
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "timer") }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
+        val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_TOGGLE }
+        val togglePI = PendingIntent.getService(this, 21, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_STOP }
-        val stopPendingIntent = PendingIntent.getService(this, 2, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+        val stopPI = PendingIntent.getService(this, 2, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Timer")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setOngoing(isTimerRunning)
+            .setOngoing(_isTimerRunning.value)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .addAction(if (_isTimerRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isTimerRunning.value) "Pause" else "Resume", togglePI)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
         
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            if (isTimerRunning) {
+            if (_isTimerRunning.value) {
                 builder.setUsesChronometer(true)
                 builder.setWhen(System.currentTimeMillis() + _timerRemaining.value)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    builder.setChronometerCountDown(true)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) builder.setChronometerCountDown(true)
             } else {
                 builder.setContentText(text ?: formatTime(_timerRemaining.value))
             }
-        } else {
-            builder.setContentText("Timer is active")
         }
-
-        if (isTimerRunning || _timerRemaining.value > 0) {
-            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
-        }
-        
         return builder.build()
     }
 
@@ -282,42 +288,35 @@ class ToolService : Service() {
     }
 
     private fun createPomodoroNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "pomodoro")
-        }
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "pomodoro") }
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_TOGGLE }
-        val togglePendingIntent = PendingIntent.getService(this, 3, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+        val togglePI = PendingIntent.getService(this, 3, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_STOP }
+        val stopPI = PendingIntent.getService(this, 31, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Pomodoro ($pomodoroMode)")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setOngoing(isPomodoroRunning)
+            .setOngoing(_isPomodoroRunning.value)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .addAction(
-                if (isPomodoroRunning) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (isPomodoroRunning) "Pause" else "Resume",
-                togglePendingIntent
-            )
+            .addAction(if (_isPomodoroRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isPomodoroRunning.value) "Pause" else "Resume", togglePI)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
 
         if (isGlobalNotificationsEnabled && isTimerNotificationsEnabled) {
-            if (isPomodoroRunning) {
+            if (_isPomodoroRunning.value) {
                 builder.setUsesChronometer(true)
                 builder.setWhen(System.currentTimeMillis() + _pomodoroRemaining.value)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    builder.setChronometerCountDown(true)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) builder.setChronometerCountDown(true)
             } else {
                 builder.setContentText(text ?: formatTime(_pomodoroRemaining.value))
             }
-        } else {
-            builder.setContentText("Pomodoro session active")
         }
-
         return builder.build()
     }
 
@@ -345,7 +344,10 @@ class ToolService : Service() {
         const val POMODORO_NOTIFICATION_ID = 2003
 
         const val ACTION_STOPWATCH_TOGGLE = "com.frerox.toolz.STOPWATCH_TOGGLE"
+        const val ACTION_STOPWATCH_STOP = "com.frerox.toolz.STOPWATCH_STOP"
+        const val ACTION_TIMER_TOGGLE = "com.frerox.toolz.TIMER_TOGGLE"
         const val ACTION_TIMER_STOP = "com.frerox.toolz.TIMER_STOP"
         const val ACTION_POMODORO_TOGGLE = "com.frerox.toolz.POMODORO_TOGGLE"
+        const val ACTION_POMODORO_STOP = "com.frerox.toolz.POMODORO_STOP"
     }
 }

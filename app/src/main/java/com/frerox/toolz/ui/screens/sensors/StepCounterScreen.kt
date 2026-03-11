@@ -63,7 +63,7 @@ fun StepCounterScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { /* Could add settings here */ }) {
+                        IconButton(onClick = { /* History action */ }) {
                             Icon(Icons.Rounded.History, contentDescription = "History")
                         }
                     }
@@ -86,13 +86,70 @@ fun StepCounterScreen(
                 length = 24.dp
             )
         ) {
-            if (!hasActivityPermission) {
-                PermissionDeniedState { activityPermissionState?.launchPermissionRequest() }
-            } else if (!state.isSensorPresent) {
-                NoSensorState()
-            } else {
-                StepContent(state)
+            when {
+                !state.isEnabledInSettings -> {
+                    DisabledInSettingsState(onEnable = { viewModel.toggleStepCounter(true) })
+                }
+                !hasActivityPermission -> {
+                    PermissionDeniedState { activityPermissionState?.launchPermissionRequest() }
+                }
+                !state.isSensorPresent -> {
+                    NoSensorState()
+                }
+                else -> {
+                    StepContent(state)
+                }
             }
+        }
+    }
+}
+
+@Composable
+fun DisabledInSettingsState(onEnable: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.DirectionsRun,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+        Text(
+            "Tracking is Disabled",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Text(
+            "Step counter is currently disabled in your settings. Would you like to enable it and start tracking your progress?",
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 16.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onEnable,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text("Enable Step Counter", fontWeight = FontWeight.Bold)
         }
     }
 }

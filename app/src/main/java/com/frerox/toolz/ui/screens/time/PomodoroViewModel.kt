@@ -59,6 +59,12 @@ class PomodoroViewModel @Inject constructor(
                     }
                 }
             }
+
+            viewModelScope.launch {
+                toolService?.isPomodoroRunning?.collect { running ->
+                    _uiState.update { it.copy(isRunning = running) }
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -80,7 +86,6 @@ class PomodoroViewModel @Inject constructor(
         } else {
             toolService?.startPomodoro(_uiState.value.remainingTime, _uiState.value.mode.name)
         }
-        _uiState.update { it.copy(isRunning = !currentlyRunning, isFinished = false) }
     }
 
     private fun onSessionComplete() {
@@ -105,7 +110,7 @@ class PomodoroViewModel @Inject constructor(
     private fun playRingtone() {
         viewModelScope.launch {
             val ringtoneUriStr = settingsRepository.ringtoneUri.first()
-            val uri = if (ringtoneUriStr != null) Uri.parse(ringtoneUriStr) else null
+            val uri = if (!ringtoneUriStr.isNullOrEmpty()) Uri.parse(ringtoneUriStr) else null
             
             try {
                 mediaPlayer?.release()
@@ -137,7 +142,7 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun reset() {
-        toolService?.pausePomodoro()
+        toolService?.resetPomodoro()
         stopRingtone()
         _uiState.update { 
             it.copy(

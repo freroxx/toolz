@@ -353,6 +353,9 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
         composable(Screen.Scanner.route) { 
             ScannerScreen(onBack = { navController.popBackStack() }) 
         }
+        composable(Screen.LightMeter.route) {
+            LightMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
         
         // Sensors & Navigation
         composable(Screen.Compass.route) { 
@@ -386,6 +389,9 @@ fun ToolzNavHost(navController: androidx.navigation.NavHostController) {
         }
         composable(Screen.BmiCalculator.route) { 
             BmiScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() }) 
+        }
+        composable(Screen.EquationSolver.route) {
+            EquationSolverScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         
         // Utilities

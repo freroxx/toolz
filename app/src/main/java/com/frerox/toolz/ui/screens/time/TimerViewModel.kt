@@ -56,6 +56,12 @@ class TimerViewModel @Inject constructor(
                     }
                 }
             }
+            
+            viewModelScope.launch {
+                toolService?.isTimerRunning?.collect { running ->
+                    _uiState.update { it.copy(isRunning = running, isPaused = !running && it.remainingTime > 0) }
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -88,11 +94,10 @@ class TimerViewModel @Inject constructor(
         val currentlyRunning = _uiState.value.isRunning
         if (currentlyRunning) {
             toolService?.pauseTimer()
-            _uiState.update { it.copy(isRunning = false, isPaused = true) }
         } else {
             if (_uiState.value.remainingTime > 0) {
                 toolService?.startTimer(_uiState.value.remainingTime)
-                _uiState.update { it.copy(isRunning = true, isPaused = false, isFinished = false) }
+                _uiState.update { it.copy(isFinished = false) }
             }
         }
     }

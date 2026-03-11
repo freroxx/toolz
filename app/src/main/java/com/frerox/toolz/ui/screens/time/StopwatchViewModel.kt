@@ -37,10 +37,15 @@ class StopwatchViewModel @Inject constructor(
             toolService = binder.getService()
             isBound = true
             
-            // Sync with service state
             viewModelScope.launch {
                 toolService?.stopwatchTime?.collect { time ->
                     _uiState.update { it.copy(elapsedTime = time) }
+                }
+            }
+
+            viewModelScope.launch {
+                toolService?.isStopwatchRunning?.collect { running ->
+                    _uiState.update { it.copy(isRunning = running) }
                 }
             }
         }
@@ -64,7 +69,6 @@ class StopwatchViewModel @Inject constructor(
         } else {
             toolService?.startStopwatch()
         }
-        _uiState.update { it.copy(isRunning = !currentlyRunning) }
     }
 
     fun reset() {
