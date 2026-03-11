@@ -21,6 +21,7 @@ import javax.inject.Inject
 
 data class RecordingState(
     val isRecording: Boolean = false,
+    val isPaused: Boolean = false,
     val durationMillis: Long = 0L,
     val recordings: List<File> = emptyList(),
     val playingFile: File? = null,
@@ -55,6 +56,11 @@ class VoiceRecorderViewModel @Inject constructor(
                 }
             }
             viewModelScope.launch {
+                recorderService?.isPaused?.collect { paused ->
+                    _uiState.update { it.copy(isPaused = paused) }
+                }
+            }
+            viewModelScope.launch {
                 recorderService?.durationMillis?.collect { duration ->
                     _uiState.update { it.copy(durationMillis = duration) }
                 }
@@ -85,8 +91,16 @@ class VoiceRecorderViewModel @Inject constructor(
         recorderService?.startRecording()
     }
 
-    fun stopRecording() {
-        recorderService?.stopRecording()
+    fun pauseRecording() {
+        recorderService?.pauseRecording()
+    }
+
+    fun resumeRecording() {
+        recorderService?.resumeRecording()
+    }
+
+    fun stopRecording(save: Boolean = true) {
+        recorderService?.stopRecording(save)
     }
 
     fun togglePlayback(file: File) {

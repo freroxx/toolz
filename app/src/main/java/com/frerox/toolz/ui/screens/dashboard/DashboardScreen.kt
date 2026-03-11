@@ -45,6 +45,8 @@ import com.frerox.toolz.ui.screens.time.TimerViewModel
 import com.frerox.toolz.ui.screens.time.StopwatchViewModel
 import com.frerox.toolz.ui.screens.time.PomodoroViewModel
 import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
+import com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel
+import com.frerox.toolz.ui.screens.sensors.RecordingState
 import java.util.*
 
 data class ToolCategory(
@@ -66,6 +68,7 @@ sealed class PillPage {
     object Stopwatch : PillPage()
     object Pomodoro : PillPage()
     object Steps : PillPage()
+    object Recorder : PillPage()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +85,7 @@ fun DashboardScreen(
     val stopwatchViewModel: StopwatchViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val pomodoroViewModel: PomodoroViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val stepViewModel: StepCounterViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val recorderViewModel: VoiceRecorderViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
@@ -90,6 +94,7 @@ fun DashboardScreen(
     val stopwatchState by stopwatchViewModel.uiState.collectAsState()
     val pomodoroState by pomodoroViewModel.uiState.collectAsState()
     val stepState by stepViewModel.uiState.collectAsState()
+    val recorderState by recorderViewModel.uiState.collectAsState()
     
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
     val userName by settingsRepository.userName.collectAsState(initial = "")
@@ -189,10 +194,11 @@ fun DashboardScreen(
             }
 
             // Universal App Pill
-            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, showPillSetting) {
+            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, recorderState, showPillSetting) {
                 if (!showPillSetting) return@remember emptyList<PillPage>()
                 val pages = mutableListOf<PillPage>()
                 if (musicState.currentTrack != null) pages.add(PillPage.Music)
+                if (recorderState.isRecording) pages.add(PillPage.Recorder)
                 if (timerState.isRunning || timerState.remainingTime > 0) pages.add(PillPage.Timer)
                 if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) pages.add(PillPage.Stopwatch)
                 if (pomodoroState.isRunning || pomodoroState.remainingTime > 0) pages.add(PillPage.Pomodoro)
@@ -223,6 +229,7 @@ fun DashboardScreen(
                                 PillPage.Stopwatch -> Screen.Stopwatch.route
                                 PillPage.Pomodoro -> Screen.Pomodoro.route
                                 PillPage.Steps -> Screen.StepCounter.route
+                                PillPage.Recorder -> Screen.VoiceRecorder.route
                             }
                             onNavigate(currentRoute)
                         },
@@ -241,9 +248,69 @@ fun DashboardScreen(
                             PillPage.Stopwatch -> StopwatchPill(stopwatchState, stopwatchViewModel)
                             PillPage.Pomodoro -> PomodoroPill(pomodoroState, pomodoroViewModel)
                             PillPage.Steps -> StepsPill(stepState)
+                            PillPage.Recorder -> RecorderPill(recorderState, recorderViewModel)
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
+    Row(
+        modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(64.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.errorContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                val infiniteTransition = rememberInfiniteTransition(label = "recording")
+                val alphaAnim by infiniteTransition.animateFloat(
+                    initialValue = 0.4f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                    label = "alpha"
+                )
+                Icon(
+                    Icons.Rounded.Mic, 
+                    null, 
+                    tint = MaterialTheme.colorScheme.error, 
+                    modifier = Modifier.size(32.dp).alpha(if (state.isRecording && !state.isPaused) alphaAnim else 1f)
+                )
+            }
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("RECORDING", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+            Text(
+                formatTimeDashboard(state.durationMillis),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(
+                onClick = { viewModel.stopRecording(true) },
+                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+            ) {
+                Icon(Icons.Rounded.Save, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+            }
+            IconButton(
+                onClick = { if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording() },
+                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.error, CircleShape)
+            ) {
+                Icon(
+                    if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                    null,
+                    tint = MaterialTheme.colorScheme.onError,
+                    modifier = Modifier.size(28.dp)
+                )
             }
         }
     }
@@ -345,48 +412,72 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
 
 @Composable
 fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: TimerViewModel) {
-    Row(
-        modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(
-            modifier = Modifier.size(64.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.secondaryContainer
+    val initialTime = if (state.initialTime > 0) state.initialTime else 1L
+    val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(500, easing = LinearOutSlowInEasing),
+        label = "smoothProgress"
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(animatedProgress)
+                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+        )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(32.dp))
-            }
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text("TIMER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
-            Text(
-                formatTimeDashboard(state.remainingTime),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(
-                onClick = { viewModel.reset() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer
             ) {
-                Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(32.dp))
+                }
             }
-            IconButton(
-                onClick = { viewModel.toggleStartStop() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
-            ) {
-                Icon(
-                    if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    null,
-                    tint = MaterialTheme.colorScheme.onSecondary,
-                    modifier = Modifier.size(28.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("TIMER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
+                Text(
+                    formatTimeDashboard(state.remainingTime),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(
+                    onClick = { viewModel.reset() },
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                ) {
+                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                }
+                IconButton(
+                    onClick = { viewModel.toggleStartStop() },
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
+                ) {
+                    Icon(
+                        if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSecondary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
         }
+
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(4.dp),
+            color = MaterialTheme.colorScheme.secondary,
+            trackColor = Color.Transparent
+        )
     }
 }
 
@@ -439,48 +530,72 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
 
 @Composable
 fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewModel: PomodoroViewModel) {
-    Row(
-        modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(
-            modifier = Modifier.size(64.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.errorContainer
+    val initialTime = state.mode.minutes * 60 * 1000L
+    val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(500, easing = LinearOutSlowInEasing),
+        label = "smoothProgress"
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(animatedProgress)
+                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+        )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(32.dp))
-            }
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(state.mode.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
-            Text(
-                formatTimeDashboard(state.remainingTime),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(
-                onClick = { viewModel.reset() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.errorContainer
             ) {
-                Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(32.dp))
+                }
             }
-            IconButton(
-                onClick = { viewModel.toggleStartStop() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.error, CircleShape)
-            ) {
-                Icon(
-                    if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    null,
-                    tint = MaterialTheme.colorScheme.onError,
-                    modifier = Modifier.size(28.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(state.mode.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                Text(
+                    formatTimeDashboard(state.remainingTime),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(
+                    onClick = { viewModel.reset() },
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                ) {
+                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                }
+                IconButton(
+                    onClick = { viewModel.toggleStartStop() },
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.error, CircleShape)
+                ) {
+                    Icon(
+                        if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        tint = MaterialTheme.colorScheme.onError,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
         }
+
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(4.dp),
+            color = MaterialTheme.colorScheme.error,
+            trackColor = Color.Transparent
+        )
     }
 }
 

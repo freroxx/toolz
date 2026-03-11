@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import net.objecthunter.exp4j.ExpressionBuilder
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.math.sqrt
 
 data class ConstantItem(val name: String, val value: String, val symbol: String, val description: String)
 
@@ -96,34 +97,128 @@ class EquationSolverViewModel @Inject constructor(
         val state = _uiState.value
         if (state.expression.isBlank()) return
 
+        // 1. Check for Equation Solving (contains '=')
+        if (state.expression.count { it == '=' } == 1) {
+            solveEquation(state.expression)
+            return
+        }
+
+        // 2. Standard Scientific Calculation
         try {
             var exprString = state.expression
                 .replace("π", "pi")
                 .replace("√", "sqrt")
             
             if (state.isDegreeMode) {
-                // Better regex to handle arguments in degrees
                 exprString = transformToRadians(exprString)
             }
             
             val expression = ExpressionBuilder(exprString).build()
             val resultValue = expression.evaluate()
             
-            val resultString = if (resultValue.isInfinite()) "Infinity" 
-            else if (resultValue.isNaN()) "NaN"
-            else if (resultValue % 1 == 0.0) {
-                resultValue.toLong().toString()
-            } else {
-                String.format(Locale.US, "%.8f", resultValue).trimEnd('0').trimEnd('.')
-            }
+            val resultString = formatResult(resultValue)
 
             _uiState.update { it.copy(result = resultString, error = null) }
 
-            viewModelScope.launch {
-                mathHistoryDao.insert(MathHistory(expression = state.expression, result = resultString))
-            }
+            saveToHistory(state.expression, resultString)
         } catch (e: Exception) {
             _uiState.update { it.copy(error = "Invalid Expression") }
+        }
+    }
+
+    private fun solveEquation(input: String) {
+        try {
+            val parts = input.split('=')
+            val left = parts[0].trim()
+            val right = parts[1].trim()
+            
+            // Bring everything to one side: left - (right) = 0
+            val equationStr = "($left) - ($right)"
+            
+            // Check for degree (highest power of x)
+            if (input.contains("x^2")) {
+                solveQuadratic(input)
+            } else if (input.contains("x")) {
+                solveLinear(input)
+            } else {
+                _uiState.update { it.copy(error = "No variable 'x' found") }
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Solving error") }
+        }
+    }
+
+    private fun solveLinear(input: String) {
+        // Simple heuristic: solve ax + b = c -> x = (c-b)/a
+        // Using numerical approach for robust solving of any 1st degree
+        try {
+            val parts = input.split('=')
+            val expr = "(${parts[0]}) - (${parts[1]})"
+            
+            // x = -f(0) / (f(1) - f(0))
+            val f0 = ExpressionBuilder(expr).variable("x").build().setVariable("x", 0.0).evaluate()
+            val f1 = ExpressionBuilder(expr).variable("x").build().setVariable("x", 1.0).evaluate()
+            
+            val x = -f0 / (f1 - f0)
+            val result = "x = ${formatResult(x)}"
+            _uiState.update { it.copy(result = result, error = null) }
+            saveToHistory(input, result)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Linear solving failed") }
+        }
+    }
+
+    private fun solveQuadratic(input: String) {
+        // Standard form: ax^2 + bx + c = 0
+        try {
+            val parts = input.split('=')
+            val expr = "(${parts[0]}) - (${parts[1]})"
+            
+            // Numerical coefficient extraction
+            val f0 = ExpressionBuilder(expr).variable("x").build().setVariable("x", 0.0).evaluate()
+            val f1 = ExpressionBuilder(expr).variable("x").build().setVariable("x", 1.0).evaluate()
+            val fm1 = ExpressionBuilder(expr).variable("x").build().setVariable("x", -1.0).evaluate()
+            
+            val c = f0
+            val a = (f1 + fm1 - 2 * c) / 2.0
+            val b = f1 - a - c
+            
+            val delta = b * b - 4 * a * c
+            
+            val result = when {
+                delta > 0 -> {
+                    val x1 = (-b + sqrt(delta)) / (2 * a)
+                    val x2 = (-b - sqrt(delta)) / (2 * a)
+                    "x₁ = ${formatResult(x1)}, x₂ = ${formatResult(x2)}"
+                }
+                delta == 0.0 -> {
+                    val x = -b / (2 * a)
+                    "x = ${formatResult(x)}"
+                }
+                else -> {
+                    val real = -b / (2 * a)
+                    val img = sqrt(-delta) / (2 * a)
+                    "x = ${formatResult(real)} ± ${formatResult(img)}i"
+                }
+            }
+            
+            _uiState.update { it.copy(result = result, error = null) }
+            saveToHistory(input, result)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Quadratic solving failed") }
+        }
+    }
+
+    private fun formatResult(value: Double): String {
+        return if (value.isInfinite()) "Infinity" 
+        else if (value.isNaN()) "NaN"
+        else if (value % 1 == 0.0) value.toLong().toString()
+        else String.format(Locale.US, "%.6f", value).trimEnd('0').trimEnd('.')
+    }
+
+    private fun saveToHistory(expr: String, res: String) {
+        viewModelScope.launch {
+            mathHistoryDao.insert(MathHistory(expression = expr, result = res))
         }
     }
 
@@ -131,14 +226,8 @@ class EquationSolverViewModel @Inject constructor(
         var res = expr
         val funcs = listOf("sin", "cos", "tan", "asin", "acos", "atan")
         funcs.forEach { f ->
-            // Use a more sophisticated replacement to avoid double-wrapping
-            // This is still limited but covers basic cases for a tool like this
             val pattern = Regex("$f\\(([^)]+)\\)")
-            if (f.startsWith("a")) {
-                // Inverse functions result is in radians, convert to degrees if needed?
-                // Usually asin(x) = angle. If we are in degree mode, we might want the result in degrees.
-                // But let's keep internal evaluation in radians and handle conversion carefully.
-            } else {
+            if (!f.startsWith("a")) {
                 res = res.replace(pattern, "$f(($1)*pi/180)")
             }
         }

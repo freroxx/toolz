@@ -8,6 +8,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.IBinder
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -116,16 +117,16 @@ class TimerViewModel @Inject constructor(
     private fun playRingtone() {
         viewModelScope.launch {
             val ringtoneUriStr = settingsRepository.ringtoneUri.first()
-            val uri = if (!ringtoneUriStr.isNullOrEmpty()) Uri.parse(ringtoneUriStr) else null
+            val uri = if (!ringtoneUriStr.isNullOrEmpty()) {
+                Uri.parse(ringtoneUriStr)
+            } else {
+                Settings.System.DEFAULT_NOTIFICATION_URI
+            }
             
             try {
                 mediaPlayer?.release()
                 mediaPlayer = MediaPlayer().apply {
-                    if (uri != null) {
-                        setDataSource(context, uri)
-                    } else {
-                        return@launch
-                    }
+                    setDataSource(context, uri)
                     setAudioAttributes(
                         AudioAttributes.Builder()
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
