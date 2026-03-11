@@ -1288,7 +1288,7 @@ fun WavySlider(
 }
 
 @Composable
-fun SleepTimerDialog(onDismiss = { showSleepTimer = false }, onSet: (Int?) -> Unit) {
+fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("SLEEP TIMER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
