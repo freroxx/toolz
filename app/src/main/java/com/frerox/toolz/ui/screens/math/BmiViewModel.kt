@@ -62,35 +62,34 @@ class BmiViewModel @Inject constructor() : ViewModel() {
     private fun calculateMetrics() {
         val state = _uiState.value
         val weightVal = state.weight.toFloatOrNull() ?: 0f
-        val heightVal = state.height.toFloatOrNull() ?: 0f
         val ageVal = state.age.toIntOrNull() ?: 0
 
         val weightInKg = if (state.isKg) weightVal else weightVal * 0.453592f
         val heightInCm = if (state.isCm) {
-            heightVal
+            state.height.toFloatOrNull() ?: 0f
         } else {
             parseImperialHeight(state.height) * 2.54f
         }
         val heightInMeters = heightInCm / 100f
         
         if (weightInKg > 0 && heightInMeters > 0) {
-            // 1. BMI Calculation
+            // 1. BMI Calculation (Standard WHO Formula)
             val bmiValue = weightInKg / heightInMeters.pow(2)
             
-            // 2. Adjust categories based on age
+            // 2. Adjust categories based on age (Standard trusted categories)
             val (category, range) = getBmiCategoryAndRange(bmiValue, ageVal)
             
-            // 3. BMR (Mifflin-St Jeor Equation)
+            // 3. BMR (Mifflin-St Jeor Equation - most accurate for modern population)
             val bmrValue = if (state.gender == Gender.MALE) {
                 (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) + 5f
             } else {
                 (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) - 161f
             }
 
-            // 4. TDEE (Sedentary baseline)
+            // 4. TDEE (Sedentary baseline: BMR * 1.2)
             val tdeeValue = bmrValue * 1.2f
 
-            // 5. Ideal Body Weight (Devine Formula)
+            // 5. Ideal Body Weight (Devine Formula - industry standard)
             val heightInInches = heightInCm / 2.54f
             val inchesOver5Feet = (heightInInches - 60).coerceAtLeast(0f)
             val ibwValue = if (state.gender == Gender.MALE) {
@@ -115,19 +114,20 @@ class BmiViewModel @Inject constructor() : ViewModel() {
     }
 
     private fun getBmiCategoryAndRange(bmi: Float, age: Int): Pair<String, Pair<Float, Float>> {
+        // WHO standard range, with adjustment for older adults if needed
         val range = if (age >= 65) {
-            22.0f to 27.0f
+            22.0f to 27.0f // Recommended range for seniors
         } else {
-            18.5f to 24.9f
+            18.5f to 24.9f // Standard WHO range
         }
 
         val category = when {
             bmi < range.first -> "Underweight"
-            bmi <= range.second -> "Normal Weight"
+            bmi <= range.second -> "Healthy"
             bmi < 30 -> "Overweight"
-            bmi < 35 -> "Obese Class I"
-            bmi < 40 -> "Obese Class II"
-            else -> "Obese Class III"
+            bmi < 35 -> "Obese (Class I)"
+            bmi < 40 -> "Obese (Class II)"
+            else -> "Obese (Class III)"
         }
         
         return category to range

@@ -160,14 +160,15 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(horizontal = 24.dp)
                     .verticalScroll(rememberScrollState())
                     .fadingEdge(
                         brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
                         length = 24.dp
                     ),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 48.dp, top = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                Spacer(Modifier.height(8.dp))
                 if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name")) {
                     SettingsSection(title = "GENERAL PREFERENCES") {
                         SettingsToggleItem(
@@ -465,7 +466,7 @@ fun SettingsScreen(
 
                 AboutSection()
                 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

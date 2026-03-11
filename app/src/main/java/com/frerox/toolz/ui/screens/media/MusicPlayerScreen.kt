@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -85,6 +86,7 @@ fun MusicPlayerScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val sliderPos by viewModel.sliderPosition.collectAsState()
     val context = LocalContext.current
 
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -263,7 +265,7 @@ fun MusicPlayerScreen(
                         MiniPlayer(
                             track = state.currentTrack!!,
                             isPlaying = state.isPlaying,
-                            progress = state.progress,
+                            progress = state.playbackPosition,
                             duration = state.duration,
                             onTogglePlay = { viewModel.togglePlayPause() },
                             onClick = { showFullPlayer = true }
@@ -430,6 +432,9 @@ fun MusicPlayerScreen(
         if (showFullPlayer && state.currentTrack != null) {
             FullPlayerView(
                 state = state,
+                sliderPos = sliderPos,
+                onSliderChange = { viewModel.onSliderChange(it) },
+                onSliderChangeFinished = { viewModel.onSliderChangeFinished() },
                 onDismiss = { showFullPlayer = false },
                 onTogglePlay = { viewModel.togglePlayPause() },
                 onSkipNext = { viewModel.skipNext() },
@@ -860,6 +865,9 @@ fun TrackCard(track: MusicTrack, onClick: () -> Unit) {
 @Composable
 fun FullPlayerView(
     state: MusicUiState,
+    sliderPos: Long?,
+    onSliderChange: (Long) -> Unit,
+    onSliderChangeFinished: () -> Unit,
     onDismiss: () -> Unit,
     onTogglePlay: () -> Unit,
     onSkipNext: () -> Unit,
@@ -878,7 +886,6 @@ fun FullPlayerView(
     var showSleepTimer by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     val configuration = LocalConfiguration.current
-    val screenHeight = configuration.screenHeightDp.dp
 
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
     val rotation by infiniteTransition.animateFloat(
@@ -889,13 +896,6 @@ fun FullPlayerView(
             repeatMode = RepeatMode.Restart
         ),
         label = "artRotation"
-    )
-
-    // Dynamic background color/blur based on current album art
-    val albumArtBlurAlpha by animateFloatAsState(
-        targetValue = if (state.isPlaying) 0.15f else 0.08f,
-        animationSpec = tween(1000),
-        label = "blurAlpha"
     )
 
     ModalBottomSheet(
@@ -914,9 +914,11 @@ fun FullPlayerView(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        alpha = albumArtBlurAlpha
-                    }
-                    .blur(70.dp),
+                        renderEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            android.graphics.RenderEffect.createBlurEffect(100f, 100f, android.graphics.Shader.TileMode.CLAMP)
+                        } else null
+                        alpha = 0.15f
+                    },
                 error = painterResource(android.R.drawable.ic_media_play)
             )
 
@@ -924,8 +926,7 @@ fun FullPlayerView(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.height(16.dp))
@@ -993,7 +994,7 @@ fun FullPlayerView(
                     }
                 }
 
-                Spacer(Modifier.height(screenHeight * 0.04f))
+                Spacer(Modifier.weight(1f))
 
                 // Premium Album Art
                 val artSize = (configuration.screenWidthDp * 0.85f).dp
@@ -1017,7 +1018,7 @@ fun FullPlayerView(
                     )
                 }
 
-                Spacer(Modifier.height(48.dp))
+                Spacer(Modifier.weight(1f))
 
                 // Track Information
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -1038,13 +1039,15 @@ fun FullPlayerView(
                     )
                 }
 
-                Spacer(Modifier.height(44.dp))
+                Spacer(Modifier.height(32.dp))
 
                 // Premium Progress Slider
+                val currentPos = sliderPos ?: state.playbackPosition
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                    WavySlider(
-                        value = state.progress.toFloat(),
-                        onValueChange = { onSeek(it.toLong()) },
+                    SquigglySlider(
+                        value = currentPos.toFloat(),
+                        onValueChange = { onSliderChange(it.toLong()) },
+                        onValueChangeFinished = onSliderChangeFinished,
                         valueRange = 0f..(state.duration.toFloat().coerceAtLeast(1f)),
                         isPlaying = state.isPlaying
                     )
@@ -1054,7 +1057,7 @@ fun FullPlayerView(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            formatDuration(state.progress),
+                            formatDuration(currentPos),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary
@@ -1068,77 +1071,63 @@ fun FullPlayerView(
                     }
                 }
 
-                Spacer(Modifier.height(44.dp))
+                Spacer(Modifier.weight(1f))
 
-                // Updated Main Controls
+                // Control Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Like button on the far left
-                    IconButton(onClick = { onToggleFavorite(track) }, modifier = Modifier.bouncyClick {}) {
+                    IconButton(onClick = { onToggleFavorite(track) }) {
                         val favScale by animateFloatAsState(if (track.isFavorite) 1.25f else 1f)
                         Icon(
                             if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                             null,
                             tint = if (track.isFavorite) Color.Red else MaterialTheme.colorScheme.outline,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .scale(favScale)
+                            modifier = Modifier.size(32.dp).scale(favScale)
                         )
                     }
 
-                    // Skip Previous
-                    IconButton(onClick = onSkipPrev, modifier = Modifier.size(56.dp).bouncyClick {}) {
-                        Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(40.dp))
-                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        IconButton(onClick = onSkipPrev, modifier = Modifier.size(56.dp).bouncyClick {}) {
+                            Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(40.dp))
+                        }
 
-                    // Massive, rounded-square Play/Pause button
-                    Surface(
-                        onClick = onTogglePlay,
-                        modifier = Modifier.size(96.dp).bouncyClick {},
-                        shape = RoundedCornerShape(32.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        shadowElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                null,
-                                modifier = Modifier.size(56.dp)
-                            )
+                        Surface(
+                            onClick = onTogglePlay,
+                            modifier = Modifier.size(90.dp).bouncyClick {},
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shadowElevation = 8.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    null,
+                                    modifier = Modifier.size(52.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(onClick = onSkipNext, modifier = Modifier.size(56.dp).bouncyClick {}) {
+                            Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(40.dp))
                         }
                     }
 
-                    // Skip Next
-                    IconButton(onClick = onSkipNext, modifier = Modifier.size(56.dp).bouncyClick {}) {
-                        Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(40.dp))
-                    }
-
-                    // Shuffle/X button on the far right
-                    IconButton(onClick = onToggleShuffle, modifier = Modifier.bouncyClick {}) {
+                    IconButton(onClick = onToggleShuffle) {
                         Icon(
                             if (state.isShuffleOn) Icons.Rounded.ShuffleOn else Icons.Rounded.Shuffle,
                             null,
                             tint = if (state.isShuffleOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
 
-                Spacer(Modifier.height(48.dp))
-
-                // Secondary Controls
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onToggleRepeat, modifier = Modifier.bouncyClick {}) {
+                Spacer(Modifier.height(24.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    IconButton(onClick = onToggleRepeat) {
                         Icon(
                             when(state.repeatMode) {
                                 Player.REPEAT_MODE_ONE -> Icons.Rounded.RepeatOneOn
@@ -1147,12 +1136,12 @@ fun FullPlayerView(
                             },
                             null,
                             tint = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
 
-                Spacer(Modifier.height(60.dp))
+                Spacer(Modifier.height(48.dp))
                 Spacer(Modifier.navigationBarsPadding())
             }
         }
@@ -1164,25 +1153,18 @@ fun FullPlayerView(
 }
 
 @Composable
-fun WavySlider(
+fun SquigglySlider(
     value: Float,
     onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val haptic = LocalHapticFeedback.current
-
-    val animatedValue by animateFloatAsState(
-        targetValue = value,
-        animationSpec = if (isDragged) snap() else tween(1000, easing = LinearEasing),
-        label = "smoothProgress"
-    )
-
+    
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    val phase by infiniteTransition.animateFloat(
+    val phaseState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * PI.toFloat(),
         animationSpec = infiniteRepeatable(
@@ -1192,93 +1174,72 @@ fun WavySlider(
         label = "phase"
     )
 
-    // Thumb growth animation
-    val thumbScale by animateFloatAsState(
-        targetValue = if (isDragged || isPressed) 1.5f else if (isPlaying) 0f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "thumbScale"
-    )
-
     val primaryColor = MaterialTheme.colorScheme.primary
-    val trackHeight = 8.dp
+    val inactiveColor = MaterialTheme.colorScheme.surfaceVariant
+    val amplitude = 4.dp
+    val wavelength = 35.dp
 
-    // Wave parameters
-    val amplitude = 5.dp // A: Amplitude
-    val wavelength = 20.dp // λ: Wavelength
-
-    Box(modifier = Modifier
-        .fillMaxWidth()
-        .height(64.dp), contentAlignment = Alignment.Center) {
-
+    Box(modifier = Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier
             .fillMaxWidth()
-            .height(trackHeight * 4)
-            .padding(horizontal = 4.dp)) {
-            val width = size.width
-            val centerY = size.height / 2
-            val progress = (animatedValue - valueRange.start) / (valueRange.endInclusive - valueRange.start).coerceAtLeast(1f)
-            val progressX = width * progress
+            .height(24.dp)
+            .drawWithCache {
+                val path = Path()
+                onDrawBehind {
+                    val width = size.width
+                    val centerY = size.height / 2
+                    val progress = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+                    val thumbX = width * progress
+                    
+                    val A = amplitude.toPx()
+                    val λ = wavelength.toPx()
+                    val φ = if (isPlaying && !isDragged) phaseState.value else 0f
 
-            // Haptic feedback when scrubbing over waves
-            if (isDragged) {
-                // Approximate "bumps" based on wave peaks
-                val peakDistance = wavelength.toPx()
-                if ((progressX % peakDistance) < 5f) {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    // 1. Draw Inactive Path (Right)
+                    drawLine(
+                        color = inactiveColor,
+                        start = Offset(thumbX, centerY),
+                        end = Offset(width, centerY),
+                        strokeWidth = 6.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+
+                    // 2. Draw Squiggly Active Path (Left)
+                    path.reset()
+                    path.moveTo(0f, centerY)
+                    val step = 4f
+                    var x = 0f
+                    while (x < thumbX) {
+                        val y = centerY + A * sin((2 * PI * x / λ) + φ).toFloat()
+                        path.lineTo(x, y)
+                        x += step
+                    }
+                    path.lineTo(thumbX, centerY)
+                    
+                    drawPath(
+                        path = path,
+                        color = primaryColor,
+                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                    )
+
+                    // 3. Draw Thumb
+                    drawCircle(
+                        color = primaryColor,
+                        radius = 8.dp.toPx(),
+                        center = Offset(thumbX, centerY)
+                    )
                 }
             }
-
-            // Unplayed Side: Straight line
-            drawLine(
-                color = primaryColor.copy(alpha = 0.15f),
-                start = Offset(progressX, centerY),
-                end = Offset(width, centerY),
-                strokeWidth = trackHeight.toPx(),
-                cap = StrokeCap.Round
-            )
-
-            // Played Side: Wavy Path
-            val path = Path()
-            path.moveTo(0f, centerY)
-
-            val stepSize = 2f // Resolution of the wave
-            val λ = wavelength.toPx()
-            val A = amplitude.toPx()
-            val φ = if (isPlaying) phase else 0f
-
-            var x = 0f
-            while (x <= progressX) {
-                // y = center + A * sin( (2π * x / λ) + φ )
-                val y = centerY + A * sin((2 * PI * x / λ) + φ).toFloat()
-                path.lineTo(x, y)
-                x += stepSize
-            }
-            // Ensure path ends exactly at thumb position
-            path.lineTo(progressX, centerY)
-
-            drawPath(
-                path = path,
-                color = primaryColor,
-                style = Stroke(width = trackHeight.toPx(), cap = StrokeCap.Round)
-            )
-
-            // Interactive Thumb (Circle)
-            if (thumbScale > 0.01f) {
-                drawCircle(
-                    color = primaryColor,
-                    radius = (8.dp.toPx()) * thumbScale,
-                    center = Offset(progressX, centerY)
-                )
-            }
-        }
+        ) {}
 
         Slider(
             value = value,
             onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
             valueRange = valueRange,
             interactionSource = interactionSource,
             colors = SliderDefaults.colors(
-                thumbColor = Color.Transparent, // We draw our own thumb
+                thumbColor = Color.Transparent,
                 activeTrackColor = Color.Transparent,
                 inactiveTrackColor = Color.Transparent
             ),
