@@ -83,6 +83,7 @@ class SettingsViewModel @Inject constructor(
     fun setMusicEqualizerPreset(preset: String) { viewModelScope.launch { repository.setMusicEqualizerPreset(preset) } }
     fun setShowMusicVisualizer(enabled: Boolean) { viewModelScope.launch { repository.setShowMusicVisualizer(enabled) } }
     fun setShowToolzPill(enabled: Boolean) { viewModelScope.launch { repository.setShowToolzPill(enabled) } }
+    fun setUserName(name: String) { viewModelScope.launch { repository.setUserName(name) } }
     
     fun resetOnboarding() {
         viewModelScope.launch {

@@ -7,12 +7,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -67,7 +67,7 @@ import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
@@ -380,7 +380,7 @@ fun ToolzNavHost(
             PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
 
-        // Media & Optics
+        // Media & Documents
         composable(Screen.MusicPlayer.route) {
             MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
