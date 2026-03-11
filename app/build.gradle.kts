@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.mlkit.vision)
     implementation(libs.androidx.pdf.viewer)
+    implementation(libs.androidx.pdf.viewer.fragment)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp)

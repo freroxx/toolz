@@ -160,7 +160,7 @@ fun PdfReaderView(uri: Uri) {
             if (pdfFragment == null) {
                 pdfFragment = PdfViewerFragment()
                 fragmentManager.beginTransaction()
-                    .replace(fragmentContainerView.id, pdfFragment, "pdf_viewer")
+                    .replace(this.fragmentContainerView.id, pdfFragment, "pdf_viewer")
                     .commitNow()
             }
             

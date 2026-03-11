@@ -51,7 +51,7 @@ data class MusicUiState(
     val mostPlayed: List<MusicTrack> = emptyList(),
     val currentTrack: MusicTrack? = null,
     val isPlaying: Boolean = false,
-    val progress: Long = 0L,
+    val playbackPosition: Long = 0L,
     val duration: Long = 0L,
     val isShuffleOn: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
@@ -80,6 +80,9 @@ class MusicPlayerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MusicUiState())
     val uiState = _uiState.asStateFlow()
+
+    private val _sliderPosition = MutableStateFlow<Long?>(null)
+    val sliderPosition = _sliderPosition.asStateFlow()
 
     private val _showSleepTimer = MutableStateFlow(false)
     val showSleepTimer = _showSleepTimer.asStateFlow()
@@ -292,7 +295,6 @@ class MusicPlayerViewModel @Inject constructor(
         controllerFuture?.addListener({
             try {
                 controller = controllerFuture?.get()
-                // Synchronize state with player
                 _uiState.update { it.copy(
                     isPlaying = controller?.isPlaying ?: false,
                     isShuffleOn = controller?.shuffleModeEnabled ?: false,
@@ -400,7 +402,9 @@ class MusicPlayerViewModel @Inject constructor(
         progressJob?.cancel()
         progressJob = viewModelScope.launch {
             while (true) {
-                _uiState.update { it.copy(progress = player.currentPosition) }
+                if (_sliderPosition.value == null) {
+                    _uiState.update { it.copy(playbackPosition = player.currentPosition) }
+                }
                 delay(100)
             }
         }
@@ -408,6 +412,19 @@ class MusicPlayerViewModel @Inject constructor(
 
     private fun stopProgressUpdate() {
         progressJob?.cancel()
+    }
+
+    fun onSliderChange(position: Long) {
+        _sliderPosition.value = position
+    }
+
+    fun onSliderChangeFinished() {
+        _sliderPosition.value?.let { pos ->
+            val p: Player = controller ?: player
+            p.seekTo(pos)
+            _uiState.update { it.copy(playbackPosition = pos) }
+        }
+        _sliderPosition.value = null
     }
 
     fun scanMusic() {
@@ -508,13 +525,13 @@ class MusicPlayerViewModel @Inject constructor(
         val p: Player = controller ?: player
         p.stop()
         p.clearMediaItems()
-        _uiState.update { it.copy(currentTrack = null, isPlaying = false, progress = 0L) }
+        _uiState.update { it.copy(currentTrack = null, isPlaying = false, playbackPosition = 0L) }
     }
 
     fun seekTo(position: Long) {
         val p: Player = controller ?: player
         p.seekTo(position)
-        _uiState.update { it.copy(progress = position) }
+        _uiState.update { it.copy(playbackPosition = position) }
     }
 
     fun skipNext() {
