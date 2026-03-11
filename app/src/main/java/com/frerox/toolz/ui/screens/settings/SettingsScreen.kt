@@ -39,7 +39,8 @@ import com.frerox.toolz.ui.components.fadingEdge
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onResetOnboarding: () -> Unit
 ) {
     val stepGoal by viewModel.stepGoal.collectAsState()
     val ringtoneUri by viewModel.ringtoneUri.collectAsState()
@@ -65,13 +66,10 @@ fun SettingsScreen(
     val unitSystem by viewModel.unitSystem.collectAsState()
     val showQibla by viewModel.showQibla.collectAsState()
     val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState()
+    val showToolzPill by viewModel.showToolzPill.collectAsState()
+    val userName by viewModel.userName.collectAsState()
 
-    // Music Player Settings
-    val musicAudioFocus by viewModel.musicAudioFocus.collectAsState()
-    val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState()
-    val musicPlaybackSpeed by viewModel.musicPlaybackSpeed.collectAsState()
-    val musicEqualizerPreset by viewModel.musicEqualizerPreset.collectAsState()
-    val showMusicVisualizer by viewModel.showMusicVisualizer.collectAsState()
+    var showResetDialog by remember { mutableStateOf(false) }
     
     val searchQuery by viewModel.searchQuery.collectAsState()
     val context = LocalContext.current
@@ -86,6 +84,30 @@ fun SettingsScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { viewModel.setShutterSoundUri(it.toString()) }
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset Onboarding?") },
+            text = { Text("This will reset your profile and name. Are you sure you want to proceed?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.resetOnboarding()
+                        showResetDialog = false
+                        onResetOnboarding()
+                    }
+                ) {
+                    Text("Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -133,8 +155,16 @@ fun SettingsScreen(
                     onQueryChange = { viewModel.onSearchQueryChange(it) }
                 )
 
-                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker")) {
+                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name")) {
                     SettingsSection(title = "General") {
+                        SettingsToggleItem(
+                            title = "Show Toolz Pill",
+                            subtitle = "Show active tools on dashboard",
+                            icon = Icons.Rounded.SmartButton,
+                            checked = showToolzPill,
+                            onCheckedChange = { viewModel.setShowToolzPill(it) }
+                        )
+
                         SettingsToggleItem(
                             title = "Step Counter",
                             subtitle = "Enable background tracking",
@@ -142,6 +172,23 @@ fun SettingsScreen(
                             checked = stepCounterEnabled,
                             onCheckedChange = { viewModel.setStepCounterEnabled(it) }
                         )
+
+                        SettingsItem(
+                            title = "User Profile",
+                            subtitle = "Signed in as $userName",
+                            icon = Icons.Rounded.Person
+                        ) {
+                            Button(
+                                onClick = { showResetDialog = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                            ) {
+                                Icon(Icons.Rounded.RestartAlt, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Reset Onboarding")
+                            }
+                        }
 
                         SettingsItem(
                             title = "Unit System",
@@ -259,7 +306,7 @@ fun SettingsScreen(
                             title = "Audio Focus",
                             subtitle = "Pause music when other apps play audio",
                             icon = Icons.Rounded.CenterFocusStrong,
-                            checked = musicAudioFocus,
+                            checked = viewModel.musicAudioFocus.collectAsState().value,
                             onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                         )
                         
@@ -267,7 +314,7 @@ fun SettingsScreen(
                             title = "Visualizer",
                             subtitle = "Show animated bars in player",
                             icon = Icons.Rounded.BarChart,
-                            checked = showMusicVisualizer,
+                            checked = viewModel.showMusicVisualizer.collectAsState().value,
                             onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
                         )
 
@@ -275,17 +322,17 @@ fun SettingsScreen(
                             title = "Shake to Skip",
                             subtitle = "Shake device to play next track",
                             icon = Icons.Rounded.ScreenRotation,
-                            checked = musicShakeToSkip,
+                            checked = viewModel.musicShakeToSkip.collectAsState().value,
                             onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
                         )
 
                         SettingsItem(
                             title = "Playback Speed",
-                            subtitle = "${"%.1f".format(musicPlaybackSpeed)}x",
+                            subtitle = "${"%.1f".format(viewModel.musicPlaybackSpeed.collectAsState().value)}x",
                             icon = Icons.Rounded.Speed
                         ) {
                             Slider(
-                                value = musicPlaybackSpeed,
+                                value = viewModel.musicPlaybackSpeed.collectAsState().value,
                                 onValueChange = { viewModel.setMusicPlaybackSpeed(it) },
                                 valueRange = 0.5f..2.0f,
                                 steps = 14,
@@ -295,7 +342,7 @@ fun SettingsScreen(
 
                         SettingsItem(
                             title = "Equalizer",
-                            subtitle = musicEqualizerPreset,
+                            subtitle = viewModel.musicEqualizerPreset.collectAsState().value,
                             icon = Icons.Rounded.Equalizer
                         ) {
                             Row(
@@ -304,7 +351,7 @@ fun SettingsScreen(
                             ) {
                                 listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Bass Boost").forEach { preset ->
                                     FilterChip(
-                                        selected = musicEqualizerPreset == preset,
+                                        selected = viewModel.musicEqualizerPreset.collectAsState().value == preset,
                                         onClick = { viewModel.setMusicEqualizerPreset(preset) },
                                         label = { Text(preset) }
                                     )

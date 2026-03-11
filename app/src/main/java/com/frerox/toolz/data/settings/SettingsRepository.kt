@@ -58,6 +58,13 @@ class SettingsRepository @Inject constructor(
     // Step Counter Toggle
     private val STEP_COUNTER_ENABLED = booleanPreferencesKey("step_counter_enabled")
 
+    // Universal Pill
+    private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
+
+    // Onboarding
+    private val USER_NAME = stringPreferencesKey("user_name")
+    private val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -105,6 +112,10 @@ class SettingsRepository @Inject constructor(
     val musicPipEnabled: Flow<Boolean> = context.dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
 
     val stepCounterEnabled: Flow<Boolean> = context.dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: true }
+
+    val showToolzPill: Flow<Boolean> = context.dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
+    val userName: Flow<String> = context.dataStore.data.map { it[USER_NAME] ?: "" }
+    val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
 
     suspend fun setStepGoal(goal: Int) { context.dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { context.dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -154,4 +165,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicPipEnabled(enabled: Boolean) { context.dataStore.edit { it[MUSIC_PIP_ENABLED] = enabled } }
 
     suspend fun setStepCounterEnabled(enabled: Boolean) { context.dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
+
+    suspend fun setShowToolzPill(enabled: Boolean) { context.dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
+    suspend fun setUserName(name: String) { context.dataStore.edit { it[USER_NAME] = name } }
+    suspend fun setOnboardingCompleted(completed: Boolean) { context.dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
 }
