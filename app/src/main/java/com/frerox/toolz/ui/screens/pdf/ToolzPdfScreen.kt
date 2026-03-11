@@ -1,17 +1,10 @@
 package com.frerox.toolz.ui.screens.pdf
 
 import android.content.Intent
-import android.net.Uri
-import android.view.View
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -35,6 +28,7 @@ fun ToolzPdfScreen(
     onNavigateBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pdfFiles by viewModel.pdfFiles.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var showBottomSheet by remember { mutableStateOf<PdfFile?>(null) }
@@ -52,9 +46,12 @@ fun ToolzPdfScreen(
                             placeholder = { Text("Search PDF files...") },
                             modifier = Modifier.fillMaxWidth(),
                             colors = TextFieldDefaults.colors(
-                                containerColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
                                 focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent
                             ),
                             singleLine = true
                         )
@@ -64,7 +61,7 @@ fun ToolzPdfScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -79,32 +76,25 @@ fun ToolzPdfScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
-            when {
-                uiState.isLoading -> {
+            when (val state = uiState) {
+                is PdfViewModel.PdfUiState.Loading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
-                uiState.error != null -> {
+                is PdfViewModel.PdfUiState.Error -> {
                     Text(
-                        text = uiState.error ?: "Unknown error",
+                        text = state.message,
                         modifier = Modifier.align(Alignment.Center),
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                uiState.files.isEmpty() -> {
-                    Text(
-                        text = "No PDF files found",
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
                 else -> {
-                    val filteredFiles = uiState.files.filter { 
-                        it.name.contains(searchQuery, ignoreCase = true) 
-                    }
-                    PdfFileList(
-                        files = filteredFiles,
+                    PdfListContent(
+                        pdfFiles = pdfFiles,
+                        searchQuery = searchQuery,
                         onFileClick = { file ->
+                            viewModel.openPdf(file.uri)
                             val intent = Intent(Intent.ACTION_VIEW).apply {
-                                data = Uri.parse(file.path)
+                                data = file.uri
                                 type = "application/pdf"
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
@@ -123,6 +113,29 @@ fun ToolzPdfScreen(
         PdfFileOptionsBottomSheet(
             file = file,
             onDismiss = { showBottomSheet = null }
+        )
+    }
+}
+
+@Composable
+fun PdfListContent(
+    pdfFiles: List<PdfFile>,
+    searchQuery: String,
+    onFileClick: (PdfFile) -> Unit,
+    onMenuClick: (PdfFile) -> Unit
+) {
+    if (pdfFiles.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(text = "No PDF files found")
+        }
+    } else {
+        val filteredFiles = pdfFiles.filter { 
+            it.name.contains(searchQuery, ignoreCase = true) 
+        }
+        PdfFileList(
+            files = filteredFiles,
+            onFileClick = onFileClick,
+            onMenuClick = onMenuClick
         )
     }
 }

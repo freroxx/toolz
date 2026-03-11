@@ -211,11 +211,11 @@ class MainActivity : ComponentActivity() {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(onClick = { musicViewModel.previous() }, modifier = Modifier.size(24.dp)) {
+                        IconButton(onClick = { musicViewModel.skipPrevious() }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(16.dp))
                         }
                         IconButton(
-                            onClick = { musicViewModel.togglePlay() },
+                            onClick = { musicViewModel.togglePlayPause() },
                             modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
                         ) {
                             Icon(
@@ -225,7 +225,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        IconButton(onClick = { musicViewModel.next() }, modifier = Modifier.size(24.dp)) {
+                        IconButton(onClick = { musicViewModel.skipNext() }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(16.dp))
                         }
                     }
