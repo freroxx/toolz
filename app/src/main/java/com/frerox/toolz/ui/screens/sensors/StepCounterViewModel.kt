@@ -18,6 +18,7 @@ data class StepState(
     val steps: Int = 0,
     val goal: Int = 10000,
     val isSensorPresent: Boolean = true,
+    val isEnabledInSettings: Boolean = true,
     val weeklyHistory: List<StepEntry> = emptyList()
 )
 
@@ -34,12 +35,14 @@ class StepCounterViewModel @Inject constructor(
     val uiState: StateFlow<StepState> = combine(
         stepRepository.currentSteps,
         settingsRepository.stepGoal,
-        stepRepository.weeklySteps
-    ) { steps, goal, history ->
+        stepRepository.weeklySteps,
+        settingsRepository.stepCounterEnabled
+    ) { steps, goal, history, isEnabled ->
         StepState(
             steps = steps,
             goal = goal,
             isSensorPresent = stepSensor != null,
+            isEnabledInSettings = isEnabled,
             weeklyHistory = history
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), StepState())
@@ -47,6 +50,12 @@ class StepCounterViewModel @Inject constructor(
     fun updateGoal(newGoal: Int) {
         viewModelScope.launch {
             settingsRepository.setStepGoal(newGoal)
+        }
+    }
+
+    fun toggleStepCounter(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setStepCounterEnabled(enabled)
         }
     }
 }

@@ -6,6 +6,7 @@ import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
 import com.frerox.toolz.data.steps.StepDao
+import com.frerox.toolz.data.math.MathHistoryDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -42,5 +43,10 @@ object DatabaseModule {
     @Provides
     fun provideStepDao(database: AppDatabase): StepDao {
         return database.stepDao()
+    }
+
+    @Provides
+    fun provideMathHistoryDao(database: AppDatabase): MathHistoryDao {
+        return database.mathHistoryDao()
     }
 }

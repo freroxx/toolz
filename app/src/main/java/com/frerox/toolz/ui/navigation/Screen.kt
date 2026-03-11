@@ -16,6 +16,7 @@ sealed class Screen(val route: String) {
     object ScreenLight : Screen("screen_light")
     object Magnifier : Screen("magnifier")
     object Scanner : Screen("scanner")
+    object LightMeter : Screen("light_meter")
     
     // Sensors & Navigation
     object Compass : Screen("compass")
@@ -29,6 +30,7 @@ sealed class Screen(val route: String) {
     object UnitConverter : Screen("unit_converter")
     object TipCalculator : Screen("tip_calculator")
     object BmiCalculator : Screen("bmi_calculator")
+    object EquationSolver : Screen("equation_solver")
     
     // Utilities
     object Ruler : Screen("ruler")
