@@ -13,12 +13,26 @@ import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.data.math.MathHistoryDao
+import com.frerox.toolz.data.pdf.PdfAnnotation
+import com.frerox.toolz.data.pdf.PdfAnnotationDao
 
-@Database(entities = [Note::class, MusicTrack::class, Playlist::class, StepEntry::class, MathHistory::class], version = 8, exportSchema = false)
+@Database(
+    entities = [
+        Note::class, 
+        MusicTrack::class, 
+        Playlist::class, 
+        StepEntry::class, 
+        MathHistory::class,
+        PdfAnnotation::class
+    ], 
+    version = 9, 
+    exportSchema = false
+)
 @TypeConverters(MusicConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun musicDao(): MusicDao
     abstract fun stepDao(): StepDao
     abstract fun mathHistoryDao(): MathHistoryDao
+    abstract fun pdfAnnotationDao(): PdfAnnotationDao
 }

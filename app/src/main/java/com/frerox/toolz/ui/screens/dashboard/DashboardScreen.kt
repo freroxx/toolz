@@ -854,6 +854,7 @@ private fun getCategories() = listOf(
             ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Security"),
             ToolItem("Ruler", Icons.Rounded.Straighten, Screen.Ruler.route, "Measure"),
             ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Light tools"),
+            ToolItem("Screen Light", Icons.Rounded.LightMode, Screen.ScreenLight.route, "Pure illumination"),
             ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Decisions")
         )
     )

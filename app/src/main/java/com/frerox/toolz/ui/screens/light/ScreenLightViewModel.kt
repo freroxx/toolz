@@ -11,7 +11,8 @@ import javax.inject.Inject
 
 data class ScreenLightState(
     val color: Color = Color.White,
-    val brightness: Float = 1.0f
+    val brightness: Float = 1.0f,
+    val isLocked: Boolean = false
 )
 
 @HiltViewModel
@@ -21,5 +22,13 @@ class ScreenLightViewModel @Inject constructor() : ViewModel() {
 
     fun setColor(color: Color) {
         _uiState.update { it.copy(color = color) }
+    }
+
+    fun setBrightness(brightness: Float) {
+        _uiState.update { it.copy(brightness = brightness) }
+    }
+    
+    fun toggleLock() {
+        _uiState.update { it.copy(isLocked = !it.isLocked) }
     }
 }
