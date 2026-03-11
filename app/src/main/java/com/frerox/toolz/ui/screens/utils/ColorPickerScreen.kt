@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Help
+import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.*
@@ -77,7 +77,7 @@ fun ColorPickerScreen(
                     },
                     actions = {
                         IconButton(onClick = { /* Help */ }) {
-                            Icon(Icons.Rounded.Help, null)
+                            Icon(Icons.AutoMirrored.Rounded.Help, null)
                         }
                     }
                 )

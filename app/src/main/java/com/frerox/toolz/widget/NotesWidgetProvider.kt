@@ -14,6 +14,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
+@Suppress("DEPRECATION")
 class NotesWidgetProvider : AppWidgetProvider() {
 
     @Inject
