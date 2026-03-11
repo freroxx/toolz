@@ -45,19 +45,34 @@ fun StopwatchScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-            ) {
-                CenterAlignedTopAppBar(
-                    modifier = Modifier.statusBarsPadding(),
-                    title = { Text("STOPWATCH", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
+            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                )
+                    
+                    Text(
+                        text = "STOPWATCH",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.5.sp
+                    )
+
+                    IconButton(
+                        onClick = { viewModel.reset() },
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset")
+                    }
+                }
             }
         }
     ) { padding ->
@@ -65,7 +80,7 @@ fun StopwatchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
@@ -88,21 +103,19 @@ fun StopwatchScreen(
 
                 val primaryColor = MaterialTheme.colorScheme.primary
                 
-                Canvas(modifier = Modifier.size(300.dp)) {
-                    // Background track
+                Canvas(modifier = Modifier.size(310.dp)) {
                     drawCircle(
-                        color = primaryColor.copy(alpha = 0.05f),
-                        style = Stroke(width = 12.dp.toPx())
+                        color = primaryColor.copy(alpha = 0.08f),
+                        style = Stroke(width = 16.dp.toPx())
                     )
                     
-                    // Dynamic segment
                     if (state.isRunning) {
                         drawArc(
                             color = primaryColor,
                             startAngle = rotation - 90f,
-                            sweepAngle = 60f,
+                            sweepAngle = 75f,
                             useCenter = false,
-                            style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                            style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
                         )
                     }
                 }
@@ -112,7 +125,7 @@ fun StopwatchScreen(
                         text = formatTime(state.elapsedTime),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 64.sp,
+                            fontSize = 68.sp,
                             fontWeight = FontWeight.Black,
                             letterSpacing = (-2).sp
                         ),
@@ -121,16 +134,18 @@ fun StopwatchScreen(
                     
                     val lapTime = if (state.laps.isEmpty()) state.elapsedTime else state.elapsedTime - state.laps.first()
                     Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
                         shape = CircleShape,
-                        modifier = Modifier.padding(top = 12.dp)
+                        modifier = Modifier.padding(top = 16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                     ) {
                         Text(
                             text = "+ ${formatTime(lapTime)}",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
                         )
                     }
                 }
@@ -143,53 +158,52 @@ fun StopwatchScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Reset Button
                 IconButton(
                     onClick = { viewModel.reset() },
                     modifier = Modifier
-                        .size(64.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                 ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(28.dp))
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
                 }
                 
-                // Start/Stop Button
                 Surface(
                     onClick = { viewModel.toggleStartStop() },
                     modifier = Modifier
-                        .size(90.dp)
+                        .size(100.dp)
                         .bouncyClick {},
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(32.dp),
                     color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                    shadowElevation = 4.dp
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(2.dp, if (state.isRunning) MaterialTheme.colorScheme.error.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = if (state.isRunning) "Pause" else "Start",
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.size(52.dp),
                             tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                         )
                     }
                 }
                 
-                // Lap Button
                 IconButton(
                     onClick = { if (state.isRunning) viewModel.lap() },
                     modifier = Modifier
-                        .size(64.dp)
+                        .size(68.dp)
+                        .clip(CircleShape)
                         .background(
-                            if (state.isRunning) MaterialTheme.colorScheme.secondaryContainer 
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), 
-                            CircleShape
+                            if (state.isRunning) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f) 
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         ),
                     enabled = state.isRunning
                 ) {
                     Icon(
                         Icons.Rounded.Flag, 
                         contentDescription = "Lap", 
-                        modifier = Modifier.size(28.dp),
-                        tint = if (state.isRunning) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        modifier = Modifier.size(32.dp),
+                        tint = if (state.isRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                     )
                 }
             }
@@ -198,7 +212,7 @@ fun StopwatchScreen(
                 .fillMaxWidth()
                 .weight(1f)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -207,31 +221,40 @@ fun StopwatchScreen(
                         style = MaterialTheme.typography.labelSmall, 
                         fontWeight = FontWeight.Black, 
                         color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
+                        letterSpacing = 2.sp
                     )
                     if (state.laps.isNotEmpty()) {
-                        Text(
-                            "${state.laps.size} Records",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                "${state.laps.size} Records",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
-                
-                Spacer(Modifier.height(12.dp))
                 
                 if (state.laps.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Rounded.Flag, null, modifier = Modifier.size(48.dp).alpha(0.1f))
-                            Text("No laps recorded", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                            Icon(Icons.Rounded.Flag, null, modifier = Modifier.size(80.dp).alpha(0.08f), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(16.dp))
+                            Text("NO LAPS RECORDED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), letterSpacing = 1.sp)
                         }
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp)
+                        modifier = Modifier.fillMaxSize().fadingEdge(
+                            brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
+                            length = 24.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 32.dp)
                     ) {
                         itemsIndexed(state.laps) { index, lapTime ->
                             val duration = if (index == state.laps.size - 1) {
@@ -255,42 +278,44 @@ fun StopwatchScreen(
 @Composable
 fun LapCard(lapNumber: Int, totalTime: Long, lapDuration: Long) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(28.dp),
         modifier = Modifier.fillMaxWidth(),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(40.dp)
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(48.dp),
+                    shadowElevation = 4.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = lapNumber.toString(),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(20.dp))
                 Column {
                     Text(
-                        text = "LAP DURATION",
+                        text = "DURATION",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        fontWeight = FontWeight.Bold
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
                     )
                     Text(
                         text = formatTime(lapDuration),
-                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                        style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
                     )
                 }
             }
@@ -299,12 +324,13 @@ fun LapCard(lapNumber: Int, totalTime: Long, lapDuration: Long) {
                     text = "CUMULATIVE",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
                 )
                 Text(
                     text = formatTime(totalTime),
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.ExtraBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                 )
             }
         }

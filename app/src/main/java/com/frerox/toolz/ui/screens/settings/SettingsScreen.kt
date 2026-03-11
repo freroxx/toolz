@@ -23,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -31,7 +32,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 
@@ -58,7 +61,6 @@ fun SettingsScreen(
     val musicNotifications by viewModel.musicNotifications.collectAsState()
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState()
-    val widgetAccentColor by viewModel.widgetAccentColor.collectAsState()
     val widgetOpacity by viewModel.widgetOpacity.collectAsState()
     
     val hapticFeedback by viewModel.hapticFeedback.collectAsState()
@@ -89,43 +91,64 @@ fun SettingsScreen(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset Onboarding?") },
-            text = { Text("This will reset your profile and name. Are you sure you want to proceed?") },
+            title = { Text("RESET DATA?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            text = { Text("This will clear your profile name and preferences. You'll need to go through onboarding again.") },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.resetOnboarding()
                         showResetDialog = false
                         onResetOnboarding()
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Reset")
+                    Text("RESET ALL", fontWeight = FontWeight.Black)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel")
+                    Text("CANCEL", fontWeight = FontWeight.Bold)
                 }
-            }
+            },
+            shape = RoundedCornerShape(36.dp)
         )
     }
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
-                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
-                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-            ) {
-                LargeTopAppBar(
-                    modifier = Modifier.statusBarsPadding(),
-                    title = { Text("Settings", fontWeight = FontWeight.ExtraBold) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
+            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
+                    
+                    Text(
+                        text = "CONFIGURATION",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.5.sp
+                    )
+
+                    IconButton(
+                        onClick = { showResetDialog = true },
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
+                    ) {
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+
+                SearchField(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.onSearchQueryChange(it) }
                 )
             }
         }
@@ -133,33 +156,23 @@ fun SettingsScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 24.dp
-            )
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .verticalScroll(rememberScrollState())
+                    .fadingEdge(
+                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
+                        length = 24.dp
+                    ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 48.dp, top = 8.dp)
             ) {
-                Spacer(Modifier.height(16.dp))
-                SearchField(
-                    query = searchQuery,
-                    onQueryChange = { viewModel.onSearchQueryChange(it) }
-                )
-
                 if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name")) {
-                    SettingsSection(title = "General") {
+                    SettingsSection(title = "GENERAL PREFERENCES") {
                         SettingsToggleItem(
                             title = "Show Toolz Pill",
-                            subtitle = "Show active tools on dashboard",
+                            subtitle = "Enable active tools overlay on dashboard",
                             icon = Icons.Rounded.SmartButton,
                             checked = showToolzPill,
                             onCheckedChange = { viewModel.setShowToolzPill(it) }
@@ -167,52 +180,58 @@ fun SettingsScreen(
 
                         SettingsToggleItem(
                             title = "Step Counter",
-                            subtitle = "Enable background tracking",
+                            subtitle = "Enable background activity tracking",
                             icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                             checked = stepCounterEnabled,
                             onCheckedChange = { viewModel.setStepCounterEnabled(it) }
                         )
 
                         SettingsItem(
-                            title = "User Profile",
-                            subtitle = "Signed in as $userName",
+                            title = "User Identity",
+                            subtitle = "Managing profile for $userName",
                             icon = Icons.Rounded.Person
                         ) {
-                            Button(
-                                onClick = { showResetDialog = true },
+                            OutlinedTextField(
+                                value = userName,
+                                onValueChange = { viewModel.setUserName(it) },
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
-                            ) {
-                                Icon(Icons.Rounded.RestartAlt, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Reset Onboarding")
-                            }
+                                placeholder = { Text("Enter your name") },
+                                shape = RoundedCornerShape(16.dp),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                )
+                            )
                         }
 
                         SettingsItem(
-                            title = "Unit System",
-                            subtitle = unitSystem.lowercase().replaceFirstChar { it.uppercase() },
+                            title = "Measurement System",
+                            subtitle = "Select your preferred units",
                             icon = Icons.Rounded.SquareFoot
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 listOf("METRIC", "IMPERIAL").forEach { unit ->
-                                    FilterChip(
-                                        selected = unitSystem == unit,
+                                    Surface(
                                         onClick = { viewModel.setUnitSystem(unit) },
-                                        label = { Text(unit.lowercase().replaceFirstChar { it.uppercase() }) },
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (unitSystem == unit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        border = if (unitSystem != unit) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (unitSystem == unit) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
                                 }
                             }
                         }
                         
                         SettingsToggleItem(
                             title = "Haptic Feedback",
-                            subtitle = "Vibrate on interactions",
+                            subtitle = "Tactile vibration on interactions",
                             icon = Icons.Rounded.Vibration,
                             checked = hapticFeedback,
                             onCheckedChange = { viewModel.setHapticFeedback(it) }
@@ -220,8 +239,8 @@ fun SettingsScreen(
 
                         if (hapticFeedback) {
                             SettingsItem(
-                                title = "Haptic Intensity",
-                                subtitle = "${(hapticIntensity * 100).toInt()}%",
+                                title = "Vibration Intensity",
+                                subtitle = "Current: ${(hapticIntensity * 100).toInt()}%",
                                 icon = Icons.Rounded.GraphicEq
                             ) {
                                 Slider(
@@ -234,16 +253,16 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleItem(
-                            title = "Show Qibla",
-                            subtitle = "Display Kaaba direction in compass",
+                            title = "kaaba Navigation",
+                            subtitle = "Show Qibla direction in compass",
                             icon = Icons.Rounded.Explore,
                             checked = showQibla,
                             onCheckedChange = { viewModel.setShowQibla(it) }
                         )
 
                         SettingsItem(
-                            title = "Daily Step Goal",
-                            subtitle = "$stepGoal steps",
+                            title = "Daily Activity Target",
+                            subtitle = "Goal: $stepGoal steps",
                             icon = Icons.Rounded.Flag
                         ) {
                             Slider(
@@ -258,10 +277,10 @@ fun SettingsScreen(
                 }
 
                 if (matches(searchQuery, "notifications", "tracker", "alerts", "music")) {
-                    SettingsSection(title = "Notifications") {
+                    SettingsSection(title = "NOTIFICATIONS & ALERTS") {
                         SettingsToggleItem(
-                            title = "Enable All Notifications",
-                            subtitle = "Global notification toggle",
+                            title = "Master Toggle",
+                            subtitle = "Enable or disable all notifications",
                             icon = Icons.Rounded.Notifications,
                             checked = notificationsEnabled,
                             onCheckedChange = { viewModel.setNotificationsEnabled(it) }
@@ -269,29 +288,22 @@ fun SettingsScreen(
                         
                         if (notificationsEnabled) {
                             SettingsToggleItem(
-                                title = "Step Tracker",
-                                subtitle = "Daily goals and milestones",
+                                title = "Fitness Milestones",
+                                subtitle = "Daily goals and achievement alerts",
                                 icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                                 checked = stepNotifications,
                                 onCheckedChange = { viewModel.setStepNotifications(it) }
                             )
                             SettingsToggleItem(
-                                title = "Timer & Stopwatch",
-                                subtitle = "Alerts and completion",
+                                title = "Time Management",
+                                subtitle = "Timer and stopwatch completion alerts",
                                 icon = Icons.Rounded.Timer,
                                 checked = timerNotifications,
                                 onCheckedChange = { viewModel.setTimerNotifications(it) }
                             )
                             SettingsToggleItem(
-                                title = "Voice Recorder",
-                                subtitle = "Recording status alerts",
-                                icon = Icons.Rounded.Mic,
-                                checked = voiceRecordNotifications,
-                                onCheckedChange = { viewModel.setVoiceRecordNotifications(it) }
-                            )
-                            SettingsToggleItem(
-                                title = "Music Player",
-                                subtitle = "Playback controls and song info",
+                                title = "Media Playback",
+                                subtitle = "Show song information and controls",
                                 icon = Icons.Rounded.MusicNote,
                                 checked = musicNotifications,
                                 onCheckedChange = { viewModel.setMusicNotifications(it) }
@@ -301,34 +313,34 @@ fun SettingsScreen(
                 }
 
                 if (matches(searchQuery, "music", "audio", "player", "speed", "equalizer", "visualizer")) {
-                    SettingsSection(title = "Music Player") {
+                    SettingsSection(title = "MUSIC ENGINE") {
                         SettingsToggleItem(
-                            title = "Audio Focus",
-                            subtitle = "Pause music when other apps play audio",
+                            title = "Smart Audio Focus",
+                            subtitle = "Auto-pause when other apps play sound",
                             icon = Icons.Rounded.CenterFocusStrong,
                             checked = viewModel.musicAudioFocus.collectAsState().value,
                             onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                         )
                         
                         SettingsToggleItem(
-                            title = "Visualizer",
-                            subtitle = "Show animated bars in player",
+                            title = "Dynamic Visualizer",
+                            subtitle = "Show animated waveforms in player",
                             icon = Icons.Rounded.BarChart,
                             checked = viewModel.showMusicVisualizer.collectAsState().value,
                             onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
                         )
 
                         SettingsToggleItem(
-                            title = "Shake to Skip",
-                            subtitle = "Shake device to play next track",
+                            title = "Shake to Next",
+                            subtitle = "Shake device to skip current track",
                             icon = Icons.Rounded.ScreenRotation,
                             checked = viewModel.musicShakeToSkip.collectAsState().value,
                             onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
                         )
 
                         SettingsItem(
-                            title = "Playback Speed",
-                            subtitle = "${"%.1f".format(viewModel.musicPlaybackSpeed.collectAsState().value)}x",
+                            title = "Playback Velocity",
+                            subtitle = "Speed: ${"%.1f".format(viewModel.musicPlaybackSpeed.collectAsState().value)}x",
                             icon = Icons.Rounded.Speed
                         ) {
                             Slider(
@@ -339,33 +351,14 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                         }
-
-                        SettingsItem(
-                            title = "Equalizer",
-                            subtitle = viewModel.musicEqualizerPreset.collectAsState().value,
-                            icon = Icons.Rounded.Equalizer
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Bass Boost").forEach { preset ->
-                                    FilterChip(
-                                        selected = viewModel.musicEqualizerPreset.collectAsState().value == preset,
-                                        onClick = { viewModel.setMusicEqualizerPreset(preset) },
-                                        label = { Text(preset) }
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
 
                 if (matches(searchQuery, "appearance", "theme", "dark mode", "colors", "secondary")) {
-                    SettingsSection(title = "Appearance") {
+                    SettingsSection(title = "VISUAL INTERFACE") {
                         SettingsToggleItem(
-                            title = "Dynamic Colors",
-                            subtitle = "Use Material You theme colors",
+                            title = "Material You",
+                            subtitle = "Sync colors with your wallpaper",
                             icon = Icons.Rounded.Palette,
                             checked = dynamicColor,
                             onCheckedChange = { viewModel.setDynamicColor(it) }
@@ -373,33 +366,35 @@ fun SettingsScreen(
                         
                         if (!dynamicColor) {
                             SettingsItem(
-                                title = "Theme Colors",
-                                subtitle = "Primary and secondary app colors",
+                                title = "Accent Colors",
+                                subtitle = "Customize primary and secondary tones",
                                 icon = Icons.Rounded.ColorLens
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                                     Column {
-                                        Text("Primary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                        Text("PRIMARY TONE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                                        Spacer(Modifier.height(8.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             ColorPickerRow(
                                                 selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
                                                 onColorSelected = { viewModel.setCustomPrimaryColor(it) }
                                             )
                                             IconButton(onClick = { viewModel.setCustomPrimaryColor(null) }) {
-                                                Icon(Icons.Rounded.RestartAlt, null)
+                                                Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary)
                                             }
                                         }
                                     }
                                     
                                     Column {
-                                        Text("Secondary Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                        Text("SECONDARY TONE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp)
+                                        Spacer(Modifier.height(8.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             ColorPickerRow(
                                                 selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
                                                 onColorSelected = { viewModel.setCustomSecondaryColor(it) }
                                             )
                                             IconButton(onClick = { viewModel.setCustomSecondaryColor(null) }) {
-                                                Icon(Icons.Rounded.RestartAlt, null)
+                                                Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary)
                                             }
                                         }
                                     }
@@ -415,21 +410,26 @@ fun SettingsScreen(
                         }
                         
                         SettingsItem(
-                            title = "Theme Mode",
-                            subtitle = themeMode.lowercase().replaceFirstChar { it.uppercase() },
+                            title = "Dark Interface",
+                            subtitle = "Mode: ${themeMode.lowercase().replaceFirstChar { it.uppercase() }}",
                             icon = Icons.Rounded.DarkMode
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                                    FilterChip(
-                                        selected = themeMode == mode,
+                                    Surface(
                                         onClick = { viewModel.setThemeMode(mode) },
-                                        label = { Text(mode.lowercase().replaceFirstChar { it.uppercase() }) },
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (themeMode == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        border = if (themeMode != mode) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (themeMode == mode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -437,56 +437,28 @@ fun SettingsScreen(
                 }
 
                 if (matches(searchQuery, "widget", "color", "opacity")) {
-                    SettingsSection(title = "Widgets") {
+                    SettingsSection(title = "DESKTOP WIDGETS") {
                         SettingsItem(
-                            title = "Widget Background",
-                            subtitle = "Color and opacity for all widgets",
+                            title = "Backdrop Aesthetics",
+                            subtitle = "Control visibility and transparency",
                             icon = Icons.Rounded.SettingsSuggest
                         ) {
                             ColorPickerRow(
                                 selectedColor = widgetBgColor,
                                 onColorSelected = { viewModel.setWidgetBackgroundColor(it) }
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Opacity, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
                                 Slider(
                                     value = widgetOpacity,
                                     onValueChange = { viewModel.setWidgetOpacity(it) },
                                     valueRange = 0.1f..1f,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(32.dp))
+                                Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
                             }
-                        }
-                    }
-                }
-
-                if (matches(searchQuery, "audio", "music", "shutter", "ringtone")) {
-                    SettingsSection(title = "Audio & Media") {
-                        SettingsItem(
-                            title = "Timer Ringtone",
-                            subtitle = if (ringtoneUri.isNullOrEmpty()) "Default Ringtone" else Uri.parse(ringtoneUri!!).lastPathSegment ?: "Custom",
-                            icon = Icons.Rounded.Audiotrack,
-                            onClick = { ringtonePickerLauncher.launch("audio/*") }
-                        )
-                        
-                        SettingsToggleItem(
-                            title = "Shutter Sound",
-                            subtitle = "Play sound when capturing images",
-                            icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                            checked = shutterSound,
-                            onCheckedChange = { viewModel.setShutterSoundEnabled(it) }
-                        )
-                        
-                        if (shutterSound) {
-                            SettingsItem(
-                                title = "Custom Shutter Sound",
-                                subtitle = if (shutterSoundUri == null) "System Default" else Uri.parse(shutterSoundUri!!).lastPathSegment ?: "Custom",
-                                icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                                onClick = { shutterPickerLauncher.launch("audio/*") }
-                            )
                         }
                     }
                 }
@@ -521,14 +493,14 @@ fun CustomHexColorPicker(
                 hexInput = it
                 isError = false
             },
-            label = { Text("Custom Hex Code") },
+            label = { Text("CUSTOM HEX CODE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) },
             placeholder = { Text("#RRGGBB") },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             isError = isError,
-            supportingText = { if (isError) Text("Invalid hex code") },
+            supportingText = { if (isError) Text("Invalid color format", fontWeight = FontWeight.Bold) },
             trailingIcon = {
-                Row {
+                Row(modifier = Modifier.padding(end = 8.dp)) {
                     IconButton(onClick = {
                         try {
                             val color = Color(android.graphics.Color.parseColor(if (hexInput.startsWith("#")) hexInput else "#$hexInput"))
@@ -538,7 +510,7 @@ fun CustomHexColorPicker(
                             isError = true
                         }
                     }) {
-                        Icon(Icons.Rounded.Colorize, "Apply Primary", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.Colorize, "Primary", tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = {
                         try {
@@ -549,10 +521,13 @@ fun CustomHexColorPicker(
                             isError = true
                         }
                     }) {
-                        Icon(Icons.Rounded.Brush, "Apply Secondary", tint = MaterialTheme.colorScheme.secondary)
+                        Icon(Icons.Rounded.Brush, "Secondary", tint = MaterialTheme.colorScheme.secondary)
                     }
                 }
-            }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+            )
         )
     }
 }
@@ -562,11 +537,11 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text("Search settings...") },
+        placeholder = { Text("Search 50+ configuration options...") },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
@@ -577,58 +552,61 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         shape = RoundedCornerShape(24.dp),
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
             unfocusedBorderColor = Color.Transparent,
-            focusedBorderColor = MaterialTheme.colorScheme.primary
+            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
         )
     )
 }
 
 @Composable
 fun AboutSection() {
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-        )
+            .padding(24.dp),
+        shape = RoundedCornerShape(40.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier.padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp)),
-                contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(80.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primary,
+                shadowElevation = 12.dp
             ) {
-                Icon(
-                    Icons.Rounded.Build, 
-                    contentDescription = null, 
-                    modifier = Modifier.size(32.dp),
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Build, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Toolz", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-            Text("Version 1.7.5 Alpha", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("TOOLZ PRO", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+            Text("Version 2.0 Expressive", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                "The ultimate toolkit for daily needs. Made and designed by frerox",
+                "The most powerful all-in-one utility suite for Android. Crafted with precision by frerox.",
                 style = MaterialTheme.typography.bodyMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center,
+                lineHeight = 22.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
             Button(
                 onClick = {},
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick {}
             ) {
-                Text("Privacy Policy")
+                Text("PRIVACY ARCHITECTURE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
         }
     }
@@ -637,11 +615,11 @@ fun AboutSection() {
 @Composable
 fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         val colors = listOf(
-            Color(0xFFFF6D00), Color(0xFF00BFA5), Color(0xFF2962FF),
+            Color(0xFF2962FF), Color(0xFF00BFA5), Color(0xFFFF6D00), 
             Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853),
             Color(0xFFE91E63), Color(0xFF673AB7), Color(0xFF03A9F4),
             Color.White, Color.Black
@@ -650,12 +628,12 @@ fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
             val argb = color.toArgb()
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(color)
                     .border(
-                        width = if (selectedColor == argb) 3.dp else 1.dp,
-                        color = if (selectedColor == argb) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.3f),
+                        width = if (selectedColor == argb) 4.dp else 1.dp,
+                        color = if (selectedColor == argb) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.2f),
                         shape = CircleShape
                     )
                     .clickable { onColorSelected(argb) }
@@ -667,15 +645,16 @@ fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
 @Composable
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)
+            fontWeight = FontWeight.Black,
+            letterSpacing = 2.sp,
+            modifier = Modifier.padding(start = 8.dp)
         )
         content()
     }
@@ -692,33 +671,35 @@ fun SettingsItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            .then(if (onClick != null) Modifier.bouncyClick(onClick = onClick) else Modifier),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                 ) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+                    }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
                 }
                 if (onClick != null) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
                 }
             }
             extraContent?.let {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 it()
             }
         }
@@ -736,33 +717,39 @@ fun SettingsToggleItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            .bouncyClick { onCheckedChange(!checked) },
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+                    }
+                }
+                Spacer(Modifier.width(20.dp))
+                Column {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
+                }
             }
             Switch(
                 checked = checked, 
                 onCheckedChange = onCheckedChange,
-                thumbContent = if (checked) {
-                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(12.dp)) }
-                } else null
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                )
             )
         }
     }

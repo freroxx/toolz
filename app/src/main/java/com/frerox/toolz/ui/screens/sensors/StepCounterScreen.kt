@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.sensors
 
 import android.Manifest
 import android.os.Build
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -10,11 +11,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -22,9 +25,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.steps.StepEntry
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -48,26 +53,34 @@ fun StepCounterScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
-                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
-                modifier = Modifier.shadow(8.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-            ) {
-                TopAppBar(
-                    modifier = Modifier.statusBarsPadding(),
-                    title = { Text("Fitness Tracker", fontWeight = FontWeight.ExtraBold) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* History action */ }) {
-                            Icon(Icons.Rounded.History, contentDescription = "History")
-                        }
+            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                )
+                    
+                    Text(
+                        text = "FITNESS TRACKER",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.5.sp
+                    )
+
+                    IconButton(
+                        onClick = { /* History action */ },
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.Rounded.History, contentDescription = "History")
+                    }
+                }
             }
         }
     ) { padding ->
@@ -76,15 +89,6 @@ fun StepCounterScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 24.dp
-            )
         ) {
             when {
                 !state.isEnabledInSettings -> {
@@ -114,7 +118,7 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            modifier = Modifier.size(120.dp),
+            modifier = Modifier.size(140.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
         ) {
@@ -122,34 +126,35 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
                 Icon(
                     Icons.AutoMirrored.Rounded.DirectionsRun,
                     contentDescription = null,
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier.size(72.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
         }
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(40.dp))
         Text(
-            "Tracking is Disabled",
+            "TRACKING DISABLED",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            textAlign = TextAlign.Center,
+            letterSpacing = (-1).sp
         )
         Text(
-            "Step counter is currently disabled in your settings. Would you like to enable it and start tracking your progress?",
+            "Step counter is currently disabled. Enable it to start tracking your daily progress and reach your goals.",
             style = MaterialTheme.typography.bodyLarge,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 16.dp)
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
         )
-        Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = onEnable,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(16.dp)
+                .height(72.dp)
+                .bouncyClick {},
+            shape = RoundedCornerShape(24.dp)
         ) {
-            Text("Enable Step Counter", fontWeight = FontWeight.Bold)
+            Text("ENABLE TRACKER", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -157,8 +162,18 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
 @Composable
 fun StepContent(state: StepState) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .fadingEdge(
+                brush = Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.05f to Color.Black,
+                    0.95f to Color.Black,
+                    1f to Color.Transparent
+                ),
+                length = 24.dp
+            ),
+        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
@@ -172,17 +187,17 @@ fun StepContent(state: StepState) {
             ) {
                 StatCard(
                     modifier = Modifier.weight(1f),
-                    title = "Calories",
+                    title = "CALORIES",
                     value = "${(state.steps * 0.04).toInt()}",
-                    unit = "kcal",
+                    unit = "KCAL",
                     icon = Icons.Rounded.Whatshot,
                     color = Color(0xFFFF5722)
                 )
                 StatCard(
                     modifier = Modifier.weight(1f),
-                    title = "Distance",
+                    title = "DISTANCE",
                     value = String.format("%.2f", state.steps * 0.000762),
-                    unit = "km",
+                    unit = "KM",
                     icon = Icons.Rounded.Route,
                     color = Color(0xFF2196F3)
                 )
@@ -196,19 +211,16 @@ fun StepContent(state: StepState) {
         item {
             DailyGoalSection(state.goal)
         }
-        
-        item {
-            Spacer(Modifier.height(32.dp))
-        }
     }
 }
 
 @Composable
 fun StepProgressCard(steps: Int, goal: Int) {
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+        shape = RoundedCornerShape(40.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
         Column(
             modifier = Modifier
@@ -216,18 +228,18 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
                 val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0f, 1f)
                 val animatedProgress by animateFloatAsState(
                     targetValue = progress,
-                    animationSpec = tween(1000, easing = FastOutSlowInEasing),
+                    animationSpec = tween(1500, easing = FastOutSlowInEasing),
                     label = "Step Progress"
                 )
                 
                 CircularProgressIndicator(
                     progress = { 1f },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
+                    strokeWidth = 28.dp,
                     strokeCap = StrokeCap.Round,
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 )
@@ -235,7 +247,7 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 CircularProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
+                    strokeWidth = 28.dp,
                     strokeCap = StrokeCap.Round,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -243,37 +255,46 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = steps.toString(),
-                        style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black),
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontWeight = FontWeight.Black,
+                            fontSize = 64.sp,
+                            letterSpacing = (-2).sp
+                        ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Steps today",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "STEPS TODAY",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.sp
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            LinearProgressIndicator(
-                progress = { (steps.toFloat() / goal.toFloat()).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(12.dp)
-                    .clip(CircleShape),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+            Spacer(modifier = Modifier.height(32.dp))
             
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("0", style = MaterialTheme.typography.labelMedium)
-                Text("Goal: $goal", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Column {
+                    Text("GOAL PROGRESS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text("${(steps.toFloat() / goal.toFloat() * 100).toInt()}% COMPLETED", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "TARGET: $goal",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
     }
@@ -288,42 +309,55 @@ fun StatCard(
     icon: ImageVector,
     color: Color
 ) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
+    Surface(
+        modifier = modifier.height(140.dp),
+        shape = RoundedCornerShape(32.dp),
+        color = color.copy(alpha = 0.1f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(28.dp))
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(text = value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text(text = "$unit $title", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = color.copy(alpha = 0.2f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+                }
+            }
+            Column {
+                Text(text = value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text(text = "$unit $title", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color.copy(alpha = 0.8f))
+            }
         }
     }
 }
 
 @Composable
 fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp)
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(24.dp)) {
             Text(
-                "Weekly Activity",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                "WEEKLY ACTIVITY",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.sp
             )
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(150.dp),
+                    .height(160.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom
             ) {
-                val calendar = Calendar.getInstance()
                 val days = (0..6).map { i ->
                     val cal = Calendar.getInstance()
                     cal.add(Calendar.DAY_OF_YEAR, -i)
@@ -331,25 +365,26 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
                 }.reversed()
 
                 days.forEach { dateStr ->
-                    val entry = history.find { it.date == dateStr }
+                    val entry = history.find { dateStr == it.date }
                     val steps = entry?.steps ?: 0
                     val barHeight = (steps.toFloat() / goal.toFloat()).coerceIn(0.05f, 1f)
                     
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
-                                .width(12.dp)
+                                .width(16.dp)
                                 .fillMaxHeight(barHeight)
-                                .clip(CircleShape)
+                                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                                 .background(
                                     if (steps >= goal) MaterialTheme.colorScheme.primary 
                                     else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                                 )
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = dateStr.takeLast(2),
                             style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -361,32 +396,34 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
 
 @Composable
 fun DailyGoalSection(goal: Int) {
-    Column {
-        Text(
-            "Daily Goal",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
-        )
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    Surface(
+        modifier = Modifier.fillMaxWidth().bouncyClick {},
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.EmojiEvents, contentDescription = null, tint = Color(0xFFFFC107))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("$goal steps", fontWeight = FontWeight.Medium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
+                    color = Color(0xFFFFC107).copy(alpha = 0.15f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.EmojiEvents, contentDescription = null, tint = Color(0xFFFFC107))
+                    }
                 }
-                TextButton(onClick = { /* Open goal picker */ }) {
-                    Text("Edit")
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text("DAILY GOAL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text("$goal STEPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }
             }
+            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -398,16 +435,21 @@ fun PermissionDeniedState(onGrant: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Activity Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(80.dp).alpha(0.2f), tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(32.dp))
+        Text("PERMISSION REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Text(
-            "We need permission to track your physical activity to provide step counting features.",
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.padding(vertical = 16.dp)
+            "Tracking your activity requires permission to use physical sensors. This data stays private on your device.",
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
         )
-        Button(onClick = onGrant, shape = RoundedCornerShape(12.dp)) {
-            Text("Grant Permission")
+        Button(
+            onClick = onGrant,
+            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
         }
     }
 }
@@ -419,13 +461,14 @@ fun NoSensorState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(Icons.Rounded.Warning, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Sensor Not Found", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(80.dp).alpha(0.2f), tint = MaterialTheme.colorScheme.error)
+        Spacer(modifier = Modifier.height(32.dp))
+        Text("SENSOR NOT FOUND", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Text(
-            "Step counter sensor is not available on this device.",
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            "Unfortunately, your device does not support the required hardware for step counting.",
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 16.dp)
         )
     }
 }

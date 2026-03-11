@@ -16,13 +16,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
@@ -39,71 +42,58 @@ fun BmiScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp
-            ) {
-                CenterAlignedTopAppBar(
-                    modifier = Modifier.statusBarsPadding(),
-                    title = { Text("HEALTH INDEX", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
+            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                )
+                    
+                    Text(
+                        text = "HEALTH INDEX",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.5.sp
+                    )
+
+                    IconButton(
+                        onClick = { viewModel.onGenderChange(if (state.gender == Gender.MALE) Gender.FEMALE else Gender.MALE) },
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                    ) {
+                        Icon(if (state.gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female, contentDescription = "Toggle Gender")
+                    }
+                }
             }
         }
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 24.dp
-            )
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 // Main Result Display
                 ResultCard(bmi = state.bmi, category = state.category, range = state.healthyRange)
 
-                // Gender Selection
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    GenderCard(
-                        gender = Gender.MALE,
-                        isSelected = state.gender == Gender.MALE,
-                        onClick = { viewModel.onGenderChange(Gender.MALE) },
-                        modifier = Modifier.weight(1f)
-                    )
-                    GenderCard(
-                        gender = Gender.FEMALE,
-                        isSelected = state.gender == Gender.FEMALE,
-                        onClick = { viewModel.onGenderChange(Gender.FEMALE) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
                 // Input Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(40.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
                     Column(
                         modifier = Modifier.padding(28.dp),
@@ -119,7 +109,7 @@ fun BmiScreen(
                                 value = state.age,
                                 onValueChange = { viewModel.onAgeChange(it) },
                                 icon = Icons.Rounded.Cake,
-                                placeholder = "Yrs",
+                                placeholder = "YRS",
                                 modifier = Modifier.weight(1f)
                             )
                             
@@ -140,7 +130,7 @@ fun BmiScreen(
                                         )
                                     }
                                 }
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(12.dp))
                                 OutlinedTextField(
                                     value = state.weight,
                                     onValueChange = { viewModel.onWeightChange(it) },
@@ -151,7 +141,9 @@ fun BmiScreen(
                                     leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null, tint = MaterialTheme.colorScheme.primary) },
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
+                                        unfocusedBorderColor = Color.Transparent,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                     )
                                 )
                             }
@@ -175,7 +167,7 @@ fun BmiScreen(
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(Modifier.height(12.dp))
                             OutlinedTextField(
                                 value = state.height,
                                 onValueChange = { viewModel.onHeightChange(it) },
@@ -186,19 +178,21 @@ fun BmiScreen(
                                 leadingIcon = { Icon(Icons.Rounded.Height, null, tint = MaterialTheme.colorScheme.primary) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                 )
                             )
                         }
                         
-                        FilledTonalButton(
+                        Button(
                             onClick = { viewModel.toggleUnit(true); viewModel.toggleUnit(false) },
-                            modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick {},
-                            shape = RoundedCornerShape(18.dp)
+                            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
+                            shape = RoundedCornerShape(20.dp)
                         ) {
-                            Icon(Icons.Rounded.Sync, null, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Rounded.Sync, null, modifier = Modifier.size(22.dp))
                             Spacer(Modifier.width(12.dp))
-                            Text("SWITCH UNITS", fontWeight = FontWeight.Black)
+                            Text("SWITCH MEASUREMENT UNITS", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -230,7 +224,7 @@ fun BmiInput(
 ) {
     Column(modifier = modifier) {
         Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -241,7 +235,9 @@ fun BmiInput(
             leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
+                unfocusedBorderColor = Color.Transparent,
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
             )
         )
     }
@@ -250,30 +246,30 @@ fun BmiInput(
 @Composable
 fun AdvancedMetrics(state: BmiState) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("DETAILED METRICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+        Text("DETAILED HEALTH METRICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             MetricCard(
                 title = "BMR",
                 value = String.format("%.0f", state.bmr),
-                unit = "kcal/d",
-                subtitle = "Metabolism",
+                unit = "KCAL/D",
+                subtitle = "BASAL METABOLISM",
                 modifier = Modifier.weight(1f)
             )
             MetricCard(
                 title = "TDEE",
                 value = String.format("%.0f", state.tdee),
-                unit = "kcal/d",
-                subtitle = "Daily Load",
+                unit = "KCAL/D",
+                subtitle = "DAILY CALORIC LOAD",
                 modifier = Modifier.weight(1f)
             )
         }
         
         MetricCard(
-            title = "Ideal Weight",
+            title = "IDEAL WEIGHT",
             value = String.format("%.1f", state.ibw),
-            unit = if (state.isKg) "kg" else "lb",
-            subtitle = "Optimal Weight Range",
+            unit = if (state.isKg) "KG" else "LB",
+            subtitle = "OPTIMAL PHYSICAL WEIGHT RANGE",
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -283,57 +279,17 @@ fun AdvancedMetrics(state: BmiState) {
 fun MetricCard(title: String, value: String, unit: String, subtitle: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp, start = 4.dp), fontWeight = FontWeight.Bold)
+                Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 6.dp, start = 6.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             }
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun GenderCard(
-    gender: Gender,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val color = if (gender == Gender.MALE) Color(0xFF2196F3) else Color(0xFFE91E63)
-    val containerColor = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-    val icon = if (gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female
-
-    Surface(
-        onClick = onClick,
-        modifier = modifier.bouncyClick {},
-        shape = RoundedCornerShape(28.dp),
-        color = containerColor,
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, color) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(36.dp),
-                tint = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = gender.name,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black,
-                color = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }
     }
 }
@@ -355,46 +311,57 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(44.dp),
-        color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(2.dp, color.copy(alpha = 0.25f)),
-        shadowElevation = 4.dp
+        shape = RoundedCornerShape(48.dp),
+        color = color.copy(alpha = 0.1f),
+        border = androidx.compose.foundation.BorderStroke(2.dp, color.copy(alpha = 0.2f)),
+        shadowElevation = 0.dp
     ) {
         Column(
             modifier = Modifier.padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+                CircularProgressIndicator(
+                    progress = { 1f },
+                    modifier = Modifier.fillMaxSize(),
+                    strokeWidth = 24.dp,
+                    color = color.copy(alpha = 0.1f),
+                    strokeCap = StrokeCap.Round
+                )
                 CircularProgressIndicator(
                     progress = { (animatedBmi / 40f).coerceIn(0f, 1f) },
-                    modifier = Modifier.size(150.dp),
-                    strokeWidth = 14.dp,
+                    modifier = Modifier.fillMaxSize(),
+                    strokeWidth = 24.dp,
                     color = color,
-                    trackColor = color.copy(alpha = 0.1f),
-                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                    trackColor = Color.Transparent,
+                    strokeCap = StrokeCap.Round
                 )
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = if (bmi == null) "--" else String.format("%.1f", animatedBmi),
-                        style = MaterialTheme.typography.displayMedium,
-                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontWeight = FontWeight.Black,
+                            fontSize = 64.sp,
+                            letterSpacing = (-2).sp
+                        ),
                         color = color
                     )
-                    Text("BMI INDEX", style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.6f), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text("BMI INDEX", style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.8f), fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
             Surface(
                 color = color,
-                shape = CircleShape
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = 8.dp
             ) {
                 Text(
-                    text = category.ifEmpty { "PENDING DATA" }.uppercase(),
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    text = category.ifEmpty { "CALCULATING..." }.uppercase(),
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                     color = Color.White,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.5.sp
                 )
             }
         }
@@ -404,12 +371,12 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
 @Composable
 fun BmiInfoSection(bmi: Float, healthyRange: Pair<Float, Float>) {
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("CLASSIFICATION INFO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+        Text("CLASSIFICATION INDEX", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
         
-        BmiCategoryItem("Underweight", "< ${healthyRange.first}", Color(0xFF4FC3F7), bmi < healthyRange.first)
-        BmiCategoryItem("Normal Weight", "${healthyRange.first} - ${healthyRange.second}", Color(0xFF66BB6A), bmi in healthyRange.first..healthyRange.second)
-        BmiCategoryItem("Overweight", "${healthyRange.second + 0.1f} - 29.9", Color(0xFFFFA726), bmi > healthyRange.second && bmi < 30f)
-        BmiCategoryItem("Obesity", "> 30", Color(0xFFEF5350), bmi >= 30f)
+        BmiCategoryItem("UNDERWEIGHT", "< ${healthyRange.first}", Color(0xFF4FC3F7), bmi < healthyRange.first)
+        BmiCategoryItem("HEALTHY", "${healthyRange.first} - ${healthyRange.second}", Color(0xFF66BB6A), bmi in healthyRange.first..healthyRange.second)
+        BmiCategoryItem("OVERWEIGHT", "${healthyRange.second + 0.1f} - 29.9", Color(0xFFFFA726), bmi > healthyRange.second && bmi < 30f)
+        BmiCategoryItem("OBESE", "> 30", Color(0xFFEF5350), bmi >= 30f)
     }
 }
 
@@ -417,21 +384,21 @@ fun BmiInfoSection(bmi: Float, healthyRange: Pair<Float, Float>) {
 fun BmiCategoryItem(label: String, range: String, color: Color, isSelected: Boolean) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = if (isSelected) color.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, color.copy(alpha = 0.5f)) else null
+        shape = RoundedCornerShape(24.dp),
+        color = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, color.copy(alpha = 0.4f)) else null
     ) {
         Row(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-                Spacer(Modifier.width(16.dp))
-                Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold, color = if (isSelected) color else MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.width(20.dp))
+                Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, color = if (isSelected) color else MaterialTheme.colorScheme.onSurface)
             }
-            Text(range, style = MaterialTheme.typography.labelMedium, color = if (isSelected) color.copy(alpha = 0.8f) else MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Black)
+            Text(range, style = MaterialTheme.typography.labelSmall, color = if (isSelected) color.copy(alpha = 0.8f) else MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }
     }
 }
