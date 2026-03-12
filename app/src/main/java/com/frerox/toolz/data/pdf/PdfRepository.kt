@@ -1,7 +1,11 @@
 package com.frerox.toolz.data.pdf
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +19,8 @@ class PdfRepository @Inject constructor(
 ) {
     suspend fun getPdfFiles(): List<PdfFile> = withContext(Dispatchers.IO) {
         val pdfFiles = mutableListOf<PdfFile>()
-        val collection = MediaStore.Files.getContentUri("external")
+        val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
@@ -44,9 +49,82 @@ class PdfRepository @Inject constructor(
                 val size = cursor.getLong(sizeColumn)
                 val date = cursor.getLong(dateColumn)
                 val contentUri = ContentUris.withAppendedId(collection, id)
-                pdfFiles.add(PdfFile(contentUri, name, size, date))
+                
+                val (thumbnail, pageCount) = generateThumbnailAndPageCount(contentUri)
+                
+                pdfFiles.add(PdfFile(contentUri, name, size, date, thumbnail, pageCount))
             }
         }
         pdfFiles
+    }
+
+    suspend fun getPageBitmap(uri: Uri, pageIndex: Int): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    if (pageIndex < renderer.pageCount) {
+                        renderer.openPage(pageIndex).use { page ->
+                            val bitmap = Bitmap.createBitmap(
+                                page.width,
+                                page.height,
+                                Bitmap.Config.ARGB_8888
+                            )
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            bitmap
+                        }
+                    } else null
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    private fun generateThumbnailAndPageCount(uri: Uri): Pair<Bitmap?, Int> {
+        return try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    val pageCount = renderer.pageCount
+                    if (pageCount > 0) {
+                        renderer.openPage(0).use { page ->
+                            val bitmap = Bitmap.createBitmap(
+                                (page.width / 4).coerceAtLeast(1),
+                                (page.height / 4).coerceAtLeast(1),
+                                Bitmap.Config.ARGB_8888
+                            )
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            Pair(bitmap, pageCount)
+                        }
+                    } else {
+                        Pair(null, 0)
+                    }
+                }
+            } ?: Pair(null, 0)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(null, 0)
+        }
+    }
+
+    suspend fun deletePdf(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.delete(uri, null, null) > 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    suspend fun renamePdf(uri: Uri, newName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Files.FileColumns.DISPLAY_NAME, if (newName.endsWith(".pdf")) newName else "$newName.pdf")
+            }
+            context.contentResolver.update(uri, values, null, null) > 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 }

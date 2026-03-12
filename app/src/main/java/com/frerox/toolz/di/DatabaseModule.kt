@@ -8,6 +8,9 @@ import com.frerox.toolz.data.music.MusicDao
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistoryDao
 import com.frerox.toolz.data.pdf.PdfAnnotationDao
+import com.frerox.toolz.data.pdf.PdfMetadataDao
+import com.frerox.toolz.data.notifications.NotificationDao
+import com.frerox.toolz.data.focus.AppLimitDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -27,7 +30,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "toolz_db"
         )
-        .fallbackToDestructiveMigration()
+        .fallbackToDestructiveMigration(false)
         .build()
     }
 
@@ -54,5 +57,20 @@ object DatabaseModule {
     @Provides
     fun providePdfAnnotationDao(database: AppDatabase): PdfAnnotationDao {
         return database.pdfAnnotationDao()
+    }
+
+    @Provides
+    fun providePdfMetadataDao(database: AppDatabase): PdfMetadataDao {
+        return database.pdfMetadataDao()
+    }
+
+    @Provides
+    fun provideNotificationDao(database: AppDatabase): NotificationDao {
+        return database.notificationDao()
+    }
+
+    @Provides
+    fun provideAppLimitDao(database: AppDatabase): AppLimitDao {
+        return database.appLimitDao()
     }
 }

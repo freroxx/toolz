@@ -1,4 +1,20 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.Toolz" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="colorPrimary">@color/primary_light</item>
+        <item name="colorSecondary">@color/secondary_light</item>
 
-    <style name="Theme.Toolz" parent="Theme.MaterialComponents.Light" />
+        <!-- Material Components compatibility -->
+        <item name="floatingActionButtonStyle">@style/Widget.Material3.FloatingActionButton.Primary</item>
+    </style>
+
+    <style name="Theme.Toolz.PdfViewer" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- The PDF viewer library uses Material Components, so we need to provide a compatible theme -->
+        <item name="colorPrimary">@color/primary_light</item>
+        <item name="colorSecondary">@color/secondary_light</item>
+
+        <!-- Fix for FloatingActionButton inflating error in ToolBoxView -->
+        <item name="colorAccent">?attr/colorSecondary</item>
+    </style>
 </resources>

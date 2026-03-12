@@ -11,7 +11,11 @@ data class Note(
     val color: Int, // ARGB format
     val isPinned: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
-    val fontStyle: String = "SANS_SERIF", // "SANS_SERIF", "SERIF", "MONOSPACE"
+    val fontStyle: String = "SANS_SERIF", // "SANS_SERIF", "SERIF", "MONOSPACE", "ROBOTO", "CASUAL", "CURSIVE"
+    val fontSize: Float = 16f,
     val isBold: Boolean = false,
-    val isItalic: Boolean = false
+    val isItalic: Boolean = false,
+    val attachedPdfUri: String? = null,
+    val attachedAudioUri: String? = null,
+    val attachedAudioName: String? = null
 )

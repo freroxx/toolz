@@ -1,69 +1,54 @@
 package com.frerox.toolz
 
-import android.Manifest
-import android.app.PictureInPictureParams
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
-import android.util.Rational
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.NavController
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import coil.compose.AsyncImage
+import androidx.navigation.navArgument
+import androidx.work.*
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.service.StepCounterService
-import com.frerox.toolz.ui.MainViewModel
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.LoadingScreen
 import com.frerox.toolz.ui.screens.OnboardingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
+import com.frerox.toolz.ui.screens.light.*
 import com.frerox.toolz.ui.screens.math.*
+import com.frerox.toolz.ui.screens.media.MusicPlayerScreen
+import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.notepad.NotepadScreen
+import com.frerox.toolz.ui.screens.pdf.PdfViewModel
+import com.frerox.toolz.ui.screens.pdf.ToolzPdfScreen
+import com.frerox.toolz.ui.screens.sensors.*
+import com.frerox.toolz.ui.screens.settings.SettingsScreen
 import com.frerox.toolz.ui.screens.time.*
 import com.frerox.toolz.ui.screens.utils.*
-import com.frerox.toolz.ui.screens.light.*
-import com.frerox.toolz.ui.screens.sensors.*
-import com.frerox.toolz.ui.screens.notepad.*
-import com.frerox.toolz.ui.screens.settings.*
-import com.frerox.toolz.ui.screens.media.*
-import com.frerox.toolz.ui.screens.pdf.*
+import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
+import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
+import com.frerox.toolz.service.StepCounterService
+import com.frerox.toolz.worker.NotificationCleanupWorker
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -72,233 +57,88 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
-    private val pdfViewModel: PdfViewModel by viewModels()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        scheduleCleanup()
 
         setContent {
-            val mainViewModel: MainViewModel = hiltViewModel()
-            val themeMode by mainViewModel.themeMode.collectAsState()
-            val dynamicColor by mainViewModel.dynamicColor.collectAsState()
-            val customPrimaryInt by mainViewModel.customPrimaryColor.collectAsState()
+            val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
+            val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
+            val customPrimary by settingsRepository.customPrimaryColor.collectAsState(initial = null)
+            val customSecondary by settingsRepository.customSecondaryColor.collectAsState(initial = null)
 
-            val darkTheme = when (themeMode) {
+            val isDark = when (themeMode) {
                 "LIGHT" -> false
                 "DARK" -> true
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
 
-            val customPrimary = customPrimaryInt?.let { Color(it) }
-            val navController = rememberNavController()
-
-            // Handle widget navigation
-            LaunchedEffect(intent) {
-                handleIntent(intent, navController)
-            }
-
-            // Handle service start after permission check and toggle
-            val context = this
-            val scope = rememberCoroutineScope()
-            val permissionLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestMultiplePermissions()
-            ) { permissions ->
-                if (permissions[Manifest.permission.ACTIVITY_RECOGNITION] == true) {
-                    scope.launch {
-                        if (settingsRepository.stepCounterEnabled.first()) {
-                            startStepService()
-                        }
-                    }
-                }
-            }
-
-            LaunchedEffect(Unit) {
-                settingsRepository.stepCounterEnabled.collectLatest { enabled ->
-                    if (enabled) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
-                                startStepService()
-                            } else {
-                                permissionLauncher.launch(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION))
-                            }
-                        } else {
-                            startStepService()
-                        }
-                    } else {
-                        stopStepService()
-                    }
-                }
-            }
-
-            LaunchedEffect(Unit) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                    }
-                }
-            }
-
             ToolzTheme(
-                darkTheme = darkTheme,
+                darkTheme = isDark,
                 dynamicColor = dynamicColor,
-                customPrimary = customPrimary
+                customPrimary = customPrimary?.let { Color(it) },
+                customSecondary = customSecondary?.let { Color(it) }
             ) {
-                val isPipMode = remember { mutableStateOf(false) }
+                val secondary = MaterialTheme.colorScheme.secondary
+                val surface = MaterialTheme.colorScheme.surface
 
-                // Track PiP mode changes
-                DisposableEffect(Unit) {
-                    val listener = androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
-                        isPipMode.value = info.isInPictureInPictureMode
-                    }
-                    addOnPictureInPictureModeChangedListener(listener)
-                    onDispose { removeOnPictureInPictureModeChangedListener(listener) }
-                }
-
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    if (isPipMode.value) {
-                        PipPlayerLayout()
-                    } else {
-                        ToolzNavHost(navController, settingsRepository, pdfViewModel)
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun PipPlayerLayout() {
-        val musicViewModel: MusicPlayerViewModel = hiltViewModel(this)
-        val state by musicViewModel.uiState.collectAsState()
-        val track = state.currentTrack
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface),
-            contentAlignment = Alignment.Center
-        ) {
-            if (track != null) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(8.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (!dynamicColor) {
+                                Brush.verticalGradient(
+                                    colors = if (isDark) {
+                                        listOf(surface, secondary.copy(alpha = 0.12f), surface)
+                                    } else {
+                                        listOf(surface, secondary.copy(alpha = 0.06f), surface)
+                                    }
+                                )
+                            } else {
+                                Brush.verticalGradient(listOf(surface, surface))
+                            }
+                        )
                 ) {
                     Surface(
-                        modifier = Modifier.size(60.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
+                        modifier = Modifier.fillMaxSize(),
+                        color = Color.Transparent
                     ) {
-                        AsyncImage(
-                            model = track.thumbnailUri,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        track.title,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        IconButton(onClick = { musicViewModel.skipPrevious() }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Rounded.SkipPrevious, null, modifier = Modifier.size(16.dp))
-                        }
-                        IconButton(
-                            onClick = { musicViewModel.togglePlayPause() },
-                            modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
-                        ) {
-                            Icon(
-                                if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        IconButton(onClick = { musicViewModel.skipNext() }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Rounded.SkipNext, null, modifier = Modifier.size(16.dp))
-                        }
+                        val navController = rememberNavController()
+                        ToolzNavHost(navController, settingsRepository)
                     }
                 }
-            } else {
-                Text("No Music", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        
+        lifecycleScope.launch {
+            settingsRepository.stepCounterEnabled.collect { enabled ->
+                if (enabled) startStepService() else stopStepService()
             }
         }
     }
 
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            runBlocking {
-                val pipEnabled = settingsRepository.musicPipEnabled.first()
-                if (pipEnabled) {
-                    val params = PictureInPictureParams.Builder()
-                        .setAspectRatio(Rational(1, 1))
-                        .build()
-                    enterPictureInPictureMode(params)
-                }
-            }
-        }
-    }
+    private fun scheduleCleanup() {
+        val cleanupRequest = PeriodicWorkRequestBuilder<NotificationCleanupWorker>(
+            24, TimeUnit.HOURS
+        ).setConstraints(
+            Constraints.Builder()
+                .setRequiresBatteryNotLow(true)
+                .setRequiresDeviceIdle(true)
+                .build()
+        ).build()
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-    }
-
-    private fun handleIntent(intent: Intent?, navController: NavController) {
-        // Deep Link from system
-        intent?.data?.let { uri ->
-            if (intent.type == "application/pdf" || uri.toString().endsWith(".pdf")) {
-                pdfViewModel.openPdf(uri)
-                navController.navigate(Screen.PdfReader.route) {
-                    launchSingleTop = true
-                }
-                return
-            }
-        }
-
-        val navigateTo = intent?.getStringExtra("navigate_to")
-        if (navigateTo != null) {
-            val route = when (navigateTo) {
-                "notepad" -> Screen.Notepad.route
-                "voice_recorder" -> Screen.VoiceRecorder.route
-                "step_counter" -> Screen.StepCounter.route
-                "compass" -> Screen.Compass.route
-                "world_clock" -> Screen.WorldClock.route
-                "music_player" -> Screen.MusicPlayer.route
-                "pdf_reader" -> Screen.PdfReader.route
-                else -> null
-            }
-            route?.let {
-                navController.navigate(it) {
-                    launchSingleTop = true
-                }
-            }
-        }
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "NotificationCleanup",
+            ExistingPeriodicWorkPolicy.KEEP,
+            cleanupRequest
+        )
     }
 
     private fun startStepService() {
         val intent = Intent(this, StepCounterService::class.java)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        startForegroundService(intent)
     }
 
     private fun stopStepService() {
@@ -310,18 +150,17 @@ class MainActivity : AppCompatActivity() {
 @Composable
 fun ToolzNavHost(
     navController: androidx.navigation.NavHostController,
-    settingsRepository: SettingsRepository,
-    pdfViewModel: PdfViewModel
+    settingsRepository: SettingsRepository
 ) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
 
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
-        enterTransition = { slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(400)) },
-        exitTransition = { slideOutHorizontally(targetOffsetX = { -it }, animationSpec = tween(400)) },
-        popEnterTransition = { slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) },
-        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) }
+        enterTransition = { fadeIn(animationSpec = tween(400)) + slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(400)) },
+        exitTransition = { fadeOut(animationSpec = tween(400)) + slideOutHorizontally(targetOffsetX = { -it }, animationSpec = tween(400)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(400)) + slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) },
+        popExitTransition = { fadeOut(animationSpec = tween(400)) + slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) }
     ) {
         composable(Screen.Loading.route) {
             LoadingScreen(
@@ -378,6 +217,9 @@ fun ToolzNavHost(
         }
         composable(Screen.Pomodoro.route) {
             PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.FocusFlow.route) {
+            FocusFlowScreen(onNavigateBack = { navController.popBackStack() })
         }
 
         // Media & Documents
@@ -451,8 +293,26 @@ fun ToolzNavHost(
         composable(Screen.PasswordGenerator.route) {
             RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
-        composable(Screen.Notepad.route) {
-            NotepadScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        composable(
+            route = Screen.Notepad.route + "?initialNoteId={initialNoteId}",
+            arguments = listOf(navArgument("initialNoteId") { type = NavType.IntType; defaultValue = -1 })
+        ) { backStackEntry ->
+            val initialNoteId = backStackEntry.arguments?.getInt("initialNoteId").takeIf { it != -1 }
+            val musicViewModel: MusicPlayerViewModel = hiltViewModel()
+            val pdfViewModel: PdfViewModel = hiltViewModel()
+            NotepadScreen(
+                viewModel = hiltViewModel(),
+                onBack = { navController.popBackStack() },
+                onPlayAudio = { uri -> 
+                    val track = musicViewModel.uiState.value.tracks.find { it.uri == uri }
+                    track?.let { musicViewModel.playTrack(it) }
+                },
+                onViewPdf = { uri ->
+                    pdfViewModel.openPdf(uri.toUri())
+                    navController.navigate(Screen.PdfReader.route)
+                },
+                initialNoteId = initialNoteId
+            )
         }
         composable(Screen.BatteryInfo.route) {
             BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -464,7 +324,17 @@ fun ToolzNavHost(
             PeriodicTableScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.PdfReader.route) {
-            ToolzPdfScreen(viewModel = pdfViewModel, onNavigateBack = { navController.popBackStack() })
+            val pdfViewModel: PdfViewModel = hiltViewModel()
+            ToolzPdfScreen(
+                viewModel = pdfViewModel, 
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToNote = { noteId ->
+                    navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId")
+                }
+            )
+        }
+        composable(Screen.NotificationVault.route) {
+            NotificationVaultScreen(onNavigateBack = { navController.popBackStack() })
         }
     }
 }

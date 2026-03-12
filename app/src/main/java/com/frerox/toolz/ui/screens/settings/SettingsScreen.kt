@@ -16,8 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -45,54 +42,37 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onResetOnboarding: () -> Unit
 ) {
-    val stepGoal by viewModel.stepGoal.collectAsState()
-    val ringtoneUri by viewModel.ringtoneUri.collectAsState()
-    val themeMode by viewModel.themeMode.collectAsState()
-    val dynamicColor by viewModel.dynamicColor.collectAsState()
-    val shutterSound by viewModel.shutterSoundEnabled.collectAsState()
-    val shutterSoundUri by viewModel.shutterSoundUri.collectAsState()
-    val customPrimaryInt by viewModel.customPrimaryColor.collectAsState()
-    val customSecondaryInt by viewModel.customSecondaryColor.collectAsState()
+    val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
+    val themeMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
+    val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
+    val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
+    val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
 
-    val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
-    val stepNotifications by viewModel.stepNotifications.collectAsState()
-    val timerNotifications by viewModel.timerNotifications.collectAsState()
-    val voiceRecordNotifications by viewModel.voiceRecordNotifications.collectAsState()
-    val musicNotifications by viewModel.musicNotifications.collectAsState()
+    val notificationsEnabled by viewModel.notificationsEnabled.collectAsState(initial = true)
+    val stepNotifications by viewModel.stepNotifications.collectAsState(initial = true)
+    val timerNotifications by viewModel.timerNotifications.collectAsState(initial = true)
+    val musicNotifications by viewModel.musicNotifications.collectAsState(initial = true)
 
-    val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState()
-    val widgetOpacity by viewModel.widgetOpacity.collectAsState()
+    val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
+    val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
     
-    val hapticFeedback by viewModel.hapticFeedback.collectAsState()
-    val hapticIntensity by viewModel.hapticIntensity.collectAsState()
-    val unitSystem by viewModel.unitSystem.collectAsState()
-    val showQibla by viewModel.showQibla.collectAsState()
-    val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState()
-    val showToolzPill by viewModel.showToolzPill.collectAsState()
-    val userName by viewModel.userName.collectAsState()
+    val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
+    val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
+    val unitSystem by viewModel.unitSystem.collectAsState(initial = "METRIC")
+    val showQibla by viewModel.showQibla.collectAsState(initial = false)
+    val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState(initial = true)
+    val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
+    val userName by viewModel.userName.collectAsState(initial = "")
 
     var showResetDialog by remember { mutableStateOf(false) }
     
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val context = LocalContext.current
-
-    val ringtonePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.setRingtoneUri(it.toString()) }
-    }
-    
-    val shutterPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.setShutterSoundUri(it.toString()) }
-    }
+    val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
 
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("RESET DATA?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            text = { Text("This will clear your profile name and preferences. You'll need to go through onboarding again.") },
+            title = { Text("RESET DATA?", fontWeight = FontWeight.Black, letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurface) },
+            text = { Text("This will clear your profile name and preferences. You'll need to go through onboarding again.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -117,41 +97,47 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            Surface(
+                color = Color.Transparent,
+                tonalElevation = 0.dp
+            ) {
+                Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                        
+                        Text(
+                            text = "CONFIGURATION",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.5.sp
+                        )
+
+                        IconButton(
+                            onClick = { showResetDialog = true },
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
+                        ) {
+                            Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.error)
+                        }
                     }
-                    
-                    Text(
-                        text = "CONFIGURATION",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.5.sp
+
+                    SearchField(
+                        query = searchQuery,
+                        onQueryChange = { viewModel.onSearchQueryChange(it) }
                     )
-
-                    IconButton(
-                        onClick = { showResetDialog = true },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
-                    ) {
-                        Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.error)
-                    }
                 }
-
-                SearchField(
-                    query = searchQuery,
-                    onQueryChange = { viewModel.onSearchQueryChange(it) }
-                )
             }
-        }
+        },
+        containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
@@ -160,15 +146,15 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp)
-                    .verticalScroll(rememberScrollState())
                     .fadingEdge(
                         brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
-                        length = 24.dp
-                    ),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                        length = 48.dp
+                    )
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(16.dp))
+                
                 if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name")) {
                     SettingsSection(title = "GENERAL PREFERENCES") {
                         SettingsToggleItem(
@@ -200,7 +186,9 @@ fun SettingsScreen(
                                 shape = RoundedCornerShape(16.dp),
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface
                                 )
                             )
                         }
@@ -215,15 +203,16 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 listOf("METRIC", "IMPERIAL").forEach { unit ->
+                                    val isSelected = unitSystem == unit
                                     Surface(
                                         onClick = { viewModel.setUnitSystem(unit) },
                                         modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
                                         shape = RoundedCornerShape(14.dp),
-                                        color = if (unitSystem == unit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        border = if (unitSystem != unit) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        border = if (!isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) else null
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (unitSystem == unit) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
@@ -254,7 +243,7 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleItem(
-                            title = "kaaba Navigation",
+                            title = "Navigation",
                             subtitle = "Show Qibla direction in compass",
                             icon = Icons.Rounded.Explore,
                             checked = showQibla,
@@ -319,7 +308,7 @@ fun SettingsScreen(
                             title = "Smart Audio Focus",
                             subtitle = "Auto-pause when other apps play sound",
                             icon = Icons.Rounded.CenterFocusStrong,
-                            checked = viewModel.musicAudioFocus.collectAsState().value,
+                            checked = viewModel.musicAudioFocus.collectAsState(initial = true).value,
                             onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                         )
                         
@@ -327,7 +316,7 @@ fun SettingsScreen(
                             title = "Dynamic Visualizer",
                             subtitle = "Show animated waveforms in player",
                             icon = Icons.Rounded.BarChart,
-                            checked = viewModel.showMusicVisualizer.collectAsState().value,
+                            checked = viewModel.showMusicVisualizer.collectAsState(initial = true).value,
                             onCheckedChange = { viewModel.setShowMusicVisualizer(it) }
                         )
 
@@ -335,17 +324,17 @@ fun SettingsScreen(
                             title = "Shake to Next",
                             subtitle = "Shake device to skip current track",
                             icon = Icons.Rounded.ScreenRotation,
-                            checked = viewModel.musicShakeToSkip.collectAsState().value,
+                            checked = viewModel.musicShakeToSkip.collectAsState(initial = false).value,
                             onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
                         )
 
                         SettingsItem(
                             title = "Playback Velocity",
-                            subtitle = "Speed: ${"%.1f".format(viewModel.musicPlaybackSpeed.collectAsState().value)}x",
+                            subtitle = "Speed: ${"%.1f".format(viewModel.musicPlaybackSpeed.collectAsState(initial = 1.0f).value)}x",
                             icon = Icons.Rounded.Speed
                         ) {
                             Slider(
-                                value = viewModel.musicPlaybackSpeed.collectAsState().value,
+                                value = viewModel.musicPlaybackSpeed.collectAsState(initial = 1.0f).value,
                                 onValueChange = { viewModel.setMusicPlaybackSpeed(it) },
                                 valueRange = 0.5f..2.0f,
                                 steps = 14,
@@ -420,15 +409,16 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                                    val isSelected = themeMode == mode
                                     Surface(
                                         onClick = { viewModel.setThemeMode(mode) },
                                         modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
                                         shape = RoundedCornerShape(14.dp),
-                                        color = if (themeMode == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        border = if (themeMode != mode) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        border = if (!isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) else null
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (themeMode == mode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
@@ -458,7 +448,7 @@ fun SettingsScreen(
                                     valueRange = 0.1f..1f,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
+                                Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.width(40.dp), textAlign = TextAlign.End)
                             }
                         }
                     }
@@ -466,7 +456,7 @@ fun SettingsScreen(
 
                 AboutSection()
                 
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(64.dp))
             }
         }
     }
@@ -504,7 +494,8 @@ fun CustomHexColorPicker(
                 Row(modifier = Modifier.padding(end = 8.dp)) {
                     IconButton(onClick = {
                         try {
-                            val color = Color(android.graphics.Color.parseColor(if (hexInput.startsWith("#")) hexInput else "#$hexInput"))
+                            val colorStr = if (hexInput.startsWith("#")) hexInput else "#$hexInput"
+                            val color = Color(android.graphics.Color.parseColor(colorStr))
                             onPrimarySelected(color.toArgb())
                             hexInput = ""
                         } catch (e: Exception) {
@@ -515,7 +506,8 @@ fun CustomHexColorPicker(
                     }
                     IconButton(onClick = {
                         try {
-                            val color = Color(android.graphics.Color.parseColor(if (hexInput.startsWith("#")) hexInput else "#$hexInput"))
+                            val colorStr = if (hexInput.startsWith("#")) hexInput else "#$hexInput"
+                            val color = Color(android.graphics.Color.parseColor(colorStr))
                             onSecondarySelected(color.toArgb())
                             hexInput = ""
                         } catch (e: Exception) {
@@ -527,7 +519,9 @@ fun CustomHexColorPicker(
                 }
             },
             colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface
             )
         )
     }
@@ -546,7 +540,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                    Icon(Icons.Rounded.Close, contentDescription = "Clear", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
@@ -556,7 +550,9 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
             unfocusedBorderColor = Color.Transparent,
-            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface
         )
     )
 }
@@ -591,11 +587,11 @@ fun AboutSection() {
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
-            Text("TOOLZ PRO", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
-            Text("Version 2.0 Expressive", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+            Text("Toolz", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = (-1).sp, color = MaterialTheme.colorScheme.onSurface)
+            Text("Version 1.7.6", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                "The most powerful all-in-one utility suite for Android. Crafted with precision by frerox.",
+                "The most powerful tool-kit for Android. Created with precision by frerox.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,
@@ -646,7 +642,7 @@ fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
 @Composable
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = Modifier.padding(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
@@ -692,7 +688,7 @@ fun SettingsItem(
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
                 }
                 if (onClick != null) {
@@ -740,7 +736,7 @@ fun SettingsToggleItem(
                 }
                 Spacer(Modifier.width(20.dp))
                 Column {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
                 }
             }

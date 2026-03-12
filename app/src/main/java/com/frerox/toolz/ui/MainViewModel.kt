@@ -21,4 +21,7 @@ class MainViewModel @Inject constructor(
 
     val customPrimaryColor: StateFlow<Int?> = repository.customPrimaryColor
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val customSecondaryColor: StateFlow<Int?> = repository.customSecondaryColor
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 }

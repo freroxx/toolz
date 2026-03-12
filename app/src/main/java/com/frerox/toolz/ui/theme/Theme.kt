@@ -67,27 +67,22 @@ fun ToolzTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
     customPrimary: Color? = null,
+    customSecondary: Color? = null,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
     val colorScheme = when {
-        customPrimary != null && !dynamicColor -> {
-            // Simplified custom color scheme generation
-            if (darkTheme) {
-                DarkColorScheme.copy(
-                    primary = customPrimary,
-                    primaryContainer = customPrimary.copy(alpha = 0.3f),
-                    onPrimaryContainer = customPrimary,
-                    outline = customPrimary.copy(alpha = 0.5f)
-                )
-            } else {
-                LightColorScheme.copy(
-                    primary = customPrimary,
-                    primaryContainer = customPrimary.copy(alpha = 0.1f),
-                    onPrimaryContainer = customPrimary,
-                    outline = customPrimary.copy(alpha = 0.5f)
-                )
-            }
+        !dynamicColor && (customPrimary != null || customSecondary != null) -> {
+            val base = if (darkTheme) DarkColorScheme else LightColorScheme
+            base.copy(
+                primary = customPrimary ?: base.primary,
+                primaryContainer = customPrimary?.copy(alpha = if (darkTheme) 0.3f else 0.1f) ?: base.primaryContainer,
+                onPrimaryContainer = customPrimary ?: base.onPrimaryContainer,
+                secondary = customSecondary ?: base.secondary,
+                secondaryContainer = customSecondary?.copy(alpha = if (darkTheme) 0.3f else 0.1f) ?: base.secondaryContainer,
+                onSecondaryContainer = customSecondary ?: base.onSecondaryContainer,
+                outline = customPrimary?.copy(alpha = 0.5f) ?: base.outline
+            )
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
