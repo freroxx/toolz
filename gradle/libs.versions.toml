@@ -18,11 +18,12 @@ roomCompiler = "2.6.1"
 kotlinxCoroutinesTest = "1.10.1"
 core = "1.6.1"
 runner = "1.6.2"
-coilCompose = "2.7.0"
+coil = "3.1.0"
 retrofit = "2.11.0"
 converterMoshi = "2.11.0"
 kotlinxCoroutinesAndroid = "1.10.1"
 kotlinxCoroutinesCore = "1.10.1"
+kotlinxCoroutinesPlayServices = "1.10.1"
 accompanistPermissions = "0.37.0"
 playServicesLocation = "21.3.0"
 cameraCamera2 = "1.4.1"
@@ -44,6 +45,9 @@ media3 = "1.6.0"
 pdfViewer = "1.0.0-alpha14"
 fragmentKtx = "1.8.6"
 mlkitTextRecognition = "16.0.1"
+workRuntime = "2.11.1"
+hiltWork = "1.3.0"
+androidxHiltCompiler = "1.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -72,11 +76,16 @@ androidx-runner = { group = "androidx.test", name = "runner", version.ref = "run
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
-coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coilCompose" }
+
+# Coil 3
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
+
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 converter-moshi = { group = "com.squareup.retrofit2", name = "converter-moshi", version.ref = "converterMoshi" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutinesCore" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanistPermissions" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraCamera2" }
@@ -99,6 +108,9 @@ androidx-pdf-viewer = { group = "androidx.pdf", name = "pdf-viewer", version.ref
 androidx-pdf-viewer-fragment = { group = "androidx.pdf", name = "pdf-viewer-fragment", version.ref = "pdfViewer" }
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragmentKtx" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntime" }
+androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
+androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "androidxHiltCompiler" }
 
 # Media3
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }

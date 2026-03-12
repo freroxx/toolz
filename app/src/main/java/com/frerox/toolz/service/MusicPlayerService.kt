@@ -14,8 +14,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import coil.ImageLoader
-import coil.request.ImageRequest
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -213,8 +215,8 @@ class MusicPlayerService : MediaSessionService() {
                 .size(300, 300)
                 .allowHardware(false)
                 .build()
-            val result = loader.execute(request).drawable
-            (result as? BitmapDrawable)?.bitmap
+            val result = loader.execute(request).image
+            result?.toBitmap()
         } catch (e: Exception) {
             null
         }

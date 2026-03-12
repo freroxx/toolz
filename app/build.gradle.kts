@@ -15,7 +15,7 @@ android {
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "1.7.0"
+        versionName = "1.7.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -73,11 +73,16 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.coil.compose)
+    
+    // Coil 3
+    implementation(libs.coil3.compose)
+    implementation(libs.coil3.network)
+
     implementation(libs.retrofit)
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.accompanist.permissions)
     implementation(libs.play.services.location)
     implementation(libs.androidx.camera.camera2)
@@ -97,6 +102,11 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.exp4j)
     
+    // WorkManager
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     // Media3
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

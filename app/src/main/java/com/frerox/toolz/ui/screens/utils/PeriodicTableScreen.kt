@@ -130,7 +130,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp),
-                        placeholder = { Text("Search by name, symbol, or number...") },
+                        placeholder = { Text("Search anything...") },
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {

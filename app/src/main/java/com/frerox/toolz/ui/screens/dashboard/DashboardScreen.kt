@@ -4,10 +4,12 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -35,8 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.navigation.Screen
@@ -47,6 +50,7 @@ import com.frerox.toolz.ui.screens.time.PomodoroViewModel
 import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
 import com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel
 import com.frerox.toolz.ui.screens.sensors.RecordingState
+import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
 import java.util.*
 
 data class ToolCategory(
@@ -86,6 +90,7 @@ fun DashboardScreen(
     val pomodoroViewModel: PomodoroViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val stepViewModel: StepCounterViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val recorderViewModel: VoiceRecorderViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val notepadViewModel: NotepadViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
@@ -95,26 +100,29 @@ fun DashboardScreen(
     val pomodoroState by pomodoroViewModel.uiState.collectAsState()
     val stepState by stepViewModel.uiState.collectAsState()
     val recorderState by recorderViewModel.uiState.collectAsState()
+    val notes by notepadViewModel.notes.collectAsState()
     
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
     val userName by settingsRepository.userName.collectAsState(initial = "")
 
-    val filteredCategories = categories.map { category ->
-        category.copy(items = category.items.filter { 
-            it.title.contains(searchQuery, ignoreCase = true) || 
-            it.description.contains(searchQuery, ignoreCase = true) 
-        })
-    }.filter { it.items.isNotEmpty() }
+    val filteredCategories = remember(searchQuery, categories) {
+        categories.map { category ->
+            category.copy(items = category.items.filter { 
+                it.title.contains(searchQuery, ignoreCase = true) || 
+                it.description.contains(searchQuery, ignoreCase = true) 
+            })
+        }.filter { it.items.isNotEmpty() }
+    }
 
     Scaffold(
         topBar = {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp
+                color = Color.Transparent,
+                tonalElevation = 0.dp
             ) {
                 Column(
                     modifier = Modifier
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(Color.Transparent)
                         .statusBarsPadding()
                 ) {
                     WelcomeHeader(
@@ -143,13 +151,16 @@ fun DashboardScreen(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                             unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface
                         )
                     )
                     Spacer(Modifier.height(8.dp))
                 }
             }
-        }
+        },
+        containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             LazyVerticalGrid(
@@ -164,14 +175,21 @@ fun DashboardScreen(
                             0.95f to Color.Black,
                             1f to Color.Transparent
                         ),
-                        length = 24.dp
+                        length = 48.dp
                     ),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                filteredCategories.forEach { category ->
+                // Quick Notepad Preview
+                if (notes.isNotEmpty() && searchQuery.isEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
+                        NotepadPreview(notes = notes, onNoteClick = { onNavigate(Screen.Notepad.route) })
+                    }
+                }
+
+                filteredCategories.forEach { category ->
+                    item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
                         Text(
                             text = category.title,
                             style = MaterialTheme.typography.labelSmall,
@@ -181,7 +199,7 @@ fun DashboardScreen(
                             letterSpacing = 2.sp
                         )
                     }
-                    items(category.items) { tool ->
+                    items(category.items, key = { it.route + category.title }) { tool ->
                         ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
                     }
                 }
@@ -258,6 +276,67 @@ fun DashboardScreen(
 }
 
 @Composable
+fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "QUICK NOTES",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 2.sp
+            )
+            TextButton(onClick = onNoteClick) {
+                Text("VIEW ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(notes.take(5)) { note ->
+                Surface(
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(110.dp)
+                        .bouncyClick(onClick = onNoteClick),
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(note.color).copy(alpha = 0.8f),
+                    tonalElevation = 2.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            note.title.ifBlank { "Untitled" },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            note.content,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 16.sp,
+                            color = Color.Black.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
     Row(
         modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
@@ -291,6 +370,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
                 formatTimeDashboard(state.durationMillis),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             )
         }
@@ -373,6 +453,7 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                     track.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -448,6 +529,7 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
                     formatTimeDashboard(state.remainingTime),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
@@ -503,6 +585,7 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
                 formatTimeDashboard(state.elapsedTime),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             )
         }
@@ -566,6 +649,7 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
                     formatTimeDashboard(state.remainingTime),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
@@ -623,12 +707,13 @@ fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
             Text(
                 "${state.steps}",
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         Column(horizontalAlignment = Alignment.End) {
             Text("${(progress * 100).toInt()}%", fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
-            Text("GOAL: ${state.goal}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.alpha(0.6f))
+            Text("GOAL: ${state.goal}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
         }
     }
 }
@@ -685,7 +770,7 @@ fun WelcomeHeader(
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
         ) {
-            Icon(Icons.Rounded.Settings, contentDescription = "Settings", modifier = Modifier.size(28.dp))
+            Icon(Icons.Rounded.Settings, contentDescription = "Settings", modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -745,6 +830,7 @@ fun ImprovedToolCard(
                         text = tool.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         lineHeight = 22.sp
                     )
@@ -764,7 +850,7 @@ fun ImprovedToolCard(
 }
 
 @Composable
-fun EmptySearchState(query: String) {
+fun EmptySearchState(searchQuery: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -780,26 +866,33 @@ fun EmptySearchState(query: String) {
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            "No tools found for \"$query\"",
+            "No tools found for \"$searchQuery\"",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.outline
+            color = MaterialTheme.colorScheme.onSurface
         )
         Text(
             "Try adjusting your search criteria",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )
     }
 }
 
 private fun getCategories() = listOf(
     ToolCategory(
+        "PRIVACY & FOCUS",
+        listOf(
+            ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Screen time insights"),
+            ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs")
+        )
+    ),
+    ToolCategory(
         "FAVORITES",
         listOf(
             ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
+            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Smart notes"),
             ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker"),
-            ToolItem("Equation Solver", Icons.Rounded.Calculate, Screen.EquationSolver.route, "Scientific math"),
             ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View documents")
         )
     ),
@@ -825,6 +918,7 @@ private fun getCategories() = listOf(
         "MEDIA & DOCUMENTS",
         listOf(
             ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View & annotate"),
+            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Write & sync"),
             ToolItem("Scanner", Icons.Rounded.QrCodeScanner, Screen.Scanner.route, "QR / Barcode"),
             ToolItem("Voice Recorder", Icons.Rounded.Mic, Screen.VoiceRecorder.route, "Audio memo"),
             ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom")

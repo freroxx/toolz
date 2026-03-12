@@ -28,6 +28,7 @@ class SettingsRepository @Inject constructor(
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
     private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
+    private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
     
     // Widget Design
     private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
@@ -84,6 +85,7 @@ class SettingsRepository @Inject constructor(
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
     val musicNotifications: Flow<Boolean> = dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
+    val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
 
     // Widget Flows
     val widgetBackgroundColor: Flow<Int> = dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
@@ -137,6 +139,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setTimerNotifications(enabled: Boolean) { dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
     suspend fun setMusicNotifications(enabled: Boolean) { dataStore.edit { it[MUSIC_NOTIFICATIONS] = enabled } }
+    suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
 
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }

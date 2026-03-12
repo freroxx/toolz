@@ -5,6 +5,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.SquigglySlider
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +61,7 @@ fun TimerScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -69,7 +71,7 @@ fun TimerScreen(
                         onClick = onBack,
                         modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     
                     Text(
@@ -95,7 +97,8 @@ fun TimerScreen(
                     }
                 }
             }
-        }
+        },
+        containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
@@ -176,7 +179,7 @@ fun TimerScreen(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text("${min}M", fontWeight = FontWeight.Black)
+                                        Text("${min}M", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
                             }
@@ -312,7 +315,7 @@ fun TimerScreen(
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                         ) {
-                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                         
                         Surface(
@@ -333,7 +336,7 @@ fun TimerScreen(
                                     if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
                                     null, 
                                     modifier = Modifier.size(52.dp),
-                                    tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                    tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -348,7 +351,7 @@ fun TimerScreen(
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                         ) {
-                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -407,7 +410,8 @@ fun ModernTimePicker(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(vertical = 55.dp)
+                contentPadding = PaddingValues(vertical = 55.dp),
+                flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
             ) {
                 items(Int.MAX_VALUE) { index ->
                     val item = index % 60

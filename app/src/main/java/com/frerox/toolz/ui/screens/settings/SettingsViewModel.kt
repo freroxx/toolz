@@ -5,10 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -18,76 +15,76 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    val searchQuery = _searchQuery.asStateFlow()
 
-    val themeMode = repository.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")
-    val dynamicColor = repository.dynamicColor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val customPrimaryColor = repository.customPrimaryColor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    val customSecondaryColor = repository.customSecondaryColor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    
-    val stepGoal = repository.stepGoal.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 10000)
-    val ringtoneUri = repository.ringtoneUri.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    val shutterSoundEnabled = repository.shutterSoundEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val shutterSoundUri = repository.shutterSoundUri.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    
-    val notificationsEnabled = repository.notificationsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val stepNotifications = repository.stepNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val timerNotifications = repository.timerNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val voiceRecordNotifications = repository.voiceRecordNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val musicNotifications = repository.musicNotifications.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    
-    val widgetBackgroundColor = repository.widgetBackgroundColor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0xFFFFFFFF.toInt())
-    val widgetAccentColor = repository.widgetAccentColor.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0xFF4CAF50.toInt())
-    val widgetOpacity = repository.widgetOpacity.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.9f)
-    
-    val hapticFeedback = repository.hapticFeedback.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val hapticIntensity = repository.hapticIntensity.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.5f)
-    val unitSystem = repository.unitSystem.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "METRIC")
-    val showQibla = repository.showQibla.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-    val stepCounterEnabled = repository.stepCounterEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    
-    val musicAudioFocus = repository.musicAudioFocus.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val musicShakeToSkip = repository.musicShakeToSkip.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-    val musicPlaybackSpeed = repository.musicPlaybackSpeed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1.0f)
-    val musicEqualizerPreset = repository.musicEqualizerPreset.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Normal")
-    val showMusicVisualizer = repository.showMusicVisualizer.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
 
-    val showToolzPill = repository.showToolzPill.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-    val userName = repository.userName.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val stepGoal = repository.stepGoal
+    val themeMode = repository.themeMode
+    val dynamicColor = repository.dynamicColor
+    val customPrimaryColor = repository.customPrimaryColor
+    val customSecondaryColor = repository.customSecondaryColor
+    val worldClockZones = repository.worldClockZones
 
-    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
-    fun setThemeMode(mode: String) { viewModelScope.launch { repository.setThemeMode(mode) } }
-    fun setDynamicColor(enabled: Boolean) { viewModelScope.launch { repository.setDynamicColor(enabled) } }
-    fun setCustomPrimaryColor(color: Int?) { viewModelScope.launch { repository.setCustomPrimaryColor(color) } }
-    fun setCustomSecondaryColor(color: Int?) { viewModelScope.launch { repository.setCustomSecondaryColor(color) } }
-    fun setStepGoal(goal: Int) { viewModelScope.launch { repository.setStepGoal(goal) } }
-    fun setRingtoneUri(uri: String) { viewModelScope.launch { repository.setRingtoneUri(uri) } }
-    fun setShutterSoundEnabled(enabled: Boolean) { viewModelScope.launch { repository.setShutterSoundEnabled(enabled) } }
-    fun setShutterSoundUri(uri: String) { viewModelScope.launch { repository.setShutterSoundUri(uri) } }
-    fun setNotificationsEnabled(enabled: Boolean) { viewModelScope.launch { repository.setNotificationsEnabled(enabled) } }
-    fun setStepNotifications(enabled: Boolean) { viewModelScope.launch { repository.setStepNotifications(enabled) } }
-    fun setTimerNotifications(enabled: Boolean) { viewModelScope.launch { repository.setTimerNotifications(enabled) } }
-    fun setVoiceRecordNotifications(enabled: Boolean) { viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) } }
-    fun setMusicNotifications(enabled: Boolean) { viewModelScope.launch { repository.setMusicNotifications(enabled) } }
-    fun setWidgetBackgroundColor(color: Int) { viewModelScope.launch { repository.setWidgetBackgroundColor(color) } }
-    fun setWidgetAccentColor(color: Int) { viewModelScope.launch { repository.setWidgetAccentColor(color) } }
-    fun setWidgetOpacity(opacity: Float) { viewModelScope.launch { repository.setWidgetOpacity(opacity) } }
-    fun setHapticFeedback(enabled: Boolean) { viewModelScope.launch { repository.setHapticFeedback(enabled) } }
-    fun setHapticIntensity(intensity: Float) { viewModelScope.launch { repository.setHapticIntensity(intensity) } }
-    fun setUnitSystem(unit: String) { viewModelScope.launch { repository.setUnitSystem(unit) } }
-    fun setShowQibla(enabled: Boolean) { viewModelScope.launch { repository.setShowQibla(enabled) } }
-    fun setStepCounterEnabled(enabled: Boolean) { viewModelScope.launch { repository.setStepCounterEnabled(enabled) } }
-    fun setMusicAudioFocus(enabled: Boolean) { viewModelScope.launch { repository.setMusicAudioFocus(enabled) } }
-    fun setMusicShakeToSkip(enabled: Boolean) { viewModelScope.launch { repository.setMusicShakeToSkip(enabled) } }
-    fun setMusicPlaybackSpeed(speed: Float) { viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) } }
-    fun setMusicEqualizerPreset(preset: String) { viewModelScope.launch { repository.setMusicEqualizerPreset(preset) } }
-    fun setShowMusicVisualizer(enabled: Boolean) { viewModelScope.launch { repository.setShowMusicVisualizer(enabled) } }
-    fun setShowToolzPill(enabled: Boolean) { viewModelScope.launch { repository.setShowToolzPill(enabled) } }
-    fun setUserName(name: String) { viewModelScope.launch { repository.setUserName(name) } }
+    val notificationsEnabled = repository.notificationsEnabled
+    val stepNotifications = repository.stepNotifications
+    val timerNotifications = repository.timerNotifications
+    val voiceRecordNotifications = repository.voiceRecordNotifications
+    val musicNotifications = repository.musicNotifications
+    val notificationRetentionDays = repository.notificationRetentionDays
+
+    val widgetBackgroundColor = repository.widgetBackgroundColor
+    val widgetAccentColor = repository.widgetAccentColor
+    val widgetOpacity = repository.widgetOpacity
+
+    val hapticFeedback = repository.hapticFeedback
+    val hapticIntensity = repository.hapticIntensity
+    val unitSystem = repository.unitSystem
+    val showQibla = repository.showQibla
+    val stepCounterEnabled = repository.stepCounterEnabled
+    val showToolzPill = repository.showToolzPill
+    val userName = repository.userName
+
+    val musicAudioFocus = repository.musicAudioFocus
+    val musicShakeToSkip = repository.musicShakeToSkip
+    val musicPlaybackSpeed = repository.musicPlaybackSpeed
+    val musicEqualizerPreset = repository.musicEqualizerPreset
+    val showMusicVisualizer = repository.showMusicVisualizer
+
+    fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
+    fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
+    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { repository.setDynamicColor(enabled) }
+    fun setCustomPrimaryColor(color: Int?) = viewModelScope.launch { repository.setCustomPrimaryColor(color) }
+    fun setCustomSecondaryColor(color: Int?) = viewModelScope.launch { repository.setCustomSecondaryColor(color) }
     
-    fun resetOnboarding() {
-        viewModelScope.launch {
-            repository.setOnboardingCompleted(false)
-        }
+    fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationsEnabled(enabled) }
+    fun setStepNotifications(enabled: Boolean) = viewModelScope.launch { repository.setStepNotifications(enabled) }
+    fun setTimerNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTimerNotifications(enabled) }
+    fun setVoiceRecordNotifications(enabled: Boolean) = viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) }
+    fun setMusicNotifications(enabled: Boolean) = viewModelScope.launch { repository.setMusicNotifications(enabled) }
+    fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }
+
+    fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color) }
+    fun setWidgetAccentColor(color: Int) = viewModelScope.launch { repository.setWidgetAccentColor(color) }
+    fun setWidgetOpacity(opacity: Float) = viewModelScope.launch { repository.setWidgetOpacity(opacity) }
+
+    fun setHapticFeedback(enabled: Boolean) = viewModelScope.launch { repository.setHapticFeedback(enabled) }
+    fun setHapticIntensity(intensity: Float) = viewModelScope.launch { repository.setHapticIntensity(intensity) }
+    fun setUnitSystem(unit: String) = viewModelScope.launch { repository.setUnitSystem(unit) }
+    fun setShowQibla(enabled: Boolean) = viewModelScope.launch { repository.setShowQibla(enabled) }
+    fun setStepCounterEnabled(enabled: Boolean) = viewModelScope.launch { repository.setStepCounterEnabled(enabled) }
+    fun setShowToolzPill(enabled: Boolean) = viewModelScope.launch { repository.setShowToolzPill(enabled) }
+    fun setUserName(name: String) = viewModelScope.launch { repository.setUserName(name) }
+
+    fun setMusicAudioFocus(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocus(enabled) }
+    fun setMusicShakeToSkip(enabled: Boolean) = viewModelScope.launch { repository.setMusicShakeToSkip(enabled) }
+    fun setMusicPlaybackSpeed(speed: Float) = viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) }
+    fun setShowMusicVisualizer(enabled: Boolean) = viewModelScope.launch { repository.setShowMusicVisualizer(enabled) }
+
+    fun resetOnboarding() = viewModelScope.launch {
+        repository.setOnboardingCompleted(false)
+        repository.setUserName("")
     }
 }

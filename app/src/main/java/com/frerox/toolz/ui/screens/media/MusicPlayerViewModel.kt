@@ -104,6 +104,63 @@ class MusicPlayerViewModel @Inject constructor(
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
 
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _uiState.update { it.copy(isPlaying = isPlaying) }
+            if (isPlaying) {
+                startProgressUpdate()
+                startPlayerService()
+                initEqualizer()
+                performHapticFeedback()
+                
+                val currentUri = player.currentMediaItem?.mediaId
+                if (currentUri != null) {
+                    viewModelScope.launch {
+                        repository.incrementPlayCount(currentUri)
+                    }
+                }
+            } else {
+                stopProgressUpdate()
+                performHapticFeedback()
+            }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
+            val track = _uiState.value.tracks.find { it.uri == uri }
+            _uiState.update { 
+                it.copy(
+                    currentTrack = track,
+                    duration = player.duration.coerceAtLeast(0L)
+                ) 
+            }
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                 performHapticFeedback()
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) {
+                _uiState.update { it.copy(duration = player.duration.coerceAtLeast(0L)) }
+            }
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            _uiState.update { it.copy(repeatMode = repeatMode) }
+            performHapticFeedback()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
+            performHapticFeedback()
+        }
+        
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            super.onPlayerError(error)
+            player.prepare()
+        }
+    }
+
     private data class MusicData(
         val tracks: List<MusicTrack>,
         val playlists: List<Playlist>,
@@ -120,6 +177,7 @@ class MusicPlayerViewModel @Inject constructor(
         
         player.setAudioAttributes(audioAttributes, true)
         player.setHandleAudioBecomingNoisy(true)
+        player.addListener(playerListener)
 
         connectToMediaController()
 
@@ -226,63 +284,6 @@ class MusicPlayerViewModel @Inject constructor(
                 }
             }.collect()
         }
-
-        player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _uiState.update { it.copy(isPlaying = isPlaying) }
-                if (isPlaying) {
-                    startProgressUpdate()
-                    startPlayerService()
-                    initEqualizer()
-                    performHapticFeedback()
-                    
-                    val currentUri = player.currentMediaItem?.mediaId
-                    if (currentUri != null) {
-                        viewModelScope.launch {
-                            repository.incrementPlayCount(currentUri)
-                        }
-                    }
-                } else {
-                    stopProgressUpdate()
-                    performHapticFeedback()
-                }
-            }
-
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
-                val track = _uiState.value.tracks.find { it.uri == uri }
-                _uiState.update { 
-                    it.copy(
-                        currentTrack = track,
-                        duration = player.duration.coerceAtLeast(0L)
-                    ) 
-                }
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
-                     performHapticFeedback()
-                }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    _uiState.update { it.copy(duration = player.duration.coerceAtLeast(0L)) }
-                }
-            }
-
-            override fun onRepeatModeChanged(repeatMode: Int) {
-                _uiState.update { it.copy(repeatMode = repeatMode) }
-                performHapticFeedback()
-            }
-
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
-                performHapticFeedback()
-            }
-            
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                super.onPlayerError(error)
-                player.prepare()
-            }
-        })
         
         if (player.isPlaying) {
             startProgressUpdate()
@@ -295,10 +296,13 @@ class MusicPlayerViewModel @Inject constructor(
         controllerFuture?.addListener({
             try {
                 controller = controllerFuture?.get()
+                controller?.addListener(playerListener)
                 _uiState.update { it.copy(
                     isPlaying = controller?.isPlaying ?: false,
                     isShuffleOn = controller?.shuffleModeEnabled ?: false,
-                    repeatMode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
+                    repeatMode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF,
+                    currentTrack = _uiState.value.tracks.find { t -> t.uri == controller?.currentMediaItem?.mediaId },
+                    duration = controller?.duration?.coerceAtLeast(0L) ?: 0L
                 )}
                 pendingAction?.invoke()
                 pendingAction = null
@@ -403,7 +407,8 @@ class MusicPlayerViewModel @Inject constructor(
         progressJob = viewModelScope.launch {
             while (true) {
                 if (_sliderPosition.value == null) {
-                    _uiState.update { it.copy(playbackPosition = player.currentPosition) }
+                    val p: Player = controller ?: player
+                    _uiState.update { it.copy(playbackPosition = p.currentPosition) }
                 }
                 delay(100)
             }
@@ -675,6 +680,8 @@ class MusicPlayerViewModel @Inject constructor(
         stopShakeDetection()
         sleepTimerJob?.cancel()
         equalizer?.release()
+        player.removeListener(playerListener)
+        controller?.removeListener(playerListener)
         controllerFuture?.let {
             MediaController.releaseFuture(it)
         }

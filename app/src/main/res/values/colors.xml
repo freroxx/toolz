@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="primary_light">#FFFF6D00</color>
+    <color name="primary_container_light">#FFFFE0B2</color>
+    <color name="secondary_light">#FF00BFA5</color>
+    <color name="secondary_container_light">#FFE0F2F1</color>
+
     <color name="purple_200">#FFBB86FC</color>
     <color name="purple_500">#FF6200EE</color>
     <color name="purple_700">#FF3700B3</color>

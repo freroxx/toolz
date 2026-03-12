@@ -22,6 +22,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions" />
 
     <application
         android:name=".ToolzApplication"
@@ -102,6 +106,29 @@
             android:name=".service.CompassService"
             android:enabled="true"
             android:exported="false" />
+
+        <service
+            android:name=".service.NotificationVaultService"
+            android:label="Toolz Notification Vault"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".service.FocusFlowAccessibilityService"
+            android:label="Toolz Focus Flow"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.AccessibilityService"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <!-- Widgets -->
         <receiver android:name=".widget.FlashlightWidgetProvider"
