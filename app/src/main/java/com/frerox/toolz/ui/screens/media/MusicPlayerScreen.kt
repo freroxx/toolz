@@ -1,13 +1,17 @@
-package com.frerox.toolz.ui.screens.media
-
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+// NEW: Specific imports for the 2026 Blur/RenderEffect system
+import android.graphics.RenderEffect as AndroidRenderEffect
+import android.graphics.Shader as AndroidShader
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -55,6 +59,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+// NEW: Bridge between Android RenderEffect and Compose
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -76,6 +82,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import java.util.*
+// NEW: Math utilities for the Sine Wave
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -166,7 +173,7 @@ fun MusicPlayerScreen(
                 Column(modifier = Modifier.statusBarsPadding()) {
                     if (state.isSelectionMode) {
                         TopAppBar(
-                            title = { Text("${state.selectedTracks.size} Selected", fontWeight = FontWeight.Black) },
+                            title = { Text(text = "${state.selectedTracks.size} Selected", fontWeight = FontWeight.Black) },
                             navigationIcon = {
                                 IconButton(onClick = { viewModel.clearSelection() }) {
                                     Icon(Icons.Rounded.Close, "Clear Selection")
@@ -180,7 +187,7 @@ fun MusicPlayerScreen(
                         )
                     } else {
                         TopAppBar(
-                            title = { Text("MUSIC PLAYER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                            title = { Text(text = "MUSIC PLAYER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                             navigationIcon = {
                                 IconButton(onClick = onBack) {
                                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -205,17 +212,17 @@ fun MusicPlayerScreen(
                                         shape = RoundedCornerShape(24.dp)
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("By Title", fontWeight = FontWeight.Bold) },
+                                            text = { Text(text = "By Title", fontWeight = FontWeight.Bold) },
                                             onClick = { viewModel.setSortOrder(SortOrder.TITLE); showSortMenu = false },
                                             leadingIcon = { Icon(Icons.Rounded.Title, null) }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("By Artist", fontWeight = FontWeight.Bold) },
+                                            text = { Text(text = "By Artist", fontWeight = FontWeight.Bold) },
                                             onClick = { viewModel.setSortOrder(SortOrder.ARTIST); showSortMenu = false },
                                             leadingIcon = { Icon(Icons.Rounded.Person, null) }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("By Recent", fontWeight = FontWeight.Bold) },
+                                            text = { Text(text = "By Recent", fontWeight = FontWeight.Bold) },
                                             onClick = { viewModel.setSortOrder(SortOrder.RECENT); showSortMenu = false },
                                             leadingIcon = { Icon(Icons.Rounded.Schedule, null) }
                                         )
@@ -231,7 +238,7 @@ fun MusicPlayerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 8.dp),
-                        placeholder = { Text("Search your music...") },
+                        placeholder = { Text(text = "Search your music...") },
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
@@ -294,7 +301,7 @@ fun MusicPlayerScreen(
                             Tab(
                                 selected = currentTab == index,
                                 onClick = { currentTab = index },
-                                text = { Text(label, fontWeight = if (currentTab == index) FontWeight.Black else FontWeight.Bold, letterSpacing = 0.5.sp) },
+                                text = { Text(text = label, fontWeight = if (currentTab == index) FontWeight.Black else FontWeight.Bold, letterSpacing = 0.5.sp) },
                                 icon = { Icon(icon, null) }
                             )
                         }
@@ -321,9 +328,9 @@ fun MusicPlayerScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Icon(Icons.Rounded.FolderSpecial, null, modifier = Modifier.size(120.dp).alpha(0.1f), tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.height(24.dp))
-                        Text("Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                        Text(text = "Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                         Text(
-                            "To access and play your music library, Toolz needs storage permissions.",
+                            text = "To access and play your music library, Toolz needs storage permissions.",
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -342,7 +349,7 @@ fun MusicPlayerScreen(
                             shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.fillMaxWidth(0.8f).height(64.dp)
                         ) {
-                            Text("GRANT ACCESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                            Text(text = "GRANT ACCESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                         }
                     }
                 }
@@ -351,7 +358,7 @@ fun MusicPlayerScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(strokeCap = StrokeCap.Round, modifier = Modifier.size(64.dp), strokeWidth = 6.dp)
                         Spacer(Modifier.height(24.dp))
-                        Text("SYNCHRONIZING...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text(text = "SYNCHRONIZING...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
                 }
             } else {
@@ -469,11 +476,11 @@ fun TrackList(tracks: List<MusicTrack>, state: MusicUiState, viewModel: MusicPla
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(100.dp).alpha(0.1f))
                         Spacer(Modifier.height(16.dp))
-                        Text("NO MUSIC FOUND", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        Text("Scan your device to locate audio files.", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+                        Text(text = "NO MUSIC FOUND", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text(text = "Scan your device to locate audio files.", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(24.dp))
                         Button(onClick = { viewModel.scanMusic() }, shape = RoundedCornerShape(20.dp)) {
-                            Text("REFRESH LIBRARY", fontWeight = FontWeight.Black)
+                            Text(text = "REFRESH LIBRARY", fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -516,7 +523,7 @@ fun FolderList(state: MusicUiState, onFolderClick: (String, List<MusicTrack>) ->
         if (state.folders.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No folders with music.", color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
+                    Text(text = "No folders with music.", color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
                 }
             }
         } else {
@@ -563,7 +570,7 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                folderName,
+                text = folderName,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -571,7 +578,7 @@ fun FolderCard(folderName: String, trackCount: Int, onClick: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                "$trackCount TRACKS",
+                text = "$trackCount TRACKS",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Black,
@@ -592,7 +599,7 @@ fun FolderTracksDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(folderName.uppercase(), fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text(text = folderName.uppercase(), fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
         text = {
             Box(modifier = Modifier.height(500.dp)) {
                 LazyColumn(
@@ -623,7 +630,7 @@ fun FolderTracksDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss, shape = RoundedCornerShape(16.dp)) { Text("DONE", fontWeight = FontWeight.Black) }
+            Button(onClick = onDismiss, shape = RoundedCornerShape(16.dp)) { Text(text = "DONE", fontWeight = FontWeight.Black) }
         },
         shape = RoundedCornerShape(40.dp),
         containerColor = MaterialTheme.colorScheme.surface
@@ -650,7 +657,7 @@ fun LibrarySection(
     ) {
         item {
             Spacer(Modifier.height(28.dp))
-            Text("QUICK ACCESS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
+            Text(text = "QUICK ACCESS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(24.dp))
         }
 
@@ -681,8 +688,8 @@ fun LibrarySection(
                                 }
                             }
                             Spacer(Modifier.height(16.dp))
-                            Text("Favorites", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                            Text("${state.favoriteTracks.size} Items", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+                            Text(text = "Favorites", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                            Text(text = "${state.favoriteTracks.size} Items", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
                         }
                     }
                 }
@@ -709,7 +716,7 @@ fun LibrarySection(
                                 }
                             }
                             Spacer(Modifier.height(16.dp))
-                            Text("New List", fontWeight = FontWeight.Black)
+                            Text(text = "New List", fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -719,8 +726,8 @@ fun LibrarySection(
         item {
             Spacer(Modifier.height(44.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("RECENTLY PLAYED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
-                TextButton(onClick = { showRecentDetail = true }) { Text("VIEW ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) }
+                Text(text = "RECENTLY PLAYED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = { showRecentDetail = true }) { Text(text = "VIEW ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) }
             }
             Spacer(Modifier.height(16.dp))
             LazyRow(
@@ -736,8 +743,8 @@ fun LibrarySection(
         item {
             Spacer(Modifier.height(44.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("MOST PLAYED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
-                TextButton(onClick = { showMostPlayedDetail = true }) { Text("VIEW ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) }
+                Text(text = "MOST PLAYED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = { showMostPlayedDetail = true }) { Text(text = "VIEW ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black) }
             }
             Spacer(Modifier.height(16.dp))
             LazyRow(
@@ -752,7 +759,7 @@ fun LibrarySection(
 
         item {
             Spacer(Modifier.height(44.dp))
-            Text("MY COLLECTIONS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
+            Text(text = "MY COLLECTIONS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(24.dp))
         }
 
@@ -915,7 +922,13 @@ fun FullPlayerView(
                     .fillMaxSize()
                     .graphicsLayer {
                         renderEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            android.graphics.RenderEffect.createBlurEffect(100f, 100f, android.graphics.Shader.TileMode.CLAMP)
+                            androidx.compose.ui.graphics.RenderEffect
+                                .createBlurEffect(
+                                    100f,
+                                    100f,
+                                    androidx.compose.ui.graphics.TileMode.Clamp
+                                )
+                                .asComposeRenderEffect()
                         } else null
                         alpha = 0.15f
                     },
@@ -941,7 +954,7 @@ fun FullPlayerView(
                     }
 
                     Text(
-                        "PLAYING NOW",
+                        text = "PLAYING NOW",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -964,29 +977,29 @@ fun FullPlayerView(
                             shape = RoundedCornerShape(28.dp)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Visuals: Circular", fontWeight = FontWeight.Bold) },
+                                text = { Text(text = "Visuals: Circular", fontWeight = FontWeight.Bold) },
                                 onClick = { onSetArtShape("CIRCLE"); showOverflowMenu = false },
                                 leadingIcon = { RadioButton(selected = state.artShape == "CIRCLE", onClick = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("Visuals: Square", fontWeight = FontWeight.Bold) },
+                                text = { Text(text = "Visuals: Square", fontWeight = FontWeight.Bold) },
                                 onClick = { onSetArtShape("SQUARE"); showOverflowMenu = false },
                                 leadingIcon = { RadioButton(selected = state.artShape == "SQUARE", onClick = null) }
                             )
                             HorizontalDivider(Modifier.padding(vertical = 4.dp).alpha(0.1f))
                             DropdownMenuItem(
-                                text = { Text("Art Rotation", fontWeight = FontWeight.Bold) },
+                                text = { Text(text = "Art Rotation", fontWeight = FontWeight.Bold) },
                                 onClick = { onToggleRotation(); showOverflowMenu = false },
                                 leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.7f)) }
                             )
                             DropdownMenuItem(
-                                text = { Text("Sleep Timer", fontWeight = FontWeight.Bold) },
+                                text = { Text(text = "Sleep Timer", fontWeight = FontWeight.Bold) },
                                 onClick = { showOverflowMenu = false; showSleepTimer = true },
                                 leadingIcon = { Icon(Icons.Rounded.Timer, null) }
                             )
                             HorizontalDivider(Modifier.padding(vertical = 4.dp).alpha(0.1f))
                             DropdownMenuItem(
-                                text = { Text("Stop & Exit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black) },
+                                text = { Text(text = "Stop & Exit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black) },
                                 onClick = { showOverflowMenu = false; onStop() },
                                 leadingIcon = { Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error) }
                             )
@@ -1023,7 +1036,7 @@ fun FullPlayerView(
                 // Track Information
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 16.dp)) {
                     Text(
-                        track.title,
+                        text = track.title,
                         style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1031,7 +1044,7 @@ fun FullPlayerView(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        track.artist?.uppercase() ?: "UNKNOWN ARTIST",
+                        text = track.artist?.uppercase() ?: "UNKNOWN ARTIST",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.ExtraBold,
@@ -1057,13 +1070,13 @@ fun FullPlayerView(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            formatDuration(currentPos),
+                            text = formatDuration(currentPos),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            formatDuration(state.duration),
+                            text = formatDuration(state.duration),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
@@ -1162,76 +1175,95 @@ fun SquigglySlider(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
-    
-    val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    val phaseState = infiniteTransition.animateFloat(
+
+    // 1. Phase animation (Horizontal movement)
+    val infiniteTransition = rememberInfiniteTransition(label = "wave_motion")
+    val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 2f * PI.toFloat(),
+        targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
+            animation = tween(1500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "phase"
+        label = "phase_state"
     )
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val inactiveColor = MaterialTheme.colorScheme.surfaceVariant
-    val amplitude = 4.dp
-    val wavelength = 35.dp
+    // 2. Amplitude animation (Flattens wave when paused/dragged)
+    val currentAmplitude by animateFloatAsState(
+        targetValue = if (isPlaying && !isDragged) 5f else 0f,
+        animationSpec = tween(600, easing = FastOutSlowInEasing),
+        label = "amplitude_state"
+    )
 
-    Box(modifier = Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier
-            .fillMaxWidth()
-            .height(24.dp)
-            .drawWithCache {
-                val path = Path()
-                onDrawBehind {
-                    val width = size.width
-                    val centerY = size.height / 2
-                    val progress = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-                    val thumbX = width * progress
-                    
-                    val A = amplitude.toPx()
-                    val λ = wavelength.toPx()
-                    val φ = if (isPlaying && !isDragged) phaseState.value else 0f
+    val primary = MaterialTheme.colorScheme.primary
+    val inactive = MaterialTheme.colorScheme.surfaceVariant
 
-                    // 1. Draw Inactive Path (Right)
-                    drawLine(
-                        color = inactiveColor,
-                        start = Offset(thumbX, centerY),
-                        end = Offset(width, centerY),
-                        strokeWidth = 6.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
+    Box(
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // Optimized Canvas using drawWithCache to prevent allocations during draw
+        Spacer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .drawWithCache {
+                    val path = Path()
+                    onDrawBehind {
+                        // Slider standard padding is 12dp. Aligning here prevents "drift"
+                        val horizontalPadding = 12.dp.toPx()
+                        val canvasWidth = size.width - (horizontalPadding * 2)
+                        val centerY = size.height / 2
 
-                    // 2. Draw Squiggly Active Path (Left)
-                    path.reset()
-                    path.moveTo(0f, centerY)
-                    val step = 4f
-                    var x = 0f
-                    while (x < thumbX) {
-                        val y = centerY + A * sin((2 * PI * x / λ) + φ).toFloat()
-                        path.lineTo(x, y)
-                        x += step
+                        val range = valueRange.endInclusive - valueRange.start
+                        val progress = if (range > 0) ((value - valueRange.start) / range).coerceIn(0f, 1f) else 0f
+                        val thumbX = horizontalPadding + (canvasWidth * progress)
+
+                        val waveFreq = 32.dp.toPx() // Wavelength
+                        val amp = currentAmplitude.dp.toPx()
+
+                        // A. Draw Inactive Track (Right side - straight)
+                        drawLine(
+                            color = inactive,
+                            start = Offset(thumbX, centerY),
+                            end = Offset(size.width - horizontalPadding, centerY),
+                            strokeWidth = 6.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+
+                        // B. Draw Active Squiggly Path (Left side)
+                        path.reset()
+                        path.moveTo(horizontalPadding, centerY)
+
+                        val step = 4f // Performance step
+                        var x = 0f
+                        val activeWidth = thumbX - horizontalPadding
+
+                        while (x < activeWidth) {
+                            // Subtraction in sin() creates forward motion
+                            val y = centerY + amp * sin((2 * PI * x / waveFreq) - phase).toFloat()
+                            path.lineTo(horizontalPadding + x, y)
+                            x += step
+                        }
+                        path.lineTo(thumbX, centerY) // Smooth snap to thumb position
+
+                        drawPath(
+                            path = path,
+                            color = primary,
+                            style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                        )
+
+                        // C. Draw Thumb (Always present)
+                        drawCircle(
+                            color = primary,
+                            radius = if (isDragged) 10.dp.toPx() else 8.dp.toPx(),
+                            center = Offset(thumbX, centerY)
+                        )
                     }
-                    path.lineTo(thumbX, centerY)
-                    
-                    drawPath(
-                        path = path,
-                        color = primaryColor,
-                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-                    )
-
-                    // 3. Draw Thumb
-                    drawCircle(
-                        color = primaryColor,
-                        radius = 8.dp.toPx(),
-                        center = Offset(thumbX, centerY)
-                    )
                 }
-            }
-        ) {}
+        )
 
+        // Invisible Interactive Slider
         Slider(
             value = value,
             onValueChange = onValueChange,
@@ -1252,7 +1284,7 @@ fun SquigglySlider(
 fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("SLEEP TIMER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text(text = "SLEEP TIMER", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(15, 30, 45, 60, 90).forEach { mins ->
@@ -1269,7 +1301,7 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                         ) {
                             Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                             Spacer(Modifier.width(20.dp))
-                            Text("$mins Minutes", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                            Text(text = "$mins Minutes", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                         }
                     }
                 }
@@ -1278,7 +1310,7 @@ fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
                     onClick = { onSet(null); onDismiss() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("CANCEL TIMER", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black)
+                    Text(text = "CANCEL TIMER", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black)
                 }
             }
         },
@@ -1332,8 +1364,8 @@ fun PlaylistDetailView(
                 }
                 Spacer(Modifier.width(24.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(playlist.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-                    Text("${playlistTracks.size} Tracks Indexed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                    Text(text = playlist.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                    Text(text = "${playlistTracks.size} Tracks Indexed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                 }
                 if (isEditable) {
                     IconButton(
@@ -1358,7 +1390,7 @@ fun PlaylistDetailView(
                 ) {
                     Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(36.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("SHUFFLE PLAY", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                    Text(text = "SHUFFLE PLAY", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                 }
                 if (isEditable) {
                     FilledTonalIconButton(
@@ -1395,11 +1427,11 @@ fun PlaylistDetailView(
     if (showAddTrack) {
         AlertDialog(
             onDismissRequest = { showAddTrack = false },
-            title = { Text("SELECT TRACKS", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            title = { Text(text = "SELECT TRACKS", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
             text = {
                 val availableTracks = allTracks.filter { it.uri !in playlist.trackUris }
                 if (availableTracks.isEmpty()) {
-                    Text("All tracks already added.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text(text = "All tracks already added.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 } else {
                     LazyColumn(modifier = Modifier.height(450.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         items(availableTracks) { track ->
@@ -1414,8 +1446,8 @@ fun PlaylistDetailView(
                                     }
                                     Spacer(Modifier.width(18.dp))
                                     Column {
-                                        Text(track.title, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(track.artist ?: "Unknown Artist", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text(text = track.title, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(text = track.artist ?: "Unknown Artist", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -1424,7 +1456,7 @@ fun PlaylistDetailView(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddTrack = false }) { Text("DISMISS", fontWeight = FontWeight.Black) }
+                TextButton(onClick = { showAddTrack = false }) { Text(text = "DISMISS", fontWeight = FontWeight.Black) }
             },
             shape = RoundedCornerShape(40.dp)
         )
@@ -1507,14 +1539,14 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit, onLongClick: () -> Uni
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    playlist.name,
+                    text = playlist.name,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${playlist.trackUris.size} TRACKS",
+                    text = "${playlist.trackUris.size} TRACKS",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Black,
@@ -1586,7 +1618,7 @@ fun TrackItem(
             Spacer(Modifier.width(18.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    track.title,
+                    text = track.title,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1594,7 +1626,7 @@ fun TrackItem(
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    track.artist?.uppercase() ?: "UNKNOWN ARTIST",
+                    text = track.artist?.uppercase() ?: "UNKNOWN ARTIST",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f) else MaterialTheme.colorScheme.outline,
                     fontWeight = FontWeight.ExtraBold,
@@ -1624,12 +1656,12 @@ fun TrackItem(
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Add to Playlist", fontWeight = FontWeight.Bold) },
+                        text = { Text(text = "Add to Playlist", fontWeight = FontWeight.Bold) },
                         onClick = { showPlaylistPicker = true; showMenu = false },
                         leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null) }
                     )
                     DropdownMenuItem(
-                        text = { Text(deleteLabel, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error) },
+                        text = { Text(text = deleteLabel, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error) },
                         onClick = { onDelete(); showMenu = false },
                         leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) }
                     )
@@ -1641,10 +1673,10 @@ fun TrackItem(
     if (showPlaylistPicker) {
         AlertDialog(
             onDismissRequest = { showPlaylistPicker = false },
-            title = { Text("SELECT PLAYLIST", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            title = { Text(text = "SELECT PLAYLIST", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
             text = {
                 if (playlists.isEmpty()) {
-                    Text("No playlists available.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text(text = "No playlists available.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 } else {
                     LazyColumn(modifier = Modifier.height(350.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(playlists) { playlist ->
@@ -1656,7 +1688,7 @@ fun TrackItem(
                                 Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(18.dp))
-                                    Text(playlist.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
+                                    Text(text = playlist.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
                                 }
                             }
                         }
@@ -1664,7 +1696,7 @@ fun TrackItem(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showPlaylistPicker = false }) { Text("CANCEL", fontWeight = FontWeight.Black) }
+                TextButton(onClick = { showPlaylistPicker = false }) { Text(text = "CANCEL", fontWeight = FontWeight.Black) }
             },
             shape = RoundedCornerShape(40.dp)
         )
@@ -1738,14 +1770,14 @@ fun MiniPlayer(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        track.title,
+                        text = track.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        track.artist?.uppercase() ?: "UNKNOWN ARTIST",
+                        text = track.artist?.uppercase() ?: "UNKNOWN ARTIST",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.ExtraBold,
@@ -1792,12 +1824,12 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("NEW COLLECTION", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text(text = "NEW COLLECTION", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Playlist Name") },
+                label = { Text(text = "Playlist Name") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
@@ -1812,10 +1844,10 @@ fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
                 onClick = { if (name.isNotBlank()) onCreate(name) },
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.height(56.dp)
-            ) { Text("CREATE", fontWeight = FontWeight.Black) }
+            ) { Text(text = "CREATE", fontWeight = FontWeight.Black) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("DISMISS", fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onDismiss) { Text(text = "DISMISS", fontWeight = FontWeight.Bold) }
         },
         shape = RoundedCornerShape(40.dp),
         containerColor = MaterialTheme.colorScheme.surface
@@ -1830,10 +1862,10 @@ fun MultiSelectPlaylistPicker(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ADD TO LIST...", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+        title = { Text(text = "ADD TO LIST...", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
         text = {
             if (playlists.isEmpty()) {
-                Text("No collections found.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Text(text = "No collections found.", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             } else {
                 LazyColumn(modifier = Modifier.height(350.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(playlists) { playlist ->
@@ -1845,7 +1877,7 @@ fun MultiSelectPlaylistPicker(
                             Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.width(18.dp))
-                                Text(playlist.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
+                                Text(text = playlist.name, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
                             }
                         }
                     }
@@ -1853,7 +1885,7 @@ fun MultiSelectPlaylistPicker(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDismiss() }) { Text("CANCEL", fontWeight = FontWeight.Black) }
+            TextButton(onClick = { onDismiss() }) { Text(text = "CANCEL", fontWeight = FontWeight.Black) }
         },
         shape = RoundedCornerShape(40.dp)
     )

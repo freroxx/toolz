@@ -332,7 +332,7 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        val targetProgress = if (state.duration > 0) state.progress.toFloat() / state.duration else 0f
+        val targetProgress = if (state.duration > 0) state.playbackPosition.toFloat() / state.duration else 0f
         val animatedProgress by animateFloatAsState(
             targetValue = targetProgress,
             animationSpec = tween(500, easing = LinearOutSlowInEasing),
