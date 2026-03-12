@@ -94,6 +94,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.barcode.scanning)
+    implementation(libs.mlkit.text.recognition)
     implementation(libs.exp4j)
     
     // Media3
