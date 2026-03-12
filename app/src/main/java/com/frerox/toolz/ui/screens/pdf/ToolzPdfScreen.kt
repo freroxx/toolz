@@ -33,7 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AssistChip
@@ -53,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -95,6 +97,7 @@ fun ToolzPdfScreen(
     val openTabs by viewModel.openTabs.collectAsStateWithLifecycle()
     val activeTabId by viewModel.activeTabId.collectAsStateWithLifecycle()
     val formulaState by viewModel.formulaState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     var showBottomSheet by remember { mutableStateOf<PdfFile?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -175,7 +178,7 @@ fun ToolzPdfScreen(
                                 label = { Text(tab.title.take(22), maxLines = 1) },
                                 trailingIcon = {
                                     Icon(
-                                        imageVector = Icons.Rounded.FitScreen,
+                                        imageVector = Icons.Rounded.Close,
                                         contentDescription = "Close tab",
                                         modifier = Modifier
                                             .size(16.dp)
@@ -232,7 +235,7 @@ fun ToolzPdfScreen(
             state = formulaState,
             onDismiss = viewModel::clearFormulaResult,
             onCopyLatex = {
-                val clipboard = LocalContext.current.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("latex", it))
             },
             onSolve = { onSolveFormula?.invoke(it) }
@@ -376,11 +379,12 @@ private fun ReaderBottomControls(viewModel: PdfViewModel, nightProfile: NightPro
     }
 }
 
+@Composable
 private fun Modifier.glassmorphicSurface(): Modifier {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         this
             .graphicsLayer {
-                renderEffect = RenderEffect.createBlurEffect(30f, 30f, Shader.TileMode.CLAMP)
+                renderEffect = RenderEffect.createBlurEffect(30f, 30f, Shader.TileMode.CLAMP).asComposeRenderEffect()
             }
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
     } else {
@@ -403,12 +407,21 @@ fun PdfListContent(
     onFileClick: (PdfFile) -> Unit,
     onMenuClick: (PdfFile) -> Unit
 ) {
+    val filteredFiles = pdfFiles.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
     if (pdfFiles.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(text = "No PDF files found", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
         }
+    } else if (filteredFiles.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "No results for \"$searchQuery\"",
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.outline
+            )
+        }
     } else {
-        val filteredFiles = pdfFiles.filter { it.name.contains(searchQuery, ignoreCase = true) }
         PdfFileList(files = filteredFiles, onFileClick = onFileClick, onMenuClick = onMenuClick)
     }
 }

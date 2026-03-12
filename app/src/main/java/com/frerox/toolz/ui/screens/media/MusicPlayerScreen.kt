@@ -1,3 +1,5 @@
+package com.frerox.toolz.ui.screens.media
+
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
@@ -157,11 +159,7 @@ fun MusicPlayerScreen(
     }
 
     val filteredTracks = remember(state.tracks, searchQuery) {
-        if (searchQuery.isEmpty()) state.tracks
-        else state.tracks.filter {
-            it.title.contains(searchQuery, ignoreCase = true) ||
-            (it.artist?.contains(searchQuery, ignoreCase = true) == true)
-        }
+        filterTracks(state.tracks, searchQuery)
     }
 
     Scaffold(
@@ -922,11 +920,11 @@ fun FullPlayerView(
                     .fillMaxSize()
                     .graphicsLayer {
                         renderEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            androidx.compose.ui.graphics.RenderEffect
+                            AndroidRenderEffect
                                 .createBlurEffect(
                                     100f,
                                     100f,
-                                    androidx.compose.ui.graphics.TileMode.Clamp
+                                    AndroidShader.TileMode.CLAMP
                                 )
                                 .asComposeRenderEffect()
                         } else null
@@ -1896,4 +1894,13 @@ private fun formatDuration(durationMs: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+}
+
+
+private fun filterTracks(tracks: List<MusicTrack>, query: String): List<MusicTrack> {
+    if (query.isBlank()) return tracks
+    return tracks.filter {
+        it.title.contains(query, ignoreCase = true) ||
+            (it.artist?.contains(query, ignoreCase = true) == true)
+    }
 }
