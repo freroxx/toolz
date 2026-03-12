@@ -86,19 +86,18 @@ fun VoiceRecorderScreen(
             // Recording Visualization Area
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1.2f),
+                    .fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface,
                 shape = RoundedCornerShape(bottomStart = 48.dp, bottomEnd = 48.dp),
                 tonalElevation = 4.dp,
                 shadowElevation = 12.dp
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.padding(vertical = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
                         if (uiState.isRecording) {
                             RecordingRippleAnimation()
                         }
@@ -107,7 +106,7 @@ fun VoiceRecorderScreen(
                             Text(
                                 text = formatDuration(uiState.durationMillis),
                                 style = MaterialTheme.typography.displayLarge.copy(
-                                    fontSize = 84.sp,
+                                    fontSize = 72.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
                                     letterSpacing = (-4).sp
@@ -125,7 +124,7 @@ fun VoiceRecorderScreen(
                                     modifier = Modifier.padding(top = 16.dp)
                                 ) {
                                     Text(
-                                        "LIVE RECORDING",
+                                        if (uiState.isPaused) "PAUSED" else "LIVE RECORDING",
                                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Black,
@@ -137,22 +136,51 @@ fun VoiceRecorderScreen(
                         }
                     }
                     
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(Modifier.height(32.dp))
                     
-                    RecordButton(
-                        isRecording = uiState.isRecording,
-                        onClick = {
-                            if (uiState.isRecording) viewModel.stopRecording()
-                            else viewModel.startRecording()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (uiState.isRecording) {
+                            Surface(
+                                onClick = {
+                                    if (uiState.isPaused) viewModel.resumeRecording()
+                                    else viewModel.pauseRecording()
+                                },
+                                modifier = Modifier.size(72.dp).bouncyClick {},
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shadowElevation = 8.dp
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(32.dp))
                         }
-                    )
+                        
+                        RecordButton(
+                            isRecording = uiState.isRecording,
+                            onClick = {
+                                if (uiState.isRecording) viewModel.stopRecording()
+                                else viewModel.startRecording()
+                            }
+                        )
+                    }
                 }
             }
 
             // Recordings List
             Column(
                 modifier = Modifier
-                    .weight(1.5f)
+                    .weight(1f)
                     .padding(horizontal = 24.dp)
             ) {
                 Row(
@@ -256,13 +284,13 @@ fun RecordingRippleAnimation() {
     Box(contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
-                .size(180.dp)
+                .size(160.dp)
                 .graphicsLayer(scaleX = scale1, scaleY = scale1)
                 .background(MaterialTheme.colorScheme.error.copy(alpha = alpha1), CircleShape)
         )
         Box(
             modifier = Modifier
-                .size(180.dp)
+                .size(160.dp)
                 .graphicsLayer(scaleX = scale1 * 0.75f, scaleY = scale1 * 0.75f)
                 .background(MaterialTheme.colorScheme.error.copy(alpha = alpha1), CircleShape)
         )
@@ -276,7 +304,7 @@ fun RecordButton(
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(110.dp).bouncyClick {},
+        modifier = Modifier.size(100.dp).bouncyClick {},
         shape = CircleShape,
         color = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         shadowElevation = 12.dp,
@@ -294,7 +322,7 @@ fun RecordButton(
                     imageVector = if (recording) Icons.Rounded.Stop else Icons.Rounded.Mic,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(52.dp)
+                    modifier = Modifier.size(48.dp)
                 )
             }
         }

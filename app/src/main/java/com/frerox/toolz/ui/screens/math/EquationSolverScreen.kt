@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.math.MathHistory
+import com.frerox.toolz.ui.components.bouncyClick
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,20 +64,22 @@ fun EquationSolverScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            // Display Area with Keyboard Support
+            // Display Area
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .weight(0.8f)
+                    .padding(vertical = 8.dp)
                     .clickable { focusRequester.requestFocus() },
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(24.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
                 Column(
                     modifier = Modifier
-                        .padding(24.dp)
+                        .padding(20.dp)
                         .fillMaxSize(),
                     verticalArrangement = Arrangement.Bottom,
                     horizontalAlignment = Alignment.End
@@ -94,10 +97,13 @@ fun EquationSolverScreen(
                         ),
                         placeholder = { 
                             Text(
-                                "0", 
+                                "Enter equation (e.g. x^2=4)", 
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = TextAlign.End,
-                                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = FontFamily.Monospace)
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontFamily = FontFamily.Monospace, 
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
                             ) 
                         },
                         colors = TextFieldDefaults.colors(
@@ -117,8 +123,8 @@ fun EquationSolverScreen(
                     
                     if (state.result.isNotEmpty()) {
                         Text(
-                            text = "= ${state.result}",
-                            style = MaterialTheme.typography.displaySmall.copy(
+                            text = state.result,
+                            style = MaterialTheme.typography.headlineSmall.copy(
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary
                             ),
@@ -130,46 +136,55 @@ fun EquationSolverScreen(
                         Text(
                             text = state.error!!,
                             color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.labelMedium
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Constants & Functions Bar
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            // Controls & Constants
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                item { 
-                    FilterChip(
-                        selected = state.isDegreeMode, 
-                        onClick = { viewModel.toggleMode() },
-                        label = { Text(if (state.isDegreeMode) "DEG" else "RAD") }
-                    )
-                }
-                items(state.constants) { constant ->
-                    AssistChip(
-                        onClick = { viewModel.appendSymbol(constant.value) },
-                        label = { Text(constant.symbol) }
-                    )
+                FilterChip(
+                    selected = state.isDegreeMode, 
+                    onClick = { viewModel.toggleMode() },
+                    label = { Text(if (state.isDegreeMode) "DEG" else "RAD") },
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(state.constants) { constant ->
+                        AssistChip(
+                            onClick = { viewModel.appendSymbol(constant.value) },
+                            label = { Text(constant.symbol) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             // Keypad
             val buttons = listOf(
-                listOf("C", "(", ")", "/"),
-                listOf("7", "8", "9", "*"),
-                listOf("4", "5", "6", "-"),
-                listOf("1", "2", "3", "+"),
-                listOf("0", ".", "BS", "=")
+                listOf("sin(", "cos(", "tan(", "log("),
+                listOf("x", "^", "(", ")"),
+                listOf("7", "8", "9", "/"),
+                listOf("4", "5", "6", "*"),
+                listOf("1", "2", "3", "-"),
+                listOf("0", ".", "=", "+"),
+                listOf("C", "BS")
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1.8f).padding(bottom = 16.dp)
+            ) {
                 buttons.forEach { row ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -190,8 +205,9 @@ fun EquationSolverScreen(
                                         else -> viewModel.appendSymbol(char)
                                     }
                                 },
-                                isAction = char == "=" || char == "/" || char == "*" || char == "-" || char == "+",
-                                isClear = char == "C" || char == "BS"
+                                isAction = char == "=" || char == "/" || char == "*" || char == "-" || char == "+" || char == "^",
+                                isClear = char == "C" || char == "BS",
+                                isVariable = char == "x"
                             )
                         }
                     }
@@ -218,36 +234,40 @@ fun KeypadButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     isAction: Boolean = false,
-    isClear: Boolean = false
+    isClear: Boolean = false,
+    isVariable: Boolean = false
 ) {
     val containerColor = when {
         isAction -> MaterialTheme.colorScheme.primaryContainer
-        isClear -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+        isVariable -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     }
     
     val contentColor = when {
         isAction -> MaterialTheme.colorScheme.onPrimaryContainer
         isClear -> MaterialTheme.colorScheme.onErrorContainer
+        isVariable -> MaterialTheme.colorScheme.onSecondaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Box(
+    Surface(
         modifier = modifier
-            .aspectRatio(1.2f)
-            .clip(RoundedCornerShape(16.dp))
-            .background(containerColor)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
+            .height(52.dp)
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = containerColor
     ) {
-        if (text == "BS") {
-            Icon(Icons.AutoMirrored.Rounded.Backspace, null, tint = contentColor)
-        } else {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = contentColor
-            )
+        Box(contentAlignment = Alignment.Center) {
+            if (text == "BS") {
+                Icon(Icons.AutoMirrored.Rounded.Backspace, null, tint = contentColor, modifier = Modifier.size(20.dp))
+            } else {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                    color = contentColor
+                )
+            }
         }
     }
 }
@@ -262,26 +282,28 @@ fun HistoryBottomSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxHeight(0.6f).padding(16.dp)) {
             Text(
-                "Calculation History",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
+                "CALCULATION HISTORY",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(history) { item ->
-                    Card(
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(item) },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text(item.expression, style = MaterialTheme.typography.bodyLarge)
+                            Text(item.expression, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
                             Text(
                                 "= ${item.result}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }

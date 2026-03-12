@@ -61,18 +61,32 @@ fun CalculatorScreen(
                         letterSpacing = 1.5.sp
                     )
 
-                    IconButton(
-                        onClick = { viewModel.onToggleMode() },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(
-                            if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Science,
-                            contentDescription = "Toggle Mode",
-                            tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
+                    Row {
+                        if (state.isScientific) {
+                            TextButton(
+                                onClick = { viewModel.onToggleAngleMode() },
+                                modifier = Modifier.height(48.dp)
+                            ) {
+                                Text(
+                                    if (state.isDegreeMode) "DEG" else "RAD",
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { viewModel.onToggleMode() },
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(
+                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Science,
+                                contentDescription = "Toggle Mode",
+                                tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
@@ -146,7 +160,7 @@ fun CalculatorScreen(
             // Buttons Grid
             Box(
                 modifier = Modifier
-                    .weight(2.8f)
+                    .weight(3f)
                     .padding(vertical = 8.dp)
             ) {
                 AnimatedContent(
@@ -220,7 +234,8 @@ fun ScientificLayout(viewModel: CalculatorViewModel) {
         "7", "8", "9", "÷",
         "4", "5", "6", "×",
         "1", "2", "3", "-",
-        "0", ".", "=", "+"
+        "0", ".", "DEL", "=",
+        "+"
     )
 
     LazyVerticalGrid(
@@ -230,21 +245,26 @@ fun ScientificLayout(viewModel: CalculatorViewModel) {
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
-            CalcButton(
-                text = btn,
-                onClick = {
-                    when (btn) {
-                        "C" -> viewModel.onClear()
-                        "=" -> viewModel.onEquals()
-                        "+", "-", "×", "÷", "^", "(", ")" -> viewModel.onOperator(btn)
-                        "sin", "cos", "tan", "log", "ln", "sqrt" -> viewModel.onFunction(btn)
-                        "π" -> viewModel.onDigit("π")
-                        "e" -> viewModel.onDigit("e")
-                        else -> viewModel.onDigit(btn)
-                    }
-                },
-                isScientific = true
-            )
+            when (btn) {
+                "DEL" -> CalcIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() }, isScientific = true)
+                else -> {
+                    CalcButton(
+                        text = btn,
+                        onClick = {
+                            when (btn) {
+                                "C" -> viewModel.onClear()
+                                "=" -> viewModel.onEquals()
+                                "+", "-", "×", "÷", "^", "(", ")" -> viewModel.onOperator(btn)
+                                "sin", "cos", "tan", "log", "ln", "sqrt" -> viewModel.onFunction(btn)
+                                "π" -> viewModel.onDigit("π")
+                                "e" -> viewModel.onDigit("e")
+                                else -> viewModel.onDigit(btn)
+                            }
+                        },
+                        isScientific = true
+                    )
+                }
+            }
         }
     }
 }
@@ -294,10 +314,10 @@ fun CalcButton(
 }
 
 @Composable
-fun CalcIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+fun CalcIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
     Surface(
         modifier = Modifier
-            .aspectRatio(1f)
+            .aspectRatio(if (isScientific) 1.25f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(28.dp),
