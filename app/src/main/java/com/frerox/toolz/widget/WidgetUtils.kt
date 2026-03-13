@@ -27,8 +27,8 @@ object WidgetUtils {
             views.setInt(R.id.widget_root, "setBackgroundColor", finalBgColor)
             
             // Calculate contrasting text color
-            val luminance = 0.299 * Color.red(bgColor) + 0.587 * Color.green(bgColor) + 0.114 * Color.blue(bgColor)
-            val isDarkBg = (luminance < 128 && opacity > 0.5)
+            val luminance = (0.299 * Color.red(bgColor) + 0.587 * Color.green(bgColor) + 0.114 * Color.blue(bgColor)) / 255
+            val isDarkBg = (luminance < 0.5 && opacity > 0.5)
             
             val textColor = if (isDarkBg) Color.WHITE else Color.parseColor("#1D1B20")
             val subTextColor = if (isDarkBg) Color.parseColor("#CAC4D0") else Color.parseColor("#49454F")
@@ -57,22 +57,30 @@ object WidgetUtils {
             
             // Progress elements and primary buttons use accent
             try {
-                // setProgressTintPixels is used via setInt for dynamic tinting
+                // Dynamic tinting for progress bars
                 views.setInt(R.id.widget_music_progress, "setProgressTintPixels", accentColor)
                 views.setInt(R.id.widget_step_progress, "setProgressTintPixels", accentColor)
                 
                 // For primary buttons
                 views.setInt(R.id.widget_music_play_pause, "setBackgroundColor", accentColor)
                 views.setInt(R.id.widget_flashlight_button, "setBackgroundColor", accentColor)
+                
+                // Tonal components
+                val tonalAlpha = if (isDarkBg) 40 else 30
+                val tonalColor = Color.argb(
+                    tonalAlpha,
+                    Color.red(accentColor),
+                    Color.green(accentColor),
+                    Color.blue(accentColor)
+                )
+                views.setInt(R.id.widget_flashlight_toggle_container, "setBackgroundColor", tonalColor)
+                views.setInt(R.id.widget_music_album_art, "setBackgroundColor", tonalColor)
             } catch (e: Exception) {}
         }
     }
 
     private fun setTextViewColor(views: RemoteViews, viewId: Int, color: Int) {
         try {
-            // Check if the resource exists to avoid "Unresolved reference" during compilation 
-            // if XMLs are not yet fully processed, but since we are using R.id directly, 
-            // the build system should find them if they are in the XML files.
             views.setTextColor(viewId, color)
         } catch (e: Exception) {}
     }

@@ -25,4 +25,13 @@ interface NotificationDao {
     
     @Query("SELECT * FROM notifications WHERE packageName = :packageName AND title = :title AND text = :text ORDER BY timestamp DESC LIMIT 1")
     suspend fun findDuplicate(packageName: String, title: String?, text: String?): NotificationEntry?
+
+    @Query("SELECT COUNT(*) FROM notifications WHERE packageName = :packageName")
+    suspend fun getNotificationCountForPackage(packageName: String): Int
+
+    @Query("SELECT * FROM notifications WHERE packageName = :packageName ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastNotificationForPackage(packageName: String): NotificationEntry?
+
+    @Query("SELECT DISTINCT packageName FROM notifications")
+    fun getDistinctPackages(): Flow<List<String>>
 }

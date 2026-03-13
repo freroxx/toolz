@@ -29,6 +29,9 @@ class SettingsRepository @Inject constructor(
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
     private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
+    private val HIDDEN_NOTIFICATION_APPS = stringSetPreferencesKey("hidden_notification_apps")
+    private val CUSTOM_NOTIFICATION_CATEGORIES = stringSetPreferencesKey("custom_notification_categories")
+    private val APP_CATEGORY_MAPPINGS = stringSetPreferencesKey("app_category_mappings") // List of "package:category"
     
     // Widget Design
     private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
@@ -61,6 +64,10 @@ class SettingsRepository @Inject constructor(
     private val USER_NAME = stringPreferencesKey("user_name")
     private val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
 
+    // Timer Duration Persistence
+    private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
+    private val LAST_TIMER_SECONDS = intPreferencesKey("last_timer_seconds")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -86,6 +93,14 @@ class SettingsRepository @Inject constructor(
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
     val musicNotifications: Flow<Boolean> = dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
+    val hiddenNotificationApps: Flow<Set<String>> = dataStore.data.map { it[HIDDEN_NOTIFICATION_APPS] ?: emptySet() }
+    val customNotificationCategories: Flow<Set<String>> = dataStore.data.map { it[CUSTOM_NOTIFICATION_CATEGORIES] ?: setOf("Social", "Finance", "Work", "General") }
+    val appCategoryMappings: Flow<Map<String, String>> = dataStore.data.map { pref ->
+        pref[APP_CATEGORY_MAPPINGS]?.associate { 
+            val parts = it.split(":")
+            parts[0] to parts.getOrElse(1) { "General" }
+        } ?: emptyMap()
+    }
 
     // Widget Flows
     val widgetBackgroundColor: Flow<Int> = dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
@@ -114,6 +129,9 @@ class SettingsRepository @Inject constructor(
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
 
+    val lastTimerMinutes: Flow<Int> = dataStore.data.map { it[LAST_TIMER_MINUTES] ?: 0 }
+    val lastTimerSeconds: Flow<Int> = dataStore.data.map { it[LAST_TIMER_SECONDS] ?: 0 }
+
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
     suspend fun setThemeMode(mode: String) { dataStore.edit { it[THEME_MODE] = mode } }
@@ -140,6 +158,16 @@ class SettingsRepository @Inject constructor(
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
     suspend fun setMusicNotifications(enabled: Boolean) { dataStore.edit { it[MUSIC_NOTIFICATIONS] = enabled } }
     suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
+    suspend fun addHiddenNotificationApp(packageName: String) { dataStore.edit { it[HIDDEN_NOTIFICATION_APPS] = (it[HIDDEN_NOTIFICATION_APPS] ?: emptySet()) + packageName } }
+    suspend fun removeHiddenNotificationApp(packageName: String) { dataStore.edit { it[HIDDEN_NOTIFICATION_APPS] = (it[HIDDEN_NOTIFICATION_APPS] ?: emptySet()) - packageName } }
+    suspend fun setNotificationCategories(categories: Set<String>) { dataStore.edit { it[CUSTOM_NOTIFICATION_CATEGORIES] = categories } }
+    suspend fun setAppCategoryMapping(packageName: String, category: String) {
+        dataStore.edit { pref ->
+            val current = pref[APP_CATEGORY_MAPPINGS] ?: emptySet()
+            val filtered = current.filterNot { it.startsWith("$packageName:") }.toSet()
+            pref[APP_CATEGORY_MAPPINGS] = filtered + "$packageName:$category"
+        }
+    }
 
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
@@ -167,4 +195,18 @@ class SettingsRepository @Inject constructor(
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
+
+    suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
+        dataStore.edit {
+            it[LAST_TIMER_MINUTES] = minutes
+            it[LAST_TIMER_SECONDS] = seconds
+        }
+    }
+    
+    suspend fun resetOnboarding() {
+        dataStore.edit {
+            it.remove(USER_NAME)
+            it.remove(ONBOARDING_COMPLETED)
+        }
+    }
 }

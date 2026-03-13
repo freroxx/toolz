@@ -9,6 +9,7 @@ import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.AppUsageInfo
+import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +23,8 @@ import javax.inject.Inject
 @HiltViewModel
 class FocusFlowViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val appLimitRepository: AppLimitRepository
+    private val appLimitRepository: AppLimitRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _usageStats = MutableStateFlow<List<AppUsageInfo>>(emptyList())
@@ -37,6 +39,9 @@ class FocusFlowViewModel @Inject constructor(
     private val _appLimits = appLimitRepository.allLimits.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
+
+    private val userMappings = settingsRepository.appCategoryMappings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(_usageStats, _appLimits) { stats, limits ->
         stats.map { stat ->
@@ -90,6 +95,7 @@ class FocusFlowViewModel @Inject constructor(
             }
             
             val pm = context.packageManager
+            val currentMappings = userMappings.value
 
             val aggregatedStats = stats.groupBy { it.packageName }.mapValues { entry ->
                 entry.value.sumOf { it.totalTimeInForeground }
@@ -105,7 +111,11 @@ class FocusFlowViewModel @Inject constructor(
 
                     val appName = appInfo?.let { pm.getApplicationLabel(it).toString() } ?: packageName
                     val icon = appInfo?.loadIcon(pm)
-                    val category = guessCategory(packageName)
+                    
+                    val mappedCategory = currentMappings[packageName]?.let { 
+                        if (it == "Productive") AppCategory.TOOLZ else AppCategory.DISTRACTION 
+                    }
+                    val category = mappedCategory ?: guessCategory(packageName)
                     
                     AppUsageInfo(
                         packageName = packageName,
@@ -136,6 +146,14 @@ class FocusFlowViewModel @Inject constructor(
             if (limit != null) {
                 appLimitRepository.removeLimit(limit)
             }
+        }
+    }
+
+    fun updateAppCategory(packageName: String, isProductive: Boolean) {
+        viewModelScope.launch {
+            val category = if (isProductive) "Productive" else "Distraction"
+            settingsRepository.setAppCategoryMapping(packageName, category)
+            refreshStats()
         }
     }
 

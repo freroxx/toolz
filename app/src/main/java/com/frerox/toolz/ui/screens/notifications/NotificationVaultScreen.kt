@@ -1,21 +1,32 @@
 package com.frerox.toolz.ui.screens.notifications
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Launch
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,9 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -35,12 +44,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.bouncyClick
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -53,9 +65,14 @@ fun NotificationVaultScreen(
     val notifications by viewModel.notifications.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedAppDetails by remember { mutableStateOf<AppDetails?>(null) }
+    var showNotificationMenu by remember { mutableStateOf<NotificationEntry?>(null) }
+    var showVaultSettings by remember { mutableStateOf(false) }
 
-    val categories = listOf("All", "Social", "Finance", "Work", "General")
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -72,6 +89,9 @@ fun NotificationVaultScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showVaultSettings = true }) {
+                        Icon(Icons.Rounded.Settings, contentDescription = "Vault Settings", tint = MaterialTheme.colorScheme.onSurface)
+                    }
                     if (notifications.isNotEmpty()) {
                         IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All", tint = MaterialTheme.colorScheme.error)
@@ -117,7 +137,8 @@ fun NotificationVaultScreen(
                             ) {
                                 NotificationVaultCard(
                                     notification = notification,
-                                    onDelete = { viewModel.deleteNotification(notification.id) }
+                                    onDelete = { viewModel.deleteNotification(notification.id) },
+                                    onLongClick = { showNotificationMenu = notification }
                                 )
                             }
                         }
@@ -149,6 +170,292 @@ fun NotificationVaultScreen(
                     }
                 },
                 shape = RoundedCornerShape(28.dp)
+            )
+        }
+
+        if (showNotificationMenu != null) {
+            val notification = showNotificationMenu!!
+            ModalBottomSheet(
+                onDismissRequest = { showNotificationMenu = null },
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp)
+            ) {
+                Column(modifier = Modifier.padding(24.dp).padding(bottom = 32.dp)) {
+                    Text(notification.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(24.dp))
+                    
+                    val menuItems = listOf(
+                        Triple("Hide notifications from this app", Icons.Rounded.VisibilityOff, {
+                            viewModel.hideApp(notification.packageName)
+                            showNotificationMenu = null
+                            Toast.makeText(context, "App hidden from vault", Toast.LENGTH_SHORT).show()
+                        }),
+                        Triple("About this app", Icons.Rounded.Info, {
+                            scope.launch {
+                                selectedAppDetails = viewModel.getAppDetails(notification.packageName)
+                                showNotificationMenu = null
+                            }
+                        }),
+                        Triple("Open app", Icons.AutoMirrored.Rounded.Launch, {
+                            try {
+                                val intent = context.packageManager.getLaunchIntentForPackage(notification.packageName)
+                                if (intent != null) {
+                                    context.startActivity(intent)
+                                } else {
+                                    Toast.makeText(context, "Cannot open app", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Cannot open app", Toast.LENGTH_SHORT).show()
+                            }
+                            showNotificationMenu = null
+                        })
+                    )
+
+                    menuItems.forEach { (label, icon, action) ->
+                        Surface(
+                            onClick = { action() },
+                            modifier = Modifier.fillMaxWidth().height(60.dp),
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
+                                Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(16.dp))
+                                Text(label, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        selectedAppDetails?.let { details ->
+            AppDetailsDialog(details = details, onDismiss = { selectedAppDetails = null })
+        }
+
+        if (showVaultSettings) {
+            VaultSettingsDialog(
+                viewModel = viewModel,
+                onDismiss = { showVaultSettings = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val timeString = details.lastNotification?.let { 
+        SimpleDateFormat("HH:mm, MMM dd", Locale.getDefault()).format(Date(it.timestamp))
+    } ?: "N/A"
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(64.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Image(
+                            painter = rememberAsyncImagePainter(
+                                try { context.packageManager.getApplicationIcon(details.packageName) } catch(e: Exception) { null }
+                            ),
+                            contentDescription = null,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(details.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text(details.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                
+                Spacer(Modifier.height(24.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                Spacer(Modifier.height(24.dp))
+                
+                DetailRow("Total Logged", "${details.totalNotifications}")
+                DetailRow("Last Entry", timeString)
+                
+                Spacer(Modifier.height(32.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("DONE")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontWeight = FontWeight.Bold)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VaultSettingsDialog(
+    viewModel: NotificationVaultViewModel,
+    onDismiss: () -> Unit
+) {
+    val hiddenApps by viewModel.hiddenApps.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val appMappings by viewModel.appMappings.collectAsState()
+    val distinctPackages by viewModel.distinctPackages.collectAsState()
+    
+    var newCategoryName by remember { mutableStateOf("") }
+    var selectedPackageToMap by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Vault Settings", fontWeight = FontWeight.Black) },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null) }
+                    }
+                )
+            }
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                Text("MANAGED SECTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(12.dp))
+                
+                categories.forEach { category ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(category, fontWeight = FontWeight.Bold)
+                            if (category != "All" && category != "General") {
+                                IconButton(onClick = { viewModel.removeCategory(category) }) {
+                                    Icon(Icons.Rounded.RemoveCircleOutline, null, tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newCategoryName,
+                        onValueChange = { newCategoryName = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("New section name") },
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (newCategoryName.isNotBlank()) {
+                                viewModel.addCategory(newCategoryName)
+                                newCategoryName = ""
+                            }
+                        },
+                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                    ) {
+                        Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onPrimary)
+                    }
+                }
+
+                Spacer(Modifier.height(32.dp))
+                Text("MAP APPS TO SECTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(12.dp))
+                
+                distinctPackages.forEach { pkg ->
+                    val currentCat = appMappings[pkg] ?: "Auto"
+                    Surface(
+                        onClick = { selectedPackageToMap = pkg },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    ) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = rememberAsyncImagePainter(try { context.packageManager.getApplicationIcon(pkg) } catch(e: Exception) { null }),
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(pkg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Section: $currentCat", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(32.dp))
+                Text("HIDDEN APPS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(12.dp))
+                
+                if (hiddenApps.isEmpty()) {
+                    Text("No apps hidden", modifier = Modifier.alpha(0.5f))
+                } else {
+                    hiddenApps.forEach { pkg ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(pkg, style = MaterialTheme.typography.bodySmall)
+                                IconButton(onClick = { viewModel.unhideApp(pkg) }) {
+                                    Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        selectedPackageToMap?.let { pkg ->
+            AlertDialog(
+                onDismissRequest = { selectedPackageToMap = null },
+                title = { Text("Select Section for $pkg", style = MaterialTheme.typography.titleMedium) },
+                text = {
+                    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                        (listOf("Auto") + categories).forEach { cat ->
+                            Surface(
+                                onClick = { 
+                                    viewModel.mapAppToCategory(pkg, if (cat == "Auto") "" else cat)
+                                    selectedPackageToMap = null
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = if ((appMappings[pkg] ?: "Auto") == cat || (cat == "Auto" && appMappings[pkg].isNullOrEmpty())) 
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent
+                            ) {
+                                Text(cat, modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {}
             )
         }
     }
@@ -270,8 +577,13 @@ fun CategoryStrip(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun NotificationVaultCard(notification: NotificationEntry, onDelete: () -> Unit) {
+fun NotificationVaultCard(
+    notification: NotificationEntry, 
+    onDelete: () -> Unit,
+    onLongClick: () -> Unit
+) {
     val context = LocalContext.current
     var isExpanded by remember { mutableStateOf(false) }
     val timeString = remember(notification.timestamp) {
@@ -281,10 +593,13 @@ fun NotificationVaultCard(notification: NotificationEntry, onDelete: () -> Unit)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
+            .animateContentSize()
+            .combinedClickable(
+                onClick = { isExpanded = !isExpanded },
+                onLongClick = { onLongClick() }
+            ),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-        onClick = { isExpanded = !isExpanded },
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {

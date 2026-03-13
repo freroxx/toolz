@@ -17,6 +17,10 @@ import javax.inject.Singleton
 class PdfRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    private val PDF_DPI = 72f
+    private val OCR_DPI = 300f
+    private val OCR_SCALE = OCR_DPI / PDF_DPI // ~4.16x
+
     suspend fun getPdfFiles(): List<PdfFile> = withContext(Dispatchers.IO) {
         val pdfFiles = mutableListOf<PdfFile>()
         val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -58,15 +62,17 @@ class PdfRepository @Inject constructor(
         pdfFiles
     }
 
-    suspend fun getPageBitmap(uri: Uri, pageIndex: Int): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun getPageBitmap(uri: Uri, pageIndex: Int, scale: Float = 1f): Bitmap? = withContext(Dispatchers.IO) {
         try {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 PdfRenderer(pfd).use { renderer ->
                     if (pageIndex < renderer.pageCount) {
                         renderer.openPage(pageIndex).use { page ->
+                            val width = (page.width * scale).toInt()
+                            val height = (page.height * scale).toInt()
                             val bitmap = Bitmap.createBitmap(
-                                page.width,
-                                page.height,
+                                width,
+                                height,
                                 Bitmap.Config.ARGB_8888
                             )
                             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -80,6 +86,8 @@ class PdfRepository @Inject constructor(
             null
         }
     }
+
+    suspend fun getOcrBitmap(uri: Uri, pageIndex: Int): Bitmap? = getPageBitmap(uri, pageIndex, OCR_SCALE)
 
     private fun generateThumbnailAndPageCount(uri: Uri): Pair<Bitmap?, Int> {
         return try {

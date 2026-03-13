@@ -20,4 +20,10 @@ class NotificationRepository @Inject constructor(
         val threshold = System.currentTimeMillis() - (days.toLong() * 24 * 60 * 60 * 1000)
         notificationDao.deleteOldNotifications(threshold)
     }
+
+    suspend fun getNotificationCountForPackage(packageName: String): Int = notificationDao.getNotificationCountForPackage(packageName)
+
+    suspend fun getLastNotificationForPackage(packageName: String): NotificationEntry? = notificationDao.getLastNotificationForPackage(packageName)
+
+    fun getDistinctPackages(): Flow<List<String>> = notificationDao.getDistinctPackages()
 }

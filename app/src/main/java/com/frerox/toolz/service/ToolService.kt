@@ -41,6 +41,8 @@ class ToolService : Service() {
     // Timer State
     private val _timerRemaining = MutableStateFlow(0L)
     val timerRemaining: StateFlow<Long> = _timerRemaining
+    private val _timerInitial = MutableStateFlow(0L)
+    val timerInitial: StateFlow<Long> = _timerInitial
     private val _isTimerRunning = MutableStateFlow(false)
     val isTimerRunning: StateFlow<Boolean> = _isTimerRunning
     private var timerJob: Job? = null
@@ -128,9 +130,10 @@ class ToolService : Service() {
     }
 
     // --- Timer Logic ---
-    fun startTimer(durationMillis: Long) {
+    fun startTimer(durationMillis: Long, initialDuration: Long? = null) {
         if (durationMillis <= 0) return
         _timerRemaining.value = durationMillis
+        initialDuration?.let { _timerInitial.value = it }
         _isTimerRunning.value = true
         timerEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         timerJob?.cancel()
@@ -156,7 +159,13 @@ class ToolService : Service() {
         _isTimerRunning.value = false
         timerJob?.cancel()
         _timerRemaining.value = 0L
+        _timerInitial.value = 0L
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    fun setTimerInitial(millis: Long) {
+        _timerInitial.value = millis
+        _timerRemaining.value = millis
     }
 
     private fun onTimerFinished() {

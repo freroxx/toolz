@@ -4,20 +4,65 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="8dp"
+    android:padding="12dp"
     android:background="@drawable/widget_background">
 
     <ImageView
         android:id="@+id/widget_music_album_art"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
         android:layout_alignParentStart="true"
         android:layout_centerVertical="true"
-        android:layout_marginStart="4dp"
         android:src="@drawable/ic_music_note"
         android:scaleType="centerCrop"
-        android:background="@drawable/widget_item_background"
+        android:background="@drawable/widget_button_tonal"
+        android:clipToOutline="true"
         android:contentDescription="Album Art" />
+
+    <LinearLayout
+        android:id="@+id/widget_controls_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <ImageButton
+            android:id="@+id/widget_music_prev"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_media_previous"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            app:tint="#49454F"
+            android:layout_marginEnd="4dp"
+            android:contentDescription="Previous" />
+
+        <ImageButton
+            android:id="@+id/widget_music_play_pause"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="@drawable/widget_button_primary"
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            app:tint="#FFFFFF"
+            android:contentDescription="Play/Pause" />
+
+        <ImageButton
+            android:id="@+id/widget_music_next"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_media_next"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            app:tint="#49454F"
+            android:layout_marginStart="4dp"
+            android:contentDescription="Next" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/widget_text_container"
@@ -27,15 +72,15 @@
         android:layout_toStartOf="@id/widget_controls_container"
         android:layout_centerVertical="true"
         android:orientation="vertical"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="4dp">
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="8dp">
 
         <TextView
             android:id="@+id/widget_music_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="NOT PLAYING"
-            android:textSize="14sp"
+            android:text="Not Playing"
+            android:textSize="15sp"
             android:fontFamily="sans-serif-black"
             android:textColor="#1D1B20"
             android:singleLine="true"
@@ -45,70 +90,26 @@
             android:id="@+id/widget_music_artist"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Select a track"
-            android:textSize="11sp"
+            android:text="Open Toolz to start"
+            android:textSize="12sp"
             android:fontFamily="sans-serif-medium"
             android:textColor="#49454F"
+            android:alpha="0.8"
             android:singleLine="true"
             android:ellipsize="end" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/widget_controls_container"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignParentEnd="true"
-        android:layout_centerVertical="true"
-        android:layout_marginEnd="4dp"
-        android:orientation="horizontal"
-        android:gravity="center">
-
-        <ImageButton
-            android:id="@+id/widget_music_prev"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@android:drawable/ic_media_previous"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="6dp"
-            android:scaleType="fitCenter"
-            android:tint="#49454F"
-            android:contentDescription="Previous" />
-
-        <ImageButton
-            android:id="@+id/widget_music_play_pause"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:src="@android:drawable/ic_media_play"
-            android:background="@drawable/widget_button_primary"
-            android:padding="10dp"
-            android:scaleType="fitCenter"
-            android:tint="#FFFFFF"
-            android:layout_marginHorizontal="2dp"
-            android:contentDescription="Play/Pause" />
-
-        <ImageButton
-            android:id="@+id/widget_music_next"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@android:drawable/ic_media_next"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="6dp"
-            android:scaleType="fitCenter"
-            android:tint="#49454F"
-            android:contentDescription="Next" />
     </LinearLayout>
 
     <ProgressBar
         android:id="@+id/widget_music_progress"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
-        android:layout_height="3dp"
+        android:layout_height="4dp"
         android:layout_alignParentBottom="true"
-        android:layout_marginHorizontal="8dp"
-        android:layout_marginBottom="2dp"
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="4dp"
         android:max="100"
         android:progress="0"
-        android:progressBackgroundTint="#E6E0E9"
+        android:progressBackgroundTint="#1A000000"
         android:progressTint="#6750A4" />
 
 </RelativeLayout>

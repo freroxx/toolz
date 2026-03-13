@@ -75,8 +75,8 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     
     // Coil 3
-    implementation(libs.coil3.compose)
-    implementation(libs.coil3.network)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     implementation(libs.retrofit)
     implementation(libs.converter.moshi)
