@@ -24,7 +24,9 @@ data class TimerState(
     val initialTime: Long = 0L,
     val isRunning: Boolean = false,
     val isFinished: Boolean = false,
-    val isPaused: Boolean = false
+    val isPaused: Boolean = false,
+    val selectedMinutes: Int = 0,
+    val selectedSeconds: Int = 0
 )
 
 @HiltViewModel
@@ -57,6 +59,12 @@ class TimerViewModel @Inject constructor(
                     }
                 }
             }
+
+            viewModelScope.launch {
+                toolService?.timerInitial?.collect { initial ->
+                    _uiState.update { it.copy(initialTime = initial) }
+                }
+            }
             
             viewModelScope.launch {
                 toolService?.isTimerRunning?.collect { running ->
@@ -75,19 +83,36 @@ class TimerViewModel @Inject constructor(
         Intent(context, ToolService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
+        
+        // Load last used duration from repository
+        viewModelScope.launch {
+            val lastMin = settingsRepository.lastTimerMinutes.first()
+            val lastSec = settingsRepository.lastTimerSeconds.first()
+            _uiState.update { it.copy(selectedMinutes = lastMin, selectedSeconds = lastSec) }
+        }
+    }
+
+    fun onTimeSelectedChange(min: Int, sec: Int) {
+        _uiState.update { it.copy(selectedMinutes = min, selectedSeconds = sec) }
+        viewModelScope.launch {
+            settingsRepository.setLastTimerDuration(min, sec)
+        }
     }
 
     fun setTimer(minutes: Int, seconds: Int) {
         val totalMillis = (minutes * 60 + seconds) * 1000L
         _uiState.update { it.copy(remainingTime = totalMillis, initialTime = totalMillis, isFinished = false, isPaused = false) }
+        toolService?.setTimerInitial(totalMillis)
     }
 
     fun addTime(millis: Long) {
         val current = _uiState.value.remainingTime
         val newTotal = current + millis
-        _uiState.update { it.copy(remainingTime = newTotal, initialTime = if (it.isRunning) it.initialTime + millis else newTotal) }
+        _uiState.update { it.copy(remainingTime = newTotal) }
         if (_uiState.value.isRunning) {
             toolService?.startTimer(newTotal)
+        } else {
+            toolService?.setTimerInitial(newTotal)
         }
     }
 
@@ -97,7 +122,7 @@ class TimerViewModel @Inject constructor(
             toolService?.pauseTimer()
         } else {
             if (_uiState.value.remainingTime > 0) {
-                toolService?.startTimer(_uiState.value.remainingTime)
+                toolService?.startTimer(_uiState.value.remainingTime, _uiState.value.initialTime)
                 _uiState.update { it.copy(isFinished = false) }
             }
         }

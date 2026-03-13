@@ -8,6 +8,9 @@ interface PdfAnnotationDao {
     @Query("SELECT * FROM pdf_annotations WHERE fileUri = :fileUri")
     fun getAnnotationsForFile(fileUri: String): Flow<List<PdfAnnotation>>
 
+    @Query("SELECT * FROM pdf_annotations WHERE fileUri = :fileUri AND pageIndex IN (:pageIndices)")
+    fun getAnnotationsForPages(fileUri: String, pageIndices: List<Int>): Flow<List<PdfAnnotation>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAnnotation(annotation: PdfAnnotation)
 

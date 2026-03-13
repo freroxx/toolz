@@ -37,6 +37,8 @@ private val DarkColorScheme = darkColorScheme(
     onBackground = OnBackgroundDark,
     surface = SurfaceDark,
     onSurface = OnSurfaceDark,
+    outline = PrimaryDark.copy(alpha = 0.5f),
+    outlineVariant = SecondaryDark.copy(alpha = 0.3f)
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -60,6 +62,8 @@ private val LightColorScheme = lightColorScheme(
     onBackground = OnBackgroundLight,
     surface = SurfaceLight,
     onSurface = OnSurfaceLight,
+    outline = PrimaryLight.copy(alpha = 0.5f),
+    outlineVariant = SecondaryLight.copy(alpha = 0.3f)
 )
 
 @Composable
@@ -74,14 +78,18 @@ fun ToolzTheme(
     val colorScheme = when {
         !dynamicColor && (customPrimary != null || customSecondary != null) -> {
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
+            val primary = customPrimary ?: base.primary
+            val secondary = customSecondary ?: base.secondary
             base.copy(
-                primary = customPrimary ?: base.primary,
-                primaryContainer = customPrimary?.copy(alpha = if (darkTheme) 0.3f else 0.1f) ?: base.primaryContainer,
-                onPrimaryContainer = customPrimary ?: base.onPrimaryContainer,
-                secondary = customSecondary ?: base.secondary,
-                secondaryContainer = customSecondary?.copy(alpha = if (darkTheme) 0.3f else 0.1f) ?: base.secondaryContainer,
-                onSecondaryContainer = customSecondary ?: base.onSecondaryContainer,
-                outline = customPrimary?.copy(alpha = 0.5f) ?: base.outline
+                primary = primary,
+                primaryContainer = primary.copy(alpha = if (darkTheme) 0.3f else 0.1f),
+                onPrimaryContainer = if (darkTheme) Color.White else primary,
+                secondary = secondary,
+                secondaryContainer = secondary.copy(alpha = if (darkTheme) 0.3f else 0.1f),
+                onSecondaryContainer = if (darkTheme) Color.White else secondary,
+                outline = primary.copy(alpha = 0.5f),
+                outlineVariant = secondary.copy(alpha = 0.3f),
+                surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f)
             )
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

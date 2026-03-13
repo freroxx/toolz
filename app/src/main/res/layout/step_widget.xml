@@ -16,8 +16,8 @@
 
         <ImageView
             android:id="@+id/widget_step_icon"
-            android:layout_width="20dp"
-            android:layout_height="20dp"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
             android:src="@android:drawable/ic_menu_directions"
             android:tint="#6750A4"
             android:contentDescription="Steps" />
@@ -26,26 +26,25 @@
             android:id="@+id/widget_step_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="STEPS"
-            android:textSize="11sp"
-            android:textStyle="bold"
+            android:text="ACTIVITY"
+            android:textSize="10sp"
+            android:fontFamily="sans-serif-black"
             android:textColor="#6750A4"
             android:layout_marginStart="8dp"
             android:letterSpacing="0.1" />
     </LinearLayout>
 
-    <LinearLayout
+    <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="8dp">
+        android:layout_marginTop="4dp">
 
         <LinearLayout
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
             android:orientation="vertical">
 
             <TextView
@@ -53,17 +52,18 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0"
-                android:textSize="32sp"
+                android:textSize="28sp"
                 android:fontFamily="sans-serif-black"
-                android:textColor="#1D1B20" />
+                android:textColor="#1D1B20"
+                android:includeFontPadding="false" />
 
             <TextView
                 android:id="@+id/widget_step_goal"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="GOAL: 10,000"
-                android:textSize="10sp"
-                android:textStyle="bold"
+                android:textSize="9sp"
+                android:fontFamily="sans-serif-medium"
                 android:textColor="#49454F"
                 android:alpha="0.7" />
         </LinearLayout>
@@ -71,10 +71,12 @@
         <ProgressBar
             android:id="@+id/widget_step_progress"
             style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
             android:indeterminate="false"
             android:progressDrawable="@drawable/circular_progress" />
-    </LinearLayout>
+    </RelativeLayout>
 
 </LinearLayout>

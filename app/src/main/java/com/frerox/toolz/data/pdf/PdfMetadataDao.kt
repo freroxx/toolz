@@ -22,4 +22,7 @@ interface PdfMetadataDao {
 
     @Query("UPDATE pdf_metadata SET ocrContent = :ocrContent WHERE uri = :uri")
     suspend fun updateOcrContent(uri: String, ocrContent: String)
+
+    @Query("UPDATE pdf_metadata SET structuredOcrData = :structuredData WHERE uri = :uri")
+    suspend fun updateStructuredOcrData(uri: String, structuredData: String)
 }

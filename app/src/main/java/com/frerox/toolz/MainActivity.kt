@@ -1,6 +1,7 @@
 package com.frerox.toolz
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -47,6 +48,7 @@ import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -106,7 +108,20 @@ class MainActivity : AppCompatActivity() {
                         color = Color.Transparent
                     ) {
                         val navController = rememberNavController()
-                        ToolzNavHost(navController, settingsRepository)
+                        val pdfViewModel: PdfViewModel = hiltViewModel()
+
+                        // Centralized Intent Handler
+                        LaunchedEffect(intent) {
+                            if (intent?.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
+                                intent.data?.let { uri ->
+                                    pdfViewModel.openPdf(uri)
+                                    delay(150) // Ensure state is ready
+                                    navController.navigate(Screen.PdfReader.route)
+                                }
+                            }
+                        }
+
+                        ToolzNavHost(navController, settingsRepository, pdfViewModel)
                     }
                 }
             }
@@ -117,6 +132,11 @@ class MainActivity : AppCompatActivity() {
                 if (enabled) startStepService() else stopStepService()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     private fun scheduleCleanup() {
@@ -150,7 +170,8 @@ class MainActivity : AppCompatActivity() {
 @Composable
 fun ToolzNavHost(
     navController: androidx.navigation.NavHostController,
-    settingsRepository: SettingsRepository
+    settingsRepository: SettingsRepository,
+    pdfViewModel: PdfViewModel
 ) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
 
@@ -299,7 +320,6 @@ fun ToolzNavHost(
         ) { backStackEntry ->
             val initialNoteId = backStackEntry.arguments?.getInt("initialNoteId").takeIf { it != -1 }
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()
-            val pdfViewModel: PdfViewModel = hiltViewModel()
             NotepadScreen(
                 viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
@@ -324,7 +344,6 @@ fun ToolzNavHost(
             PeriodicTableScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.PdfReader.route) {
-            val pdfViewModel: PdfViewModel = hiltViewModel()
             ToolzPdfScreen(
                 viewModel = pdfViewModel, 
                 onNavigateBack = { navController.popBackStack() },

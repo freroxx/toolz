@@ -2,11 +2,10 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@android:id/background">
         <shape
-            android:innerRadiusRatio="3"
             android:shape="ring"
-            android:thicknessRatio="15"
+            android:thickness="4dp"
             android:useLevel="false">
-            <solid android:color="#EEEEEE" />
+            <solid android:color="#1A000000" />
         </shape>
     </item>
     <item android:id="@android:id/progress">
@@ -16,13 +15,12 @@
             android:pivotY="50%"
             android:toDegrees="270">
             <shape
-                android:innerRadiusRatio="3"
                 android:shape="ring"
-                android:thicknessRatio="15"
+                android:thickness="4dp"
                 android:useLevel="true">
                 <gradient
-                    android:endColor="#4CAF50"
-                    android:startColor="#4CAF50"
+                    android:endColor="#6750A4"
+                    android:startColor="#6750A4"
                     android:type="sweep" />
             </shape>
         </rotate>

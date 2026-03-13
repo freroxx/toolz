@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
-import com.frerox.toolz.ui.components.SquigglySlider
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,9 +48,6 @@ fun TimerScreen(
     val hapticEnabled by viewModel.hapticEnabled.collectAsState()
     val view = LocalView.current
     val haptic = LocalHapticFeedback.current
-    
-    var selectedMinutes by remember { mutableIntStateOf(0) }
-    var selectedSeconds by remember { mutableIntStateOf(0) }
 
     val animatedProgress by animateFloatAsState(
         targetValue = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f,
@@ -75,7 +71,7 @@ fun TimerScreen(
                     }
                     
                     Text(
-                        text = "TIMER",
+                        text = "PRECISION TIMER",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
@@ -131,9 +127,9 @@ fun TimerScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ModernTimePicker(
-                            value = selectedMinutes,
+                            value = state.selectedMinutes,
                             onValueChange = { 
-                                selectedMinutes = it
+                                viewModel.onTimeSelectedChange(it, state.selectedSeconds)
                                 if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             },
                             label = "MINUTES"
@@ -148,9 +144,9 @@ fun TimerScreen(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                         )
                         ModernTimePicker(
-                            value = selectedSeconds,
+                            value = state.selectedSeconds,
                             onValueChange = { 
-                                selectedSeconds = it
+                                viewModel.onTimeSelectedChange(state.selectedMinutes, it)
                                 if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             },
                             label = "SECONDS"
@@ -166,8 +162,7 @@ fun TimerScreen(
                             listOf(1, 5, 10, 15).forEach { min ->
                                 Surface(
                                     onClick = { 
-                                        selectedMinutes = min
-                                        selectedSeconds = 0
+                                        viewModel.onTimeSelectedChange(min, 0)
                                         if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     },
                                     modifier = Modifier
@@ -190,9 +185,9 @@ fun TimerScreen(
 
                     Button(
                         onClick = {
-                            if (selectedMinutes > 0 || selectedSeconds > 0) {
+                            if (state.selectedMinutes > 0 || state.selectedSeconds > 0) {
                                 if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.setTimer(selectedMinutes, selectedSeconds)
+                                viewModel.setTimer(state.selectedMinutes, state.selectedSeconds)
                                 viewModel.toggleStartStop()
                             }
                         },
@@ -215,19 +210,36 @@ fun TimerScreen(
                             .size(320.dp)
                             .padding(16.dp)
                     ) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                        val glowAlpha by infiniteTransition.animateFloat(
+                            initialValue = 0.05f,
+                            targetValue = 0.15f,
+                            animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+                            label = ""
+                        )
+                        
+                        val primaryColor = MaterialTheme.colorScheme.primary
+                        val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             drawCircle(
-                                color = Color.LightGray.copy(alpha = 0.1f),
-                                style = Stroke(width = 20.dp.toPx())
+                                brush = Brush.radialGradient(
+                                    colors = listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent),
+                                    radius = size.width / 1.2f
+                                )
+                            )
+                            drawCircle(
+                                color = trackColor,
+                                style = Stroke(width = 12.dp.toPx())
                             )
                         }
                         
                         CircularProgressIndicator(
                             progress = { animatedProgress },
-                            modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 20.dp,
+                            modifier = Modifier.fillMaxSize().padding(6.dp),
+                            strokeWidth = 12.dp,
                             strokeCap = StrokeCap.Round,
-                            color = if (state.isFinished) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            color = if (state.isFinished) MaterialTheme.colorScheme.error else primaryColor,
                             trackColor = Color.Transparent,
                         )
                         
@@ -329,7 +341,7 @@ fun TimerScreen(
                                 .bouncyClick {},
                             shape = CircleShape,
                             color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                            shadowElevation = 8.dp
+                            shadowElevation = 12.dp
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -390,6 +402,18 @@ fun ModernTimePicker(
         }
     }
 
+    // Sync state back to list if changed externally (presets)
+    LaunchedEffect(value) {
+        val currentIndex = (listState.firstVisibleItemIndex + 1) % 60
+        if (currentIndex != value && !listState.isScrollInProgress) {
+            val targetIndex = listState.firstVisibleItemIndex + (value - currentIndex).let { if (it < -30) it + 60 else if (it > 30) it - 60 else it }
+            listState.scrollToItem(targetIndex)
+        }
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -401,9 +425,9 @@ fun ModernTimePicker(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(72.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                color = primaryColor.copy(alpha = 0.08f),
                 shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, primaryColor.copy(alpha = 0.15f))
             ) {}
 
             LazyColumn(
@@ -420,8 +444,8 @@ fun ModernTimePicker(
                         text = String.format(Locale.getDefault(), "%02d", item),
                         style = if (isSelected) MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black) 
                                 else MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
-                        color = if (isSelected) MaterialTheme.colorScheme.primary 
-                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                        color = if (isSelected) primaryColor 
+                                else onSurfaceColor.copy(alpha = 0.12f),
                         modifier = Modifier.padding(vertical = 4.dp),
                         fontSize = if (isSelected) 48.sp else 32.sp
                     )
@@ -429,7 +453,7 @@ fun ModernTimePicker(
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = primaryColor, letterSpacing = 1.5.sp)
     }
 }
 

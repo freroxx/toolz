@@ -6,7 +6,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.Location
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -25,7 +24,10 @@ data class CompassState(
     val showQibla: Boolean = false,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val accuracy: Int = 0
+    val accuracy: Int = 0,
+    val isLevel: Boolean = true,
+    val pitch: Float = 0f,
+    val roll: Float = 0f
 )
 
 @HiltViewModel
@@ -48,7 +50,7 @@ class CompassViewModel @Inject constructor(
     private var lastAccelerometerSet = false
     private var lastMagnetometerSet = false
     
-    private val alpha = 0.97f
+    private val alpha = 0.95f
     private var filteredAzimuth = 0f
 
     init {
@@ -79,16 +81,14 @@ class CompassViewModel @Inject constructor(
     }
 
     private fun calculateQibla(lat: Double, lng: Double): Float {
-        val kaabaLat = 21.422487
-        val kaabaLng = 39.826206
+        val kaabaLat = Math.toRadians(21.422487)
+        val kaabaLng = Math.toRadians(39.826206)
         
         val latRad = Math.toRadians(lat)
         val lngRad = Math.toRadians(lng)
-        val kLatRad = Math.toRadians(kaabaLat)
-        val kLngRad = Math.toRadians(kaabaLng)
         
-        val y = sin(kLngRad - lngRad)
-        val x = cos(latRad) * tan(kLatRad) - sin(latRad) * cos(kLngRad - lngRad)
+        val y = sin(kaabaLng - lngRad)
+        val x = cos(latRad) * tan(kaabaLat) - sin(latRad) * cos(kaabaLng - lngRad)
         
         var qibla = Math.toDegrees(atan2(y, x)).toFloat()
         return (qibla + 360) % 360
@@ -101,7 +101,6 @@ class CompassViewModel @Inject constructor(
             accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
             magnetometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
         }
-        if (_uiState.value.showQibla) updateLocationAndQibla()
     }
 
     fun stopListening() {
@@ -109,35 +108,32 @@ class CompassViewModel @Inject constructor(
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        var azimuthInDegrees = 0f
-        
+        val rotationMatrix = FloatArray(9)
+        val orientation = FloatArray(3)
+
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
-            val rotationMatrix = FloatArray(9)
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-            val orientation = FloatArray(3)
             SensorManager.getOrientation(rotationMatrix, orientation)
-            azimuthInDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
         } else {
             if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-                System.arraycopy(event.values, 0, lastAccelerometer, 0, event.values.size)
+                System.arraycopy(event.values, 0, lastAccelerometer, 0, 3)
                 lastAccelerometerSet = true
             } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-                System.arraycopy(event.values, 0, lastMagnetometer, 0, event.values.size)
+                System.arraycopy(event.values, 0, lastMagnetometer, 0, 3)
                 lastMagnetometerSet = true
             }
 
             if (lastAccelerometerSet && lastMagnetometerSet) {
-                val r = FloatArray(9)
-                val i = FloatArray(9)
-                if (SensorManager.getRotationMatrix(r, i, lastAccelerometer, lastMagnetometer)) {
-                    val orientation = FloatArray(3)
-                    SensorManager.getOrientation(r, orientation)
-                    azimuthInDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+                if (SensorManager.getRotationMatrix(rotationMatrix, null, lastAccelerometer, lastMagnetometer)) {
+                    SensorManager.getOrientation(rotationMatrix, orientation)
                 } else return
             } else return
         }
 
-        // Apply declination if location is available
+        var azimuthInDegrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+        val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
+        val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
+
         _uiState.value.latitude?.let { lat ->
             _uiState.value.longitude?.let { lng ->
                 val declination = GeomagneticField(
@@ -148,11 +144,14 @@ class CompassViewModel @Inject constructor(
         }
 
         val targetAzimuth = (azimuthInDegrees + 360) % 360
-        
-        // Low-pass filter for stability
         filteredAzimuth = normalizeAngle(filteredAzimuth + shortestAngleDist(filteredAzimuth, targetAzimuth) * (1 - alpha))
         
-        _uiState.update { it.copy(azimuth = filteredAzimuth) }
+        _uiState.update { it.copy(
+            azimuth = filteredAzimuth,
+            pitch = pitch,
+            roll = roll,
+            isLevel = abs(pitch) < 5 && abs(roll) < 5 // Polished: Sharper threshold
+        ) }
     }
     
     private fun shortestAngleDist(a: Float, b: Float): Float {

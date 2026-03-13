@@ -4,22 +4,20 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
-import android.os.ext.SdkExtensions
-import android.view.ContextThemeWrapper
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,9 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Notes
-import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Sort
-import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,33 +33,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidViewBinding
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.pdf.viewer.fragment.PdfViewerFragment
-import com.frerox.toolz.R
-import com.frerox.toolz.data.pdf.PdfAnnotation
 import com.frerox.toolz.data.pdf.PdfFile
-import com.frerox.toolz.databinding.LayoutPdfViewerBinding
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import kotlinx.coroutines.delay
@@ -76,8 +61,7 @@ import java.util.*
 fun ToolzPdfScreen(
     viewModel: PdfViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToNote: (Int) -> Unit,
-    onSolveFormula: ((String) -> Unit)? = null
+    onNavigateToNote: (Int) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val pdfFiles by viewModel.pdfFiles.collectAsStateWithLifecycle()
@@ -85,8 +69,10 @@ fun ToolzPdfScreen(
     val openTabs by viewModel.openTabs.collectAsStateWithLifecycle()
     val activeTabId by viewModel.activeTabId.collectAsStateWithLifecycle()
     val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
-    val annotations by viewModel.annotations.collectAsStateWithLifecycle()
+    val docState by viewModel.docState.collectAsStateWithLifecycle()
     val extractedText by viewModel.extractedText.collectAsStateWithLifecycle()
+    val ocrData by viewModel.ocrData.collectAsStateWithLifecycle()
+    
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -96,219 +82,110 @@ fun ToolzPdfScreen(
     var searchQuery by remember { mutableStateOf("") }
     var deletingFileId by remember { mutableStateOf<Uri?>(null) }
     var showOcrResult by remember { mutableStateOf(false) }
+    var internalSearchQuery by remember { mutableStateOf("") }
+    var isSearchingInDoc by remember { mutableStateOf(false) }
 
     val activeTab = openTabs.find { it.id == activeTabId }
     val isAmoled = nightProfile == NightProfile.AMOLED_BLACK
 
     Scaffold(
-        containerColor = if (isAmoled) Color.Black else Color.Transparent,
+        containerColor = if (isAmoled) Color.Black else MaterialTheme.colorScheme.background,
         topBar = {
             if (uiState !is PdfViewModel.PdfUiState.Viewer) {
-                Surface(
-                    color = if (isAmoled) Color.Black else Color.Transparent,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .statusBarsPadding()
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            IconButton(
-                                onClick = onNavigateBack,
-                                modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Rounded.ArrowBack, 
-                                    contentDescription = "Back",
-                                    tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            Text(
-                                text = "PDF TOOLS",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.sp,
-                                color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                            )
-
-                            var showSortMenu by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(
-                                    onClick = { showSortMenu = true },
-                                    modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Rounded.Sort, 
-                                        contentDescription = "Sort",
-                                        tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = showSortMenu,
-                                    onDismissRequest = { showSortMenu = false },
-                                    modifier = Modifier.background(
-                                        if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface, 
-                                        RoundedCornerShape(20.dp)
-                                    )
-                                ) {
-                                    PdfSortOrder.entries.forEach { order ->
-                                        DropdownMenuItem(
-                                            text = { Text(order.name.lowercase().replaceFirstChar { it.uppercase() }) },
-                                            onClick = {
-                                                viewModel.setSortOrder(order)
-                                                showSortMenu = false
-                                            },
-                                            leadingIcon = {
-                                                if (sortOrder == order) Icon(Icons.Rounded.Check, null)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
+                PdfListTopBar(
+                    onNavigateBack = onNavigateBack,
+                    sortOrder = sortOrder,
+                    onSortOrderChange = viewModel::setSortOrder,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { 
+                        searchQuery = it
+                        viewModel.setSearchQuery(it)
+                    },
+                    openTabs = openTabs,
+                    activeTabId = activeTabId,
+                    onTabSwitch = viewModel::switchTab,
+                    onTabClose = viewModel::closeTab,
+                    isAmoled = isAmoled
+                )
+            } else {
+                ViewerTopBar(
+                    title = activeTab?.title ?: "PDF Viewer",
+                    isSearching = isSearchingInDoc,
+                    searchQuery = internalSearchQuery,
+                    onSearchQueryChange = { 
+                        internalSearchQuery = it
+                        viewModel.searchInDocument(it)
+                    },
+                    onToggleSearch = { 
+                        isSearchingInDoc = !isSearchingInDoc
+                        if (!isSearchingInDoc) {
+                            internalSearchQuery = ""
+                            viewModel.searchInDocument("")
                         }
-
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = {
-                                searchQuery = it
-                                viewModel.setSearchQuery(it)
-                            },
-                            placeholder = { Text("Search your documents...") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                            leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                            shape = RoundedCornerShape(24.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                focusedContainerColor = if (isAmoled) Color(0xFF222222) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            )
-                        )
-
-                        if (openTabs.isNotEmpty()) {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .padding(vertical = 4.dp)
-                                    .fadingEdge(
-                                        brush = Brush.horizontalGradient(
-                                            0f to Color.Transparent,
-                                            0.05f to Color.Black,
-                                            0.95f to Color.Black,
-                                            1f to Color.Transparent
-                                        ),
-                                        length = 16.dp
-                                    )
-                            ) {
-                                items(openTabs, key = { it.id }) { tab ->
-                                    val isActive = tab.id == activeTabId
-                                    Surface(
-                                        onClick = { viewModel.switchTab(tab.id) },
-                                        color = if (isActive) MaterialTheme.colorScheme.primary 
-                                                else if (isAmoled) Color(0xFF1A1A1A) 
-                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        shape = RoundedCornerShape(16.dp),
-                                        modifier = Modifier.height(36.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 12.dp)
-                                        ) {
-                                            Text(
-                                                text = tab.title.take(15),
-                                                style = MaterialTheme.typography.labelLarge,
-                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (isActive) MaterialTheme.colorScheme.onPrimary 
-                                                        else if (isAmoled) Color.White.copy(alpha = 0.7f)
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                            Icon(
-                                                imageVector = Icons.Rounded.Close,
-                                                contentDescription = "Close",
-                                                modifier = Modifier
-                                                    .size(16.dp)
-                                                    .clickable { viewModel.closeTab(tab.id) },
-                                                tint = if (isActive) MaterialTheme.colorScheme.onPrimary 
-                                                        else if (isAmoled) Color.White.copy(alpha = 0.4f)
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                    },
+                    onBack = viewModel::closeViewer,
+                    isAmoled = isAmoled
+                )
             }
         },
         bottomBar = {
             if (uiState is PdfViewModel.PdfUiState.Viewer) {
-                Column {
-                    if (activeTab?.lastTool == PdfToolMode.HIGHLIGHTER) {
-                        HighlighterToolbar(
-                            onUndo = { viewModel.undoLastAnnotation() },
-                            onRedo = { viewModel.redoAnnotation() },
-                            onReset = { viewModel.clearAllAnnotations() },
+                Surface(
+                    color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp
+                ) {
+                    Column {
+                        if (activeTab?.lastTool == PdfToolMode.TEXT_SELECT) {
+                            TextSelectToolbar(
+                                onViewFullText = { showOcrResult = true },
+                                onResetOcr = { viewModel.resetOcr() },
+                                isAmoled = isAmoled
+                            )
+                        }
+                        
+                        ThumbnailScrubber(
+                            totalPages = docState.totalPages,
+                            currentPage = docState.currentPageIndex,
+                            onPageSelected = { page ->
+                                viewModel.updatePage(page)
+                            },
+                            getThumbnail = { viewModel.getThumbnail(it) },
                             isAmoled = isAmoled
                         )
-                    } else if (activeTab?.lastTool == PdfToolMode.TEXT_SELECT) {
-                        TextSelectToolbar(
-                            onViewFullText = { showOcrResult = true },
-                            onResetOcr = { viewModel.resetOcr() },
+
+                        ReaderBottomControls(
+                            activeTool = activeTab?.lastTool ?: PdfToolMode.NAVIGATE,
+                            onToolSelected = { tool ->
+                                viewModel.updateLastTool(tool)
+                                if (tool == PdfToolMode.SEARCH) {
+                                    isSearchingInDoc = true
+                                }
+                            },
                             isAmoled = isAmoled
                         )
                     }
-                    ReaderBottomControls(
-                        activeTool = activeTab?.lastTool ?: PdfToolMode.NAVIGATE,
-                        onToolSelected = viewModel::updateLastTool,
-                        isAmoled = isAmoled
-                    )
                 }
             }
         },
         floatingActionButton = {
-            if (uiState is PdfViewModel.PdfUiState.Viewer) {
-                Column(horizontalAlignment = Alignment.End) {
-                    FloatingActionButton(
-                        onClick = viewModel::toggleNightProfile,
-                        containerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    ) {
-                        AnimatedContent(targetState = nightProfile, label = "") { profile ->
-                            Icon(
-                                imageVector = when(profile) {
-                                    NightProfile.OFF -> Icons.Rounded.LightMode
-                                    NightProfile.SOLARIZED_DARK -> Icons.Rounded.Contrast
-                                    NightProfile.AMOLED_BLACK -> Icons.Rounded.DarkMode
-                                },
-                                contentDescription = "Night profile"
-                            )
-                        }
-                    }
-                    FloatingActionButton(
-                        onClick = viewModel::closeViewer,
-                        containerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.primary,
-                        contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.onPrimary,
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Close Viewer")
+            if (uiState is PdfViewModel.PdfUiState.Viewer && !isSearchingInDoc) {
+                FloatingActionButton(
+                    onClick = viewModel::toggleNightProfile,
+                    containerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    AnimatedContent(targetState = nightProfile, label = "") { profile ->
+                        Icon(
+                            imageVector = when(profile) {
+                                NightProfile.OFF -> Icons.Rounded.LightMode
+                                NightProfile.SOLARIZED_DARK -> Icons.Rounded.Contrast
+                                NightProfile.AMOLED_BLACK -> Icons.Rounded.DarkMode
+                            },
+                            contentDescription = "Night profile"
+                        )
                     }
                 }
             }
@@ -321,54 +198,17 @@ fun ToolzPdfScreen(
                 .background(if (isAmoled) Color.Black else Color.Transparent)
         ) {
             when (val state = uiState) {
-                is PdfViewModel.PdfUiState.Loading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 4.dp
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                "Scanning for PDFs...",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                is PdfViewModel.PdfUiState.Loading -> LoadingScreen(isAmoled)
                 is PdfViewModel.PdfUiState.Viewer -> {
-                    Column {
-                        if (activeTab?.isOcrActive == true) {
-                            LinearProgressIndicator(
-                                progress = { activeTab.ocrProgress },
-                                modifier = Modifier.fillMaxWidth().height(4.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            )
-                            Surface(
-                                color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "Polishing document OCR... ${(activeTab.ocrProgress * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                                    textAlign = TextAlign.Center,
-                                    color = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                        InfinitePdfReader(
-                            uri = state.uri,
-                            viewModel = viewModel,
-                            nightProfile = nightProfile,
-                            activeTool = activeTab?.lastTool ?: PdfToolMode.NAVIGATE,
-                            annotations = annotations
-                        )
-                    }
+                    ViewerContent(
+                        uri = state.uri,
+                        viewModel = viewModel,
+                        docState = docState,
+                        activeTab = activeTab,
+                        ocrData = ocrData,
+                        nightProfile = nightProfile,
+                        isAmoled = isAmoled
+                    )
                 }
                 else -> {
                     PdfListContent(
@@ -392,150 +232,185 @@ fun ToolzPdfScreen(
         )
     }
 
-    showBottomSheet?.let { file ->
-        PdfFileOptionsBottomSheet(
-            file = file,
-            isAmoled = isAmoled,
-            onDismiss = { showBottomSheet = null },
-            onDelete = { 
-                deletingFileId = file.uri
-                showBottomSheet = null
-                scope.launch {
-                    delay(600)
-                    viewModel.deleteFile(file)
-                    deletingFileId = null
-                }
-            },
-            onRename = { 
-                showRenameDialog = file
-                showBottomSheet = null
-            },
-            onPin = {
-                viewModel.togglePin(file)
-                showBottomSheet = null
-            },
-            onShare = {
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/pdf"
-                    putExtra(Intent.EXTRA_STREAM, file.uri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(Intent.createChooser(intent, "Share PDF"))
-                showBottomSheet = null
-            },
-            onDetails = {
-                showDetailsDialog = file
-                showBottomSheet = null
-            },
-            onNotes = {
-                viewModel.navigateToNotesForPdf(file) { noteId ->
-                    if (noteId != null) {
-                        onNavigateToNote(noteId)
-                    } else {
-                        viewModel.createNoteForPdf(file) { newId ->
-                            onNavigateToNote(newId)
-                        }
-                    }
-                }
-                showBottomSheet = null
+    FileActionComponents(
+        showBottomSheet = showBottomSheet,
+        showRenameDialog = showRenameDialog,
+        showDetailsDialog = showDetailsDialog,
+        onDismissBottomSheet = { showBottomSheet = null },
+        onDismissRename = { showRenameDialog = null },
+        onDismissDetails = { showDetailsDialog = null },
+        onDelete = { file ->
+            deletingFileId = file.uri
+            showBottomSheet = null
+            scope.launch {
+                delay(600)
+                viewModel.deleteFile(file)
+                deletingFileId = null
             }
-        )
-    }
-
-    showRenameDialog?.let { file ->
-        var newName by remember { mutableStateOf(file.name.removeSuffix(".pdf")) }
-        Dialog(
-            onDismissRequest = { showRenameDialog = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Surface(
-                modifier = Modifier.padding(24.dp).widthIn(max = 400.dp),
-                shape = RoundedCornerShape(32.dp),
-                color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                border = if (isAmoled) BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)) else null
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text(
-                        "Rename File", 
-                        style = MaterialTheme.typography.titleLarge, 
-                        fontWeight = FontWeight.Black,
-                        color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(20.dp))
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("New Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = if (isAmoled) Color.Black else Color.Transparent,
-                            focusedContainerColor = if (isAmoled) Color.Black else Color.Transparent,
-                            unfocusedTextColor = if (isAmoled) Color.White else Color.Unspecified,
-                            focusedTextColor = if (isAmoled) Color.White else Color.Unspecified
-                        )
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { showRenameDialog = null }) { Text("Cancel") }
-                        Spacer(Modifier.width(12.dp))
-                        Button(
-                            onClick = {
-                                if (newName.isNotBlank()) {
-                                    viewModel.renameFile(file, newName)
-                                }
-                                showRenameDialog = null
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary,
-                                contentColor = if (isAmoled) Color.Black else MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            Text("RENAME", fontWeight = FontWeight.Bold)
-                        }
+        },
+        onRename = { file ->
+            showRenameDialog = file
+            showBottomSheet = null
+        },
+        onRenameConfirm = { file, name ->
+            viewModel.renameFile(file, name)
+            showRenameDialog = null
+        },
+        onPin = { file ->
+            viewModel.togglePin(file)
+            showBottomSheet = null
+        },
+        onShare = { file ->
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, file.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Share PDF"))
+            showBottomSheet = null
+        },
+        onDetails = { file ->
+            showDetailsDialog = file
+            showBottomSheet = null
+        },
+        onNotes = { file ->
+            viewModel.navigateToNotesForPdf(file) { noteId ->
+                if (noteId != null) {
+                    onNavigateToNote(noteId)
+                } else {
+                    viewModel.createNoteForPdf(file) { newId ->
+                        onNavigateToNote(newId)
                     }
                 }
+            }
+            showBottomSheet = null
+        },
+        isAmoled = isAmoled
+    )
+}
+
+@Composable
+private fun ViewerContent(
+    uri: Uri,
+    viewModel: PdfViewModel,
+    docState: DocumentState,
+    activeTab: PdfWorkspaceTab?,
+    ocrData: OcrDocumentData?,
+    nightProfile: NightProfile,
+    isAmoled: Boolean
+) {
+    Column {
+        if (activeTab?.isOcrActive == true) {
+            OcrProgressHeader(activeTab.ocrProgress, isAmoled)
+        }
+
+        Box(modifier = Modifier.weight(1f)) {
+            InfinitePdfReader(
+                uri = uri,
+                viewModel = viewModel,
+                docState = docState,
+                ocrData = ocrData,
+                nightProfile = nightProfile,
+                activeTool = activeTab?.lastTool ?: PdfToolMode.NAVIGATE
+            )
+
+            if (docState.isSearching || docState.searchResults.isNotEmpty()) {
+                SearchResultsOverlay(
+                    docState = docState, 
+                    onPageSelected = viewModel::updatePage,
+                    isAmoled = isAmoled
+                )
             }
         }
     }
+}
 
-    showDetailsDialog?.let { file ->
-        Dialog(
-            onDismissRequest = { showDetailsDialog = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
+@Composable
+private fun OcrProgressHeader(progress: Float, isAmoled: Boolean) {
+    Column {
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(4.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        )
+        Surface(
+            color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Surface(
-                modifier = Modifier.padding(24.dp).widthIn(max = 400.dp),
-                shape = RoundedCornerShape(32.dp),
-                color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                border = if (isAmoled) BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)) else null
+            Text(
+                "Document OCR Active... ${(progress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                textAlign = TextAlign.Center,
+                color = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchResultsOverlay(
+    docState: DocumentState, 
+    onPageSelected: (Int) -> Unit,
+    isAmoled: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .align(Alignment.BottomCenter),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = if (isAmoled) Color(0xFF1A1A1A).copy(alpha = 0.9f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f),
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text(
-                        "File Details", 
-                        style = MaterialTheme.typography.titleLarge, 
-                        fontWeight = FontWeight.Black,
-                        color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        DetailItem(Icons.Rounded.Description, "Name", file.name, isAmoled)
-                        DetailItem(Icons.Rounded.Storage, "Size", formatSize(file.size), isAmoled)
-                        DetailItem(Icons.Rounded.Pages, "Pages", file.pageCount.toString(), isAmoled)
-                        DetailItem(Icons.Rounded.Event, "Modified", formatDate(file.lastModified), isAmoled)
-                        DetailItem(Icons.Rounded.Folder, "Path", file.uri.path ?: "Unknown", isAmoled)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (docState.isSearching) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Searching all pages...", style = MaterialTheme.typography.labelSmall)
+                    } else {
+                        Icon(Icons.Rounded.Search, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${docState.searchResults.size} matches found",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black
+                        )
                     }
-                    Spacer(Modifier.height(32.dp))
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        TextButton(
-                            onClick = { showDetailsDialog = null },
-                            colors = ButtonDefaults.textButtonColors(contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary)
-                        ) { 
-                            Text("CLOSE", fontWeight = FontWeight.Bold) 
+                }
+                
+                if (docState.searchResults.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        items(docState.searchResults) { pageIndex ->
+                            Surface(
+                                onClick = { onPageSelected(pageIndex) },
+                                color = if (docState.currentPageIndex == pageIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        (pageIndex + 1).toString(),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (docState.currentPageIndex == pageIndex) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -545,38 +420,522 @@ fun ToolzPdfScreen(
 }
 
 @Composable
-private fun HighlighterToolbar(
-    onUndo: () -> Unit,
-    onRedo: () -> Unit,
-    onReset: () -> Unit,
+private fun InfinitePdfReader(
+    uri: Uri,
+    viewModel: PdfViewModel,
+    docState: DocumentState,
+    ocrData: OcrDocumentData?,
+    nightProfile: NightProfile,
+    activeTool: PdfToolMode
+) {
+    val listState = rememberLazyListState()
+    
+    val visiblePageIndex by remember {
+        derivedStateOf {
+            listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
+        }
+    }
+
+    LaunchedEffect(visiblePageIndex) {
+        viewModel.updatePage(visiblePageIndex)
+    }
+
+    LaunchedEffect(docState.currentPageIndex) {
+        if (!listState.isScrollInProgress && docState.currentPageIndex != visiblePageIndex) {
+            listState.animateScrollToItem(docState.currentPageIndex)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            items(docState.totalPages) { index ->
+                PageContainer(
+                    pageIndex = index,
+                    viewModel = viewModel,
+                    ocrPageData = ocrData?.pages?.find { it.pageIndex == index },
+                    activeTool = activeTool
+                )
+            }
+        }
+
+        if (nightProfile != NightProfile.OFF) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(nightProfile.overlayColor())
+            )
+        }
+    }
+}
+
+@Composable
+private fun PageContainer(
+    pageIndex: Int,
+    viewModel: PdfViewModel,
+    ocrPageData: OcrPageData?,
+    activeTool: PdfToolMode
+) {
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    
+    LaunchedEffect(pageIndex) {
+        bitmap = viewModel.getPageBitmap(pageIndex)
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .aspectRatio(0.707f)
+                .shadow(4.dp, RoundedCornerShape(8.dp)),
+            color = Color.White,
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                bitmap?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = "Page ${pageIndex + 1}",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                    
+                    PageOverlay(
+                        pageIndex = pageIndex,
+                        ocrPageData = ocrPageData,
+                        activeTool = activeTool,
+                        bitmapWidth = it.width,
+                        bitmapHeight = it.height
+                    )
+                } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "PAGE ${pageIndex + 1}",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = Color.Gray.copy(alpha = 0.6f),
+            letterSpacing = 1.sp
+        )
+    }
+}
+
+@Composable
+private fun PageOverlay(
+    pageIndex: Int,
+    ocrPageData: OcrPageData?,
+    activeTool: PdfToolMode,
+    bitmapWidth: Int,
+    bitmapHeight: Int
+) {
+    if (activeTool == PdfToolMode.TEXT_SELECT && ocrPageData != null) {
+        val context = LocalContext.current
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val density = LocalDensity.current
+            val viewWidth = with(density) { maxWidth.toPx() }
+            val viewHeight = with(density) { maxHeight.toPx() }
+            
+            val scaleX = viewWidth / bitmapWidth
+            val scaleY = viewHeight / bitmapHeight
+            
+            ocrPageData.blocks.forEach { block ->
+                val left = block.left * scaleX
+                val top = block.top * scaleY
+                val width = (block.right - block.left) * scaleX
+                val height = (block.bottom - block.top) * scaleY
+                
+                Box(
+                    modifier = Modifier
+                        .offset(x = with(density) { left.toDp() }, y = with(density) { top.toDp() })
+                        .size(width = with(density) { width.toDp() }, height = with(density) { height.toDp() })
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f))
+                        .clickable {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("PDF Text", block.text))
+                            Toast.makeText(context, "Text copied", Toast.LENGTH_SHORT).show()
+                        }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailScrubber(
+    totalPages: Int,
+    currentPage: Int,
+    onPageSelected: (Int) -> Unit,
+    getThumbnail: suspend (Int) -> Bitmap?,
     isAmoled: Boolean
 ) {
+    if (totalPages <= 1) return
+    
+    val listState = rememberLazyListState()
+    
+    LaunchedEffect(currentPage) {
+        listState.animateScrollToItem(currentPage)
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        color = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
-        shape = RoundedCornerShape(24.dp),
-        tonalElevation = 4.dp,
-        border = if (isAmoled) BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)) else null
+            .height(100.dp),
+        color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        tonalElevation = 2.dp,
+        border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.05f) else Color.Transparent)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                IconButton(onClick = onUndo) {
-                    Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = if (isAmoled) Color.White else Color.Unspecified)
+            items(totalPages) { index ->
+                ThumbnailItem(
+                    index = index,
+                    isSelected = index == currentPage,
+                    getThumbnail = getThumbnail,
+                    onClick = { onPageSelected(index) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailItem(
+    index: Int,
+    isSelected: Boolean,
+    getThumbnail: suspend (Int) -> Bitmap?,
+    onClick: () -> Unit
+) {
+    var thumb by remember { mutableStateOf<Bitmap?>(null) }
+    
+    LaunchedEffect(index) {
+        thumb = getThumbnail(index)
+    }
+
+    val scale by animateFloatAsState(if (isSelected) 1.1f else 1f, label = "")
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(54.dp)
+                .height(76.dp)
+                .clickable(onClick = onClick),
+            shape = RoundedCornerShape(6.dp),
+            border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, Color.Gray.copy(alpha = 0.2f)),
+            color = Color.LightGray.copy(alpha = 0.1f),
+            shadowElevation = if (isSelected) 4.dp else 0.dp
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                thumb?.let {
+                    Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
                 }
-                IconButton(onClick = onRedo) {
-                    Icon(Icons.AutoMirrored.Rounded.Redo, null, tint = if (isAmoled) Color.White else Color.Unspecified)
+                if (thumb == null) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 }
             }
-            TextButton(onClick = onReset, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                Icon(Icons.Rounded.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Reset", fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            (index + 1).toString(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
+        )
+    }
+}
+
+@Composable
+private fun ReaderBottomControls(
+    activeTool: PdfToolMode,
+    onToolSelected: (PdfToolMode) -> Unit,
+    isAmoled: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ToolItem(
+            icon = Icons.Rounded.PanTool,
+            label = "Pan",
+            isSelected = activeTool == PdfToolMode.NAVIGATE,
+            onClick = { onToolSelected(PdfToolMode.NAVIGATE) },
+            isAmoled = isAmoled
+        )
+        ToolItem(
+            icon = Icons.Rounded.TextFields,
+            label = "OCR",
+            isSelected = activeTool == PdfToolMode.TEXT_SELECT,
+            onClick = { onToolSelected(PdfToolMode.TEXT_SELECT) },
+            isAmoled = isAmoled
+        )
+        ToolItem(
+            icon = Icons.Rounded.Search,
+            label = "Search",
+            isSelected = activeTool == PdfToolMode.SEARCH,
+            onClick = { onToolSelected(PdfToolMode.SEARCH) },
+            isAmoled = isAmoled
+        )
+    }
+}
+
+@Composable
+private fun ToolItem(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    isAmoled: Boolean
+) {
+    val animatedColor by animateColorAsState(
+        if (isSelected) MaterialTheme.colorScheme.primary else (if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)),
+        label = ""
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(8.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(24.dp),
+            tint = animatedColor
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+            color = animatedColor
+        )
+    }
+}
+
+@Composable
+private fun PdfListTopBar(
+    onNavigateBack: () -> Unit,
+    sortOrder: PdfSortOrder,
+    onSortOrderChange: (PdfSortOrder) -> Unit,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    openTabs: List<PdfWorkspaceTab>,
+    activeTabId: String?,
+    onTabSwitch: (String) -> Unit,
+    onTabClose: (String) -> Unit,
+    isAmoled: Boolean
+) {
+    Surface(
+        color = if (isAmoled) Color.Black else Color.Transparent,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .padding(bottom = 12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
+                }
+
+                Text(
+                    text = "PDF TOOLS",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
+                )
+
+                var showSortMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(
+                        onClick = { showSortMenu = true },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.Sort, "Sort", tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false },
+                        modifier = Modifier.background(if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp))
+                    ) {
+                        PdfSortOrder.entries.forEach { order ->
+                            DropdownMenuItem(
+                                text = { Text(order.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                                onClick = {
+                                    onSortOrderChange(order)
+                                    showSortMenu = false
+                                },
+                                leadingIcon = { if (sortOrder == order) Icon(Icons.Rounded.Check, null) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                placeholder = { Text("Search your documents...") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                shape = RoundedCornerShape(28.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    focusedContainerColor = if (isAmoled) Color(0xFF222222) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                )
+            )
+
+            if (openTabs.isNotEmpty()) {
+                TabRow(openTabs, activeTabId, onTabSwitch, onTabClose, isAmoled)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabRow(
+    openTabs: List<PdfWorkspaceTab>,
+    activeTabId: String?,
+    onTabSwitch: (String) -> Unit,
+    onTabClose: (String) -> Unit,
+    isAmoled: Boolean
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        items(openTabs, key = { it.id }) { tab ->
+            val isActive = tab.id == activeTabId
+            Surface(
+                onClick = { onTabSwitch(tab.id) },
+                color = if (isActive) MaterialTheme.colorScheme.primary
+                        else if (isAmoled) Color(0xFF1A1A1A)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                ) {
+                    Text(
+                        text = tab.title.take(15),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isActive) FontWeight.Black else FontWeight.Medium,
+                        color = if (isActive) MaterialTheme.colorScheme.onPrimary
+                                else if (isAmoled) Color.White.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Rounded.Close, null,
+                        modifier = Modifier.size(16.dp).clickable { onTabClose(tab.id) },
+                        tint = if (isActive) MaterialTheme.colorScheme.onPrimary
+                                else if (isAmoled) Color.White.copy(alpha = 0.4f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewerTopBar(
+    title: String,
+    isSearching: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onToggleSearch: () -> Unit,
+    onBack: () -> Unit,
+    isAmoled: Boolean
+) {
+    Surface(
+        color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        tonalElevation = 4.dp
+    ) {
+        Column(modifier = Modifier.statusBarsPadding()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = if (isAmoled) Color.White else Color.Unspecified)
+                }
+
+                if (isSearching) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        placeholder = { Text("Find text...") },
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = onToggleSearch) { Icon(Icons.Rounded.Close, null) }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedContainerColor = Color.Transparent
+                        )
+                    )
+                } else {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (isAmoled) Color.White else Color.Unspecified
+                    )
+                    IconButton(onClick = onToggleSearch) {
+                        Icon(Icons.Rounded.Search, null, tint = if (isAmoled) Color.White else Color.Unspecified)
+                    }
+                }
             }
         }
     }
@@ -589,13 +948,10 @@ private fun TextSelectToolbar(
     isAmoled: Boolean
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        color = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        color = if (isAmoled) Color(0xFF1A1A1A).copy(alpha = 0.9f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
         shape = RoundedCornerShape(24.dp),
-        tonalElevation = 4.dp,
-        border = if (isAmoled) BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)) else null
+        tonalElevation = 4.dp
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -603,23 +959,115 @@ private fun TextSelectToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = onViewFullText) {
-                Icon(Icons.Rounded.Article, null, modifier = Modifier.size(18.dp), tint = if (isAmoled) Color.White else Color.Unspecified)
+                Icon(Icons.Rounded.Article, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("View Extracted Text", color = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary)
+                Text("Show Full Text", fontWeight = FontWeight.Black)
             }
-            VerticalDivider(modifier = Modifier.height(24.dp).width(1.dp), color = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            VerticalDivider(modifier = Modifier.height(24.dp).width(1.dp), color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
             TextButton(onClick = onResetOcr) {
-                Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)
+                Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Rescan", color = MaterialTheme.colorScheme.secondary)
+                Text("Re-scan", fontWeight = FontWeight.Black)
             }
+        }
+    }
+}
+
+@Composable
+private fun LoadingScreen(isAmoled: Boolean) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(modifier = Modifier.size(56.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 5.dp)
+            Spacer(Modifier.height(24.dp))
+            Text("Optimizing Document...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (isAmoled) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun FileActionComponents(
+    showBottomSheet: PdfFile?,
+    showRenameDialog: PdfFile?,
+    showDetailsDialog: PdfFile?,
+    onDismissBottomSheet: () -> Unit,
+    onDismissRename: () -> Unit,
+    onDismissDetails: () -> Unit,
+    onDelete: (PdfFile) -> Unit,
+    onRename: (PdfFile) -> Unit,
+    onRenameConfirm: (PdfFile, String) -> Unit,
+    onPin: (PdfFile) -> Unit,
+    onShare: (PdfFile) -> Unit,
+    onDetails: (PdfFile) -> Unit,
+    onNotes: (PdfFile) -> Unit,
+    isAmoled: Boolean
+) {
+    showBottomSheet?.let { file ->
+        PdfFileOptionsBottomSheet(
+            file = file, isAmoled = isAmoled, onDismiss = onDismissBottomSheet,
+            onDelete = { onDelete(file) }, onRename = { onRename(file) }, onPin = { onPin(file) },
+            onShare = { onShare(file) }, onDetails = { onDetails(file) }, onNotes = { onNotes(file) }
+        )
+    }
+
+    showRenameDialog?.let { file ->
+        var newName by remember { mutableStateOf(file.name.removeSuffix(".pdf")) }
+        AlertDialog(
+            onDismissRequest = onDismissRename,
+            title = { Text("Rename File", fontWeight = FontWeight.Black) },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it },
+                    label = { Text("New Name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                )
+            },
+            confirmButton = {
+                Button(onClick = { onRenameConfirm(file, newName) }, shape = RoundedCornerShape(12.dp)) { Text("RENAME") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissRename) { Text("Cancel") }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface
+        )
+    }
+
+    showDetailsDialog?.let { file ->
+        AlertDialog(
+            onDismissRequest = onDismissDetails,
+            title = { Text("File Details", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DetailRow(Icons.Rounded.Description, "Name", file.name)
+                    DetailRow(Icons.Rounded.Storage, "Size", pdfFormatSize(file.size))
+                    DetailRow(Icons.Rounded.Pages, "Pages", file.pageCount.toString())
+                    DetailRow(Icons.Rounded.Event, "Modified", pdfFormatDate(file.lastModified))
+                }
+            },
+            confirmButton = {
+                Button(onClick = { onDismissDetails() }, shape = RoundedCornerShape(12.dp)) { Text("CLOSE") }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface
+        )
+    }
+}
+
+@Composable
+private fun DetailRow(icon: ImageVector, label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OcrResultDialog(
+fun OcrResultDialog(
     text: String,
     onDismiss: () -> Unit,
     isAmoled: Boolean
@@ -630,13 +1078,12 @@ private fun OcrResultDialog(
         containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(24.dp).heightIn(min = 400.dp, max = 600.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(24.dp).heightIn(min = 400.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Extracted Text", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (isAmoled) Color.White else Color.Unspecified)
+                Text("Extracted Text", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 IconButton(onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("Extracted PDF Text", text)
-                    clipboard.setPrimaryClip(clip)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("PDF OCR", text))
                     Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
@@ -650,266 +1097,67 @@ private fun OcrResultDialog(
                 border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.1f) else Color.Transparent)
             ) {
                 Box(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-                    Text(text, color = if (isAmoled) Color.White.copy(alpha = 0.8f) else Color.Unspecified)
+                    Text(text, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
                 }
             }
             Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("CLOSE")
-            }
-            Spacer(Modifier.height(32.dp))
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("CLOSE") }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DetailItem(icon: ImageVector, label: String, value: String, isAmoled: Boolean) {
-    Row(verticalAlignment = Alignment.Top) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .background(
-                    if (isAmoled) Color.White.copy(alpha = 0.05f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    RoundedCornerShape(10.dp)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, null, modifier = Modifier.size(18.dp), tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary)
-        }
-        Spacer(Modifier.width(16.dp))
-        Column {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = if (isAmoled) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-            Text(
-                value, 
-                style = MaterialTheme.typography.bodyMedium, 
-                fontWeight = FontWeight.Medium,
-                color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
-@Composable
-private fun InfinitePdfReader(
-    uri: Uri,
-    viewModel: PdfViewModel,
-    nightProfile: NightProfile,
-    activeTool: PdfToolMode,
-    annotations: List<PdfAnnotation>
+fun PdfFileOptionsBottomSheet(
+    file: PdfFile,
+    isAmoled: Boolean,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onRename: () -> Unit,
+    onPin: () -> Unit,
+    onShare: () -> Unit,
+    onDetails: () -> Unit,
+    onNotes: () -> Unit
 ) {
-    val context = LocalContext.current
-    val fragmentActivity = context as? FragmentActivity
-    var dragStart by remember { mutableStateOf<Offset?>(null) }
-    var dragEnd by remember { mutableStateOf<Offset?>(null) }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (fragmentActivity != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(activeTool) {
-                        if (activeTool == PdfToolMode.HIGHLIGHTER) {
-                            detectDragGestures(
-                                onDragStart = { dragStart = it },
-                                onDragEnd = {
-                                    if (dragStart != null && dragEnd != null) {
-                                        viewModel.addHighlight(
-                                            Rect(dragStart!!, dragEnd!!),
-                                            Color.Yellow.copy(alpha = 0.4f).toArgb()
-                                        )
-                                    }
-                                    dragStart = null
-                                    dragEnd = null
-                                },
-                                onDrag = { change, _ ->
-                                    dragEnd = change.position
-                                }
-                            )
-                        }
-                    }
-            ) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.S) >= 13) {
-                    val themedContext = remember { ContextThemeWrapper(context, R.style.Theme_Toolz_PdfViewer) }
-                    
-                    AndroidViewBinding(
-                        factory = { inflater, parent, attachToParent ->
-                            val binding = LayoutPdfViewerBinding.inflate(inflater.cloneInContext(themedContext), parent, attachToParent)
-                            binding
-                        }
-                    ) {
-                        val fragmentManager = fragmentActivity.supportFragmentManager
-                        var pdfFragment = fragmentManager.findFragmentByTag("pdf_viewer") as? PdfViewerFragment
-                        if (pdfFragment == null) {
-                            pdfFragment = PdfViewerFragment()
-                            fragmentManager.beginTransaction()
-                                .replace(this.fragmentContainerView.id, pdfFragment, "pdf_viewer")
-                                .commitNow()
-                        }
-                        
-                        try {
-                            pdfFragment.documentUri = uri
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-                } else {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Integrated PDF viewer requires Android 12+ with SDK extension 13", modifier = Modifier.padding(24.dp), textAlign = TextAlign.Center)
-                    }
-                }
-
-                // Highlighting Overlay
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    annotations.forEach { ann ->
-                        if (ann.type == com.frerox.toolz.data.pdf.AnnotationType.HIGHLIGHTER) {
-                            val coords = ann.data.split(",").map { it.toFloat() }
-                            if (coords.size == 4) {
-                                drawRoundRect(
-                                    color = Color(ann.color),
-                                    topLeft = Offset(coords[0], coords[1]),
-                                    size = Size(coords[2] - coords[0], coords[3] - coords[1]),
-                                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                                )
-                            }
-                        }
-                    }
-                    
-                    // Live Dragging Highlight
-                    if (dragStart != null && dragEnd != null) {
-                        drawRoundRect(
-                            color = Color.Yellow.copy(alpha = 0.3f),
-                            topLeft = Offset(
-                                minOf(dragStart!!.x, dragEnd!!.x),
-                                minOf(dragStart!!.y, dragEnd!!.y)
-                            ),
-                            size = Size(
-                                Math.abs(dragEnd!!.x - dragStart!!.x),
-                                Math.abs(dragEnd!!.y - dragStart!!.y)
-                            ),
-                            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                        )
-                    }
-                }
-
-                if (nightProfile != NightProfile.OFF) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(nightProfile.overlayColor())
-                    )
-                }
-            }
-        } else {
-             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Error: Context is not FragmentActivity", modifier = Modifier.padding(24.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReaderBottomControls(
-    activeTool: PdfToolMode,
-    onToolSelected: (PdfToolMode) -> Unit,
-    isAmoled: Boolean
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        color = if (isAmoled) Color(0xFF1A1A1A).copy(alpha = 0.95f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-        shape = RoundedCornerShape(32.dp),
-        tonalElevation = 8.dp,
-        border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(horizontal = 24.dp, vertical = 8.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ToolItem(
-                icon = Icons.Rounded.TextFields,
-                label = "Text Select",
-                isSelected = activeTool == PdfToolMode.TEXT_SELECT,
-                onClick = { onToolSelected(PdfToolMode.TEXT_SELECT) },
-                isAmoled = isAmoled
-            )
-            
-            ToolItem(
-                icon = Icons.Rounded.Brush,
-                label = "Highlight",
-                isSelected = activeTool == PdfToolMode.HIGHLIGHTER,
-                onClick = { onToolSelected(PdfToolMode.HIGHLIGHTER) },
-                isAmoled = isAmoled
-            )
+        Column(modifier = Modifier.padding(bottom = 32.dp)) {
+            Row(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.PictureAsPdf, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(file.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("PDF • ${pdfFormatSize(file.size)}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = if (isAmoled) Color.White.copy(alpha = 0.1f) else Color.Transparent)
+            OptionItem("Share Document", Icons.Rounded.Share, onShare, isAmoled)
+            OptionItem(if (file.isPinned) "Unpin File" else "Pin File", Icons.Rounded.PushPin, onPin, isAmoled)
+            OptionItem("Rename File", Icons.Rounded.Edit, onRename, isAmoled)
+            OptionItem("View Details", Icons.Rounded.Info, onDetails, isAmoled)
+            OptionItem("Attached Notes", Icons.AutoMirrored.Rounded.Notes, onNotes, isAmoled)
+            OptionItem("Delete File", Icons.Rounded.Delete, onDelete, isAmoled, isError = true)
         }
     }
 }
 
 @Composable
-private fun ToolItem(
-    icon: ImageVector,
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    isAmoled: Boolean
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(8.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(
-                    if (isSelected) (if (isAmoled) Color.White else MaterialTheme.colorScheme.primary) else Color.Transparent,
-                    CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (isSelected) (if (isAmoled) Color.Black else MaterialTheme.colorScheme.onPrimary) 
-                       else (if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant)
-            )
-        }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            color = if (isSelected) (if (isAmoled) Color.White else MaterialTheme.colorScheme.primary) 
-                    else (if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant)
-        )
-    }
-}
-
-private fun NightProfile.overlayColor(): Color {
-    return when (this) {
-        NightProfile.OFF -> Color.Transparent
-        NightProfile.SOLARIZED_DARK -> Color(0x33FDF6E3).compositeOver(Color(0xFF002B36))
-        NightProfile.AMOLED_BLACK -> Color(0xFF000000).copy(alpha = 0.85f)
-    }
-}
-
-private fun formatSize(size: Long): String {
-    val kb = size / 1024.0
-    val mb = kb / 1024.0
-    return if (mb >= 1) "%.2f MB".format(mb) else "%.2f KB".format(kb)
-}
-
-private fun formatDate(timestamp: Long): String {
-    val sdf = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
-    return sdf.format(Date(timestamp * 1000))
+private fun OptionItem(text: String, icon: ImageVector, onClick: () -> Unit, isAmoled: Boolean, isError: Boolean = false) {
+    ListItem(
+        headlineContent = { Text(text, color = if (isError) MaterialTheme.colorScheme.error else if (isAmoled) Color.White else Color.Unspecified, fontWeight = FontWeight.Bold) },
+        leadingContent = { Icon(icon, null, tint = if (isError) MaterialTheme.colorScheme.error else if (isAmoled) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.primary) },
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+    )
 }
 
 @Composable
@@ -942,12 +1190,7 @@ fun PdfListContent(
     } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize().fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.02f to Color.Black,
-                    0.98f to Color.Black,
-                    1f to Color.Transparent
-                ),
+                brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
                 length = 24.dp
             ),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
@@ -956,11 +1199,8 @@ fun PdfListContent(
             items(filteredFiles, key = { it.uri.toString() }) { file ->
                 val isDeleting = deletingFileId == file.uri
                 PdfFileItem(
-                    file = file,
-                    isDeleting = isDeleting,
-                    isAmoled = isAmoled,
-                    onClick = { onFileClick(file) },
-                    onMenuClick = { onMenuClick(file) }
+                    file = file, isDeleting = isDeleting, isAmoled = isAmoled,
+                    onClick = { onFileClick(file) }, onMenuClick = { onMenuClick(file) }
                 )
             }
         }
@@ -978,8 +1218,8 @@ fun PdfFileItem(
     val alpha by animateFloatAsState(if (isDeleting) 0f else 1f, animationSpec = tween(600, easing = FastOutSlowInEasing), label = "")
     val scale by animateFloatAsState(if (isDeleting) 0.75f else 1f, animationSpec = tween(600, easing = LinearOutSlowInEasing), label = "")
     val colorTransition by animateColorAsState(
-        if (isDeleting) Color.Red.copy(alpha = 0.5f) 
-        else if (isAmoled) Color(0xFF1A1A1A) 
+        if (isDeleting) Color.Red.copy(alpha = 0.5f)
+        else if (isAmoled) Color(0xFF1A1A1A)
         else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         animationSpec = tween(400),
         label = ""
@@ -987,25 +1227,14 @@ fun PdfFileItem(
 
     Surface(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                this.alpha = alpha
-                this.scaleX = scale
-                this.scaleY = scale
-            },
-        shape = RoundedCornerShape(24.dp),
-        color = colorTransition,
+        modifier = Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha; this.scaleX = scale; this.scaleY = scale },
+        shape = RoundedCornerShape(24.dp), color = colorTransition,
         border = if (file.isPinned) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null,
         shadowElevation = if (isDeleting) 0.dp else 2.dp
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.size(52.dp), shape = RoundedCornerShape(14.dp),
                 color = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -1019,20 +1248,9 @@ fun PdfFileItem(
                         Icon(Icons.Rounded.PushPin, null, modifier = Modifier.size(14.dp), tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(6.6.dp))
                     }
-                    Text(
-                        text = file.name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                    )
+                    Text(text = file.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
                 }
-                Text(
-                    text = "${formatSize(file.size)} • ${file.pageCount} pages",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
+                Text(text = "${pdfFormatSize(file.size)} • ${file.pageCount} pages", style = MaterialTheme.typography.bodySmall, color = if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
             }
             IconButton(onClick = onMenuClick) {
                 Icon(Icons.Rounded.MoreVert, null, tint = if (isAmoled) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
@@ -1041,102 +1259,21 @@ fun PdfFileItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PdfFileOptionsBottomSheet(
-    file: PdfFile, 
-    isAmoled: Boolean,
-    onDismiss: () -> Unit,
-    onDelete: () -> Unit,
-    onRename: () -> Unit,
-    onPin: () -> Unit,
-    onShare: () -> Unit,
-    onDetails: () -> Unit,
-    onNotes: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
-            color = Color.Transparent,
-            border = if (isAmoled) BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)) else null,
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(16.dp)) {
-                    Surface(
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.PictureAsPdf, null, tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(32.dp))
-                        }
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = file.name, 
-                            fontWeight = FontWeight.Black, 
-                            style = MaterialTheme.typography.titleMedium, 
-                            maxLines = 1, 
-                            overflow = TextOverflow.Ellipsis,
-                            color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(text = "PDF Document", style = MaterialTheme.typography.labelMedium, color = if (isAmoled) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                val options = listOf(
-                    OptionItem("Share Document", Icons.Rounded.Share, if (isAmoled) Color.White else MaterialTheme.colorScheme.primary, onShare),
-                    OptionItem(if (file.isPinned) "Unpin File" else "Pin File", Icons.Rounded.PushPin, if (isAmoled) Color.White else MaterialTheme.colorScheme.secondary, onPin),
-                    OptionItem("Rename File", Icons.Rounded.Edit, if (isAmoled) Color.White else MaterialTheme.colorScheme.secondary, onRename),
-                    OptionItem("Details", Icons.Rounded.Info, if (isAmoled) Color.White else MaterialTheme.colorScheme.tertiary, onDetails),
-                    OptionItem("Notes", Icons.AutoMirrored.Rounded.Notes, if (isAmoled) Color.White else MaterialTheme.colorScheme.primary, onNotes),
-                    OptionItem("Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error, onDelete)
-                )
-                
-                options.forEach { item ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .bouncyClick { item.action() },
-                        color = Color.Transparent,
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .background(item.color.copy(alpha = 0.1f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(item.icon, null, tint = item.color, modifier = Modifier.size(20.dp))
-                            }
-                            Spacer(Modifier.size(16.dp))
-                            Text(
-                                item.text, 
-                                fontWeight = FontWeight.Bold, 
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
+private fun NightProfile.overlayColor(): Color {
+    return when (this) {
+        NightProfile.OFF -> Color.Transparent
+        NightProfile.SOLARIZED_DARK -> Color(0x33FDF6E3).compositeOver(Color(0xFF002B36))
+        NightProfile.AMOLED_BLACK -> Color(0xFF000000).copy(alpha = 0.85f)
     }
 }
 
-private data class OptionItem(val text: String, val icon: ImageVector, val color: Color, val action: () -> Unit)
+private fun pdfFormatSize(size: Long): String {
+    val kb = size / 1024.0
+    val mb = kb / 1024.0
+    return if (mb >= 1) "%.2f MB".format(mb) else "%.2f KB".format(kb)
+}
+
+private fun pdfFormatDate(timestamp: Long): String {
+    val sdf = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
+    return sdf.format(Date(timestamp * 1000))
+}
