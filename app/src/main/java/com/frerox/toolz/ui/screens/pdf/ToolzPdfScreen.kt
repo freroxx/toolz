@@ -223,6 +223,13 @@ fun ToolzPdfScreen(
                     )
                 }
             }
+            
+            // Formula Scanning Overlay
+            activeTab?.let { tab ->
+                if (tab.isOcrActive) {
+                    FormulaScanningOverlay(progress = tab.ocrProgress, isAmoled = isAmoled)
+                }
+            }
         }
     }
 
@@ -1288,21 +1295,44 @@ fun PdfListContent(
 ) {
     val filteredFiles = pdfFiles.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
-    if (pdfFiles.isEmpty()) {
+    val isSearching = searchQuery.isNotEmpty()
+    if (pdfFiles.isEmpty() || filteredFiles.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Rounded.Description, null, modifier = Modifier.size(80.dp), tint = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(16.dp))
-                Text(text = "No PDF files found", fontWeight = FontWeight.Bold, color = if (isAmoled) Color.White.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally, 
+                modifier = Modifier.padding(32.dp).graphicsLayer { translationY = -40f }
+            ) {
+                Surface(
+                    modifier = Modifier.size(120.dp),
+                    shape = RoundedCornerShape(40.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+                ) {
+                    Icon(
+                        if (isSearching) Icons.Rounded.SearchOff else Icons.Rounded.Article, 
+                        contentDescription = null, 
+                        modifier = Modifier.padding(32.dp), 
+                        tint = if (isAmoled) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.secondary
+                    )
+                }
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    text = if (isSearching) "NO DOCUMENTS FOUND" else "LIBRARY IS EMPTY",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.secondary,
+                    letterSpacing = 2.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (isSearching) "We couldn't find any PDF files matching \"$searchQuery\"" else "Add or scan your first PDF to begin your digital library.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (isAmoled) Color.White.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(0.8f),
+                    fontWeight = FontWeight.Medium
+                )
             }
-        }
-    } else if (filteredFiles.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No results for \"$searchQuery\"",
-                fontWeight = FontWeight.Bold,
-                color = if (isAmoled) Color.White.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline
-            )
         }
     } else {
         LazyColumn(
@@ -1342,10 +1372,14 @@ fun PdfFileItem(
         label = ""
     )
 
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Surface(
-        onClick = onClick,
+        onClick = {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
         modifier = Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha; this.scaleX = scale; this.scaleY = scale }
-            .then(if (!isDeleting && !isAmoled) Modifier.shadow(8.dp, RoundedCornerShape(24.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else Modifier),
+            .then(if (!isDeleting && !isAmoled) Modifier.shadow(12.dp, RoundedCornerShape(24.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else Modifier),
         shape = RoundedCornerShape(24.dp), color = colorTransition,
         border = if (file.isPinned) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else BorderStroke(1.dp, colorTransition.copy(alpha = 0.5f)),
         tonalElevation = if (isDeleting) 0.dp else 4.dp
@@ -1409,4 +1443,94 @@ private fun pdfFormatSize(size: Long): String {
 private fun pdfFormatDate(timestamp: Long): String {
     val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     return sdf.format(Date(timestamp * 1000))
+}
+@Composable
+fun FormulaScanningOverlay(progress: Float, isAmoled: Boolean) {
+    Box(
+        modifier = Modifier.fillMaxSize()
+            .background((if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface).copy(alpha = 0.9f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                val infiniteTransition = rememberInfiniteTransition(label = "scanning")
+                val scanOffset by infiniteTransition.animateFloat(
+                    initialValue = -80f,
+                    targetValue = 80f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1500, easing = EaseInOutSine),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "scanLine"
+                )
+                
+                Surface(
+                    modifier = Modifier.size(160.dp),
+                    shape = RoundedCornerShape(40.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                ) {
+                    Icon(
+                        Icons.Rounded.Memory,
+                        null,
+                        modifier = Modifier.padding(48.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                    )
+                }
+                
+                // Scanning Line
+                Box(
+                    modifier = Modifier
+                        .width(180.dp)
+                        .height(2.dp)
+                        .offset(y = scanOffset.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.primary, Color.Transparent)
+                            )
+                        )
+                        .shadow(8.dp, spotColor = MaterialTheme.colorScheme.primary)
+                )
+            }
+            
+            Spacer(Modifier.height(48.dp))
+            Text(
+                "FORMULA INTERPRETATION ACTIVE",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 2.sp
+            )
+            Spacer(Modifier.height(16.dp))
+            
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.width(200.dp).height(8.dp).clip(CircleShape),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            )
+            
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "${(progress * 100).toInt()}% COMPLETED",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(Modifier.height(32.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    "CONVERTING TO LATEX STORAGE",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
 }

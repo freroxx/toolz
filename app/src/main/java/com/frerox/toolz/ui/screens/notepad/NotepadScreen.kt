@@ -178,28 +178,75 @@ fun NotepadScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (filteredNotes.isEmpty()) {
+                val isSearching = searchQuery.isNotEmpty()
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Surface(
-                            modifier = Modifier.size(120.dp),
-                            shape = RoundedCornerShape(40.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-                        ) {
-                            Icon(
-                                if (searchQuery.isEmpty()) Icons.Rounded.EditNote else Icons.Rounded.SearchOff, 
-                                contentDescription = null, 
-                                modifier = Modifier.padding(32.dp), 
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally, 
+                        modifier = Modifier.padding(32.dp).graphicsLayer { translationY = -40f }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            // Decorative pulses
+                            repeat(3) { i ->
+                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                val scale by infiniteTransition.animateFloat(
+                                    initialValue = 1f,
+                                    targetValue = 1.4f + (i * 0.2f),
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(2000, delayMillis = i * 400, easing = EaseInOutQuart),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "scale"
+                                )
+                                val alpha by infiniteTransition.animateFloat(
+                                    initialValue = 1f,
+                                    targetValue = 0f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(2000, delayMillis = i * 400, easing = EaseInOutQuart),
+                                        repeatMode = RepeatMode.Restart
+                                    ),
+                                    label = "alpha"
+                                )
+                                Surface(
+                                    modifier = Modifier.size(100.dp).graphicsLayer { 
+                                        scaleX = scale
+                                        scaleY = scale
+                                        this.alpha = alpha
+                                    },
+                                    shape = RoundedCornerShape(36.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                ) {}
+                            }
+                            
+                            Surface(
+                                modifier = Modifier.size(110.dp),
+                                shape = RoundedCornerShape(32.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            ) {
+                                Icon(
+                                    if (isSearching) Icons.Rounded.SearchOff else Icons.Rounded.AutoAwesome, 
+                                    contentDescription = null, 
+                                    modifier = Modifier.padding(28.dp), 
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(32.dp))
                         Text(
-                            if (searchQuery.isEmpty()) "Your canvas is empty" else "No matching notes found", 
-                            style = MaterialTheme.typography.titleMedium, 
-                            color = MaterialTheme.colorScheme.outline,
+                            text = if (isSearching) "STILL SEARCHING..." else "CAPTURING MOMENTS", 
+                            style = MaterialTheme.typography.labelSmall, 
                             fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = if (isSearching) "We couldn't find any thoughts matching \"$searchQuery\"" else "Your ideas are waiting for a canvas. Start your first note now.", 
+                            style = MaterialTheme.typography.bodyLarge, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(0.8f)
                         )
                     }
                 }
@@ -210,37 +257,54 @@ fun NotepadScreen(
                         brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
                         length = 24.dp
                     ),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalItemSpacing = 16.dp
                 ) {
-                    items(filteredNotes, key = { it.id }) { note ->
-                        ImprovedNoteItem(
-                            note = note, 
-                            isDark = isDark,
-                            isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
-                            currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
-                            onClick = { 
-                                noteToEdit = note
-                                showEditor = false // We now open viewer first through noteToEdit being non-null
-                            },
-                            onDelete = { 
-                                viewModel.deleteNote(note)
-                                scope.launch {
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = "Note moved to trash",
-                                        actionLabel = "UNDO",
-                                        duration = SnackbarDuration.Short
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        viewModel.undoDelete()
+                    itemsIndexed(filteredNotes, key = { _, note -> note.id }) { index, note ->
+                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                        Box(
+                            modifier = Modifier
+                                .animateItemPlacement(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                        ) {
+                            ImprovedNoteItem(
+                                note = note, 
+                                isDark = isDark,
+                                isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
+                                currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
+                                onClick = { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    noteToEdit = note
+                                    showEditor = false
+                                },
+                                onDelete = { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    viewModel.deleteNote(note)
+                                    scope.launch {
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "Note moved to trash",
+                                            actionLabel = "UNDO",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            viewModel.undoDelete()
+                                        }
                                     }
+                                },
+                                onTogglePin = { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    viewModel.togglePin(note) 
+                                },
+                                onPlayAudio = { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    note.attachedAudioUri?.let { onPlayAudio(it) } 
+                                },
+                                onViewPdf = { 
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    note.attachedPdfUri?.let { onViewPdf(it) } 
                                 }
-                            },
-                            onTogglePin = { viewModel.togglePin(note) },
-                            onPlayAudio = { note.attachedAudioUri?.let { onPlayAudio(it) } },
-                            onViewPdf = { note.attachedPdfUri?.let { onViewPdf(it) } }
-                        )
+                            )
+                        }
                     }
                 }
             }
