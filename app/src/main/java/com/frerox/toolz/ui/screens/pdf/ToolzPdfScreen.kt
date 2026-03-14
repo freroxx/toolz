@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Article
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.*
@@ -43,13 +44,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.pdf.PdfFile
-import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -133,7 +132,8 @@ fun ToolzPdfScreen(
                 Surface(
                     color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface,
                     tonalElevation = 8.dp,
-                    shadowElevation = 8.dp
+                    shadowElevation = 8.dp,
+                    shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
                 ) {
                     Column {
                         if (activeTab?.lastTool == PdfToolMode.TEXT_SELECT) {
@@ -174,7 +174,7 @@ fun ToolzPdfScreen(
                     onClick = viewModel::toggleNightProfile,
                     containerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.padding(bottom = 16.dp)
                 ) {
                     AnimatedContent(targetState = nightProfile, label = "") { profile ->
@@ -201,7 +201,6 @@ fun ToolzPdfScreen(
                 is PdfViewModel.PdfUiState.Loading -> LoadingScreen(isAmoled)
                 is PdfViewModel.PdfUiState.Viewer -> {
                     ViewerContent(
-                        uri = state.uri,
                         viewModel = viewModel,
                         docState = docState,
                         activeTab = activeTab,
@@ -291,7 +290,6 @@ fun ToolzPdfScreen(
 
 @Composable
 private fun ViewerContent(
-    uri: Uri,
     viewModel: PdfViewModel,
     docState: DocumentState,
     activeTab: PdfWorkspaceTab?,
@@ -306,7 +304,6 @@ private fun ViewerContent(
 
         Box(modifier = Modifier.weight(1f)) {
             InfinitePdfReader(
-                uri = uri,
                 viewModel = viewModel,
                 docState = docState,
                 ocrData = ocrData,
@@ -327,31 +324,39 @@ private fun ViewerContent(
 
 @Composable
 private fun OcrProgressHeader(progress: Float, isAmoled: Boolean) {
-    Column {
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(4.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        )
-        Surface(
-            color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
-            modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+            .padding(vertical = 8.dp, horizontal = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Document OCR Active... ${(progress * 100).toInt()}%",
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                textAlign = TextAlign.Center,
-                color = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary,
+                "Scanning document for text...",
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
+            Text(
+                "${(progress * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black
+            )
         }
+        Spacer(Modifier.height(6.dp))
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+            trackColor = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+        )
     }
 }
 
 @Composable
-private fun SearchResultsOverlay(
+private fun BoxScope.SearchResultsOverlay(
     docState: DocumentState, 
     onPageSelected: (Int) -> Unit,
     isAmoled: Boolean
@@ -421,7 +426,6 @@ private fun SearchResultsOverlay(
 
 @Composable
 private fun InfinitePdfReader(
-    uri: Uri,
     viewModel: PdfViewModel,
     docState: DocumentState,
     ocrData: OcrDocumentData?,
@@ -449,7 +453,16 @@ private fun InfinitePdfReader(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize()
+                .fadingEdge(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.05f to Color.Black,
+                        0.95f to Color.Black,
+                        1f to Color.Transparent
+                    ),
+                    length = 40.dp
+                ),
             contentPadding = PaddingValues(vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -492,9 +505,9 @@ private fun PageContainer(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .aspectRatio(0.707f)
-                .shadow(4.dp, RoundedCornerShape(8.dp)),
+                .shadow(8.dp, RoundedCornerShape(12.dp)),
             color = Color.White,
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(12.dp)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 bitmap?.let {
@@ -506,7 +519,6 @@ private fun PageContainer(
                     )
                     
                     PageOverlay(
-                        pageIndex = pageIndex,
                         ocrPageData = ocrPageData,
                         activeTool = activeTool,
                         bitmapWidth = it.width,
@@ -517,20 +529,25 @@ private fun PageContainer(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "PAGE ${pageIndex + 1}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = Color.Gray.copy(alpha = 0.6f),
-            letterSpacing = 1.sp
-        )
+        Spacer(Modifier.height(12.dp))
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                "PAGE ${pageIndex + 1}",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                letterSpacing = 1.sp
+            )
+        }
     }
 }
 
 @Composable
 private fun PageOverlay(
-    pageIndex: Int,
     ocrPageData: OcrPageData?,
     activeTool: PdfToolMode,
     bitmapWidth: Int,
@@ -587,10 +604,9 @@ private fun ThumbnailScrubber(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(100.dp),
+            .height(110.dp),
         color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
         tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.05f) else Color.Transparent)
     ) {
         LazyRow(
             state = listState,
@@ -624,7 +640,7 @@ private fun ThumbnailItem(
         thumb = getThumbnail(index)
     }
 
-    val scale by animateFloatAsState(if (isSelected) 1.1f else 1f, label = "")
+    val scale by animateFloatAsState(if (isSelected) 1.15f else 1f, label = "")
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -635,10 +651,10 @@ private fun ThumbnailItem(
                 .width(54.dp)
                 .height(76.dp)
                 .clickable(onClick = onClick),
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(8.dp),
             border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, Color.Gray.copy(alpha = 0.2f)),
             color = Color.LightGray.copy(alpha = 0.1f),
-            shadowElevation = if (isSelected) 4.dp else 0.dp
+            shadowElevation = if (isSelected) 8.dp else 0.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
                 thumb?.let {
@@ -654,7 +670,7 @@ private fun ThumbnailItem(
                 }
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             (index + 1).toString(),
             style = MaterialTheme.typography.labelSmall,
@@ -673,8 +689,13 @@ private fun ReaderBottomControls(
     Row(
         modifier = Modifier
             .padding(horizontal = 24.dp, vertical = 12.dp)
-            .fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .fillMaxWidth()
+            .background(
+                if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
+                RoundedCornerShape(24.dp)
+            )
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
         ToolItem(
@@ -717,9 +738,9 @@ private fun ToolItem(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(8.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Icon(
             imageVector = icon,
@@ -769,7 +790,7 @@ private fun PdfListTopBar(
             ) {
                 IconButton(
                     onClick = onNavigateBack,
-                    modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
                 }
@@ -786,7 +807,7 @@ private fun PdfListTopBar(
                 Box {
                     IconButton(
                         onClick = { showSortMenu = true },
-                        modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.Sort, "Sort", tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
                     }
@@ -817,7 +838,7 @@ private fun PdfListTopBar(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(24.dp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -912,7 +933,7 @@ private fun ViewerTopBar(
                         onValueChange = onSearchQueryChange,
                         placeholder = { Text("Find text...") },
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         trailingIcon = {
                             IconButton(onClick = onToggleSearch) { Icon(Icons.Rounded.Close, null) }
@@ -959,7 +980,7 @@ private fun TextSelectToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = onViewFullText) {
-                Icon(Icons.Rounded.Article, null, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Rounded.Article, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Show Full Text", fontWeight = FontWeight.Black)
             }
@@ -1130,7 +1151,16 @@ fun PdfFileOptionsBottomSheet(
             Row(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.PictureAsPdf, null, tint = MaterialTheme.colorScheme.primary)
+                        if (file.thumbnail != null) {
+                            Image(
+                                bitmap = file.thumbnail.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Rounded.PictureAsPdf, null, tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
                 Spacer(Modifier.width(16.dp))
@@ -1194,7 +1224,7 @@ fun PdfListContent(
                 length = 24.dp
             ),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             items(filteredFiles, key = { it.uri.toString() }) { file ->
                 val isDeleting = deletingFileId == file.uri
@@ -1229,16 +1259,25 @@ fun PdfFileItem(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha; this.scaleX = scale; this.scaleY = scale },
         shape = RoundedCornerShape(24.dp), color = colorTransition,
-        border = if (file.isPinned) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null,
-        shadowElevation = if (isDeleting) 0.dp else 2.dp
+        border = if (file.isPinned) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null,
+        shadowElevation = if (isDeleting) 0.dp else 4.dp
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(
-                modifier = Modifier.size(52.dp), shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.size(64.dp), shape = RoundedCornerShape(16.dp),
                 color = if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.PictureAsPdf, null, tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                    if (file.thumbnail != null) {
+                        Image(
+                            bitmap = file.thumbnail.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(Icons.Rounded.PictureAsPdf, null, tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                    }
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -1246,11 +1285,17 @@ fun PdfFileItem(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (file.isPinned) {
                         Icon(Icons.Rounded.PushPin, null, modifier = Modifier.size(14.dp), tint = if (isAmoled) Color.White else MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(6.6.dp))
+                        Spacer(Modifier.width(6.dp))
                     }
                     Text(text = file.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface)
                 }
                 Text(text = "${pdfFormatSize(file.size)} • ${file.pageCount} pages", style = MaterialTheme.typography.bodySmall, color = if (isAmoled) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Event, null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                    Spacer(Modifier.width(4.dp))
+                    Text(pdfFormatDate(file.lastModified), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
             }
             IconButton(onClick = onMenuClick) {
                 Icon(Icons.Rounded.MoreVert, null, tint = if (isAmoled) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
@@ -1274,6 +1319,6 @@ private fun pdfFormatSize(size: Long): String {
 }
 
 private fun pdfFormatDate(timestamp: Long): String {
-    val sdf = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
+    val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     return sdf.format(Date(timestamp * 1000))
 }

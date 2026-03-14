@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.utils
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,6 +28,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,24 +106,28 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
                 tonalElevation = 0.dp
             ) {
-                Column {
-                    TopAppBar(
+                Column(modifier = Modifier.statusBarsPadding()) {
+                    CenterAlignedTopAppBar(
                         title = { 
-                            Column {
-                                Text("PERIODIC TABLE", fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("PERIODIC TABLE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
                                 if (!isLoading) {
-                                    Text("${allElements.size} Elements Indexed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                    Text("${allElements.size} ELEMENTS INDEXED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 }
                             }
                         },
                         navigationIcon = {
-                            IconButton(onClick = onBack) {
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                             }
-                        }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                     )
                     
                     OutlinedTextField(
@@ -129,78 +135,68 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                         onValueChange = { searchQuery = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        placeholder = { Text("Search anything...") },
-                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Rounded.Close, null)
-                                }
-                            }
-                        },
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                        placeholder = { Text("Search by name, symbol or number...") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             unfocusedBorderColor = Color.Transparent,
                             focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                         )
                     )
 
                     LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
-                            FilterChip(
-                                selected = selectedCategory == null,
+                            Surface(
                                 onClick = { selectedCategory = null },
-                                label = { Text("All") },
+                                color = if (selectedCategory == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 shape = RoundedCornerShape(16.dp),
-                                leadingIcon = if (selectedCategory == null) {
-                                    { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
-                                } else null
-                            )
+                                border = if (selectedCategory != null) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
+                            ) {
+                                Text(
+                                    "ALL",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (selectedCategory == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                         items(categories) { category ->
+                            val isSelected = selectedCategory == category
                             val catColor = allElements.find { it.category == category }?.color ?: MaterialTheme.colorScheme.primary
-                            FilterChip(
-                                selected = selectedCategory == category,
+                            
+                            Surface(
                                 onClick = { selectedCategory = category },
-                                label = { Text(category) },
+                                color = if (isSelected) catColor else catColor.copy(alpha = 0.1f),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = catColor.copy(alpha = 0.2f),
-                                    selectedLabelColor = catColor,
-                                    selectedLeadingIconColor = catColor
-                                ),
-                                leadingIcon = if (selectedCategory == category) {
-                                    { Icon(Icons.Rounded.Category, null, modifier = Modifier.size(16.dp)) }
-                                } else null
-                            )
+                                border = if (!isSelected) BorderStroke(1.dp, catColor.copy(alpha = 0.3f)) else null
+                            ) {
+                                Text(
+                                    category.uppercase(),
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (isSelected) Color.White else catColor
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.02f to Color.Black,
-                    0.98f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 16.dp
-            )
         ) {
             if (isLoading) {
                 Column(
@@ -210,32 +206,37 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             progress = { loadingProgress },
-                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
-                            modifier = Modifier.size(100.dp),
-                            strokeWidth = 8.dp
+                            strokeCap = StrokeCap.Round,
+                            modifier = Modifier.size(120.dp),
+                            strokeWidth = 8.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                         )
                         Text(
                             "${(loadingProgress * 100).toInt()}%",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                     Spacer(Modifier.height(32.dp))
-                    Text(loadingStatus, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("Database Optimization Phase", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text(loadingStatus.uppercase(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text("OPTIMIZING ATOMIC DATABASE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
                 }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 100.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(20.dp),
+                    modifier = Modifier.fillMaxSize().fadingEdge(
+                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
+                        length = 24.dp
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(filteredElements, key = { it.atomicNumber }) { element ->
                         ModernElementCard(
-                            element = element,
-                            modifier = Modifier.animateItem()
+                            element = element
                         ) {
                             selectedElement = element
                         }
@@ -254,17 +255,15 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    
+fun ModernElementCard(element: Element, onClick: () -> Unit) {
     Surface(
-        modifier = modifier
+        modifier = Modifier
             .aspectRatio(1f)
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(
+        tonalElevation = 4.dp,
+        border = BorderStroke(
             width = 2.dp,
             brush = Brush.linearGradient(
                 listOf(element.color.copy(alpha = 0.6f), element.color.copy(alpha = 0.1f))
@@ -325,12 +324,13 @@ fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: 
                 )
                 
                 Text(
-                    text = element.name,
+                    text = element.name.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    letterSpacing = 0.5.sp
                 )
             }
         }
@@ -357,38 +357,39 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             // Header
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(120.dp),
+                    modifier = Modifier.size(110.dp),
                     shape = RoundedCornerShape(32.dp),
                     color = element.color,
-                    shadowElevation = 16.dp
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(4.dp, Color.White.copy(alpha = 0.2f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             element.symbol, 
-                            style = MaterialTheme.typography.displayMedium.copy(fontSize = 56.sp), 
+                            style = MaterialTheme.typography.displayMedium.copy(fontSize = 52.sp), 
                             color = Color.White, 
                             fontWeight = FontWeight.Black
                         )
                     }
                 }
-                Spacer(Modifier.width(24.dp))
+                Spacer(Modifier.width(20.dp))
                 Column {
                     Text(
                         element.name.uppercase(), 
-                        style = MaterialTheme.typography.headlineLarge, 
+                        style = MaterialTheme.typography.headlineMedium, 
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
                     )
                     Surface(
                         color = element.color.copy(alpha = 0.15f),
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
                         Text(
                             element.category.uppercase(), 
-                            style = MaterialTheme.typography.labelLarge, 
+                            style = MaterialTheme.typography.labelSmall, 
                             color = element.color,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                             fontWeight = FontWeight.Black,
                             letterSpacing = 1.sp
                         )
@@ -397,18 +398,18 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             }
 
             // Cards Grid
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    DetailCard(Modifier.weight(1f), "Atomic Number", element.atomicNumber.toString(), Icons.Rounded.Numbers, element.color)
-                    DetailCard(Modifier.weight(1f), "Atomic Weight", String.format(Locale.getDefault(), "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DetailCard(Modifier.weight(1f), "ATOMIC NUMBER", element.atomicNumber.toString(), Icons.Rounded.Numbers, element.color)
+                    DetailCard(Modifier.weight(1f), "ATOMIC WEIGHT", String.format(Locale.getDefault(), "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    DetailCard(Modifier.weight(1f), "Electron Config", element.electronConfig, Icons.Rounded.Layers, element.color)
-                    DetailCard(Modifier.weight(1f), "Discovered By", element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DetailCard(Modifier.weight(1f), "ELECTRON CONFIG", element.electronConfig, Icons.Rounded.Layers, element.color)
+                    DetailCard(Modifier.weight(1f), "DISCOVERY", element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    DetailCard(Modifier.weight(1f), "Density", element.density, Icons.Rounded.Compress, element.color)
-                    DetailCard(Modifier.weight(1f), "Abundance", element.abundance, Icons.Rounded.Public, element.color)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DetailCard(Modifier.weight(1f), "DENSITY", element.density, Icons.Rounded.Compress, element.color)
+                    DetailCard(Modifier.weight(1f), "ABUNDANCE", element.abundance, Icons.Rounded.Public, element.color)
                 }
             }
 
@@ -416,25 +417,34 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(32.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, element.color.copy(alpha = 0.1f))
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Info, null, tint = element.color, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("SCIENTIFIC OVERVIEW", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
+                    Surface(
+                        color = element.color.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "SCIENTIFIC OVERVIEW", 
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall, 
+                            fontWeight = FontWeight.Black, 
+                            color = element.color, 
+                            letterSpacing = 1.5.sp
+                        )
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(
                         element.description, 
                         style = MaterialTheme.typography.bodyLarge, 
-                        lineHeight = 28.sp,
-                        fontWeight = FontWeight.Medium
+                        lineHeight = 26.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp).alpha(0.1f))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        PropertyItem("Melting Point", element.meltPoint, Icons.Rounded.DeviceThermostat)
-                        PropertyItem("Boiling Point", element.boilingPoint, Icons.Rounded.Air)
+                        PropertyItem("MELTING POINT", element.meltPoint, Icons.Rounded.DeviceThermostat)
+                        PropertyItem("BOILING POINT", element.boilingPoint, Icons.Rounded.Air)
                     }
                 }
             }
@@ -443,18 +453,21 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             Surface(
                 color = element.color.copy(alpha = 0.1f),
                 shape = RoundedCornerShape(32.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, element.color.copy(alpha = 0.2f))
+                border = BorderStroke(1.5.dp, element.color.copy(alpha = 0.2f))
             ) {
                 Row(modifier = Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.AutoAwesome, 
-                        null, 
-                        tint = element.color, 
-                        modifier = Modifier.size(40.dp)
-                    )
+                    Surface(
+                        modifier = Modifier.size(48.dp),
+                        shape = CircleShape,
+                        color = element.color.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = element.color, modifier = Modifier.size(24.dp))
+                        }
+                    }
                     Spacer(Modifier.width(20.dp))
                     Column {
-                        Text("QUICK FACT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
+                        Text("ATOMIC INSIGHT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
                         Text(element.funFact, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -468,15 +481,14 @@ fun DetailCard(modifier: Modifier, label: String, value: String, icon: androidx.
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
             Spacer(Modifier.height(12.dp))
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }
     }
 }
@@ -484,14 +496,14 @@ fun DetailCard(modifier: Modifier, label: String, value: String, icon: androidx.
 @Composable
 fun PropertyItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
+        Surface(
+            modifier = Modifier.size(44.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
         ) {
-            Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column {

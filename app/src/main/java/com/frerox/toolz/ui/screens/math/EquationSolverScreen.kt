@@ -1,11 +1,15 @@
 package com.frerox.toolz.ui.screens.math
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -17,9 +21,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
@@ -30,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,43 +52,53 @@ fun EquationSolverScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("EQUATION SOLVER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+            CenterAlignedTopAppBar(
+                title = { 
+                    Text("EQUATION SOLVER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) 
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showHistory = true }) {
+                    IconButton(
+                        onClick = { showHistory = true },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
                         Icon(Icons.Rounded.History, contentDescription = "History")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 24.dp)
         ) {
             // Display Area
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.8f)
-                    .padding(vertical = 8.dp)
+                    .weight(1f)
+                    .padding(vertical = 12.dp)
                     .clickable { focusRequester.requestFocus() },
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(32.dp),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
                 Column(
                     modifier = Modifier
-                        .padding(20.dp)
+                        .padding(24.dp)
                         .fillMaxSize(),
-                    verticalArrangement = Arrangement.Bottom,
+                    verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.End
                 ) {
                     TextField(
@@ -92,17 +109,17 @@ fun EquationSolverScreen(
                             .focusRequester(focusRequester),
                         textStyle = MaterialTheme.typography.headlineMedium.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Black,
                             textAlign = TextAlign.End
                         ),
                         placeholder = { 
                             Text(
-                                "Enter equation (e.g. x^2=4)", 
+                                "x² + 5x + 6 = 0", 
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = TextAlign.End,
-                                style = MaterialTheme.typography.bodyLarge.copy(
+                                style = MaterialTheme.typography.headlineSmall.copy(
                                     fontFamily = FontFamily.Monospace, 
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                                 )
                             ) 
                         },
@@ -119,53 +136,87 @@ fun EquationSolverScreen(
                         })
                     )
                     
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     
-                    if (state.result.isNotEmpty()) {
-                        Text(
-                            text = state.result,
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            ),
-                            textAlign = TextAlign.End
-                        )
+                    AnimatedVisibility(
+                        visible = state.result.isNotEmpty(),
+                        enter = slideInVertically { it } + fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text(
+                                text = "SOLUTIONS: ${state.result}",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary
+                                ),
+                                textAlign = TextAlign.End
+                            )
+                        }
                     }
                     
-                    if (state.error != null) {
-                        Text(
-                            text = state.error!!,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                    state.error?.let {
+                        Surface(
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.padding(top = 12.dp)
+                        ) {
+                            Text(
+                                text = it.uppercase(),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
                     }
                 }
             }
 
             // Controls & Constants
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterChip(
-                    selected = state.isDegreeMode, 
+                Surface(
                     onClick = { viewModel.toggleMode() },
-                    label = { Text(if (state.isDegreeMode) "DEG" else "RAD") },
+                    color = if (state.isDegreeMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(12.dp)
-                )
+                ) {
+                    Text(
+                        if (state.isDegreeMode) "DEG" else "RAD",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = if (state.isDegreeMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     items(state.constants) { constant ->
-                        AssistChip(
+                        Surface(
                             onClick = { viewModel.appendSymbol(constant.value) },
-                            label = { Text(constant.symbol) },
-                            shape = RoundedCornerShape(12.dp)
-                        )
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+                        ) {
+                            Text(
+                                constant.symbol,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
                 }
             }
@@ -183,7 +234,13 @@ fun EquationSolverScreen(
 
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1.8f).padding(bottom = 16.dp)
+                modifier = Modifier
+                    .weight(2.5f)
+                    .padding(bottom = 24.dp)
+                    .fadingEdge(
+                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
+                        length = 16.dp
+                    )
             ) {
                 buttons.forEach { row ->
                     Row(
@@ -238,13 +295,15 @@ fun KeypadButton(
     isVariable: Boolean = false
 ) {
     val containerColor = when {
-        isAction -> MaterialTheme.colorScheme.primaryContainer
-        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
-        isVariable -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        text == "=" -> MaterialTheme.colorScheme.primary
+        isAction -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+        isVariable -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     }
     
     val contentColor = when {
+        text == "=" -> MaterialTheme.colorScheme.onPrimary
         isAction -> MaterialTheme.colorScheme.onPrimaryContainer
         isClear -> MaterialTheme.colorScheme.onErrorContainer
         isVariable -> MaterialTheme.colorScheme.onSecondaryContainer
@@ -253,17 +312,18 @@ fun KeypadButton(
 
     Surface(
         modifier = modifier
-            .height(52.dp)
+            .height(54.dp)
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        color = containerColor
+        color = containerColor,
+        border = if (!isAction && text != "=") BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (text == "BS") {
-                Icon(Icons.AutoMirrored.Rounded.Backspace, null, tint = contentColor, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Rounded.Backspace, null, tint = contentColor, modifier = Modifier.size(22.dp))
             } else {
                 Text(
-                    text = text,
+                    text = if (text.length > 2 && text.endsWith("(")) text.dropLast(1) else text,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
                     color = contentColor
                 )
@@ -279,28 +339,35 @@ fun HistoryBottomSheet(
     onDismiss: () -> Unit,
     onSelect: (MathHistory) -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxHeight(0.6f).padding(16.dp)) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxHeight(0.6f).padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
             Text(
-                "CALCULATION HISTORY",
-                style = MaterialTheme.typography.labelLarge,
+                "HISTORY LOG",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(bottom = 16.dp)
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 2.sp,
+                modifier = Modifier.padding(vertical = 16.dp)
             )
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(history) { item ->
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(item) },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            .bouncyClick { onSelect(item) },
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(item.expression, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace)
+                        Column(modifier = Modifier.padding(20.dp)) {
+                            Text(item.expression, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(4.dp))
                             Text(
-                                "= ${item.result}",
+                                "Result: ${item.result}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Black

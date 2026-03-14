@@ -22,3 +22,9 @@ data class OcrBlockData(
 data class OcrDocumentData(
     val pages: List<OcrPageData>
 )
+
+data class FormulaOcrResult(
+    val plainText: String,
+    val latex: String,
+    val confidence: Float
+)

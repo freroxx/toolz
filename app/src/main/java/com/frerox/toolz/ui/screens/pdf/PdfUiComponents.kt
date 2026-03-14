@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.pdf
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -7,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material3.*
@@ -40,31 +42,49 @@ fun PdfFileList(
             .fadingEdge(
                 brush = Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
+                    0.02f to Color.Black,
+                    0.98f to Color.Black,
                     1f to Color.Transparent
                 ),
                 length = 24.dp
             ),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 100.dp, top = 20.dp),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text(
-                text = "RECENT DOCUMENTS",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 8.dp, start = 8.dp),
-                letterSpacing = 2.sp
-            )
+            Surface(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = "RECENT DOCUMENTS",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 2.sp
+                )
+            }
         }
-        items(files) { file ->
-            PdfFileItem(
-                file = file,
-                onClick = { onFileClick(file) },
-                onMenuClick = { onMenuClick(file) }
-            )
+        
+        if (files.isEmpty()) {
+            item {
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Description, null, modifier = Modifier.size(80.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).padding(20.dp), tint = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.height(16.dp))
+                        Text("No PDF files found", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+            }
+        } else {
+            items(files) { file ->
+                PdfFileItem(
+                    file = file,
+                    onClick = { onFileClick(file) },
+                    onMenuClick = { onMenuClick(file) }
+                )
+            }
         }
     }
 }
@@ -78,12 +98,12 @@ fun PdfFileItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(110.dp)
+            .height(120.dp)
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         tonalElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Row(
             modifier = Modifier
@@ -93,24 +113,25 @@ fun PdfFileItem(
         ) {
             Surface(
                 modifier = Modifier
-                    .width(64.dp)
+                    .width(72.dp)
                     .fillMaxHeight(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 2.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (file.thumbnail != null) {
                         Image(
                             bitmap = file.thumbnail.asImageBitmap(),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)),
+                            modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
                     } else {
                         Icon(
                             imageVector = Icons.Rounded.PictureAsPdf,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -123,24 +144,39 @@ fun PdfFileItem(
                 Text(
                     text = file.name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${formatSize(file.size)} • ${file.pageCount} PAGES",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 0.5.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "${file.pageCount} PGS",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = formatSize(file.size),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = formatDate(file.lastModified).uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.outline,
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.5.sp
                 )
             }
             
@@ -166,5 +202,5 @@ private fun formatSize(size: Long): String {
 
 private fun formatDate(timestamp: Long): String {
     val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-    return sdf.format(Date(timestamp * 1000)) // MediaStore returns seconds
+    return sdf.format(Date(timestamp * 1000))
 }

@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.light
 import android.app.Activity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -107,13 +109,19 @@ fun ScreenLightScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
-            Text(
-                "TAP TO CONFIGURE",
-                style = MaterialTheme.typography.labelLarge,
-                color = contentColor.copy(alpha = 0.3f),
-                fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp
-            )
+            Surface(
+                color = contentColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    "TAP TO CONFIGURE",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.5f),
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp
+                )
+            }
         }
 
         // Lock Status Indicator
@@ -126,8 +134,9 @@ fun ScreenLightScreen(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
                     modifier = Modifier.size(120.dp),
-                    shape = CircleShape,
-                    color = contentColor.copy(alpha = 0.1f)
+                    shape = RoundedCornerShape(40.dp),
+                    color = contentColor.copy(alpha = 0.15f),
+                    border = BorderStroke(2.dp, contentColor.copy(alpha = 0.2f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -138,18 +147,20 @@ fun ScreenLightScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(24.dp))
                 Text(
                     "SCREEN LOCKED",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = contentColor,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
                 )
                 Text(
-                    "Long press anywhere to unlock",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = contentColor.copy(alpha = 0.6f)
+                    "LONG PRESS TO UNLOCK",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
                 )
             }
         }
@@ -172,28 +183,28 @@ fun ScreenLightScreen(
                 ) {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.background(contentColor.copy(alpha = 0.1f), CircleShape)
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.15f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = contentColor)
                     }
                     
                     Surface(
-                        color = contentColor.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(20.dp)
+                        color = contentColor.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
                             "SCREEN LIGHT",
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = contentColor,
-                            letterSpacing = 1.sp
+                            letterSpacing = 2.sp
                         )
                     }
 
                     IconButton(
                         onClick = { viewModel.toggleLock() },
-                        modifier = Modifier.background(contentColor.copy(alpha = 0.1f), CircleShape)
+                        modifier = Modifier.size(48.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.15f))
                     ) {
                         Icon(Icons.Rounded.LockOpen, "Lock", tint = contentColor)
                     }
@@ -206,8 +217,8 @@ fun ScreenLightScreen(
                         .padding(24.dp)
                         .fillMaxWidth(),
                     shape = RoundedCornerShape(40.dp),
-                    color = (if (state.color.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, contentColor.copy(alpha = 0.2f))
+                    color = (if (state.color.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, contentColor.copy(alpha = 0.2f))
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
@@ -230,14 +241,14 @@ fun ScreenLightScreen(
                             Spacer(Modifier.width(12.dp))
                             Text(
                                 "${(state.brightness * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = contentColor,
                                 modifier = Modifier.width(36.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
 
                         // Presets
                         LazyRow(
@@ -247,23 +258,32 @@ fun ScreenLightScreen(
                             items(presets) { color ->
                                 Box(
                                     modifier = Modifier
-                                        .size(52.dp)
+                                        .size(48.dp)
                                         .clip(CircleShape)
                                         .background(color)
                                         .border(
                                             width = if (state.color == color) 3.dp else 1.dp,
-                                            color = if (state.color == color) contentColor else contentColor.copy(alpha = 0.3f),
+                                            color = if (state.color == color) contentColor else contentColor.copy(alpha = 0.2f),
                                             shape = CircleShape
                                         )
                                         .clickable { viewModel.setColor(color) }
-                                )
+                                ) {
+                                    if (state.color == color) {
+                                        Icon(
+                                            Icons.Rounded.Check, 
+                                            null, 
+                                            tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
+                                            modifier = Modifier.align(Alignment.Center).size(20.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                         
                         // Custom Color Hue Slider
-                        var hue by remember { mutableStateOf(0f) }
+                        var hue by remember { mutableFloatStateOf(0f) }
                         val hueColors = remember {
                             listOf(
                                 Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red
@@ -273,8 +293,8 @@ fun ScreenLightScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(12.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
                                 .background(Brush.horizontalGradient(hueColors))
                         )
                         
