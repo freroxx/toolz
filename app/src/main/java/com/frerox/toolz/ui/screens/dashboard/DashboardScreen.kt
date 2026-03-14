@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.dashboard
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -117,12 +118,11 @@ fun DashboardScreen(
     Scaffold(
         topBar = {
             Surface(
-                color = Color.Transparent,
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
                 tonalElevation = 0.dp
             ) {
                 Column(
                     modifier = Modifier
-                        .background(Color.Transparent)
                         .statusBarsPadding()
                 ) {
                     WelcomeHeader(
@@ -136,7 +136,7 @@ fun DashboardScreen(
                         placeholder = { Text("Search 30+ precision tools...") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                            .padding(horizontal = 24.dp, vertical = 8.dp),
                         leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingIcon = { 
                             if (searchQuery.isNotEmpty()) {
@@ -148,36 +148,34 @@ fun DashboardScreen(
                         shape = RoundedCornerShape(24.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface
+                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                         )
                     )
                     Spacer(Modifier.height(8.dp))
                 }
             }
         },
-        containerColor = Color.Transparent
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 160.dp),
+                columns = GridCells.Adaptive(minSize = 165.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     .fadingEdge(
                         brush = Brush.verticalGradient(
                             0f to Color.Transparent,
-                            0.05f to Color.Black,
-                            0.95f to Color.Black,
+                            0.02f to Color.Black,
+                            0.98f to Color.Black,
                             1f to Color.Transparent
                         ),
-                        length = 48.dp
+                        length = 32.dp
                     ),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 20.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 150.dp, top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -190,14 +188,20 @@ fun DashboardScreen(
 
                 filteredCategories.forEach { category ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
-                        Text(
-                            text = category.title,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp, start = 8.dp),
-                            letterSpacing = 2.sp
-                        )
+                        Surface(
+                            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = category.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                letterSpacing = 2.sp
+                            )
+                        }
                     }
                     items(category.items, key = { it.route + category.title }) { tool ->
                         ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
@@ -239,7 +243,7 @@ fun DashboardScreen(
                         .padding(horizontal = 24.dp)
                         .fillMaxWidth()
                         .height(110.dp)
-                        .shadow(32.dp, RoundedCornerShape(55.dp))
+                        .shadow(24.dp, RoundedCornerShape(32.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                         .bouncyClick { 
                             val currentRoute = when(activePages[pagerState.currentPage]) {
                                 PillPage.Music -> Screen.MusicPlayer.route
@@ -251,10 +255,10 @@ fun DashboardScreen(
                             }
                             onNavigate(currentRoute)
                         },
-                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(12.dp),
-                    shape = RoundedCornerShape(55.dp),
-                    tonalElevation = 12.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(32.dp),
+                    tonalElevation = 8.dp,
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                 ) {
                     HorizontalPager(
                         state = pagerState,
@@ -307,9 +311,9 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                         .height(110.dp)
                         .bouncyClick(onClick = onNoteClick),
                     shape = RoundedCornerShape(24.dp),
-                    color = Color(note.color).copy(alpha = 0.8f),
+                    color = Color(note.color).copy(alpha = 0.9f),
                     tonalElevation = 2.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -327,7 +331,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                             lineHeight = 16.sp,
-                            color = Color.Black.copy(alpha = 0.6f)
+                            color = Color.Black.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -377,7 +381,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(
                 onClick = { viewModel.stopRecording(true) },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
             ) {
                 Icon(Icons.Rounded.Save, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
             }
@@ -436,7 +440,7 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                     .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f),
                 shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(22.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 4.dp
+                shadowElevation = 8.dp
             ) {
                 AsyncImage(
                     model = track.thumbnailUri,
@@ -536,7 +540,7 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
                     onClick = { viewModel.reset() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
                 ) {
                     Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                 }
@@ -592,7 +596,7 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(
                 onClick = { viewModel.reset() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
             ) {
                 Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
             }
@@ -656,7 +660,7 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
                     onClick = { viewModel.reset() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
                 ) {
                     Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                 }
@@ -767,7 +771,7 @@ fun WelcomeHeader(
             onClick = onSettingsClick,
             modifier = Modifier
                 .size(52.dp)
-                .clip(CircleShape)
+                .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
         ) {
             Icon(Icons.Rounded.Settings, contentDescription = "Settings", modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface)
@@ -788,7 +792,7 @@ fun ImprovedToolCard(
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         tonalElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
@@ -812,7 +816,7 @@ fun ImprovedToolCard(
             ) {
                 Surface(
                     modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {

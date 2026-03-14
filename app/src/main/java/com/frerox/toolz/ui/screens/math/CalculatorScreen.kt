@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.math
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -40,45 +41,46 @@ fun CalculatorScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = "CALCULATOR",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    )
+                },
+                navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                    
-                    Text(
-                        text = "CALCULATOR",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.5.sp
-                    )
-
-                    Row {
+                },
+                actions = {
+                    Row(modifier = Modifier.padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (state.isScientific) {
-                            TextButton(
+                            Surface(
                                 onClick = { viewModel.onToggleAngleMode() },
-                                modifier = Modifier.height(48.dp)
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
                                     if (state.isDegreeMode) "DEG" else "RAD",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
+                            Spacer(Modifier.width(8.dp))
                         }
                         IconButton(
                             onClick = { viewModel.onToggleMode() },
-                            modifier = Modifier.size(48.dp).clip(CircleShape).background(
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(
                                 if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                             )
                         ) {
                             Icon(
@@ -88,9 +90,11 @@ fun CalculatorScreen(
                             )
                         }
                     }
-                }
-            }
-        }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             modifier = Modifier
@@ -104,14 +108,14 @@ fun CalculatorScreen(
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(vertical = 16.dp),
-                shape = RoundedCornerShape(40.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(28.dp),
+                        .padding(24.dp),
                     contentAlignment = Alignment.BottomEnd
                 ) {
                     Column(horizontalAlignment = Alignment.End) {
@@ -121,37 +125,43 @@ fun CalculatorScreen(
                         ) { formula ->
                             Text(
                                 text = formula,
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                                 textAlign = TextAlign.End,
                                 fontWeight = FontWeight.Bold,
                                 minLines = 1
                             )
                         }
                         
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         
                         Text(
                             text = state.display,
                             style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = if (state.display.length > 10) 44.sp else 64.sp,
+                                fontSize = if (state.display.length > 12) 36.sp else if (state.display.length > 8) 48.sp else 64.sp,
                                 fontWeight = FontWeight.Black,
-                                letterSpacing = (-2).sp
+                                letterSpacing = (-1).sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
                             maxLines = 2,
-                            lineHeight = if (state.display.length > 10) 52.sp else 72.sp
+                            lineHeight = if (state.display.length > 12) 42.sp else 72.sp
                         )
                         
                         state.error?.let {
-                            Text(
-                                text = it.uppercase(),
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
+                            Surface(
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.padding(top = 8.dp)
-                            )
+                            ) {
+                                Text(
+                                    text = it.uppercase(),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
                     }
                 }
@@ -166,8 +176,8 @@ fun CalculatorScreen(
                 AnimatedContent(
                     targetState = state.isScientific,
                     transitionSpec = {
-                        (slideInHorizontally { if (it > 0) it else -it } + fadeIn()) togetherWith 
-                        (slideOutHorizontally { if (it > 0) -it else it } + fadeOut())
+                        (slideInVertically { it } + fadeIn()) togetherWith 
+                        (slideOutVertically { -it } + fadeOut())
                     }, label = ""
                 ) { isScientific ->
                     if (isScientific) {
@@ -240,8 +250,8 @@ fun ScientificLayout(viewModel: CalculatorViewModel) {
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
@@ -280,9 +290,9 @@ fun CalcButton(
     
     val containerColor = when {
         text == "=" -> MaterialTheme.colorScheme.primary
-        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-        isAction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+        isAction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
     }
     
     val contentColor = when {
@@ -297,17 +307,16 @@ fun CalcButton(
             .aspectRatio(if (isScientific) 1.25f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         color = containerColor,
-        border = if (!isOperator && text != "=") androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
+        border = if (!isOperator && text != "=") BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = text,
                 style = if (isScientific) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
-                color = contentColor,
-                letterSpacing = if (isScientific) 0.sp else (-1).sp
+                color = contentColor
             )
         }
     }
@@ -320,16 +329,16 @@ fun CalcIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClic
             .aspectRatio(if (isScientific) 1.25f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon, 
                 contentDescription = null, 
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(24.dp)
             )
         }
     }

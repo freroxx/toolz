@@ -14,12 +14,7 @@ import android.widget.TextView
 import com.frerox.toolz.R
 import com.frerox.toolz.data.focus.AppLimitRepository
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.util.*
 import javax.inject.Inject
 
@@ -34,6 +29,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var isOverlayShowing = false
     private var currentPackage: String? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var checkJob: Job? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -45,27 +41,39 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 return
             }
             
-            currentPackage = packageName
-            checkAppLimit(packageName)
+            if (currentPackage != packageName) {
+                currentPackage = packageName
+                checkAppLimit(packageName)
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        // Start a periodic check for the current package
-        serviceScope.launch {
+        startPeriodicCheck()
+    }
+
+    private fun startPeriodicCheck() {
+        checkJob?.cancel()
+        checkJob = serviceScope.launch {
             while (isActive) {
                 currentPackage?.let { checkAppLimit(it) }
-                delay(30000) // Check every 30 seconds
+                delay(5000) // Check more frequently (every 5 seconds)
             }
         }
     }
 
     private fun checkAppLimit(packageName: String) {
         serviceScope.launch {
-            val limit = appLimitRepository.getLimitForApp(packageName)
+            val limit = withContext(Dispatchers.IO) {
+                appLimitRepository.getLimitForApp(packageName)
+            }
+            
             if (limit != null && limit.isEnabled) {
-                val usageTime = getTodayUsage(packageName)
+                val usageTime = withContext(Dispatchers.IO) {
+                    getTodayUsage(packageName)
+                }
+                
                 if (usageTime >= limit.limitMillis) {
                     showOverlay(packageName)
                 } else {
@@ -87,49 +95,53 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val startTime = calendar.timeInMillis
         val endTime = System.currentTimeMillis()
 
+        // Sum usage from all daily stats entries to be accurate
         val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
-        return stats.filter { it.packageName == packageName }.sumOf { it.totalTimeInForeground }
+        return stats?.filter { it.packageName == packageName }?.sumOf { it.totalTimeInForeground } ?: 0L
     }
 
     private fun showOverlay(packageName: String) {
         if (isOverlayShowing) return
 
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        )
+        serviceScope.launch {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            )
 
-        val inflater = LayoutInflater.from(this)
-        overlayView = inflater.inflate(R.layout.layout_focus_lock, null)
-        
-        val pm = packageManager
-        val appName = try {
-            val ai = pm.getApplicationInfo(packageName, 0)
-            pm.getApplicationLabel(ai).toString()
-        } catch (e: Exception) {
-            packageName
-        }
+            val inflater = LayoutInflater.from(this@FocusFlowAccessibilityService)
+            overlayView = inflater.inflate(R.layout.layout_focus_lock, null)
+            
+            val pm = packageManager
+            val appName = try {
+                val ai = pm.getApplicationInfo(packageName, 0)
+                pm.getApplicationLabel(ai).toString()
+            } catch (e: Exception) {
+                packageName
+            }
 
-        overlayView?.findViewById<TextView>(R.id.tv_lock_message)?.text = 
-            "Limit reached for $appName. Time to refocus!"
-        
-        overlayView?.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
-            val startMain = Intent(Intent.ACTION_MAIN)
-            startMain.addCategory(Intent.CATEGORY_HOME)
-            startMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            startActivity(startMain)
-            hideOverlay()
-        }
+            overlayView?.findViewById<TextView>(R.id.tv_lock_message)?.text = 
+                "You've reached your daily limit for $appName.\nToolz suggests taking a break."
+            
+            overlayView?.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(intent)
+                hideOverlay()
+            }
 
-        try {
-            windowManager?.addView(overlayView, params)
-            isOverlayShowing = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+            try {
+                windowManager?.addView(overlayView, params)
+                isOverlayShowing = true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -143,6 +155,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             overlayView = null
             isOverlayShowing = false
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        checkJob?.cancel()
+        serviceScope.cancel()
     }
 
     override fun onInterrupt() {}

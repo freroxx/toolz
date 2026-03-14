@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.math
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -42,36 +43,39 @@ fun BmiScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = "HEALTH INDEX",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    )
+                },
+                navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                    
-                    Text(
-                        text = "HEALTH INDEX",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.5.sp
-                    )
-
+                },
+                actions = {
                     IconButton(
                         onClick = { viewModel.onGenderChange(if (state.gender == Gender.MALE) Gender.FEMALE else Gender.MALE) },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                     ) {
-                        Icon(if (state.gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female, contentDescription = "Toggle Gender")
+                        Icon(
+                            if (state.gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female, 
+                            contentDescription = "Toggle Gender",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
-                }
-            }
-        }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
@@ -80,6 +84,10 @@ fun BmiScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .fadingEdge(
+                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
+                        length = 24.dp
+                    )
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -91,18 +99,18 @@ fun BmiScreen(
                 // Input Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(40.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(28.dp),
-                        verticalArrangement = Arrangement.spacedBy(28.dp)
+                        modifier = Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         // Age & Weight Row
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             BmiInput(
                                 label = "AGE",
@@ -113,37 +121,38 @@ fun BmiScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            Column(modifier = Modifier.weight(1.3f)) {
+                            Column(modifier = Modifier.weight(1.2f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("WEIGHT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                                     Spacer(Modifier.weight(1f))
                                     Surface(
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                        shape = CircleShape
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        onClick = { viewModel.toggleUnit(false) }
                                     ) {
                                         Text(
                                             if (state.isKg) "KG" else "LB",
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Black,
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(10.dp))
                                 OutlinedTextField(
                                     value = state.weight,
                                     onValueChange = { viewModel.onWeightChange(it) },
                                     modifier = Modifier.fillMaxWidth(),
                                     placeholder = { Text("0") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                    shape = RoundedCornerShape(20.dp),
-                                    leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null, tint = MaterialTheme.colorScheme.primary) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    leadingIcon = { Icon(Icons.Rounded.MonitorWeight, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
                                         unfocusedBorderColor = Color.Transparent,
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface
                                     )
                                 )
                             }
@@ -155,44 +164,35 @@ fun BmiScreen(
                                 Text("HEIGHT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                                 Spacer(Modifier.weight(1f))
                                 Surface(
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    shape = CircleShape
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    onClick = { viewModel.toggleUnit(true) }
                                 ) {
                                     Text(
                                         if (state.isCm) "CM" else "FT/IN",
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(10.dp))
                             OutlinedTextField(
                                 value = state.height,
                                 onValueChange = { viewModel.onHeightChange(it) },
                                 modifier = Modifier.fillMaxWidth(),
                                 placeholder = { Text(if (state.isCm) "0" else "0' 0\"") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                shape = RoundedCornerShape(20.dp),
-                                leadingIcon = { Icon(Icons.Rounded.Height, null, tint = MaterialTheme.colorScheme.primary) },
+                                shape = RoundedCornerShape(16.dp),
+                                leadingIcon = { Icon(Icons.Rounded.Height, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
                                     unfocusedBorderColor = Color.Transparent,
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface
                                 )
                             )
-                        }
-                        
-                        Button(
-                            onClick = { viewModel.toggleUnit(true); viewModel.toggleUnit(false) },
-                            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
-                            shape = RoundedCornerShape(20.dp)
-                        ) {
-                            Icon(Icons.Rounded.Sync, null, modifier = Modifier.size(22.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("SWITCH MEASUREMENT UNITS", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -224,20 +224,20 @@ fun BmiInput(
 ) {
     Column(modifier = modifier) {
         Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text(placeholder) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            shape = RoundedCornerShape(20.dp),
-            leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+            shape = RoundedCornerShape(16.dp),
+            leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
                 unfocusedBorderColor = Color.Transparent,
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                focusedContainerColor = MaterialTheme.colorScheme.surface
             )
         )
     }
@@ -246,7 +246,19 @@ fun BmiInput(
 @Composable
 fun AdvancedMetrics(state: BmiState) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("DETAILED HEALTH METRICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+        Surface(
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                "DETAILED HEALTH METRICS", 
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall, 
+                fontWeight = FontWeight.Black, 
+                color = MaterialTheme.colorScheme.primary, 
+                letterSpacing = 1.5.sp
+            )
+        }
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             MetricCard(
@@ -260,7 +272,7 @@ fun AdvancedMetrics(state: BmiState) {
                 title = "TDEE",
                 value = String.format("%.0f", state.tdee),
                 unit = "KCAL/D",
-                subtitle = "DAILY CALORIC LOAD",
+                subtitle = "DAILY LOAD",
                 modifier = Modifier.weight(1f)
             )
         }
@@ -279,17 +291,17 @@ fun AdvancedMetrics(state: BmiState) {
 fun MetricCard(title: String, value: String, unit: String, subtitle: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(vertical = 4.dp)) {
-                Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-                Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 6.dp, start = 6.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp, start = 4.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             }
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
         }
     }
 }
@@ -311,27 +323,26 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(48.dp),
-        color = color.copy(alpha = 0.1f),
-        border = androidx.compose.foundation.BorderStroke(2.dp, color.copy(alpha = 0.2f)),
-        shadowElevation = 0.dp
+        shape = RoundedCornerShape(40.dp),
+        color = color.copy(alpha = 0.05f),
+        border = BorderStroke(2.dp, color.copy(alpha = 0.15f)),
     ) {
         Column(
-            modifier = Modifier.padding(32.dp),
+            modifier = Modifier.padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
                 CircularProgressIndicator(
                     progress = { 1f },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
+                    strokeWidth = 20.dp,
                     color = color.copy(alpha = 0.1f),
                     strokeCap = StrokeCap.Round
                 )
                 CircularProgressIndicator(
                     progress = { (animatedBmi / 40f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
+                    strokeWidth = 20.dp,
                     color = color,
                     trackColor = Color.Transparent,
                     strokeCap = StrokeCap.Round
@@ -341,7 +352,7 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
                         text = if (bmi == null) "--" else String.format("%.1f", animatedBmi),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontWeight = FontWeight.Black,
-                            fontSize = 64.sp,
+                            fontSize = 56.sp,
                             letterSpacing = (-2).sp
                         ),
                         color = color
@@ -349,19 +360,19 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
                     Text("BMI INDEX", style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.8f), fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                 }
             }
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
             Surface(
                 color = color,
-                shape = RoundedCornerShape(16.dp),
-                shadowElevation = 8.dp
+                shape = RoundedCornerShape(14.dp),
+                shadowElevation = 4.dp
             ) {
                 Text(
-                    text = category.ifEmpty { "CALCULATING..." }.uppercase(),
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.titleMedium,
+                    text = category.ifEmpty { "WAITING..." }.uppercase(),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Black,
                     color = Color.White,
-                    letterSpacing = 1.5.sp
+                    letterSpacing = 1.sp
                 )
             }
         }
@@ -370,8 +381,20 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
 
 @Composable
 fun BmiInfoSection(bmi: Float, healthyRange: Pair<Float, Float>) {
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("CLASSIFICATION INDEX", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Surface(
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                "CLASSIFICATION INDEX", 
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall, 
+                fontWeight = FontWeight.Black, 
+                color = MaterialTheme.colorScheme.primary, 
+                letterSpacing = 1.5.sp
+            )
+        }
         
         BmiCategoryItem("UNDERWEIGHT", "< ${healthyRange.first}", Color(0xFF4FC3F7), bmi < healthyRange.first)
         BmiCategoryItem("HEALTHY", "${healthyRange.first} - ${healthyRange.second}", Color(0xFF66BB6A), bmi in healthyRange.first..healthyRange.second)
@@ -384,19 +407,19 @@ fun BmiInfoSection(bmi: Float, healthyRange: Pair<Float, Float>) {
 fun BmiCategoryItem(label: String, range: String, color: Color, isSelected: Boolean) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, color.copy(alpha = 0.4f)) else null
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) color.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+        border = if (isSelected) BorderStroke(1.5.dp, color.copy(alpha = 0.3f)) else null
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-                Spacer(Modifier.width(20.dp))
-                Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, color = if (isSelected) color else MaterialTheme.colorScheme.onSurface)
+                Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+                Spacer(Modifier.width(16.dp))
+                Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = if (isSelected) color else MaterialTheme.colorScheme.onSurface)
             }
             Text(range, style = MaterialTheme.typography.labelSmall, color = if (isSelected) color.copy(alpha = 0.8f) else MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }

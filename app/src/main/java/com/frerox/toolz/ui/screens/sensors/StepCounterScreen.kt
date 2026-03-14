@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,36 +54,35 @@ fun StepCounterScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        text = "FITNESS TRACKER",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    )
+                },
+                navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
-                    
-                    Text(
-                        text = "FITNESS TRACKER",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.5.sp
-                    )
-
+                },
+                actions = {
                     IconButton(
                         onClick = { /* History action */ },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.History, contentDescription = "History")
                     }
-                }
-            }
-        }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         val hasActivityPermission = activityPermissionState?.status?.isGranted ?: true
         
@@ -119,8 +119,9 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
     ) {
         Surface(
             modifier = Modifier.size(140.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            shape = RoundedCornerShape(40.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
@@ -144,15 +145,15 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
+            modifier = Modifier.padding(top = 16.dp, bottom = 40.dp)
         )
         Button(
             onClick = onEnable,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(64.dp)
                 .bouncyClick {},
-            shape = RoundedCornerShape(24.dp)
+            shape = RoundedCornerShape(20.dp)
         ) {
             Text("ENABLE TRACKER", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         }
@@ -167,13 +168,13 @@ fun StepContent(state: StepState) {
             .fadingEdge(
                 brush = Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
+                    0.02f to Color.Black,
+                    0.98f to Color.Black,
                     1f to Color.Transparent
                 ),
                 length = 24.dp
             ),
-        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 48.dp, top = 8.dp),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
@@ -211,6 +212,10 @@ fun StepContent(state: StepState) {
         item {
             DailyGoalSection(state.goal)
         }
+        
+        item {
+            Spacer(Modifier.height(32.dp))
+        }
     }
 }
 
@@ -219,8 +224,8 @@ fun StepProgressCard(steps: Int, goal: Int) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(40.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
         Column(
             modifier = Modifier
@@ -228,7 +233,7 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
                 val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0f, 1f)
                 val animatedProgress by animateFloatAsState(
                     targetValue = progress,
@@ -239,15 +244,15 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 CircularProgressIndicator(
                     progress = { 1f },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 28.dp,
+                    strokeWidth = 24.dp,
                     strokeCap = StrokeCap.Round,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 )
                 
                 CircularProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 28.dp,
+                    strokeWidth = 24.dp,
                     strokeCap = StrokeCap.Round,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -257,14 +262,14 @@ fun StepProgressCard(steps: Int, goal: Int) {
                         text = steps.toString(),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontWeight = FontWeight.Black,
-                            fontSize = 64.sp,
+                            fontSize = 60.sp,
                             letterSpacing = (-2).sp
                         ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "STEPS TODAY",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
                         letterSpacing = 1.sp
@@ -310,19 +315,19 @@ fun StatCard(
     color: Color
 ) {
     Surface(
-        modifier = modifier.height(140.dp),
-        shape = RoundedCornerShape(32.dp),
+        modifier = modifier.height(130.dp),
+        shape = RoundedCornerShape(28.dp),
         color = color.copy(alpha = 0.1f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Surface(
                 modifier = Modifier.size(40.dp),
                 shape = RoundedCornerShape(12.dp),
-                color = color.copy(alpha = 0.2f)
+                color = color.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
                 }
             }
             Column {
@@ -338,8 +343,8 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
             Text(
@@ -354,7 +359,7 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp),
+                    .height(140.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom
             ) {
@@ -372,15 +377,15 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
-                                .width(16.dp)
+                                .width(14.dp)
                                 .fillMaxHeight(barHeight)
-                                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
                                 .background(
                                     if (steps >= goal) MaterialTheme.colorScheme.primary 
                                     else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                                 )
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = dateStr.takeLast(2),
                             style = MaterialTheme.typography.labelSmall,
@@ -398,9 +403,9 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
 fun DailyGoalSection(goal: Int) {
     Surface(
         modifier = Modifier.fillMaxWidth().bouncyClick {},
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.padding(20.dp),
@@ -409,8 +414,8 @@ fun DailyGoalSection(goal: Int) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = CircleShape,
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = Color(0xFFFFC107).copy(alpha = 0.15f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -442,7 +447,7 @@ fun PermissionDeniedState(onGrant: () -> Unit) {
             "Tracking your activity requires permission to use physical sensors. This data stays private on your device.",
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
+            modifier = Modifier.padding(top = 16.dp, bottom = 40.dp)
         )
         Button(
             onClick = onGrant,

@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.time
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -57,32 +58,29 @@ fun TimerScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                    
+            CenterAlignedTopAppBar(
+                title = {
                     Text(
                         text = "PRECISION TIMER",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.5.sp
+                        letterSpacing = 2.sp
                     )
-
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
                     IconButton(
                         onClick = { viewModel.toggleHaptic() },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(
                             if (hapticEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         )
                     ) {
                         Icon(
@@ -91,10 +89,11 @@ fun TimerScreen(
                             tint = if (hapticEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
-                }
-            }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+            )
         },
-        containerColor = Color.Transparent
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
@@ -109,20 +108,26 @@ fun TimerScreen(
             ) {
                 if (state.initialTime == 0L || (state.isFinished && !state.isRunning)) {
                     // SELECTION UI
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
                     
-                    Text(
-                        "SET DURATION",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "SET DURATION",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 2.sp
+                        )
+                    }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(240.dp),
+                            .height(200.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -139,9 +144,9 @@ fun TimerScreen(
                             style = MaterialTheme.typography.displayLarge,
                             modifier = Modifier
                                 .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
+                                .padding(bottom = 32.dp),
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                         )
                         ModernTimePicker(
                             value = state.selectedSeconds,
@@ -167,11 +172,11 @@ fun TimerScreen(
                                     },
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(64.dp)
+                                        .height(60.dp)
                                         .bouncyClick {},
                                     shape = RoundedCornerShape(20.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text("${min}M", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
@@ -193,51 +198,54 @@ fun TimerScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(72.dp)
+                            .height(64.dp)
                             .bouncyClick {},
-                        shape = RoundedCornerShape(24.dp),
-                        contentPadding = PaddingValues(0.dp)
+                        shape = RoundedCornerShape(20.dp),
+                        elevation = ButtonDefaults.buttonColors().containerColor.let { ButtonDefaults.buttonElevation(defaultElevation = 8.dp) }
                     ) {
-                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text("START COUNTDOWN", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text("START COUNTDOWN", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
                 } else {
                     // ACTIVE UI
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(320.dp)
+                            .size(300.dp)
                             .padding(16.dp)
                     ) {
                         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                         val glowAlpha by infiniteTransition.animateFloat(
                             initialValue = 0.05f,
-                            targetValue = 0.15f,
+                            targetValue = 0.12f,
                             animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
                             label = ""
                         )
                         
                         val primaryColor = MaterialTheme.colorScheme.primary
-                        val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
 
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             drawCircle(
                                 brush = Brush.radialGradient(
                                     colors = listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent),
-                                    radius = size.width / 1.2f
+                                    radius = size.width / 1.1f
                                 )
-                            )
-                            drawCircle(
-                                color = trackColor,
-                                style = Stroke(width = 12.dp.toPx())
                             )
                         }
                         
                         CircularProgressIndicator(
+                            progress = { 1f },
+                            modifier = Modifier.fillMaxSize(),
+                            strokeWidth = 14.dp,
+                            strokeCap = StrokeCap.Round,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        )
+                        
+                        CircularProgressIndicator(
                             progress = { animatedProgress },
-                            modifier = Modifier.fillMaxSize().padding(6.dp),
-                            strokeWidth = 12.dp,
+                            modifier = Modifier.fillMaxSize(),
+                            strokeWidth = 14.dp,
                             strokeCap = StrokeCap.Round,
                             color = if (state.isFinished) MaterialTheme.colorScheme.error else primaryColor,
                             trackColor = Color.Transparent,
@@ -249,8 +257,8 @@ fun TimerScreen(
                                 style = MaterialTheme.typography.displayLarge.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 84.sp,
-                                    letterSpacing = (-4).sp
+                                    fontSize = 72.sp,
+                                    letterSpacing = (-3).sp
                                 ),
                                 color = if (state.isFinished) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                             )
@@ -260,14 +268,14 @@ fun TimerScreen(
                                 exit = fadeOut() + shrinkVertically()
                             ) {
                                 Surface(
-                                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
-                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.padding(top = 8.dp)
                                 ) {
                                     Text(
                                         "PAUSED", 
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.labelLarge, 
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall, 
                                         fontWeight = FontWeight.Black, 
                                         color = MaterialTheme.colorScheme.secondary,
                                         letterSpacing = 1.sp
@@ -289,20 +297,20 @@ fun TimerScreen(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(68.dp)
+                                    .height(60.dp)
                                     .bouncyClick {},
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                                border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxSize(),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(6.6.dp))
-                                    Text("+${sec}S", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall)
+                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("+${sec}S", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                                 }
                             }
                         }
@@ -323,11 +331,11 @@ fun TimerScreen(
                                 viewModel.reset() 
                             },
                             modifier = Modifier
-                                .size(68.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                         ) {
-                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                         
                         Surface(
@@ -337,18 +345,18 @@ fun TimerScreen(
                                 viewModel.toggleStartStop() 
                             },
                             modifier = Modifier
-                                .size(100.dp)
+                                .size(90.dp)
                                 .bouncyClick {},
                             shape = CircleShape,
-                            color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                            color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
                             shadowElevation = 12.dp
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
                                     null, 
-                                    modifier = Modifier.size(52.dp),
-                                    tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimaryContainer
+                                    modifier = Modifier.size(44.dp),
+                                    tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
                                 )
                             }
                         }
@@ -359,11 +367,11 @@ fun TimerScreen(
                                 viewModel.reset() 
                             },
                             modifier = Modifier
-                                .size(68.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                         ) {
-                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -418,23 +426,23 @@ fun ModernTimePicker(
         Box(
             modifier = Modifier
                 .width(110.dp)
-                .height(180.dp),
+                .height(160.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp),
-                color = primaryColor.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, primaryColor.copy(alpha = 0.15f))
+                    .height(64.dp),
+                color = primaryColor.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
             ) {}
 
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(vertical = 55.dp),
+                contentPadding = PaddingValues(vertical = 48.dp),
                 flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
             ) {
                 items(Int.MAX_VALUE) { index ->
@@ -445,15 +453,15 @@ fun ModernTimePicker(
                         style = if (isSelected) MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black) 
                                 else MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
                         color = if (isSelected) primaryColor 
-                                else onSurfaceColor.copy(alpha = 0.12f),
+                                else onSurfaceColor.copy(alpha = 0.1f),
                         modifier = Modifier.padding(vertical = 4.dp),
-                        fontSize = if (isSelected) 48.sp else 32.sp
+                        fontSize = if (isSelected) 44.sp else 32.sp
                     )
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = primaryColor, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(12.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = primaryColor, letterSpacing = 1.sp)
     }
 }
 
@@ -462,7 +470,7 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.9f))
+            .background(Color.Black.copy(alpha = 0.92f))
             .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -470,7 +478,7 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
             val pulseScale by infiniteTransition.animateFloat(
                 initialValue = 1f,
-                targetValue = 1.25f,
+                targetValue = 1.2f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(600, easing = FastOutSlowInEasing),
                     repeatMode = RepeatMode.Reverse
@@ -480,31 +488,31 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
 
             Surface(
                 modifier = Modifier
-                    .size(180.dp)
+                    .size(160.dp)
                     .scale(pulseScale),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.error,
                 shadowElevation = 24.dp,
-                border = androidx.compose.foundation.BorderStroke(4.dp, Color.White.copy(alpha = 0.3f))
+                border = BorderStroke(4.dp, Color.White.copy(alpha = 0.2f))
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(90.dp), tint = Color.White)
+                    Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(80.dp), tint = Color.White)
                 }
             }
-            Spacer(Modifier.height(56.dp))
+            Spacer(Modifier.height(48.dp))
             Text("TIME'S UP!", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp, textAlign = TextAlign.Center)
-            Text("Your countdown has completed", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center)
+            Text("Your countdown has completed", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center)
             
-            Spacer(Modifier.height(72.dp))
+            Spacer(Modifier.height(64.dp))
             
             Button(
                 onClick = onDismiss,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(80.dp)
+                    .height(72.dp)
                     .bouncyClick {},
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                shape = RoundedCornerShape(28.dp)
+                shape = RoundedCornerShape(24.dp)
             ) {
                 Text("DISMISS ALARM", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             }

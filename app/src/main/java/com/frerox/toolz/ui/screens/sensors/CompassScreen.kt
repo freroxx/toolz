@@ -4,6 +4,7 @@ import android.Manifest
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,17 +79,20 @@ fun CompassScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text("COMPASS", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = surfaceColor
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         val config = LocalConfiguration.current
         val dialSize = (config.screenWidthDp.dp * 0.85f).coerceAtMost(400.dp)
@@ -107,14 +111,14 @@ fun CompassScreen(
             ) {
                 Text(
                     text = "${state.azimuth.toInt()}°",
-                    style = MaterialTheme.typography.displayLarge,
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 80.sp),
                     fontWeight = FontWeight.Black,
                     color = onSurface
                 )
                 
                 Surface(
                     color = primaryColor.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
                         text = getDirectionLabel(state.azimuth).uppercase(),
@@ -138,7 +142,7 @@ fun CompassScreen(
                 val infiniteTransition = rememberInfiniteTransition(label = "glow")
                 val glowAlpha by infiniteTransition.animateFloat(
                     initialValue = 0.05f,
-                    targetValue = 0.15f,
+                    targetValue = 0.12f,
                     animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
                     label = "glowAlpha"
                 )
@@ -239,7 +243,7 @@ fun CompassScreen(
                         .shadow(12.dp, CircleShape),
                     shape = CircleShape,
                     color = surfaceColor,
-                    border = androidx.compose.foundation.BorderStroke(
+                    border = BorderStroke(
                         width = 2.dp,
                         color = if (state.isLevel) Color(0xFF4CAF50) else primaryColor.copy(alpha = 0.3f)
                     )
@@ -314,8 +318,8 @@ fun CompassInfoCard(
         modifier = modifier
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
