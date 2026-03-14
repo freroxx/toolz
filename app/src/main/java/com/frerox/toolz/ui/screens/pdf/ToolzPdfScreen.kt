@@ -453,10 +453,21 @@ private fun InfinitePdfReader(
         }
     }
 
+    var zoom by remember { mutableStateOf(1f) }
+    val transformableState = rememberTransformableState { zoomChange, offsetChange, rotationChange ->
+        zoom *= zoomChange
+        zoom = zoom.coerceIn(1f, 5f)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize()
+                .transformable(state = transformableState)
+                .graphicsLayer(
+                    scaleX = zoom,
+                    scaleY = zoom
+                )
                 .fadingEdge(
                     brush = Brush.verticalGradient(
                         0f to Color.Transparent,
@@ -475,7 +486,8 @@ private fun InfinitePdfReader(
                     pageIndex = index,
                     viewModel = viewModel,
                     ocrPageData = ocrData?.pages?.find { it.pageIndex == index },
-                    activeTool = activeTool
+                    activeTool = activeTool,
+                    showPageNumber = docState.showPages
                 )
             }
         }
@@ -495,7 +507,8 @@ private fun PageContainer(
     pageIndex: Int,
     viewModel: PdfViewModel,
     ocrPageData: OcrPageData?,
-    activeTool: PdfToolMode
+    activeTool: PdfToolMode,
+    showPageNumber: Boolean = true
 ) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     
@@ -538,19 +551,21 @@ private fun PageContainer(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text(
-                "PAGE ${pageIndex + 1}",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                letterSpacing = 1.sp
-            )
+        if (showPageNumber) {
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    "PAGE ${pageIndex + 1}",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    letterSpacing = 1.sp
+                )
+            }
         }
     }
 }
@@ -968,6 +983,13 @@ private fun ViewerTopBar(
                         overflow = TextOverflow.Ellipsis,
                         color = if (isAmoled) Color.White else Color.Unspecified
                     )
+                    IconButton(onClick = viewModel::toggleShowPages) {
+                        Icon(
+                            if (docState.showPages) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff, 
+                            null, 
+                            tint = if (isAmoled) Color.White else Color.Unspecified
+                        )
+                    }
                     IconButton(onClick = onToggleSearch) {
                         Icon(Icons.Rounded.Search, null, tint = if (isAmoled) Color.White else Color.Unspecified)
                     }

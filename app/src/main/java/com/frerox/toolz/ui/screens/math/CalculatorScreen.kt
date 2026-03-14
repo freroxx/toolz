@@ -43,16 +43,16 @@ fun CalculatorScreen(
         // Decorative background elements
         Box(
             modifier = Modifier
-                .size(300.dp)
-                .offset(x = (-100).dp, y = (-100).dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), CircleShape)
+                .size(350.dp)
+                .offset(x = (-120).dp, y = (-120).dp)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CircleShape)
         )
         Box(
             modifier = Modifier
-                .size(400.dp)
+                .size(450.dp)
                 .align(Alignment.BottomEnd)
-                .offset(x = 150.dp, y = 150.dp)
-                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f), CircleShape)
+                .offset(x = 180.dp, y = 180.dp)
+                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.06f), CircleShape)
         )
 
         Scaffold(
@@ -63,14 +63,14 @@ fun CalculatorScreen(
                             text = "CALCULATOR",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
-                            letterSpacing = 3.sp,
+                            letterSpacing = 4.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
                     },
                     navigationIcon = {
                         IconButton(
                             onClick = onBack,
-                            modifier = Modifier.padding(12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            modifier = Modifier.padding(12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", modifier = Modifier.size(24.dp))
                         }
@@ -79,12 +79,12 @@ fun CalculatorScreen(
                         IconButton(
                             onClick = { viewModel.onToggleMode() },
                             modifier = Modifier.padding(end = 12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(
-                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                             )
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Science,
+                                imageVector = if (state.isScientific) Icons.Rounded.Science else Icons.Rounded.Calculate,
                                 contentDescription = "Toggle Mode",
                                 tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(24.dp)
@@ -103,15 +103,19 @@ fun CalculatorScreen(
                     .padding(horizontal = 24.dp)
             ) {
                 // Display Area
-                Box(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.2f)
-                        .padding(vertical = 16.dp)
+                        .padding(vertical = 16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(32.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                 ) {
                     Column(
-                        modifier = Modifier.align(Alignment.BottomEnd),
-                        horizontalAlignment = Alignment.End
+                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.Bottom
                     ) {
                         AnimatedContent(
                             targetState = state.formula,
@@ -122,24 +126,24 @@ fun CalculatorScreen(
                             Text(
                                 text = formula,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                                 textAlign = TextAlign.End,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 4.dp)
+                                modifier = Modifier.padding(bottom = 8.dp)
                             )
                         }
                         
                         Text(
                             text = state.display,
                             style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = if (state.display.length > 12) 42.sp else if (state.display.length > 8) 54.sp else 72.sp,
+                                fontSize = if (state.display.length > 12) 38.sp else if (state.display.length > 8) 48.sp else 64.sp,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = (-2).sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
                             maxLines = 2,
-                            lineHeight = if (state.display.length > 12) 48.sp else 78.sp
+                            lineHeight = if (state.display.length > 12) 44.sp else 70.sp
                         )
                         
                         state.error?.let {
@@ -164,17 +168,26 @@ fun CalculatorScreen(
                 if (state.isScientific) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text(
+                            "SCIENTIFIC MODE", 
+                            style = MaterialTheme.typography.labelSmall, 
+                            fontWeight = FontWeight.Black, 
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            letterSpacing = 2.sp
+                        )
+                        
                         Surface(
                             onClick = { viewModel.onToggleAngleMode() },
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(14.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
                             Text(
-                                if (state.isDegreeMode) "DEGREE" else "RADIAN",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                if (state.isDegreeMode) "DEG" else "RAD",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary,
@@ -185,12 +198,12 @@ fun CalculatorScreen(
                 }
 
                 // Buttons Grid
-                Box(modifier = Modifier.weight(3f)) {
+                Box(modifier = Modifier.weight(3.5f)) {
                     AnimatedContent(
                         targetState = state.isScientific,
                         transitionSpec = {
-                            (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.92f))
-                                .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.92f))
+                            (fadeIn(animationSpec = tween(500)) + slideInVertically { it / 8 })
+                                .togetherWith(fadeOut(animationSpec = tween(300)) + slideOutVertically { -it / 8 })
                         }, label = "keypad"
                     ) { isScientific ->
                         if (isScientific) {
@@ -214,7 +227,7 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
         "7", "8", "9", "-",
         "4", "5", "6", "+",
         "1", "2", "3", "=",
-        "0", "00", ".", ""
+        "0", "00", ".", "%"
     )
 
     LazyVerticalGrid(
@@ -239,6 +252,7 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
                                 "-" -> viewModel.onOperator("-")
                                 "×" -> viewModel.onOperator("×")
                                 "÷" -> viewModel.onOperator("÷")
+                                "%" -> viewModel.onOperator("/100")
                                 else -> viewModel.onDigit(btn)
                             }
                         }
@@ -252,34 +266,42 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 @Composable
 fun ScientificKeypad(viewModel: CalculatorViewModel) {
     val buttons = listOf(
-        "sin", "cos", "tan", "(",
-        "sqrt", "log", "ln", ")",
+        "sin", "cos", "tan", "inv",
+        "asin", "acos", "atan", "exp",
+        "sqrt", "log10", "ln", "abs",
         "π", "e", "^", "÷",
         "7", "8", "9", "×",
         "4", "5", "6", "-",
         "1", "2", "3", "+",
-        "C", "0", ".", "=",
-        "DEL"
+        "(", "0", ")", "=",
+        "C", "DEL"
     )
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
             when (btn) {
                 "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() }, isScientific = true)
+                "C" -> {
+                    CalculatorButton(
+                        text = "C",
+                        onClick = { viewModel.onClear() },
+                        isScientific = true,
+                        isClear = true
+                    )
+                }
                 else -> {
                     CalculatorButton(
                         text = btn,
                         onClick = {
                             when (btn) {
-                                "C" -> viewModel.onClear()
                                 "=" -> viewModel.onEquals()
                                 "+", "-", "×", "÷", "^", "(", ")" -> viewModel.onOperator(btn)
-                                "sin", "cos", "tan", "log", "ln", "sqrt" -> viewModel.onFunction(btn)
+                                "sin", "cos", "tan", "log10", "ln", "sqrt", "abs", "exp", "inv", "asin", "acos", "atan" -> viewModel.onFunction(btn)
                                 "π" -> viewModel.onDigit("π")
                                 "e" -> viewModel.onDigit("e")
                                 else -> viewModel.onDigit(btn)
@@ -297,18 +319,18 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
 fun CalculatorButton(
     text: String, 
     onClick: () -> Unit, 
-    isScientific: Boolean = false
+    isScientific: Boolean = false,
+    isClear: Boolean = false
 ) {
-    val isOperator = text in listOf("=", "+", "-", "×", "÷", "^")
-    val isFunction = text in listOf("sin", "cos", "tan", "log", "ln", "sqrt")
-    val isClear = text == "C"
+    val isOperator = text in listOf("=", "+", "-", "×", "÷", "^", "(", ")")
+    val isFunction = text in listOf("sin", "cos", "tan", "log10", "ln", "sqrt", "abs", "exp", "inv", "asin", "acos", "atan")
     
     val containerColor = when {
         text == "=" -> MaterialTheme.colorScheme.primary
-        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-        isFunction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+        isFunction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     }
     
     val contentColor = when {
@@ -321,43 +343,48 @@ fun CalculatorButton(
 
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.2f else 1f)
+            .aspectRatio(if (isScientific) 1.4f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(if (isScientific) 16.dp else 24.dp),
         color = containerColor,
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.05f))
+        tonalElevation = 4.dp,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = text,
-                style = if (isScientific) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
+                style = if (isScientific) {
+                    if (text.length > 3) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleMedium
+                } else {
+                    MaterialTheme.typography.headlineSmall
+                },
                 fontWeight = FontWeight.Black,
-                color = contentColor
+                color = contentColor,
+                maxLines = 1
             )
         }
     }
 }
 
 @Composable
-fun CalculatorIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
+fun CalculatorIconButton(icon: ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.2f else 1f)
+            .aspectRatio(if (isScientific) 1.4f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.05f))
+        shape = RoundedCornerShape(if (isScientific) 16.dp else 24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        tonalElevation = 4.dp,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon, 
                 contentDescription = null, 
                 tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(if (isScientific) 22.dp else 28.dp)
             )
         }
     }

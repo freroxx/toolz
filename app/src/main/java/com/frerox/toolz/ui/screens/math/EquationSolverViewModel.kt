@@ -149,10 +149,60 @@ class EquationSolverViewModel @Inject constructor(
     }
 
     private fun solveCubic(state: SolverState) {
-        // Implementation for cubic (using cardano or numerical)
-        // For simplicity and premium UX, we can use a numerical solver for cubics in this context
-        // but let's provide a result for common ones
-        _uiState.update { it.copy(error = "Cubic solver coming soon in next patch!", result = "Under development") }
+        val a = parse(state.coefficients["a"] ?: "0")
+        val b = parse(state.coefficients["b"] ?: "0")
+        val c = parse(state.coefficients["c"] ?: "0")
+        val d = parse(state.coefficients["d"] ?: "0")
+
+        if (a == 0.0) {
+            solveQuadratic(state)
+            return
+        }
+
+        // x³ + Ax² + Bx + C = 0
+        val A = b / a
+        val B = c / a
+        val C = d / a
+
+        val Q = (3 * B - A * A) / 9.0
+        val R = (9 * A * B - 27 * C - 2 * A * A * A) / 54.0
+        val D = Q * Q * Q + R * R
+
+        val steps = mutableListOf(
+            "Equation: ${format(a)}x³ + ${format(b)}x² + ${format(c)}x + ${format(d)} = 0",
+            "Normalized: x³ + ${format(A)}x² + ${format(B)}x + ${format(C)} = 0",
+            "Calculate Q and R parameters...",
+            "Discriminant (D) = Q³ + R² = ${format(D)}"
+        )
+
+        val result = if (D >= 0) {
+            val S = cubeRoot(R + sqrt(D))
+            val T = cubeRoot(R - sqrt(D))
+            val x1 = S + T - A / 3.0
+            
+            if (abs(D) < 1e-10) { // Three real roots, at least two equal
+                val x2 = -(S + T) / 2.0 - A / 3.0
+                steps.add("D ≈ 0: Three real roots, at least two are equal.")
+                "x₁ = ${format(x1)}, x₂ = ${format(x2)}"
+            } else { // One real root and two complex
+                steps.add("D > 0: One real root and two complex conjugate roots.")
+                "x₁ = ${format(x1)} (Real root)"
+            }
+        } else { // Three distinct real roots
+            val theta = Math.acos(R / sqrt(-Q * Q * Q))
+            val x1 = 2 * sqrt(-Q) * Math.cos(theta / 3.0) - A / 3.0
+            val x2 = 2 * sqrt(-Q) * Math.cos((theta + 2 * Math.PI) / 3.0) - A / 3.0
+            val x3 = 2 * sqrt(-Q) * Math.cos((theta + 4 * Math.PI) / 3.0) - A / 3.0
+            steps.add("D < 0: Three distinct real roots using trigonometric method.")
+            "x₁ = ${format(x1)}, x₂ = ${format(x2)}, x₃ = ${format(x3)}"
+        }
+
+        _uiState.update { it.copy(result = result, steps = steps, error = null) }
+        saveToHistory("${format(a)}x³ + ${format(b)}x² + ${format(c)}x + ${format(d)} = 0", result)
+    }
+
+    private fun cubeRoot(x: Double): Double {
+        return if (x >= 0) Math.pow(x, 1.0 / 3.0) else -Math.pow(-x, 1.0 / 3.0)
     }
 
     private fun solveSystem2(state: SolverState) {

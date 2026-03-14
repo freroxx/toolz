@@ -331,7 +331,8 @@ fun NoteViewerDialog(
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = { BottomSheetDefaults.DragHandle(color = onNoteColor.copy(alpha = 0.4f)) },
         tonalElevation = 12.dp,
-        modifier = Modifier.fillMaxHeight(0.9f)
+        modifier = Modifier.fillMaxHeight(0.95f),
+        windowInsets = BottomSheetDefaults.windowInsets
     ) {
         Column(
             modifier = Modifier
@@ -406,7 +407,8 @@ fun NoteViewerDialog(
                                 thumbnail = currentTrackThumbnail,
                                 containerColor = onNoteColor.copy(alpha = 0.15f),
                                 contentColor = onNoteColor,
-                                onClick = { onPlayAudio(note.attachedAudioUri) }
+                                onClick = { onPlayAudio(note.attachedAudioUri) },
+                                modifier = Modifier.widthIn(max = 280.dp)
                             )
                         }
                         if (note.attachedPdfUri != null) {

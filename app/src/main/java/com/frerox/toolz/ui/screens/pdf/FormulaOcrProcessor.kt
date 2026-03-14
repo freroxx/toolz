@@ -125,14 +125,23 @@ class FormulaOcrProcessor @Inject constructor(
             .replace("∫", "int")
             .replace("∞", "inf")
             .replace("≈", "approx")
+            .replace("≤", "<=")
+            .replace("≥", ">=")
+            .replace("≠", "!=")
             .replace(Regex("\\s+"), " ")
             .trim()
 
         var latex = normalized
             .replace(Regex("([a-zA-Z0-9])\\^([a-zA-Z0-9]+)"), "$1^{$2}")
+            .replace(Regex("([a-zA-Z0-9])_([a-zA-Z0-9]+)"), "$1_{$2}")
             .replace(Regex("([a-zA-Z0-9]+)/([a-zA-Z0-9]+)"), "\\\\frac{$1}{$2}")
             
-        val symbolMap = mapOf("alpha" to "\\alpha", "beta" to "\\beta", "pi" to "\\pi", "sum" to "\\sum", "int" to "\\int")
+        val symbolMap = mapOf(
+            "alpha" to "\\alpha", "beta" to "\\beta", "gamma" to "\\gamma", 
+            "delta" to "\\delta", "epsilon" to "\\epsilon",
+            "pi" to "\\pi", "sum" to "\\sum", "int" to "\\int", 
+            "sqrt" to "\\sqrt", "theta" to "\\theta", "omega" to "\\omega"
+        )
         symbolMap.forEach { (key, value) -> latex = latex.replace(key, value, ignoreCase = true) }
 
         return FormulaOcrResult(normalized, latex, 0.9f)
