@@ -53,7 +53,8 @@ data class DocumentState(
     val isReady: Boolean = false,
     val searchResults: List<Int> = emptyList(),
     val isSearching: Boolean = false,
-    val searchKeyword: String = ""
+    val searchKeyword: String = "",
+    val showPages: Boolean = true
 )
 
 @HiltViewModel
@@ -176,6 +177,9 @@ class PdfViewModel @Inject constructor(
             return
         }
 
+        // Set state immediately to reserve the viewer screen
+        _uiState.value = PdfUiState.Viewer(uri)
+        
         viewModelScope.launch {
             val restored = restoreSession(uri)
             val file = pdfFiles.value.find { it.uri == uri }
@@ -210,6 +214,10 @@ class PdfViewModel @Inject constructor(
             currentPageIndex = tab.page,
             isReady = true
         ) }
+    }
+
+    fun toggleShowPages() {
+        _docState.update { it.copy(showPages = !it.showPages) }
     }
 
     fun closeTab(tabId: String) {

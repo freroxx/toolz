@@ -86,12 +86,12 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 isNewExpression = true
                 it.copy(display = "0")
             } else {
-                // Check if we are deleting a function like "sin("
-                val functions = listOf("sin(", "cos(", "tan(", "log(", "ln(", "sqrt(")
+                // Check if we are deleting a function
+                val functions = listOf("sin(", "cos(", "tan(", "log(", "ln(", "sqrt(", "abs(", "log10(", "exp(", "inv(", "acos(", "asin(", "atan(")
                 var newDisplay = it.display
                 for (func in functions) {
                     if (it.display.endsWith(func)) {
-                        newDisplay = it.display.drop(func.length)
+                        newDisplay = it.display.dropLast(func.length)
                         break
                     }
                 }
@@ -119,9 +119,11 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                     .replace("×", "*")
                     .replace("÷", "/")
                     .replace("π", "pi")
+                    .replace("ln(", "log(")
+                    .replace("inv(", "1/(")
                 
                 if (state.isDegreeMode) {
-                    expressionStr = transformToRadians(expressionStr)
+                    expressionStr = transformTrig(expressionStr)
                 }
                 
                 val expression = ExpressionBuilder(expressionStr).build()
@@ -159,15 +161,18 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
         }
     }
 
-    private fun transformToRadians(expr: String): String {
+    private fun transformTrig(expr: String): String {
         var res = expr
-        val funcs = listOf("sin", "cos", "tan")
+        val funcs = listOf("sin", "cos", "tan", "asin", "acos", "atan")
         funcs.forEach { f ->
-            // Match function calls and inject degree to radian conversion
             val pattern = Regex("$f\\(([^)]+)\\)")
             res = res.replace(pattern) { matchResult ->
                 val inner = matchResult.groupValues[1]
-                "$f(($inner)*pi/180)"
+                if (f.startsWith("a")) { // Inverse trig: result is in radians, convert to degrees
+                    "($f($inner)*180/pi)"
+                } else { // Normal trig: input is in degrees, convert to radians
+                    "$f(($inner)*pi/180)"
+                }
             }
         }
         return res
