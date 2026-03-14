@@ -587,33 +587,57 @@ fun SwipeToDeleteContainer(
         }
     )
 
+    val isDismissing = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
+
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
             val color by animateColorAsState(
                 when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
-                    else -> Color.Transparent
-                }, label = ""
+                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                }, label = "color"
             )
             val scale by animateFloatAsState(
-                if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) 1.2f else 0.8f, label = ""
+                if (isDismissing) 1.3f else 1f, label = "scale"
+            )
+            val alpha by animateFloatAsState(
+                if (isDismissing) 1f else 0.5f, label = "alpha"
             )
 
             Box(
                 Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(28.dp))
-                    .background(color)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color.Transparent, color.copy(alpha = 0.2f), color)
+                        )
+                    )
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Icon(
-                    Icons.Rounded.Delete,
-                    contentDescription = "Delete",
-                    modifier = Modifier.graphicsLayer(scaleX = scale, scaleY = scale),
-                    tint = Color.White
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .alpha(alpha)
+                        .graphicsLayer(scaleX = scale, scaleY = scale)
+                ) {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "Delete",
+                        tint = Color.White
+                    )
+                    if (isDismissing) {
+                        Text(
+                            "PURGE", 
+                            style = MaterialTheme.typography.labelSmall, 
+                            fontWeight = FontWeight.Black, 
+                            color = Color.White,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
             }
         },
         enableDismissFromStartToEnd = false,
@@ -702,20 +726,21 @@ fun NotificationVaultCard(
                 onLongClick = { onLongClick() }
             ),
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        color = if (isExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(
             1.dp, 
-            if (isExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) 
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            if (isExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
         ),
-        tonalElevation = 2.dp
+        shadowElevation = if (isExpanded) 6.dp else 0.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
                     shadowElevation = 2.dp
                 ) {
                     val iconPainter = rememberAsyncImagePainter(
@@ -727,12 +752,12 @@ fun NotificationVaultCard(
                     Image(
                         painter = iconPainter,
                         contentDescription = null,
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(12.dp),
                         contentScale = ContentScale.Fit
                     )
                 }
 
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(16.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
@@ -744,23 +769,23 @@ fun NotificationVaultCard(
                             notification.appName.uppercase(),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            letterSpacing = 0.5.sp
+                            letterSpacing = 1.sp
                         )
                         Text(
                             timeString,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                     }
                     
                     Text(
-                        notification.title ?: "NO TITLE",
+                        notification.title ?: "Notification",
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -768,29 +793,50 @@ fun NotificationVaultCard(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
-            
-            Text(
-                notification.text ?: "",
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium,
-                lineHeight = 20.sp
-            )
+            if (notification.text?.isNotEmpty() == true) {
+                Spacer(Modifier.height(12.dp))
+                
+                Text(
+                    notification.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = if (isExpanded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 20.sp
+                )
+            }
 
             if (isExpanded) {
                 Spacer(Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Surface(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("Notification Text", notification.text ?: "")
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Content copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        modifier = Modifier.weight(1f).height(40.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("COPY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
                     ) {
-                        Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                     }
                 }
             }

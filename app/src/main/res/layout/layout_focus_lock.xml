@@ -10,56 +10,72 @@
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
         android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:padding="32dp">
 
-        <View
-            android:layout_width="100dp"
-            android:layout_height="100dp"
-            android:background="@android:drawable/ic_lock_power_off"
-            android:backgroundTint="#FF5252" />
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+            
+            <View
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:background="@android:drawable/btn_default"
+                android:backgroundTint="#1AFFFFFF"
+                android:layout_gravity="center" />
+                
+            <View
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:background="@android:drawable/ic_lock_power_off"
+                android:backgroundTint="#FF3B30"
+                android:layout_gravity="center" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/tv_lock_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
-            android:text="FOCUS FLOW"
-            android:textColor="#FF5252"
-            android:textSize="14sp"
+            android:layout_marginTop="40dp"
+            android:text="FOCUS FLOW ACTIVE"
+            android:textColor="#FF3B30"
+            android:textSize="12sp"
             android:fontFamily="sans-serif-black"
-            android:letterSpacing="0.2" />
+            android:letterSpacing="0.3" />
 
         <TextView
             android:id="@+id/tv_lock_message"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="You've reached your daily limit for this application."
+            android:layout_marginTop="16dp"
+            android:text="Limit Reached"
             android:textAlignment="center"
             android:textColor="#FFFFFF"
-            android:textSize="22sp"
-            android:fontFamily="sans-serif-medium" />
+            android:textSize="28sp"
+            android:fontFamily="sans-serif-condensed-light" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Take a moment to breathe and stay productive with other tools."
+            android:layout_marginTop="12dp"
+            android:text="Toolz suggests taking a break.\nDisconnecting builds better focus."
             android:textAlignment="center"
-            android:textColor="#AAAAAA"
-            android:textSize="14sp" />
+            android:textColor="#8E8E93"
+            android:textSize="15sp"
+            android:lineSpacingExtra="4dp" />
 
         <Button
             android:id="@+id/btn_exit"
             android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginTop="48dp"
+            android:layout_height="60dp"
+            android:layout_marginTop="56dp"
             android:backgroundTint="#FFFFFF"
             android:textColor="#000000"
-            android:text="RETURN TO DASHBOARD"
+            android:text="BACK TO DASHBOARD"
+            android:textAllCaps="true"
             android:fontFamily="sans-serif-black"
             android:textSize="14sp"
-            android:elevation="8dp" />
+            android:letterSpacing="0.1" />
 
     </LinearLayout>
 
