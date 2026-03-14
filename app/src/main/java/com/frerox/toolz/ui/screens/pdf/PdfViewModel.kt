@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.pdf
-
+ 
+import com.google.mlkit.vision.text.Text
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.LruCache
@@ -41,6 +42,7 @@ data class PdfWorkspaceTab(
     val lastTool: PdfToolMode = PdfToolMode.NAVIGATE,
     val isOcrActive: Boolean = false,
     val ocrProgress: Float = 0f,
+    val ocrLanguage: OcrLanguage = OcrLanguage.LATIN,
     val pageCount: Int = 0,
     val lastOpenedAt: Long = System.currentTimeMillis()
 )
@@ -244,6 +246,15 @@ class PdfViewModel @Inject constructor(
         }
     }
 
+    fun setOcrLanguage(language: OcrLanguage) {
+        val tab = _activeTab.value ?: return
+        updateActiveTab { it.copy(ocrLanguage = language) }
+        // Rerun OCR if it's already extracted, or if the user is in TEXT_SELECT mode
+        if (tab.lastTool == PdfToolMode.TEXT_SELECT) {
+            runFullDocumentOcr(tab.copy(ocrLanguage = language))
+        }
+    }
+
     private fun checkAndRunOcr(tab: PdfWorkspaceTab) {
         viewModelScope.launch {
             val meta = metadataDao.getMetadata(tab.uri.toString())
@@ -264,7 +275,7 @@ class PdfViewModel @Inject constructor(
                 val bitmap = repository.getOcrBitmap(tab.uri, i)
                 if (bitmap != null) {
                     try {
-                        val result = ocrProcessor.processImage(bitmap)
+                        val result = ocrProcessor.processImage(bitmap, language = tab.ocrLanguage)
                         val text = ocrProcessor.getStructuredText(result)
                         ocrResults.add(text)
                         

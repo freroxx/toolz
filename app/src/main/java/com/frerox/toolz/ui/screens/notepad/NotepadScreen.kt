@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -197,7 +198,7 @@ fun NotepadScreen(
                             currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                             onClick = { 
                                 noteToEdit = note
-                                showEditor = true
+                                showEditor = false // We now open viewer first through noteToEdit being non-null
                             },
                             onDelete = { viewModel.deleteNote(note) },
                             onTogglePin = { viewModel.togglePin(note) },
@@ -209,17 +210,43 @@ fun NotepadScreen(
             }
         }
 
-        if (showEditor) {
+        if (showEditor && noteToEdit == null) {
+            // Creating a new note
             NoteEditorDialog(
-                note = noteToEdit,
+                note = null,
                 viewModel = viewModel,
                 isAmoled = isDark,
                 onDismiss = { showEditor = false },
                 onSave = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName ->
-                    if (noteToEdit == null) {
-                        viewModel.addNote(title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName)
-                    } else {
-                        viewModel.updateNote(noteToEdit!!.copy(
+                    viewModel.addNote(title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName)
+                    showEditor = false
+                }
+            )
+        } else if (noteToEdit != null) {
+            // Viewing an existing note
+            NoteViewerDialog(
+                note = noteToEdit!!,
+                viewModel = viewModel,
+                isAmoled = isDark,
+                isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == noteToEdit!!.attachedAudioUri,
+                currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
+                onDismiss = { noteToEdit = null },
+                onEdit = {
+                    showEditor = true // This will trigger the NoteEditorDialog overlay within the viewer's awareness, or we can just swap
+                },
+                onPlayAudio = { onPlayAudio(it) },
+                onViewPdf = { onViewPdf(it) }
+            )
+
+            // If user clicked Edit from inside NoteViewerDialog
+            if (showEditor) {
+                NoteEditorDialog(
+                    note = noteToEdit,
+                    viewModel = viewModel,
+                    isAmoled = isDark,
+                    onDismiss = { showEditor = false },
+                    onSave = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName ->
+                        val updated = noteToEdit!!.copy(
                             title = title, 
                             content = content, 
                             color = color,
@@ -231,11 +258,189 @@ fun NotepadScreen(
                             attachedAudioUri = audioUri,
                             attachedAudioName = audioName,
                             timestamp = System.currentTimeMillis()
-                        ))
+                        )
+                        viewModel.updateNote(updated)
+                        noteToEdit = updated // Update viewer state
+                        showEditor = false
                     }
-                    showEditor = false
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NoteViewerDialog(
+    note: Note,
+    viewModel: NotepadViewModel,
+    isAmoled: Boolean,
+    isPlaying: Boolean,
+    currentTrackThumbnail: String?,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onPlayAudio: (String) -> Unit,
+    onViewPdf: (String) -> Unit
+) {
+    val noteColor = Color(note.color)
+    val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = noteColor,
+        contentColor = onNoteColor,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = onNoteColor.copy(alpha = 0.4f)) },
+        modifier = Modifier.fillMaxHeight(0.9f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date(note.timestamp)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = onNoteColor.copy(alpha = 0.5f),
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(
+                        onClick = { viewModel.togglePin(note) },
+                        modifier = Modifier.size(36.dp).background(onNoteColor.copy(alpha = 0.1f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PushPin,
+                            contentDescription = "Pin",
+                            tint = if (note.isPinned) onNoteColor else onNoteColor.copy(alpha = 0.3f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp).background(onNoteColor.copy(alpha = 0.1f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Edit, "Edit", tint = onNoteColor, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(
+                        onClick = {
+                            viewModel.deleteNote(note)
+                            onDismiss()
+                        },
+                        modifier = Modifier.size(36.dp).background(onNoteColor.copy(alpha = 0.1f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.Delete, "Delete", tint = onNoteColor, modifier = Modifier.size(18.dp))
+                    }
                 }
-            )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp)
+            ) {
+                Text(
+                    text = note.title.ifEmpty { "Untitled" },
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black,
+                    color = onNoteColor,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                if (note.attachedAudioUri != null || note.attachedPdfUri != null) {
+                    Row(
+                        modifier = Modifier.padding(bottom = 24.dp).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (note.attachedAudioUri != null) {
+                            Surface(
+                                onClick = { onPlayAudio(note.attachedAudioUri) },
+                                color = if (isPlaying) onNoteColor.copy(alpha = 0.2f) else onNoteColor.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (isPlaying) Icons.Rounded.PauseCircle else Icons.Rounded.PlayCircle, 
+                                        null, 
+                                        modifier = Modifier.size(24.dp), 
+                                        tint = onNoteColor
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        note.attachedAudioName ?: "Play Audio",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = onNoteColor,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                        if (note.attachedPdfUri != null) {
+                            Surface(
+                                onClick = { onViewPdf(note.attachedPdfUri) },
+                                color = onNoteColor.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Description, 
+                                        null, 
+                                        modifier = Modifier.size(24.dp), 
+                                        tint = onNoteColor
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "View PDF",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = onNoteColor,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (note.attachedPdfUri != null) {
+                    PdfPreview(
+                        uri = note.attachedPdfUri, 
+                        modifier = Modifier
+                            .padding(bottom = 24.dp)
+                            .height(180.dp)
+                            .clickable { onViewPdf(note.attachedPdfUri) }
+                    )
+                }
+
+                Text(
+                    text = note.content,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontFamily = when(note.fontStyle) {
+                            "SERIF" -> FontFamily.Serif
+                            "MONOSPACE" -> FontFamily.Monospace
+                            "CASUAL" -> FontFamily.Cursive
+                            else -> FontFamily.Default
+                        },
+                        fontSize = note.fontSize.sp,
+                        fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                        fontStyle = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                        lineHeight = 1.5.times(note.fontSize).sp
+                    ),
+                    color = onNoteColor.copy(alpha = 0.85f)
+                )
+            }
         }
     }
 }

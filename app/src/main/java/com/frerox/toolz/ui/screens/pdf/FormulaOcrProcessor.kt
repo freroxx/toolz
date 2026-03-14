@@ -5,6 +5,11 @@ import android.graphics.*
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -13,13 +18,34 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class OcrLanguage(val displayName: String) {
+    LATIN("English/Latin"), // Latin handles English, French, Spanish, German, etc.
+    CHINESE("Chinese"),
+    JAPANESE("Japanese"),
+    KOREAN("Korean"),
+    DEVANAGARI("Devanagari")
+}
+
 @Singleton
 class FormulaOcrProcessor @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val recognizers = mutableMapOf<OcrLanguage, TextRecognizer>()
 
-    suspend fun processImage(bitmap: Bitmap, region: Rect? = null): Text = withContext(Dispatchers.Default) {
+    private fun getRecognizer(language: OcrLanguage): TextRecognizer {
+        return recognizers.getOrPut(language) {
+            val options = when (language) {
+                OcrLanguage.LATIN -> TextRecognizerOptions.DEFAULT_OPTIONS
+                OcrLanguage.CHINESE -> ChineseTextRecognizerOptions.Builder().build()
+                OcrLanguage.JAPANESE -> JapaneseTextRecognizerOptions.Builder().build()
+                OcrLanguage.KOREAN -> KoreanTextRecognizerOptions.Builder().build()
+                OcrLanguage.DEVANAGARI -> DevanagariTextRecognizerOptions.Builder().build()
+            }
+            TextRecognition.getClient(options)
+        }
+    }
+
+    suspend fun processImage(bitmap: Bitmap, language: OcrLanguage = OcrLanguage.LATIN, region: Rect? = null): Text = withContext(Dispatchers.Default) {
         val targetBitmap = if (region != null) {
             // Ensure region is within bounds
             val safeRegion = Rect(
@@ -41,7 +67,7 @@ class FormulaOcrProcessor @Inject constructor(
         val image = InputImage.fromBitmap(processedBitmap, 0)
         
         try {
-            recognizer.process(image).await()
+            getRecognizer(language).process(image).await()
         } catch (e: Exception) {
             throw e
         } finally {

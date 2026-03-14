@@ -1016,7 +1016,8 @@ private fun getCategories() = listOf(
         "PRIVACY & FOCUS",
         listOf(
             ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Screen time insights"),
-            ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs")
+            ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
+            ToolItem("Clipboard", Icons.Rounded.ContentPaste, Screen.Clipboard.route, "Smart copy history")
         )
     ),
     ToolCategory(

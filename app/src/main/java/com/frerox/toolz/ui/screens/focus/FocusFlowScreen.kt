@@ -7,8 +7,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -29,6 +34,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,6 +61,7 @@ fun FocusFlowScreen(
     val productivityScore by viewModel.productivityScore.collectAsState()
     val isWeekly by viewModel.isWeekly.collectAsState()
     var selectedAppForSettings by remember { mutableStateOf<AppUsageInfo?>(null) }
+    var appToRename by remember { mutableStateOf<AppUsageInfo?>(null) }
 
     Scaffold(
         topBar = {
@@ -99,6 +107,54 @@ fun FocusFlowScreen(
             ) {
                 item {
                     EnhancedProductivityHeader(productivityScore)
+                }
+
+                // Total screen time summary
+                item {
+                    val totalTime = usageStats.sumOf { it.usageTimeMillis }
+                    val totalHours = totalTime / 3600000
+                    val totalMinutes = (totalTime % 3600000) / 60000
+                    val appCount = usageStats.size
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Rounded.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (totalHours > 0) "${totalHours}h ${totalMinutes}m" else "${totalMinutes}m",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text("SCREEN TIME", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Rounded.Apps, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "$appCount",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text("APPS USED", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp)
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -167,7 +223,11 @@ fun FocusFlowScreen(
                 }
 
                 items(usageStats, key = { it.packageName }) { info ->
-                    EnhancedUsageItem(info, onClick = { selectedAppForSettings = info })
+                    EnhancedUsageItem(
+                        info, 
+                        onClick = { selectedAppForSettings = info },
+                        onLongClick = { appToRename = info }
+                    )
                 }
                 
                 item {
@@ -192,6 +252,41 @@ fun FocusFlowScreen(
                 }
             )
         }
+
+        // Rename dialog
+        appToRename?.let { app ->
+            var nameInput by remember { mutableStateOf(app.appName) }
+            AlertDialog(
+                onDismissRequest = { appToRename = null },
+                title = { Text("Rename App", fontWeight = FontWeight.Black) },
+                text = {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("Custom Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (nameInput.isNotBlank()) {
+                            viewModel.renameApp(app.packageName, nameInput.trim())
+                        }
+                        appToRename = null
+                    }) {
+                        Text("SAVE", fontWeight = FontWeight.Black)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { appToRename = null }) {
+                        Text("CANCEL")
+                    }
+                },
+                shape = RoundedCornerShape(28.dp)
+            )
+        }
     }
 }
 
@@ -203,7 +298,10 @@ fun FocusAppSettingsSheet(
     onSaveLimit: (Long) -> Unit,
     onUpdateCategory: (Boolean) -> Unit
 ) {
-    var limitInput by remember { mutableStateOf((app.limitMillis?.div(60000) ?: 0L).toString()) }
+    val initialMinutes = app.limitMillis?.div(60000) ?: 0L
+    var selectedHours by remember { mutableStateOf((initialMinutes / 60).toInt()) }
+    var selectedMins by remember { mutableStateOf((initialMinutes % 60).toInt()) }
+    
     val isCurrentlyProductive = app.category == AppCategory.TOOLZ
 
     ModalBottomSheet(
@@ -276,36 +374,63 @@ fun FocusAppSettingsSheet(
             }
 
             Spacer(Modifier.height(32.dp))
-            Text("DAILY TIME LIMIT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("DAILY TIME LIMIT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                if (selectedHours == 0 && selectedMins == 0) {
+                    Text("No Limit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
             
-            OutlinedTextField(
-                value = limitInput,
-                onValueChange = { if (it.all { char -> char.isDigit() }) limitInput = it },
-                label = { Text("Minutes") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                placeholder = { Text("0 to disable limit") },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                ),
-                trailingIcon = {
-                    if (limitInput.isNotEmpty()) {
-                        IconButton(onClick = { limitInput = "" }) {
-                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
-                        }
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(160.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    // Selection Highlight Overlay
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(0.6f).height(44.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    ) {}
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Hours Picker
+                        ScrollableNumberPicker(
+                            range = 0..23,
+                            selectedItem = selectedHours,
+                            onItemSelected = { selectedHours = it },
+                            label = "h"
+                        )
+                        
+                        Spacer(Modifier.width(24.dp))
+                        Text(":", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(0.5f))
+                        Spacer(Modifier.width(24.dp))
+                        
+                        // Minutes Picker
+                        ScrollableNumberPicker(
+                            range = 0..59,
+                            selectedItem = selectedMins,
+                            onItemSelected = { selectedMins = it },
+                            label = "m",
+                            formatTwoDigits = true
+                        )
                     }
                 }
-            )
+            }
             
             Spacer(Modifier.height(32.dp))
             Button(
                 onClick = { 
-                    onSaveLimit(limitInput.toLongOrNull() ?: 0L)
+                    val totalMins = (selectedHours * 60L) + selectedMins
+                    onSaveLimit(totalMins)
                     onDismiss()
                 },
                 modifier = Modifier.fillMaxWidth().height(60.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = MaterialTheme.colorScheme.primary),
@@ -338,9 +463,6 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>) {
                 Text("WEEKLY INVESTMENT", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp)
             }
             Spacer(Modifier.height(8.dp))
-            Text(
-                if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
-            ).toString() // Just to avoid unused warning if needed, but Text is correct
             Text(
                 if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
                 style = MaterialTheme.typography.displayMedium,
@@ -466,8 +588,9 @@ fun EnhancedProductivityHeader(score: Int) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit) {
+fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit, onLongClick: () -> Unit) {
     val hours = info.usageTimeMillis / 3600000
     val minutes = (info.usageTimeMillis % 3600000) / 60000
     val timeStr = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
@@ -475,7 +598,12 @@ fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit) {
     val isOverLimit = info.limitMillis != null && info.usageTimeMillis >= info.limitMillis
 
     Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         border = BorderStroke(
@@ -599,6 +727,91 @@ fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit) {
                                 )
                             )
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ScrollableNumberPicker(
+    range: IntRange,
+    selectedItem: Int,
+    onItemSelected: (Int) -> Unit,
+    label: String,
+    formatTwoDigits: Boolean = false,
+    visibleItemsCount: Int = 3
+) {
+    val items = range.toList()
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = items.indexOf(selectedItem).coerceAtLeast(0))
+    val itemHeight = 44.dp
+    
+    // Auto-snap logic
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress && listState.layoutInfo.visibleItemsInfo.isNotEmpty()) {
+            val centerOffset = listState.layoutInfo.viewportEndOffset / 2
+            val closestItem = listState.layoutInfo.visibleItemsInfo.minByOrNull {
+                kotlin.math.abs((it.offset + it.size / 2) - centerOffset)
+            }
+            if (closestItem != null) {
+                val index = closestItem.index
+                if (index in items.indices) {
+                    onItemSelected(items[index])
+                    listState.animateScrollToItem(index)
+                }
+            }
+        }
+    }
+
+    // Scroll to new selected item if changed externally
+    LaunchedEffect(selectedItem) {
+        val index = items.indexOf(selectedItem)
+        if (index >= 0 && !listState.isScrollInProgress) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
+    Box(
+        modifier = Modifier.height(itemHeight * visibleItemsCount).width(64.dp)
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = itemHeight * (visibleItemsCount / 2))
+        ) {
+            items(items) { item ->
+                val isSelected = item == selectedItem
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.2f else 0.8f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                )
+                val alpha by animateFloatAsState(
+                    targetValue = if (isSelected) 1f else 0.4f,
+                    animationSpec = tween(150)
+                )
+
+                Box(
+                    modifier = Modifier.height(itemHeight).fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = if (formatTwoDigits) String.format("%02d", item) else item.toString(),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.scale(scale).alpha(alpha)
+                        )
+                        if (isSelected) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 2.dp, bottom = 4.dp).alpha(alpha)
+                            )
+                        }
+                    }
                 }
             }
         }
