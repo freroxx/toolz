@@ -39,162 +39,176 @@ fun CalculatorScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "CALCULATOR",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    Row(modifier = Modifier.padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (state.isScientific) {
-                            Surface(
-                                onClick = { viewModel.onToggleAngleMode() },
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    if (state.isDegreeMode) "DEG" else "RAD",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Decorative background elements
+        Box(
+            modifier = Modifier
+                .size(300.dp)
+                .offset(x = (-100).dp, y = (-100).dp)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .size(400.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 150.dp, y = 150.dp)
+                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f), CircleShape)
+        )
+
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "CALCULATOR",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.padding(12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", modifier = Modifier.size(24.dp))
                         }
+                    },
+                    actions = {
                         IconButton(
                             onClick = { viewModel.onToggleMode() },
-                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(
-                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            modifier = Modifier.padding(end = 12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(
+                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) 
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             )
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Science,
                                 contentDescription = "Toggle Mode",
-                                tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 24.dp)
-        ) {
-            // Display Area
-            Surface(
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+            },
+            containerColor = Color.Transparent
+        ) { padding ->
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(vertical = 16.dp),
-                shape = RoundedCornerShape(32.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 24.dp)
             ) {
+                // Display Area
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.BottomEnd
+                        .fillMaxWidth()
+                        .weight(1.2f)
+                        .padding(vertical = 16.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.End) {
+                    Column(
+                        modifier = Modifier.align(Alignment.BottomEnd),
+                        horizontalAlignment = Alignment.End
+                    ) {
                         AnimatedContent(
                             targetState = state.formula,
-                            transitionSpec = { fadeIn() togetherWith fadeOut() }, label = ""
+                            transitionSpec = { 
+                                fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                            }, label = "formula"
                         ) { formula ->
                             Text(
                                 text = formula,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
                                 textAlign = TextAlign.End,
                                 fontWeight = FontWeight.Bold,
-                                minLines = 1
+                                modifier = Modifier.padding(bottom = 4.dp)
                             )
                         }
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
                         
                         Text(
                             text = state.display,
                             style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = if (state.display.length > 12) 36.sp else if (state.display.length > 8) 48.sp else 64.sp,
+                                fontSize = if (state.display.length > 12) 42.sp else if (state.display.length > 8) 54.sp else 72.sp,
                                 fontWeight = FontWeight.Black,
-                                letterSpacing = (-1).sp
+                                letterSpacing = (-2).sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
                             maxLines = 2,
-                            lineHeight = if (state.display.length > 12) 42.sp else 72.sp
+                            lineHeight = if (state.display.length > 12) 48.sp else 78.sp
                         )
                         
                         state.error?.let {
                             Surface(
                                 color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.padding(top = 8.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.padding(top = 12.dp)
                             ) {
                                 Text(
                                     text = it.uppercase(),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 1.sp
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            // Buttons Grid
-            Box(
-                modifier = Modifier
-                    .weight(3f)
-                    .padding(vertical = 8.dp)
-            ) {
-                AnimatedContent(
-                    targetState = state.isScientific,
-                    transitionSpec = {
-                        (slideInVertically { it } + fadeIn()) togetherWith 
-                        (slideOutVertically { -it } + fadeOut())
-                    }, label = ""
-                ) { isScientific ->
-                    if (isScientific) {
-                        ScientificLayout(viewModel)
-                    } else {
-                        NormalLayout(viewModel)
+                if (state.isScientific) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Surface(
+                            onClick = { viewModel.onToggleAngleMode() },
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        ) {
+                            Text(
+                                if (state.isDegreeMode) "DEGREE" else "RADIAN",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.sp
+                            )
+                        }
                     }
                 }
+
+                // Buttons Grid
+                Box(modifier = Modifier.weight(3f)) {
+                    AnimatedContent(
+                        targetState = state.isScientific,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.92f))
+                                .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.92f))
+                        }, label = "keypad"
+                    ) { isScientific ->
+                        if (isScientific) {
+                            ScientificKeypad(viewModel)
+                        } else {
+                            StandardKeypad(viewModel)
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
             }
-            
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-fun NormalLayout(viewModel: CalculatorViewModel) {
+fun StandardKeypad(viewModel: CalculatorViewModel) {
     val buttons = listOf(
         "C", "÷", "×", "DEL",
         "7", "8", "9", "-",
@@ -212,10 +226,10 @@ fun NormalLayout(viewModel: CalculatorViewModel) {
     ) {
         items(buttons) { btn ->
             when (btn) {
-                "DEL" -> CalcIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() })
+                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() })
                 "" -> Spacer(modifier = Modifier.aspectRatio(1f))
                 else -> {
-                    CalcButton(
+                    CalculatorButton(
                         text = btn,
                         onClick = {
                             when (btn) {
@@ -236,29 +250,29 @@ fun NormalLayout(viewModel: CalculatorViewModel) {
 }
 
 @Composable
-fun ScientificLayout(viewModel: CalculatorViewModel) {
+fun ScientificKeypad(viewModel: CalculatorViewModel) {
     val buttons = listOf(
-        "sin", "cos", "tan", "sqrt",
-        "log", "ln", "(", ")",
-        "π", "e", "^", "C",
-        "7", "8", "9", "÷",
-        "4", "5", "6", "×",
-        "1", "2", "3", "-",
-        "0", ".", "DEL", "=",
-        "+"
+        "sin", "cos", "tan", "(",
+        "sqrt", "log", "ln", ")",
+        "π", "e", "^", "÷",
+        "7", "8", "9", "×",
+        "4", "5", "6", "-",
+        "1", "2", "3", "+",
+        "C", "0", ".", "=",
+        "DEL"
     )
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
             when (btn) {
-                "DEL" -> CalcIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() }, isScientific = true)
+                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() }, isScientific = true)
                 else -> {
-                    CalcButton(
+                    CalculatorButton(
                         text = btn,
                         onClick = {
                             when (btn) {
@@ -280,36 +294,40 @@ fun ScientificLayout(viewModel: CalculatorViewModel) {
 }
 
 @Composable
-fun CalcButton(
+fun CalculatorButton(
     text: String, 
     onClick: () -> Unit, 
     isScientific: Boolean = false
 ) {
     val isOperator = text in listOf("=", "+", "-", "×", "÷", "^")
-    val isAction = text in listOf("C", "DEL", "sin", "cos", "tan", "log", "ln", "sqrt", "(", ")", "π", "e")
+    val isFunction = text in listOf("sin", "cos", "tan", "log", "ln", "sqrt")
+    val isClear = text == "C"
     
     val containerColor = when {
         text == "=" -> MaterialTheme.colorScheme.primary
-        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-        isAction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+        isFunction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
     }
     
     val contentColor = when {
         text == "=" -> MaterialTheme.colorScheme.onPrimary
         isOperator -> MaterialTheme.colorScheme.onPrimaryContainer
-        isAction -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        isClear -> MaterialTheme.colorScheme.onErrorContainer
+        isFunction -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
 
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.25f else 1f)
+            .aspectRatio(if (isScientific) 1.2f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         color = containerColor,
-        border = if (!isOperator && text != "=") BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+        tonalElevation = 2.dp,
+        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.05f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
@@ -323,22 +341,23 @@ fun CalcButton(
 }
 
 @Composable
-fun CalcIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
+fun CalculatorIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.25f else 1f)
+            .aspectRatio(if (isScientific) 1.2f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        tonalElevation = 2.dp,
+        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.05f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon, 
                 contentDescription = null, 
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.size(24.dp)
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(26.dp)
             )
         }
     }
