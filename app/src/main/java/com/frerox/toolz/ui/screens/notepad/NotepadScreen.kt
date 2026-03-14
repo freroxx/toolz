@@ -20,9 +20,9 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -261,12 +261,13 @@ fun NotepadScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalItemSpacing = 16.dp
                 ) {
-                    itemsIndexed(filteredNotes, key = { _, note -> note.id }) { index, note ->
-                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-                        Box(
-                            modifier = Modifier
-                                .animateItemPlacement(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                        ) {
+                    filteredNotes.forEachIndexed { index, note ->
+                        item(key = note.id) {
+                            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                            Box(
+                                modifier = Modifier
+                                    .animateItem()
+                            ) {
                             ImprovedNoteItem(
                                 note = note, 
                                 isDark = isDark,
@@ -309,6 +310,7 @@ fun NotepadScreen(
                 }
             }
         }
+    }
 
         if (showEditor && noteToEdit == null) {
             // Creating a new note
@@ -395,8 +397,7 @@ fun NoteViewerDialog(
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = { BottomSheetDefaults.DragHandle(color = onNoteColor.copy(alpha = 0.4f)) },
         tonalElevation = 12.dp,
-        modifier = Modifier.fillMaxHeight(0.95f),
-        windowInsets = BottomSheetDefaults.windowInsets
+        modifier = Modifier.fillMaxHeight(0.95f)
     ) {
         Column(
             modifier = Modifier
