@@ -27,6 +27,8 @@ class SettingsViewModel @Inject constructor(
     val customPrimaryColor = repository.customPrimaryColor
     val customSecondaryColor = repository.customSecondaryColor
     val worldClockZones = repository.worldClockZones
+    
+    val dashboardView = repository.dashboardView
 
     val notificationsEnabled = repository.notificationsEnabled
     val stepNotifications = repository.stepNotifications
@@ -59,6 +61,8 @@ class SettingsViewModel @Inject constructor(
     fun setCustomPrimaryColor(color: Int?) = viewModelScope.launch { repository.setCustomPrimaryColor(color) }
     fun setCustomSecondaryColor(color: Int?) = viewModelScope.launch { repository.setCustomSecondaryColor(color) }
     
+    fun setDashboardView(view: String) = viewModelScope.launch { repository.setDashboardView(view) }
+
     fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationsEnabled(enabled) }
     fun setStepNotifications(enabled: Boolean) = viewModelScope.launch { repository.setStepNotifications(enabled) }
     fun setTimerNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTimerNotifications(enabled) }

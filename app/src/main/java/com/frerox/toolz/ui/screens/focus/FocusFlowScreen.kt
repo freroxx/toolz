@@ -308,7 +308,7 @@ fun FocusAppSettingsSheet(
                     onSaveLimit(limitInput.toLongOrNull() ?: 0L)
                     onDismiss()
                 },
-                modifier = Modifier.fillMaxWidth().height(60.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
@@ -584,13 +584,15 @@ fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .fillMaxWidth(barProgress)
+                            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = if (barProgress >= 1f) 24.dp else 0.dp))
                             .background(
                                 Brush.horizontalGradient(
                                     listOf(color.copy(alpha = 0.7f), color)

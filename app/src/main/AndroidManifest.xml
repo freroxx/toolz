@@ -130,6 +130,28 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <service
+            android:name=".service.ClipboardService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_TYPE"
+                android:value="Clipboard history monitoring and smart classification" />
+        </service>
+
+        <service
+            android:name=".service.ClipboardTileService"
+            android:label="Toolz: Clipboard"
+            android:icon="@android:drawable/ic_menu_recent_history"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
         <!-- Widgets -->
         <receiver android:name=".widget.FlashlightWidgetProvider"
             android:exported="true">

@@ -28,8 +28,7 @@ class FocusFlowViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _usageStats = MutableStateFlow<List<AppUsageInfo>>(emptyList())
-    val usageStats: StateFlow<List<AppUsageInfo>> = _usageStats.asStateFlow()
-
+    
     private val _isWeekly = MutableStateFlow(false)
     val isWeekly = _isWeekly.asStateFlow()
 
@@ -43,11 +42,17 @@ class FocusFlowViewModel @Inject constructor(
     private val userMappings = settingsRepository.appCategoryMappings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(_usageStats, _appLimits) { stats, limits ->
+    val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(_usageStats, _appLimits, userMappings) { stats, limits, mappings ->
         stats.map { stat ->
             val limit = limits.find { it.packageName == stat.packageName }
-            stat.copy(limitMillis = limit?.limitMillis)
-        }
+            val mappedCategory = mappings[stat.packageName]?.let { 
+                if (it == "Productive") AppCategory.TOOLZ else AppCategory.DISTRACTION 
+            }
+            stat.copy(
+                limitMillis = limit?.limitMillis,
+                category = mappedCategory ?: guessCategory(stat.packageName)
+            )
+        }.sortedByDescending { it.usageTimeMillis }
     }
 
     init {
@@ -57,6 +62,13 @@ class FocusFlowViewModel @Inject constructor(
             while (true) {
                 delay(60000)
                 refreshStats()
+            }
+        }
+        
+        // Recalculate score when mappings change
+        viewModelScope.launch {
+            combinedUsageStats.collect { 
+                calculateProductivityScore(it)
             }
         }
     }
@@ -76,15 +88,26 @@ class FocusFlowViewModel @Inject constructor(
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
                 calendar.timeInMillis
             } else {
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
                 calendar.timeInMillis
             }
             
-            val endTime = System.currentTimeMillis()
+            val endTime = if (_isWeekly.value) {
+                System.currentTimeMillis()
+            } else {
+                val endCal = Calendar.getInstance()
+                endCal.set(Calendar.HOUR_OF_DAY, 23)
+                endCal.set(Calendar.MINUTE, 59)
+                endCal.set(Calendar.SECOND, 59)
+                endCal.set(Calendar.MILLISECOND, 999)
+                endCal.timeInMillis
+            }
 
             val stats = withContext(Dispatchers.IO) {
                 statsManager.queryUsageStats(
@@ -95,7 +118,6 @@ class FocusFlowViewModel @Inject constructor(
             }
             
             val pm = context.packageManager
-            val currentMappings = userMappings.value
 
             val aggregatedStats = stats.groupBy { it.packageName }.mapValues { entry ->
                 entry.value.sumOf { it.totalTimeInForeground }
@@ -112,23 +134,16 @@ class FocusFlowViewModel @Inject constructor(
                     val appName = appInfo?.let { pm.getApplicationLabel(it).toString() } ?: packageName
                     val icon = appInfo?.loadIcon(pm)
                     
-                    val mappedCategory = currentMappings[packageName]?.let { 
-                        if (it == "Productive") AppCategory.TOOLZ else AppCategory.DISTRACTION 
-                    }
-                    val category = mappedCategory ?: guessCategory(packageName)
-                    
                     AppUsageInfo(
                         packageName = packageName,
                         appName = appName,
                         usageTimeMillis = time,
-                        category = category,
                         icon = icon
                     )
-                }.sortedByDescending { it.usageTimeMillis }
+                }
             }
 
             _usageStats.value = usageList
-            calculateProductivityScore(usageList)
         }
     }
 
@@ -153,7 +168,6 @@ class FocusFlowViewModel @Inject constructor(
         viewModelScope.launch {
             val category = if (isProductive) "Productive" else "Distraction"
             settingsRepository.setAppCategoryMapping(packageName, category)
-            refreshStats()
         }
     }
 

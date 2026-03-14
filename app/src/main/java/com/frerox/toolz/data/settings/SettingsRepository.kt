@@ -22,6 +22,9 @@ class SettingsRepository @Inject constructor(
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
     
+    // Dashboard View
+    private val DASHBOARD_VIEW = stringPreferencesKey("dashboard_view") // "DEFAULT", "LIST"
+
     // Notifications
     private val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
     private val STEP_NOTIFICATIONS = booleanPreferencesKey("step_notifications")
@@ -85,6 +88,8 @@ class SettingsRepository @Inject constructor(
     val shutterSoundEnabled: Flow<Boolean> = dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
+    
+    val dashboardView: Flow<String> = dataStore.data.map { it[DASHBOARD_VIEW] ?: "DEFAULT" }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
@@ -150,6 +155,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setShutterSoundUri(uri: String) { dataStore.edit { it[SHUTTER_SOUND_URI] = uri } }
     suspend fun addWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) + zone } }
     suspend fun removeWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) - zone } }
+    
+    suspend fun setDashboardView(view: String) { dataStore.edit { it[DASHBOARD_VIEW] = view } }
 
     // Notification setters
     suspend fun setNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled } }

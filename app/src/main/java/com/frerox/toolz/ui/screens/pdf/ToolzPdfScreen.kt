@@ -504,7 +504,13 @@ private fun PageContainer(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .aspectRatio(0.707f)
+                .then(
+                    if (bitmap != null && bitmap!!.height > 0) {
+                        Modifier.aspectRatio(bitmap!!.width.toFloat() / bitmap!!.height.toFloat())
+                    } else {
+                        Modifier.aspectRatio(0.707f)
+                    }
+                )
                 .shadow(8.dp, RoundedCornerShape(12.dp)),
             color = Color.White,
             shape = RoundedCornerShape(12.dp)
@@ -1257,10 +1263,11 @@ fun PdfFileItem(
 
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha; this.scaleX = scale; this.scaleY = scale },
+        modifier = Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha; this.scaleX = scale; this.scaleY = scale }
+            .then(if (!isDeleting && !isAmoled) Modifier.shadow(8.dp, RoundedCornerShape(24.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else Modifier),
         shape = RoundedCornerShape(24.dp), color = colorTransition,
-        border = if (file.isPinned) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else null,
-        shadowElevation = if (isDeleting) 0.dp else 4.dp
+        border = if (file.isPinned) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)) else BorderStroke(1.dp, colorTransition.copy(alpha = 0.5f)),
+        tonalElevation = if (isDeleting) 0.dp else 4.dp
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(

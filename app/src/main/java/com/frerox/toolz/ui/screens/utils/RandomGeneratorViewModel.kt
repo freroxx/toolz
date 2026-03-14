@@ -58,14 +58,35 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
         val symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?"
         
         var charPool = lower
-        if (_uiState.value.includeUpper) charPool += upper
-        if (_uiState.value.includeNumbers) charPool += numbers
-        if (_uiState.value.includeSymbols) charPool += symbols
+        val guaranteedChars = mutableListOf<Char>()
+        guaranteedChars.add(lower[Random.nextInt(lower.length)])
+        
+        if (_uiState.value.includeUpper) {
+            charPool += upper
+            guaranteedChars.add(upper[Random.nextInt(upper.length)])
+        }
+        if (_uiState.value.includeNumbers) {
+            charPool += numbers
+            guaranteedChars.add(numbers[Random.nextInt(numbers.length)])
+        }
+        if (_uiState.value.includeSymbols) {
+            charPool += symbols
+            guaranteedChars.add(symbols[Random.nextInt(symbols.length)])
+        }
         
         val length = _uiState.value.passwordLength.toInt()
-        val pwd = (1..length)
-            .map { charPool[Random.nextInt(charPool.length)] }
-            .joinToString("")
+        val pwdChars = mutableListOf<Char>()
+        
+        for (i in 0 until length) {
+            if (i < guaranteedChars.size) {
+                pwdChars.add(guaranteedChars[i])
+            } else {
+                pwdChars.add(charPool[Random.nextInt(charPool.length)])
+            }
+        }
+        pwdChars.shuffle()
+        
+        val pwd = pwdChars.joinToString("")
         
         _uiState.update { it.copy(password = pwd) }
     }

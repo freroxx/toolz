@@ -80,8 +80,7 @@ class FormulaOcrProcessor @Inject constructor(
         
         val sb = StringBuilder()
         blocks.forEach { block ->
-            // Filter noise: low character count blocks often come from diagrams
-            if (block.text.length >= 3) {
+            if (block.text.isNotBlank()) {
                 sb.append(block.text).append("\n\n")
             }
         }

@@ -44,6 +44,7 @@ import com.frerox.toolz.ui.screens.time.*
 import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
+import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.worker.NotificationCleanupWorker
@@ -354,6 +355,9 @@ fun ToolzNavHost(
         }
         composable(Screen.NotificationVault.route) {
             NotificationVaultScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.Clipboard.route) {
+            ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
     }
 }
