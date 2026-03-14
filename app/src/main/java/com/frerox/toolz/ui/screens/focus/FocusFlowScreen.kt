@@ -70,6 +70,8 @@ fun FocusFlowScreen(
     val canDrawOverlays = remember { Settings.canDrawOverlays(context) }
     
     var isAccessibilityEnabled by remember { mutableStateOf(false) }
+    var selectedAppForSettings by remember { mutableStateOf<AppUsageInfo?>(null) }
+    var appToRename by remember { mutableStateOf<AppUsageInfo?>(null) }
     
     val lifecycleEvent = rememberLifecycleEvent()
     
@@ -302,7 +304,7 @@ fun FocusFlowScreen(
 
                 items(usageStats, key = { it.packageName }) { info ->
                     EnhancedUsageItem(
-                        info, 
+                        info = info, 
                         onClick = { selectedAppForSettings = info },
                         onLongClick = { appToRename = info }
                     )
@@ -314,6 +316,7 @@ fun FocusFlowScreen(
             }
         }
 
+        // App Settings Sheet
         selectedAppForSettings?.let { app ->
             FocusAppSettingsSheet(
                 app = app,
@@ -331,26 +334,19 @@ fun FocusFlowScreen(
             )
         }
 
-        // Rename dialog
-        appToRename?.let { app ->
-            var nameInput by remember { mutableStateOf(app.appName) }
+        // Rename Dialog
+        val currentAppToRename = appToRename
+        if (currentAppToRename != null) {
+            var nameInput by remember(currentAppToRename.packageName) { 
+                mutableStateOf(currentAppToRename.appName) 
+            }
+            
             AlertDialog(
                 onDismissRequest = { appToRename = null },
-                title = { Text("Rename App", fontWeight = FontWeight.Black) },
-                text = {
-                    OutlinedTextField(
-                        value = nameInput,
-                        onValueChange = { nameInput = it },
-                        label = { Text("Custom Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                },
                 confirmButton = {
                     TextButton(onClick = {
                         if (nameInput.isNotBlank()) {
-                            viewModel.renameApp(app.packageName, nameInput.trim())
+                            viewModel.renameApp(currentAppToRename.packageName, nameInput.trim())
                         }
                         appToRename = null
                     }) {
@@ -361,6 +357,17 @@ fun FocusFlowScreen(
                     TextButton(onClick = { appToRename = null }) {
                         Text("CANCEL")
                     }
+                },
+                title = { Text("Rename App", fontWeight = FontWeight.Black) },
+                text = {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { newVal -> nameInput = newVal },
+                        label = { Text("Custom Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp)
+                    )
                 },
                 shape = RoundedCornerShape(28.dp)
             )
