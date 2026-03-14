@@ -679,25 +679,52 @@ fun CategoryStrip(
     selectedCategory: String,
     onCategorySelect: (String) -> Unit
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(categories) { category ->
             val isSelected = selectedCategory == category
+            val backgroundColor by animateColorAsState(
+                targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                label = "catBg"
+            )
+            val contentColor by animateColorAsState(
+                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                label = "catText"
+            )
+            val scale by animateFloatAsState(
+                targetValue = if (isSelected) 1.05f else 1f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                label = "catScale"
+            )
+
             Surface(
-                modifier = Modifier.bouncyClick { onCategorySelect(category) },
-                shape = RoundedCornerShape(16.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .bouncyClick { 
+                        if (!isSelected) {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onCategorySelect(category)
+                        }
+                    },
+                shape = RoundedCornerShape(18.dp),
+                color = backgroundColor,
                 border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
                 Text(
                     text = category.uppercase(),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    letterSpacing = 1.sp
+                    color = contentColor,
+                    letterSpacing = 1.2.sp
                 )
             }
         }
@@ -857,38 +884,74 @@ fun NotificationVaultCard(
 @Composable
 fun EmptyVaultState(isFiltering: Boolean) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().padding(32.dp).graphicsLayer { translationY = -20f },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            modifier = Modifier.size(120.dp),
-            shape = RoundedCornerShape(40.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-        ) {
-            Icon(
-                if (isFiltering) Icons.Rounded.SearchOff else Icons.Rounded.HistoryEdu,
-                null,
-                modifier = Modifier.padding(32.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            )
+        Box(contentAlignment = Alignment.Center) {
+            // Interactive security rings
+            repeat(2) { i ->
+                val infiniteTransition = rememberInfiniteTransition(label = "rings")
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = if (i == 0) 360f else -360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(8000 + (i * 2000), easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "rotation"
+                )
+                
+                Canvas(modifier = Modifier.size(150.dp + (i * 40).dp).graphicsLayer { rotationZ = rotation }) {
+                    drawArc(
+                        color = Color.Primary.copy(alpha = 0.15f),
+                        startAngle = 0f,
+                        sweepAngle = 120f,
+                        useCenter = false,
+                        style = Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    )
+                    drawArc(
+                        color = Color.Primary.copy(alpha = 0.15f),
+                        startAngle = 180f,
+                        sweepAngle = 120f,
+                        useCenter = false,
+                        style = Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    )
+                }
+            }
+
+            Surface(
+                modifier = Modifier.size(110.dp),
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            ) {
+                Icon(
+                    if (isFiltering) Icons.Rounded.SearchOff else Icons.Rounded.Shield,
+                    null,
+                    modifier = Modifier.padding(28.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
-        Spacer(Modifier.height(32.dp))
+        
+        Spacer(Modifier.height(48.dp))
         Text(
-            if (isFiltering) "NO RESULTS MATCHED" else "VAULT IS SECURELY EMPTY",
-            style = MaterialTheme.typography.headlineSmall,
+            if (isFiltering) "NO SCAN MATCHES" else "VAULT IS SECURE",
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            letterSpacing = (-1).sp
+            color = MaterialTheme.colorScheme.primary,
+            letterSpacing = 2.sp
         )
+        Spacer(Modifier.height(12.dp))
         Text(
-            if (isFiltering) "Adjust your search parameters" else "Toolz hasn't intercepted any notifications yet.",
+            if (isFiltering) "Adjust your parameters and try again." else "All incoming transmissions are currently being monitored and encrypted.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 16.dp)
+            modifier = Modifier.fillMaxWidth(0.85f),
+            fontWeight = FontWeight.Medium,
+            lineHeight = 24.sp
         )
     }
 }

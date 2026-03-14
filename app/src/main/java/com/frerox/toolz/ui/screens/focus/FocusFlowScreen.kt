@@ -146,39 +146,56 @@ fun FocusFlowScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().bouncyClick { },
-                            shape = RoundedCornerShape(24.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
-                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                            shape = RoundedCornerShape(32.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.error, RoundedCornerShape(14.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        if (!canDrawOverlays) Icons.Rounded.Layers else Icons.Rounded.AccessibilityNew, 
-                                        null, 
-                                        tint = MaterialTheme.colorScheme.onError
-                                    )
+                            Column(modifier = Modifier.padding(24.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.error, RoundedCornerShape(18.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            if (!canDrawOverlays) Icons.Rounded.Layers else Icons.Rounded.AccessibilityNew, 
+                                            null, 
+                                            tint = MaterialTheme.colorScheme.onError,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(20.dp))
+                                    Column {
+                                        Text(
+                                            if (!canDrawOverlays) "OVERLAY REQUIRED" else "ACCESSIBILITY REQUIRED", 
+                                            fontWeight = FontWeight.Black, 
+                                            color = MaterialTheme.colorScheme.error, 
+                                            style = MaterialTheme.typography.labelSmall,
+                                            letterSpacing = 2.sp
+                                        )
+                                        Text(
+                                            if (!canDrawOverlays) "CRITICAL FOR LIMITS" else "CRITICAL FOR ENGINE", 
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
                                 }
-                                Spacer(Modifier.width(16.dp))
-                                Column {
-                                    Text(
-                                        if (!canDrawOverlays) "OVERLAY REQUIRED" else "ACCESSIBILITY REQUIRED", 
-                                        fontWeight = FontWeight.Black, 
-                                        color = MaterialTheme.colorScheme.error, 
-                                        style = MaterialTheme.typography.labelSmall,
-                                        letterSpacing = 1.sp
-                                    )
-                                    Text(
-                                        if (!canDrawOverlays) "Enable screen limits by granting overlay permission." 
-                                        else "Enable focus engine by granting accessibility permission.", 
-                                        style = MaterialTheme.typography.bodySmall, 
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                Spacer(Modifier.height(16.dp))
+                                Text(
+                                    if (!canDrawOverlays) "Grant overlay permission so Toolz can interrupt distracting apps effectively." 
+                                    else "The focus engine requires accessibility access to analyze app changes and enforce your limits.", 
+                                    style = MaterialTheme.typography.bodyMedium, 
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 20.sp
+                                )
+                                Spacer(Modifier.height(20.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.error,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("RESOLVE PERMISSION", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             }
                         }
@@ -458,9 +475,53 @@ fun FocusAppSettingsSheet(
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(15, 30, 60, 120).forEach { mins ->
+                    val isSelected = (selectedHours * 60 + selectedMins) == mins
+                    val activeColor = MaterialTheme.colorScheme.primary
+                    
+                    Surface(
+                        onClick = {
+                            selectedHours = mins / 60
+                            selectedMins = mins % 60
+                        },
+                        modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) activeColor else activeColor.copy(alpha = 0.1f),
+                        border = if (isSelected) null else BorderStroke(1.dp, activeColor.copy(alpha = 0.2f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                if (mins < 60) "${mins}m" else "${mins / 60}h", 
+                                style = MaterialTheme.typography.labelSmall, 
+                                fontWeight = FontWeight.Black,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else activeColor
+                            )
+                        }
+                    }
+                }
+                
+                Surface(
+                    onClick = {
+                        selectedHours = 0
+                        selectedMins = 0
+                    },
+                    modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
             Spacer(Modifier.height(32.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("DAILY TIME LIMIT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                Text("CUSTOM DURATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                 if (selectedHours == 0 && selectedMins == 0) {
                     Text("No Limit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
                 }
@@ -601,25 +662,47 @@ fun EnhancedProductivityHeader(score: Int) {
     val primary = MaterialTheme.colorScheme.primary
     val container = MaterialTheme.colorScheme.primaryContainer
     
+    val isElite = score > 85
+    val glowTransition = rememberInfiniteTransition(label = "glow")
+    val glowAlpha by glowTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowAlpha"
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(40.dp), spotColor = primary.copy(alpha = 0.3f)),
+            .shadow(
+                elevation = if (isElite) 24.dp else 16.dp, 
+                shape = RoundedCornerShape(40.dp), 
+                spotColor = if (isElite) primary else primary.copy(alpha = 0.3f)
+            ),
         shape = RoundedCornerShape(40.dp),
         color = container.copy(alpha = 0.1f),
-        border = BorderStroke(2.dp, Brush.verticalGradient(listOf(primary.copy(alpha = 0.5f), Color.Transparent)))
+        border = BorderStroke(2.dp, Brush.verticalGradient(listOf(primary.copy(alpha = if (isElite) glowAlpha else 0.5f), Color.Transparent)))
     ) {
         Column(
-            modifier = Modifier.padding(32.dp),
+            modifier = Modifier.padding(vertical = 40.dp, horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                "FOCUS EFFICIENCY",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = primary,
-                letterSpacing = 2.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isElite) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = primary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    "FOCUS EFFICIENCY",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = primary,
+                    letterSpacing = 2.sp
+                )
+            }
             
             Row(verticalAlignment = Alignment.Bottom) {
                 val animatedScore by animateIntAsState(targetValue = score, animationSpec = tween(1500, easing = FastOutSlowInEasing), label = "")
@@ -627,7 +710,14 @@ fun EnhancedProductivityHeader(score: Int) {
                     "$animatedScore",
                     style = MaterialTheme.typography.displayLarge.copy(fontSize = 110.sp),
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.graphicsLayer {
+                        if (isElite) {
+                            val pulse = glowAlpha * 0.05f
+                            scaleX = 1f + pulse
+                            scaleY = 1f + pulse
+                        }
+                    }
                 )
                 Text(
                     "%",
@@ -638,7 +728,7 @@ fun EnhancedProductivityHeader(score: Int) {
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             
             SquigglySlider(
                 value = score.toFloat(),
@@ -648,11 +738,12 @@ fun EnhancedProductivityHeader(score: Int) {
                 isPlaying = true
             )
             
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(28.dp))
             
             Surface(
                 color = (if (score > 50) primary else MaterialTheme.colorScheme.error).copy(alpha = 0.1f),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, (if (score > 50) primary else MaterialTheme.colorScheme.error).copy(alpha = 0.2f))
             ) {
                 Text(
                     when {
@@ -662,7 +753,7 @@ fun EnhancedProductivityHeader(score: Int) {
                         score > 30 -> "MODERATE DISTRACTION"
                         else -> "CRITICAL REFOCUS NEEDED"
                     },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
                     color = if (score > 50) primary else MaterialTheme.colorScheme.error,
