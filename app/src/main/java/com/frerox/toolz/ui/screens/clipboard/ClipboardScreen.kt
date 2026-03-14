@@ -63,6 +63,14 @@ fun ClipboardScreen(
     val groups = remember(entries) { viewModel.groupedEntries(entries) }
     val listState = rememberLazyListState()
     var showClearAllConfirmation by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    val filteredEntries = remember(entries, searchQuery) {
+        if (searchQuery.isBlank()) entries
+        else entries.filter { it.content.contains(searchQuery, ignoreCase = true) }
+    }
+    val filteredGroups = remember(filteredEntries) { viewModel.groupedEntries(filteredEntries) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshClipboard()
@@ -97,6 +105,21 @@ fun ClipboardScreen(
                             }
                         },
                         actions = {
+                            // Search
+                            IconButton(
+                                onClick = { isSearchActive = !isSearchActive },
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Icon(
+                                    if (isSearchActive) Icons.Rounded.SearchOff else Icons.Rounded.Search, 
+                                    contentDescription = "Search",
+                                    tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
                             // Sync manually
                             IconButton(
                                 onClick = { viewModel.refreshClipboard() },
@@ -123,6 +146,41 @@ fun ClipboardScreen(
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                     )
+                    
+                    if (isSearchActive) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        ) {
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Search clipboard...", style = MaterialTheme.typography.bodyMedium) },
+                                leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(20.dp)) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                },
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                singleLine = true
+                            )
+                        }
+                    }
                 }
             }
         }
