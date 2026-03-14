@@ -47,6 +47,8 @@ fun SettingsScreen(
     val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
+    
+    val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
 
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState(initial = true)
     val stepNotifications by viewModel.stepNotifications.collectAsState(initial = true)
@@ -143,7 +145,7 @@ fun SettingsScreen(
             ) {
                 Spacer(Modifier.height(8.dp))
                 
-                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name")) {
+                if (matches(searchQuery, "step goal", "health", "units", "qibla", "compass", "haptic", "vibration", "step counter", "tracker", "pill", "dashboard", "onboarding", "profile", "name", "view", "list")) {
                     SettingsSection(title = "CORE PREFERENCES") {
                         SettingsToggleItem(
                             title = "Toolz Status Pill",
@@ -152,6 +154,32 @@ fun SettingsScreen(
                             checked = showToolzPill,
                             onCheckedChange = { viewModel.setShowToolzPill(it) }
                         )
+                        
+                        SettingsItem(
+                            title = "Dashboard View",
+                            subtitle = "Style: ${dashboardView.lowercase()}",
+                            icon = Icons.Rounded.Dashboard
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("DEFAULT", "LIST").forEach { view ->
+                                    val isSelected = dashboardView == view
+                                    Surface(
+                                        onClick = { viewModel.setDashboardView(view) },
+                                        modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(view, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         SettingsToggleItem(
                             title = "Background Step Tracker",

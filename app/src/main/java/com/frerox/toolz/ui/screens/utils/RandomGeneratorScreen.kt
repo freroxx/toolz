@@ -21,6 +21,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.fadingEdge
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,14 +50,25 @@ fun RandomGeneratorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .fadingEdge(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.05f to Color.Black,
+                        0.95f to Color.Black,
+                        1f to Color.Transparent
+                    ),
+                    length = 24.dp
+                )
+                .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
+            Spacer(Modifier.height(8.dp))
             // Number Generator Section
             SectionHeader(title = "Random Number", icon = Icons.Rounded.Casino)
             OutlinedCard(
-                shape = MaterialTheme.shapes.extraLarge
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(
@@ -100,7 +114,8 @@ fun RandomGeneratorScreen(
             // Password Generator Section
             SectionHeader(title = "Password Generator", icon = Icons.Rounded.Lock)
             OutlinedCard(
-                shape = MaterialTheme.shapes.extraLarge
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(
@@ -180,6 +195,7 @@ fun RandomGeneratorScreen(
                     }
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

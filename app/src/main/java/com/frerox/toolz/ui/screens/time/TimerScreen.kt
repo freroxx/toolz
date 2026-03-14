@@ -400,63 +400,42 @@ fun ModernTimePicker(
     onValueChange: (Int) -> Unit,
     label: String
 ) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE / 2 - (Int.MAX_VALUE / 2 % 60) + value - 1)
-    
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress) {
-            val centerIndex = listState.firstVisibleItemIndex + 1
-            onValueChange(centerIndex % 60)
-            listState.animateScrollToItem(listState.firstVisibleItemIndex)
-        }
-    }
-
-    // Sync state back to list if changed externally (presets)
-    LaunchedEffect(value) {
-        val currentIndex = (listState.firstVisibleItemIndex + 1) % 60
-        if (currentIndex != value && !listState.isScrollInProgress) {
-            val targetIndex = listState.firstVisibleItemIndex + (value - currentIndex).let { if (it < -30) it + 60 else if (it > 30) it - 60 else it }
-            listState.scrollToItem(targetIndex)
-        }
-    }
-
     val primaryColor = MaterialTheme.colorScheme.primary
-    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
+        Surface(
             modifier = Modifier
                 .width(110.dp)
-                .height(160.dp),
-            contentAlignment = Alignment.Center
+                .height(160.dp)
+                .shadow(8.dp, RoundedCornerShape(24.dp), spotColor = primaryColor.copy(alpha = 0.5f)),
+            color = primaryColor.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                color = primaryColor.copy(alpha = 0.05f),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
-            ) {}
-
-            LazyColumn(
-                state = listState,
+            Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(vertical = 48.dp),
-                flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                items(Int.MAX_VALUE) { index ->
-                    val item = index % 60
-                    val isSelected = (listState.firstVisibleItemIndex + 1) == index
-                    Text(
-                        text = String.format(Locale.getDefault(), "%02d", item),
-                        style = if (isSelected) MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black) 
-                                else MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
-                        color = if (isSelected) primaryColor 
-                                else onSurfaceColor.copy(alpha = 0.1f),
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        fontSize = if (isSelected) 44.sp else 32.sp
-                    )
+                IconButton(
+                    onClick = { onValueChange((value + 1) % 60) }, 
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Up", tint = primaryColor)
+                }
+                
+                Text(
+                    text = String.format(Locale.getDefault(), "%02d", value),
+                    style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black),
+                    color = primaryColor,
+                    fontSize = 48.sp
+                )
+                
+                IconButton(
+                    onClick = { onValueChange((value - 1 + 60) % 60) }, 
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Down", tint = primaryColor)
                 }
             }
         }

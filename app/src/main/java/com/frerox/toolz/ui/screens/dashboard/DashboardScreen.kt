@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -29,6 +30,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -105,6 +107,7 @@ fun DashboardScreen(
     
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
     val userName by settingsRepository.userName.collectAsState(initial = "")
+    val dashboardView by settingsRepository.dashboardView.collectAsState(initial = "DEFAULT")
 
     val filteredCategories = remember(searchQuery, categories) {
         categories.map { category ->
@@ -161,56 +164,87 @@ fun DashboardScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 165.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .fadingEdge(
-                        brush = Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.02f to Color.Black,
-                            0.98f to Color.Black,
-                            1f to Color.Transparent
-                        ),
-                        length = 32.dp
-                    ),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 150.dp, top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Quick Notepad Preview
-                if (notes.isNotEmpty() && searchQuery.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        NotepadPreview(notes = notes, onNoteClick = { onNavigate(Screen.Notepad.route) })
-                    }
+            if (dashboardView == "LIST") {
+                val allTools = remember(categories) { 
+                    categories.flatMap { it.items }.distinctBy { it.route }.sortedBy { it.title } 
                 }
-
-                filteredCategories.forEach { category ->
-                    item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
-                        Surface(
-                            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = category.title,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                letterSpacing = 2.sp
-                            )
-                        }
-                    }
-                    items(category.items, key = { it.route + category.title }) { tool ->
-                        ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                val filteredTools = remember(searchQuery, allTools) {
+                    allTools.filter { 
+                        it.title.contains(searchQuery, ignoreCase = true) || 
+                        it.description.contains(searchQuery, ignoreCase = true) 
                     }
                 }
                 
-                if (filteredCategories.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        EmptySearchState(searchQuery)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .fadingEdge(
+                            brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
+                            length = 32.dp
+                        ),
+                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 150.dp, top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredTools, key = { it.route }) { tool ->
+                        ToolListItem(tool = tool, onClick = { onNavigate(tool.route) })
+                    }
+                    if (filteredTools.isEmpty()) {
+                        item { EmptySearchState(searchQuery) }
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .fadingEdge(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.02f to Color.Black,
+                                0.98f to Color.Black,
+                                1f to Color.Transparent
+                            ),
+                            length = 32.dp
+                        ),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 150.dp, top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Quick Notepad Preview
+                    if (notes.isNotEmpty() && searchQuery.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            NotepadPreview(notes = notes, onNoteClick = { onNavigate(Screen.Notepad.route) })
+                        }
+                    }
+
+                    filteredCategories.forEach { category ->
+                        item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
+                            Surface(
+                                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = category.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    letterSpacing = 2.sp
+                                )
+                            }
+                        }
+                        items(category.items, key = { it.route + category.title }) { tool ->
+                            ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                        }
+                    }
+                    
+                    if (filteredCategories.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            EmptySearchState(searchQuery)
+                        }
                     }
                 }
             }
@@ -223,15 +257,15 @@ fun DashboardScreen(
                 if (recorderState.isRecording) pages.add(PillPage.Recorder)
                 if (timerState.isRunning || timerState.remainingTime > 0) pages.add(PillPage.Timer)
                 if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) pages.add(PillPage.Stopwatch)
-                if (pomodoroState.isRunning || pomodoroState.remainingTime > 0) pages.add(PillPage.Pomodoro)
+                if (pomodoroState.isRunning || pomodoroTimeLeft(pomodoroState) > 0) pages.add(PillPage.Pomodoro)
                 if (stepState.isEnabledInSettings) pages.add(PillPage.Steps) 
                 pages
             }
 
             AnimatedVisibility(
                 visible = activePages.isNotEmpty(),
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                enter = slideInVertically(initialOffsetY = { it + 200 }) + fadeIn() + scaleIn(initialScale = 0.8f),
+                exit = slideOutVertically(targetOffsetY = { it + 200 }) + fadeOut() + scaleOut(targetScale = 0.8f),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp)
@@ -242,8 +276,8 @@ fun DashboardScreen(
                     modifier = Modifier
                         .padding(horizontal = 24.dp)
                         .fillMaxWidth()
-                        .height(110.dp)
-                        .shadow(24.dp, RoundedCornerShape(32.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        .height(100.dp)
+                        .shadow(32.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
                         .bouncyClick { 
                             val currentRoute = when(activePages[pagerState.currentPage]) {
                                 PillPage.Music -> Screen.MusicPlayer.route
@@ -256,25 +290,119 @@ fun DashboardScreen(
                             onNavigate(currentRoute)
                         },
                     color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(32.dp),
-                    tonalElevation = 8.dp,
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    shape = CircleShape,
+                    tonalElevation = 12.dp,
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                 ) {
                     HorizontalPager(
                         state = pagerState,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        pageSpacing = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 0.dp)
                     ) { pageIndex ->
-                        when (activePages[pageIndex]) {
-                            PillPage.Music -> MusicPill(musicState, musicViewModel)
-                            PillPage.Timer -> TimerPill(timerState, timerViewModel)
-                            PillPage.Stopwatch -> StopwatchPill(stopwatchState, stopwatchViewModel)
-                            PillPage.Pomodoro -> PomodoroPill(pomodoroState, pomodoroViewModel)
-                            PillPage.Steps -> StepsPill(stepState)
-                            PillPage.Recorder -> RecorderPill(recorderState, recorderViewModel)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    val pageOffset = (
+                                        (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                    ).absoluteValue
+                                    
+                                    alpha = lerp(
+                                        start = 0.4f,
+                                        stop = 1f,
+                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                    )
+                                    scaleX = lerp(
+                                        start = 0.9f,
+                                        stop = 1f,
+                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                    )
+                                    scaleY = lerp(
+                                        start = 0.9f,
+                                        stop = 1f,
+                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                    )
+                                }
+                                .animateContentSize()
+                        ) {
+                            when (activePages[pageIndex]) {
+                                PillPage.Music -> MusicPill(musicState, musicViewModel)
+                                PillPage.Timer -> TimerPill(timerState, timerViewModel)
+                                PillPage.Stopwatch -> StopwatchPill(stopwatchState, stopwatchViewModel)
+                                PillPage.Pomodoro -> PomodoroPill(pomodoroState, pomodoroViewModel)
+                                PillPage.Steps -> StepsPill(stepState)
+                                PillPage.Recorder -> RecorderPill(recorderState, recorderViewModel)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+private fun pomodoroTimeLeft(state: com.frerox.toolz.ui.screens.time.PomodoroState): Long {
+    return try { state.remainingTime } catch(e: Exception) { 0L }
+}
+
+private fun lerp(start: Float, stop: Float, fraction: Float): Float {
+    return (1 - fraction) * start + fraction * stop
+}
+
+private val Float.absoluteValue: Float get() = if (this < 0) -this else this
+
+@Composable
+fun ToolListItem(tool: ToolItem, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = tool.icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = tool.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = tool.description,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                modifier = Modifier.size(24.dp)
+            )
         }
     }
 }
@@ -347,7 +475,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(56.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.errorContainer
         ) {
@@ -363,7 +491,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
                     Icons.Rounded.Mic, 
                     null, 
                     tint = MaterialTheme.colorScheme.error, 
-                    modifier = Modifier.size(32.dp).alpha(if (state.isRecording && !state.isPaused) alphaAnim else 1f)
+                    modifier = Modifier.size(24.dp).alpha(if (state.isRecording && !state.isPaused) alphaAnim else 1f)
                 )
             }
         }
@@ -372,7 +500,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
             Text("RECORDING", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
             Text(
                 formatTimeDashboard(state.durationMillis),
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
@@ -381,19 +509,19 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(
                 onClick = { viewModel.stopRecording(true) },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
             ) {
-                Icon(Icons.Rounded.Save, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                Icon(Icons.Rounded.Save, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
             }
             IconButton(
                 onClick = { if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.error, CircleShape)
+                modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.error, CircleShape)
             ) {
                 Icon(
                     if (state.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
                     null,
                     tint = MaterialTheme.colorScheme.onError,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
@@ -436,9 +564,9 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
         ) {
             Surface(
                 modifier = Modifier
-                    .size(76.dp)
+                    .size(68.dp)
                     .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f),
-                shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(22.dp),
+                shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shadowElevation = 8.dp
             ) {
@@ -463,7 +591,7 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                 )
                 Text(
                     track.artist ?: "Unknown Artist",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
@@ -474,14 +602,14 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
             IconButton(
                 onClick = { viewModel.togglePlayPause() },
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(52.dp)
                     .background(MaterialTheme.colorScheme.primary, CircleShape)
             ) {
                 Icon(
                     if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
@@ -518,12 +646,12 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(64.dp),
+                modifier = Modifier.size(56.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.secondaryContainer
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(32.dp))
+                    Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(28.dp))
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -531,7 +659,7 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
                 Text("TIMER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
                 Text(
                     formatTimeDashboard(state.remainingTime),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
@@ -540,19 +668,19 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
                     onClick = { viewModel.reset() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                    modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
                 ) {
-                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
                 }
                 IconButton(
                     onClick = { viewModel.toggleStartStop() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
+                    modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
                 ) {
                     Icon(
                         if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         null,
                         tint = MaterialTheme.colorScheme.onSecondary,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
@@ -574,12 +702,12 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(56.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.tertiaryContainer
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(32.dp))
+                Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(28.dp))
             }
         }
         Spacer(Modifier.width(16.dp))
@@ -587,7 +715,7 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
             Text("STOPWATCH", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
             Text(
                 formatTimeDashboard(state.elapsedTime),
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
@@ -596,19 +724,19 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(
                 onClick = { viewModel.reset() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
             ) {
-                Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
             }
             IconButton(
                 onClick = { viewModel.toggleStartStop() },
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape)
             ) {
                 Icon(
                     if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                     null,
                     tint = MaterialTheme.colorScheme.onTertiary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
@@ -638,12 +766,12 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(64.dp),
+                modifier = Modifier.size(56.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.errorContainer
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(32.dp))
+                    Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -651,7 +779,7 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
                 Text(state.mode.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
                 Text(
                     formatTimeDashboard(state.remainingTime),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
@@ -660,19 +788,19 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
                     onClick = { viewModel.reset() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                    modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
                 ) {
-                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
                 }
                 IconButton(
                     onClick = { viewModel.toggleStartStop() },
-                    modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.error, CircleShape)
+                    modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.error, CircleShape)
                 ) {
                     Icon(
                         if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         null,
                         tint = MaterialTheme.colorScheme.onError,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
@@ -694,29 +822,29 @@ fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
         modifier = Modifier.padding(horizontal = 20.dp).fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(68.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
                 progress = { progress },
                 modifier = Modifier.fillMaxSize(),
                 color = Color(0xFF4CAF50),
                 trackColor = Color(0xFF4CAF50).copy(alpha = 0.1f),
-                strokeWidth = 7.dp,
+                strokeWidth = 6.dp,
                 strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
             )
-            Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(30.dp))
+            Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.width(20.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text("DAILY STEPS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
             Text(
                 "${state.steps}",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text("${(progress * 100).toInt()}%", fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
+            Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
             Text("GOAL: ${state.goal}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
         }
     }
@@ -787,7 +915,7 @@ fun ImprovedToolCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(140.dp)
+            .height(130.dp)
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -811,11 +939,11 @@ fun ImprovedToolCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(20.dp),
+                    .padding(18.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(44.dp),
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
                 ) {
@@ -824,7 +952,7 @@ fun ImprovedToolCard(
                             imageVector = tool.icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -832,18 +960,18 @@ fun ImprovedToolCard(
                 Column {
                     Text(
                         text = tool.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        lineHeight = 22.sp
+                        lineHeight = 18.sp
                     )
                     Text(
                         text = tool.description.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
-                        lineHeight = 14.sp,
+                        lineHeight = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
                     )

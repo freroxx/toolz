@@ -4,9 +4,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,8 +39,10 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -46,10 +53,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -60,9 +70,11 @@ fun NotepadScreen(
     onBack: () -> Unit,
     onPlayAudio: (String) -> Unit,
     onViewPdf: (String) -> Unit,
-    initialNoteId: Int? = null
+    initialNoteId: Int? = null,
+    musicViewModel: MusicPlayerViewModel = hiltViewModel()
 ) {
     val notes by viewModel.notes.collectAsStateWithLifecycle()
+    val musicState by musicViewModel.uiState.collectAsState()
     var showEditor by remember { mutableStateOf(false) }
     var noteToEdit by remember { mutableStateOf<Note?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -181,6 +193,8 @@ fun NotepadScreen(
                         ImprovedNoteItem(
                             note = note, 
                             isDark = isDark,
+                            isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
+                            currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                             onClick = { 
                                 noteToEdit = note
                                 showEditor = true
@@ -230,6 +244,8 @@ fun NotepadScreen(
 fun ImprovedNoteItem(
     note: Note, 
     isDark: Boolean,
+    isPlaying: Boolean,
+    currentTrackThumbnail: String?,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
@@ -238,6 +254,18 @@ fun ImprovedNoteItem(
 ) {
     val noteColor = Color(note.color)
     val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
+    val context = LocalContext.current
+
+    val infiniteTransition = rememberInfiniteTransition(label = "rotation")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(10000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "thumbRotation"
+    )
 
     Surface(
         modifier = Modifier
@@ -245,7 +273,7 @@ fun ImprovedNoteItem(
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(28.dp),
         color = noteColor.copy(alpha = 0.95f),
-        tonalElevation = 2.dp,
+        shadowElevation = 8.dp,
         border = BorderStroke(1.dp, onNoteColor.copy(alpha = 0.1f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -271,6 +299,11 @@ fun ImprovedNoteItem(
             
             Spacer(modifier = Modifier.height(8.dp))
             
+            // PDF Preview
+            if (note.attachedPdfUri != null) {
+                PdfPreview(uri = note.attachedPdfUri, modifier = Modifier.padding(bottom = 12.dp))
+            }
+
             Text(
                 text = note.content, 
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -296,16 +329,43 @@ fun ImprovedNoteItem(
                     if (note.attachedAudioUri != null) {
                         Surface(
                             onClick = onPlayAudio,
-                            color = onNoteColor.copy(alpha = 0.1f),
+                            color = if (isPlaying) onNoteColor.copy(alpha = 0.2f) else onNoteColor.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                Icons.Rounded.PlayCircle, 
-                                null, 
-                                modifier = Modifier.padding(8.dp).size(18.dp), 
-                                tint = onNoteColor
-                            )
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                if (isPlaying && currentTrackThumbnail != null) {
+                                    AsyncImage(
+                                        model = currentTrackThumbnail,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .rotate(rotation),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                } else {
+                                    Icon(
+                                        if (isPlaying) Icons.Rounded.PauseCircle else Icons.Rounded.PlayCircle, 
+                                        null, 
+                                        modifier = Modifier.size(18.dp), 
+                                        tint = onNoteColor
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    note.attachedAudioName?.take(8) ?: "Audio",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = onNoteColor,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                     if (note.attachedPdfUri != null) {
@@ -315,12 +375,25 @@ fun ImprovedNoteItem(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                Icons.Rounded.Description, 
-                                null, 
-                                modifier = Modifier.padding(8.dp).size(18.dp), 
-                                tint = onNoteColor
-                            )
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Description, 
+                                    null, 
+                                    modifier = Modifier.size(18.dp), 
+                                    tint = onNoteColor
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    "PDF",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = onNoteColor,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
                     }
                 }
@@ -343,7 +416,7 @@ fun ImprovedNoteItem(
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                         Icon(
-                            imageVector = if (note.isPinned) Icons.Rounded.PushPin else Icons.Rounded.PushPin,
+                            imageVector = Icons.Rounded.PushPin,
                             contentDescription = "Pin",
                             tint = if (note.isPinned) onNoteColor else onNoteColor.copy(alpha = 0.15f),
                             modifier = Modifier.size(14.dp)
@@ -359,6 +432,52 @@ fun ImprovedNoteItem(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(uri) {
+        try {
+            val contentUri = Uri.parse(uri)
+            context.contentResolver.openFileDescriptor(contentUri, "r")?.use { pfd ->
+                val renderer = PdfRenderer(pfd)
+                if (renderer.pageCount > 0) {
+                    val page = renderer.openPage(0)
+                    val b = Bitmap.createBitmap(page.width / 4, page.height / 4, Bitmap.Config.ARGB_8888)
+                    page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmap = b
+                    page.close()
+                }
+                renderer.close()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .clip(RoundedCornerShape(16.dp)),
+        color = Color.Black.copy(alpha = 0.05f)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Gray.copy(alpha = 0.3f), modifier = Modifier.size(40.dp))
             }
         }
     }
@@ -384,7 +503,6 @@ fun NoteEditorDialog(
     var attachedAudioUri by remember { mutableStateOf(note?.attachedAudioUri) }
     var attachedAudioName by remember { mutableStateOf(note?.attachedAudioName) }
     
-    val context = LocalContext.current
     val availableTracks by viewModel.availableTracks.collectAsStateWithLifecycle()
     val availablePdfs by viewModel.availablePdfs.collectAsStateWithLifecycle()
 

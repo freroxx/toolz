@@ -11,6 +11,7 @@ import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import com.frerox.toolz.data.pdf.PdfMetadataDao
 import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimitDao
+import com.frerox.toolz.data.clipboard.ClipboardDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -72,5 +73,10 @@ object DatabaseModule {
     @Provides
     fun provideAppLimitDao(database: AppDatabase): AppLimitDao {
         return database.appLimitDao()
+    }
+
+    @Provides
+    fun provideClipboardDao(database: AppDatabase): ClipboardDao {
+        return database.clipboardDao()
     }
 }

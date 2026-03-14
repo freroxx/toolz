@@ -45,6 +45,7 @@ sealed class Screen(val route: String) {
     object PeriodicTable : Screen("periodic_table")
     object PdfReader : Screen("pdf_reader")
     object NotificationVault : Screen("notification_vault")
+    object Clipboard : Screen("clipboard")
     
     // Media
     object MusicPlayer : Screen("music_player")
