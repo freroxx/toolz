@@ -139,15 +139,19 @@ fun TimerScreen(
                             },
                             label = "MINUTES"
                         )
-                        Text(
-                            ":", 
-                            style = MaterialTheme.typography.displayLarge,
+                        
+                        Box(
                             modifier = Modifier
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 32.dp),
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        )
+                                .padding(horizontal = 24.dp)
+                                .height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)))
+                                Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)))
+                            }
+                        }
+
                         ModernTimePicker(
                             value = state.selectedSeconds,
                             onValueChange = { 
@@ -405,42 +409,60 @@ fun ModernTimePicker(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
             modifier = Modifier
-                .width(110.dp)
-                .height(160.dp)
-                .shadow(8.dp, RoundedCornerShape(24.dp), spotColor = primaryColor.copy(alpha = 0.5f)),
-            color = primaryColor.copy(alpha = 0.05f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
+                .width(130.dp)
+                .height(180.dp)
+                .shadow(16.dp, RoundedCornerShape(32.dp), spotColor = primaryColor.copy(alpha = 0.3f)),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            shape = RoundedCornerShape(32.dp),
+            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(
-                    onClick = { onValueChange((value + 1) % 60) }, 
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+            Box(contentAlignment = Alignment.Center) {
+                // Background Highlight
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.8f).height(72.dp),
+                    color = primaryColor.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(16.dp)
+                ) {}
+
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Up", tint = primaryColor)
-                }
-                
-                Text(
-                    text = String.format(Locale.getDefault(), "%02d", value),
-                    style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Black),
-                    color = primaryColor,
-                    fontSize = 48.sp
-                )
-                
-                IconButton(
-                    onClick = { onValueChange((value - 1 + 60) % 60) }, 
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Down", tint = primaryColor)
+                    IconButton(
+                        onClick = { onValueChange((value + 1) % 60) }, 
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Up", tint = primaryColor.copy(alpha = 0.6f))
+                    }
+                    
+                    Text(
+                        text = String.format(Locale.getDefault(), "%02d", value),
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontWeight = FontWeight.Black,
+                            fontSize = 64.sp,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    
+                    IconButton(
+                        onClick = { onValueChange((value - 1 + 60) % 60) }, 
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Down", tint = primaryColor.copy(alpha = 0.6f))
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = primaryColor, letterSpacing = 1.sp)
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = label, 
+            style = MaterialTheme.typography.labelSmall, 
+            fontWeight = FontWeight.ExtraBold, 
+            color = primaryColor, 
+            letterSpacing = 1.5.sp
+        )
     }
 }
 

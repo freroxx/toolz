@@ -625,14 +625,14 @@ fun EnhancedProductivityHeader(score: Int) {
                 val animatedScore by animateIntAsState(targetValue = score, animationSpec = tween(1500, easing = FastOutSlowInEasing), label = "")
                 Text(
                     "$animatedScore",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 80.sp),
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 110.sp),
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     "%",
-                    modifier = Modifier.padding(bottom = 18.dp, start = 4.dp),
-                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(bottom = 24.dp, start = 4.dp),
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Black,
                     color = primary
                 )
@@ -676,6 +676,11 @@ fun EnhancedProductivityHeader(score: Int) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit, onLongClick: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val scale by animateFloatAsState(if (visible) 1f else 0.9f, spring(Spring.DampingRatioMediumBouncy), label = "")
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(500), label = "")
+
     val hours = info.usageTimeMillis / 3600000
     val minutes = (info.usageTimeMillis % 3600000) / 60000
     val timeStr = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
@@ -685,6 +690,11 @@ fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit, onLongClick: () -
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
