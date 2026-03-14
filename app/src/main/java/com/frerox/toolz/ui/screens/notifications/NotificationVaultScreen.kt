@@ -578,9 +578,11 @@ fun SwipeToDeleteContainer(
     onDelete: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = {
             if (it == SwipeToDismissBoxValue.EndToStart) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                 onDelete()
                 true
             } else false
@@ -588,6 +590,13 @@ fun SwipeToDeleteContainer(
     )
 
     val isDismissing = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
+    
+    // Trigger haptic when we reach the target value
+    LaunchedEffect(isDismissing) {
+        if (isDismissing) {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+        }
+    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -596,13 +605,17 @@ fun SwipeToDeleteContainer(
                 when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                }, label = "color"
+                }, 
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                label = "color"
             )
             val scale by animateFloatAsState(
-                if (isDismissing) 1.3f else 1f, label = "scale"
+                if (isDismissing) 1.25f else 1f, 
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                label = "scale"
             )
             val alpha by animateFloatAsState(
-                if (isDismissing) 1f else 0.5f, label = "alpha"
+                if (isDismissing) 1f else 0.4f, label = "alpha"
             )
 
             Box(
@@ -611,7 +624,8 @@ fun SwipeToDeleteContainer(
                     .clip(RoundedCornerShape(28.dp))
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Color.Transparent, color.copy(alpha = 0.2f), color)
+                            colors = listOf(Color.Transparent, color.copy(alpha = 0.15f), color.copy(alpha = 0.8f)),
+                            startX = 0f
                         )
                     )
                     .padding(horizontal = 24.dp),
@@ -621,21 +635,40 @@ fun SwipeToDeleteContainer(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .alpha(alpha)
-                        .graphicsLayer(scaleX = scale, scaleY = scale)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
                 ) {
-                    Icon(
-                        Icons.Rounded.DeleteOutline,
-                        contentDescription = "Delete",
-                        tint = Color.White
-                    )
+                    Surface(
+                        color = Color.White.copy(alpha = 0.15f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = "Delete",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                     if (isDismissing) {
-                        Text(
-                            "PURGE", 
-                            style = MaterialTheme.typography.labelSmall, 
-                            fontWeight = FontWeight.Black, 
-                            color = Color.White,
-                            letterSpacing = 1.sp
-                        )
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            Text(
+                                "RELEASE TO PURGE", 
+                                style = MaterialTheme.typography.labelSmall, 
+                                fontWeight = FontWeight.Black, 
+                                color = Color.White,
+                                modifier = Modifier.padding(top = 8.dp),
+                                letterSpacing = 2.sp
+                            )
+                        }
                     }
                 }
             }
