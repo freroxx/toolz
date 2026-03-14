@@ -46,12 +46,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import coil3.compose.rememberAsyncImagePainter
 import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppUsageInfo
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.rememberLifecycleEvent
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,9 +66,27 @@ fun FocusFlowScreen(
     val productivityScore by viewModel.productivityScore.collectAsState()
     val isWeekly by viewModel.isWeekly.collectAsState()
     val context = LocalContext.current
+    
     val canDrawOverlays = remember { Settings.canDrawOverlays(context) }
-    var selectedAppForSettings by remember { mutableStateOf<AppUsageInfo?>(null) }
-    var appToRename by remember { mutableStateOf<AppUsageInfo?>(null) }
+    
+    var isAccessibilityEnabled by remember { mutableStateOf(false) }
+    
+    val lifecycleEvent = rememberLifecycleEvent()
+    
+    // Check for accessibility permission whenever the screen is resumed
+    LaunchedEffect(lifecycleEvent) {
+        if (lifecycleEvent == Lifecycle.Event.ON_RESUME) {
+            val accessibilityEnabled = try {
+                val setting = Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED)
+                if (setting == 1) {
+                    val service = "${context.packageName}/com.frerox.toolz.service.FocusFlowAccessibilityService"
+                    val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                    enabledServices?.contains(service) == true
+                } else false
+            } catch (e: Exception) { false }
+            isAccessibilityEnabled = accessibilityEnabled
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -111,27 +131,52 @@ fun FocusFlowScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Permission Warning
-                if (!canDrawOverlays) {
+                if (!canDrawOverlays || !isAccessibilityEnabled) {
                     item {
                         Surface(
                             onClick = {
-                                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                                context.startActivity(intent)
+                                if (!canDrawOverlays) {
+                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                    context.startActivity(intent)
+                                } else {
+                                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    context.startActivity(intent)
+                                }
                             },
                             modifier = Modifier.fillMaxWidth().bouncyClick { },
                             shape = RoundedCornerShape(24.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                Box(
+                                    modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.error, RoundedCornerShape(14.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        if (!canDrawOverlays) Icons.Rounded.Layers else Icons.Rounded.AccessibilityNew, 
+                                        null, 
+                                        tint = MaterialTheme.colorScheme.onError
+                                    )
+                                }
                                 Spacer(Modifier.width(16.dp))
                                 Column {
-                                    Text("LIMITS NOT ACTIVE", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                                    Text("Tap to grant overlay permission to enable screen limits.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    Text(
+                                        if (!canDrawOverlays) "OVERLAY REQUIRED" else "ACCESSIBILITY REQUIRED", 
+                                        fontWeight = FontWeight.Black, 
+                                        color = MaterialTheme.colorScheme.error, 
+                                        style = MaterialTheme.typography.labelSmall,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Text(
+                                        if (!canDrawOverlays) "Enable screen limits by granting overlay permission." 
+                                        else "Enable focus engine by granting accessibility permission.", 
+                                        style = MaterialTheme.typography.bodySmall, 
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
