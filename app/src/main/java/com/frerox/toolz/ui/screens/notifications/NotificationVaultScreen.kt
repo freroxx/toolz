@@ -904,16 +904,17 @@ fun EmptyVaultState(isFiltering: Boolean) {
                     label = "rotation"
                 )
                 
+                val arcColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                 Canvas(modifier = Modifier.size(150.dp + (i * 40).dp).graphicsLayer { rotationZ = rotation }) {
                     drawArc(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        color = arcColor,
                         startAngle = 0f,
                         sweepAngle = 120f,
                         useCenter = false,
                         style = Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
                     )
                     drawArc(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        color = arcColor,
                         startAngle = 180f,
                         sweepAngle = 120f,
                         useCenter = false,
