@@ -109,11 +109,23 @@ fun NotepadScreen(
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     CenterAlignedTopAppBar(
-                        title = { Text("SMART NOTEPAD", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp) },
+                        title = { 
+                            Text(
+                                "NOTEPAD", 
+                                fontWeight = FontWeight.Black, 
+                                style = MaterialTheme.typography.headlineSmall, 
+                                letterSpacing = 3.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            ) 
+                        },
                         navigationIcon = {
                             IconButton(
                                 onClick = onBack,
-                                modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                modifier = Modifier
+                                    .padding(start = 16.dp)
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                             }
@@ -121,24 +133,24 @@ fun NotepadScreen(
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                     )
                     
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search your thoughts...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp),
-                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        ),
-                        singleLine = true
-                    )
-                    Spacer(Modifier.height(12.dp))
+                    Box(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search your thoughts...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                            modifier = Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(24.dp)),
+                            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                focusedBorderColor = MaterialTheme.colorScheme.primary
+                            ),
+                            singleLine = true
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         },
@@ -149,11 +161,18 @@ fun NotepadScreen(
                     noteToEdit = null
                     showEditor = true 
                 },
+                modifier = Modifier
+                    .padding(bottom = 16.dp, end = 8.dp)
+                    .bouncyClick(onClick = { 
+                        noteToEdit = null
+                        showEditor = true 
+                    }),
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(24.dp),
-                icon = { Icon(Icons.Rounded.Add, "Add Note") },
-                text = { Text("NEW NOTE", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+                shape = RoundedCornerShape(20.dp),
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp, pressedElevation = 2.dp),
+                icon = { Icon(Icons.Rounded.Add, "Add Note", Modifier.size(28.dp)) },
+                text = { Text("NEW NOTE", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp) }
             )
         }
     ) { padding ->
@@ -381,52 +400,23 @@ fun NoteViewerDialog(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (note.attachedAudioUri != null) {
-                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                            val pulseScale by infiniteTransition.animateFloat(
-                                initialValue = 1f,
-                                targetValue = if (isPlaying) 1.05f else 1f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = FastOutSlowInEasing),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "pulse"
+                            MusicPill(
+                                title = note.attachedAudioName ?: "Play Audio",
+                                isPlaying = isPlaying,
+                                thumbnail = currentTrackThumbnail,
+                                containerColor = onNoteColor.copy(alpha = 0.15f),
+                                contentColor = onNoteColor,
+                                onClick = { onPlayAudio(note.attachedAudioUri) }
                             )
-
-                            Surface(
-                                onClick = { onPlayAudio(note.attachedAudioUri) },
-                                modifier = Modifier.graphicsLayer { scaleX = pulseScale; scaleY = pulseScale },
-                                color = if (isPlaying) onNoteColor.copy(alpha = 0.25f) else onNoteColor.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(20.dp),
-                                border = if (isPlaying) BorderStroke(2.dp, onNoteColor.copy(alpha = 0.5f)) else null
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        if (isPlaying) Icons.Rounded.PauseCircle else Icons.Rounded.PlayCircle, 
-                                        null, 
-                                        modifier = Modifier.size(28.dp), 
-                                        tint = onNoteColor
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(
-                                        note.attachedAudioName ?: "Play Audio",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = onNoteColor,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                            }
                         }
                         if (note.attachedPdfUri != null) {
                             Surface(
                                 onClick = { onViewPdf(note.attachedPdfUri) },
                                 color = onNoteColor.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(20.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
@@ -435,7 +425,7 @@ fun NoteViewerDialog(
                                         modifier = Modifier.size(24.dp), 
                                         tint = onNoteColor
                                     )
-                                    Spacer(Modifier.width(8.dp))
+                                    Spacer(Modifier.width(12.dp))
                                     Text(
                                         "View PDF",
                                         style = MaterialTheme.typography.labelLarge,
@@ -574,46 +564,16 @@ fun ImprovedNoteItem(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (note.attachedAudioUri != null) {
-                        Surface(
+                        MusicPill(
+                            title = note.attachedAudioName ?: "Audio",
+                            isPlaying = isPlaying,
+                            thumbnail = currentTrackThumbnail,
+                            containerColor = if (isPlaying) onNoteColor.copy(alpha = 0.2f) else onNoteColor.copy(alpha = 0.1f),
+                            contentColor = onNoteColor,
                             onClick = onPlayAudio,
-                            color = if (isPlaying) onNoteColor.copy(alpha = 0.2f) else onNoteColor.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                if (isPlaying && currentTrackThumbnail != null) {
-                                    AsyncImage(
-                                        model = currentTrackThumbnail,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .rotate(rotation),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                } else {
-                                    Icon(
-                                        if (isPlaying) Icons.Rounded.PauseCircle else Icons.Rounded.PlayCircle, 
-                                        null, 
-                                        modifier = Modifier.size(18.dp), 
-                                        tint = onNoteColor
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                }
-                                Text(
-                                    note.attachedAudioName?.take(8) ?: "Audio",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = onNoteColor,
-                                    fontWeight = FontWeight.Black,
-                                    maxLines = 1
-                                )
-                            }
-                        }
+                            modifier = Modifier.weight(1f),
+                            compact = true
+                        )
                     }
                     if (note.attachedPdfUri != null) {
                         Surface(
@@ -638,7 +598,8 @@ fun ImprovedNoteItem(
                                     "PDF",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = onNoteColor,
-                                    fontWeight = FontWeight.Black
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -711,20 +672,147 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(100.dp)
-            .clip(RoundedCornerShape(16.dp)),
-        color = Color.Black.copy(alpha = 0.05f)
+            .height(110.dp)
+            .shadow(8.dp, RoundedCornerShape(12.dp))
+            .border(1.dp, Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp)),
+        color = Color.White
     ) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().alpha(0.9f)
             )
         } else {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Gray.copy(alpha = 0.3f), modifier = Modifier.size(40.dp))
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color.White)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Red.copy(alpha = 0.6f), modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Text("PDF PREVIEW", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MusicPill(
+    title: String,
+    isPlaying: Boolean,
+    thumbnail: String?,
+    containerColor: Color,
+    contentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "rotation")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (isPlaying) 8000 else 20000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "thumbRotation"
+    )
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPlaying) 1.02f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy),
+        label = "scale"
+    )
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale },
+        color = containerColor,
+        shape = RoundedCornerShape(if (compact) 16.dp else 24.dp),
+        border = if (isPlaying) BorderStroke(1.dp, contentColor.copy(alpha = 0.3f)) else null
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = if (compact) 10.dp else 16.dp, vertical = if (compact) 8.dp else 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (compact) 24.dp else 32.dp)
+                    .clip(CircleShape)
+                    .background(contentColor.copy(alpha = 0.1f))
+                    .rotate(rotation),
+                contentAlignment = Alignment.Center
+            ) {
+                if (thumbnail != null) {
+                    AsyncImage(
+                        model = thumbnail,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.MusicNote,
+                        null,
+                        modifier = Modifier.size(if (compact) 14.dp else 18.dp),
+                        tint = contentColor.copy(alpha = 0.7f)
+                    )
+                }
+                
+                // Overlay play/pause icon in the center of the disc
+                Surface(
+                    modifier = Modifier.size(if (compact) 12.dp else 16.dp),
+                    color = contentColor.copy(alpha = 0.8f),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        modifier = Modifier.padding(2.dp),
+                        tint = containerColor
+                    )
+                }
+            }
+            
+            Spacer(Modifier.width(if (compact) 8.dp else 12.dp))
+            
+            Text(
+                text = if (compact) title.take(10) else title,
+                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
+                color = contentColor,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            
+            if (!compact && isPlaying) {
+                Spacer(Modifier.width(10.dp))
+                // Simple visualizer effect (3 bars)
+                Row(
+                    modifier = Modifier.height(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    repeat(3) { index ->
+                        val barHeight by infiniteTransition.animateFloat(
+                            initialValue = 4f,
+                            targetValue = 12f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(300 + (index * 100), easing = FastOutLinearInEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "bar$index"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(barHeight.dp)
+                                .background(contentColor, RoundedCornerShape(1.dp))
+                        )
+                    }
+                }
             }
         }
     }
