@@ -285,12 +285,16 @@ fun NoteViewerDialog(
     val noteColor = Color(note.color)
     val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = noteColor,
+        sheetState = sheetState,
+        containerColor = noteColor.copy(alpha = 0.9f),
         contentColor = onNoteColor,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = { BottomSheetDefaults.DragHandle(color = onNoteColor.copy(alpha = 0.4f)) },
+        tonalElevation = 12.dp,
         modifier = Modifier.fillMaxHeight(0.9f)
     ) {
         Column(
@@ -360,22 +364,35 @@ fun NoteViewerDialog(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (note.attachedAudioUri != null) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                            val pulseScale by infiniteTransition.animateFloat(
+                                initialValue = 1f,
+                                targetValue = if (isPlaying) 1.05f else 1f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1000, easing = FastOutSlowInEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "pulse"
+                            )
+
                             Surface(
                                 onClick = { onPlayAudio(note.attachedAudioUri) },
-                                color = if (isPlaying) onNoteColor.copy(alpha = 0.2f) else onNoteColor.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(16.dp)
+                                modifier = Modifier.graphicsLayer { scaleX = pulseScale; scaleY = pulseScale },
+                                color = if (isPlaying) onNoteColor.copy(alpha = 0.25f) else onNoteColor.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(20.dp),
+                                border = if (isPlaying) BorderStroke(2.dp, onNoteColor.copy(alpha = 0.5f)) else null
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         if (isPlaying) Icons.Rounded.PauseCircle else Icons.Rounded.PlayCircle, 
                                         null, 
-                                        modifier = Modifier.size(24.dp), 
+                                        modifier = Modifier.size(28.dp), 
                                         tint = onNoteColor
                                     )
-                                    Spacer(Modifier.width(8.dp))
+                                    Spacer(Modifier.width(12.dp))
                                     Text(
                                         note.attachedAudioName ?: "Play Audio",
                                         style = MaterialTheme.typography.labelLarge,
