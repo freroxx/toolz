@@ -481,6 +481,11 @@ fun ImprovedNoteItem(
     onPlayAudio: () -> Unit,
     onViewPdf: () -> Unit
 ) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val scale by animateFloatAsState(if (visible) 1f else 0.9f, spring(Spring.DampingRatioMediumBouncy), label = "")
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(500), label = "")
+
     val noteColor = Color(note.color)
     val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
     val context = LocalContext.current
@@ -499,6 +504,11 @@ fun ImprovedNoteItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(28.dp),
         color = noteColor.copy(alpha = 0.95f),
@@ -672,25 +682,48 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(110.dp)
-            .shadow(8.dp, RoundedCornerShape(12.dp))
-            .border(1.dp, Color.Black.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp)),
+            .height(140.dp)
+            .shadow(12.dp, RoundedCornerShape(16.dp), spotColor = Color.Black.copy(alpha = 0.3f))
+            .border(1.dp, Color.Black.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp)),
         color = Color.White
     ) {
         if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().alpha(0.9f)
-            )
+            Box {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // Overlay to make it feel like a document
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.05f))
+                            )
+                        )
+                )
+            }
         } else {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color.White)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Red.copy(alpha = 0.6f), modifier = Modifier.size(32.dp))
-                    Spacer(Modifier.height(4.dp))
-                    Text("PDF PREVIEW", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    Icon(
+                        Icons.Rounded.PictureAsPdf, 
+                        null, 
+                        tint = Color(0xFFE53935).copy(alpha = 0.8f), 
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "DOCUMENT PREVIEW", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        fontWeight = FontWeight.Black, 
+                        color = Color.Gray,
+                        letterSpacing = 1.sp
+                    )
                 }
             }
         }
@@ -971,14 +1004,27 @@ fun NoteEditorDialog(
 
                             VerticalDivider(modifier = Modifier.height(20.dp).width(1.dp), color = onBgColor.copy(alpha = 0.2f))
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { if (fontSize > 12) fontSize -= 2 }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.Remove, null, tint = onBgColor, modifier = Modifier.size(16.dp))
-                                }
-                                Text("${fontSize.toInt()}", color = onBgColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                IconButton(onClick = { if (fontSize < 48) fontSize += 2 }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.Add, null, tint = onBgColor, modifier = Modifier.size(16.dp))
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp).width(120.dp)
+                            ) {
+                                Icon(Icons.Rounded.TextFields, null, tint = onBgColor, modifier = Modifier.size(16.dp))
+                                com.frerox.toolz.ui.components.SquigglySlider(
+                                    value = fontSize,
+                                    onValueChange = { fontSize = it },
+                                    valueRange = 12f..48f,
+                                    modifier = Modifier.weight(1f),
+                                    color = onBgColor,
+                                    squigglesEnabled = true
+                                )
+                                Text(
+                                    "${fontSize.toInt()}", 
+                                    color = onBgColor, 
+                                    fontWeight = FontWeight.Black, 
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.width(20.dp),
+                                    textAlign = TextAlign.End
+                                )
                             }
                         }
                     }

@@ -4,19 +4,20 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="12dp"
+    android:padding="16dp"
     android:background="@drawable/widget_background">
 
     <ImageView
         android:id="@+id/widget_music_album_art"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
         android:layout_alignParentStart="true"
         android:layout_centerVertical="true"
         android:src="@drawable/ic_music_note"
         android:scaleType="centerCrop"
         android:background="@drawable/widget_button_tonal"
         android:clipToOutline="true"
+        android:elevation="4dp"
         android:contentDescription="Album Art" />
 
     <LinearLayout
@@ -30,37 +31,38 @@
 
         <ImageButton
             android:id="@+id/widget_music_prev"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:src="@android:drawable/ic_media_previous"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="8dp"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             app:tint="#49454F"
-            android:layout_marginEnd="4dp"
+            android:layout_marginEnd="2dp"
             android:contentDescription="Previous" />
 
         <ImageButton
             android:id="@+id/widget_music_play_pause"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:src="@android:drawable/ic_media_play"
             android:background="@drawable/widget_button_primary"
-            android:padding="12dp"
+            android:padding="14dp"
             android:scaleType="fitCenter"
             app:tint="#FFFFFF"
+            android:elevation="6dp"
             android:contentDescription="Play/Pause" />
 
         <ImageButton
             android:id="@+id/widget_music_next"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:src="@android:drawable/ic_media_next"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="8dp"
+            android:padding="10dp"
             android:scaleType="fitCenter"
             app:tint="#49454F"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="2dp"
             android:contentDescription="Next" />
     </LinearLayout>
 
@@ -72,29 +74,30 @@
         android:layout_toStartOf="@id/widget_controls_container"
         android:layout_centerVertical="true"
         android:orientation="vertical"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="8dp">
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="12dp">
 
         <TextView
             android:id="@+id/widget_music_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Not Playing"
-            android:textSize="15sp"
+            android:textSize="16sp"
             android:fontFamily="sans-serif-black"
             android:textColor="#1D1B20"
             android:singleLine="true"
-            android:ellipsize="marquee" />
+            android:ellipsize="marquee"
+            android:letterSpacing="0.02" />
 
         <TextView
             android:id="@+id/widget_music_artist"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Open Toolz to start"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:fontFamily="sans-serif-medium"
             android:textColor="#49454F"
-            android:alpha="0.8"
+            android:alpha="0.7"
             android:singleLine="true"
             android:ellipsize="end" />
     </LinearLayout>
@@ -105,8 +108,8 @@
         android:layout_width="match_parent"
         android:layout_height="4dp"
         android:layout_alignParentBottom="true"
-        android:layout_marginHorizontal="12dp"
-        android:layout_marginBottom="4dp"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="2dp"
         android:max="100"
         android:progress="0"
         android:progressBackgroundTint="#1A000000"

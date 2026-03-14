@@ -132,15 +132,17 @@ fun NotificationVaultScreen(
                     EmptyVaultState(searchQuery.isNotEmpty())
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        val surface = MaterialTheme.colorScheme.surface
                         LazyColumn(
                             modifier = Modifier.fillMaxSize()
                                 .fadingEdge(
                                     brush = Brush.verticalGradient(
-                                        0f to Color.Transparent,
-                                        0.05f to Color.Black,
-                                        0.95f to Color.Black,
-                                        1f to Color.Transparent
-                                    ),
+                                    colors = if (isDark) {
+                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.04f), surface)
+                                    } else {
+                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.02f), surface)
+                                    }
+                                ),
                                     length = 24.dp
                                 ),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
@@ -591,13 +593,7 @@ fun SwipeToDeleteContainer(
 
     val isDismissing = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
     
-    // Trigger haptic when we reach the target value
-    LaunchedEffect(isDismissing) {
-        if (isDismissing) {
-            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-        }
-    }
-
+    // Simple, tight slide-to-delete animation
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
@@ -606,70 +602,41 @@ fun SwipeToDeleteContainer(
                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 }, 
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                animationSpec = tween(300),
                 label = "color"
             )
-            val scale by animateFloatAsState(
-                if (isDismissing) 1.25f else 1f, 
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                label = "scale"
-            )
             val alpha by animateFloatAsState(
-                if (isDismissing) 1f else 0.4f, label = "alpha"
+                if (dismissState.progress > 0.1f) 1f else 0f, 
+                animationSpec = tween(200),
+                label = "alpha"
             )
 
             Box(
                 Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(28.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(Color.Transparent, color.copy(alpha = 0.15f), color.copy(alpha = 0.8f)),
-                            startX = 0f
-                        )
-                    )
+                    .background(color)
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .alpha(alpha)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.alpha(alpha)
                 ) {
-                    Surface(
-                        color = Color.White.copy(alpha = 0.15f),
-                        shape = CircleShape,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.DeleteOutline,
-                                contentDescription = "Delete",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    if (isDismissing) {
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            Text(
-                                "RELEASE TO PURGE", 
-                                style = MaterialTheme.typography.labelSmall, 
-                                fontWeight = FontWeight.Black, 
-                                color = Color.White,
-                                modifier = Modifier.padding(top = 8.dp),
-                                letterSpacing = 2.sp
-                            )
-                        }
-                    }
+                    Text(
+                        "DELETE", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        fontWeight = FontWeight.Black, 
+                        color = Color.White,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         },
@@ -744,6 +711,11 @@ fun NotificationVaultCard(
     onDelete: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val scale by animateFloatAsState(if (visible) 1f else 0.92f, spring(Spring.DampingRatioMediumBouncy), label = "")
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(600), label = "")
+
     val context = LocalContext.current
     var isExpanded by remember { mutableStateOf(false) }
     val timeString = remember(notification.timestamp) {
@@ -753,6 +725,11 @@ fun NotificationVaultCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
             .animateContentSize()
             .combinedClickable(
                 onClick = { isExpanded = !isExpanded },

@@ -1,48 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
     android:padding="16dp"
     android:background="@drawable/widget_background">
 
-    <TextView
-        android:id="@+id/widget_coin_label"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="FLIP A COIN"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:textColor="#6750A4"
-        android:letterSpacing="0.2"
-        android:layout_marginBottom="12dp" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical">
 
-    <FrameLayout
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:background="@drawable/widget_button_tonal"
-        android:padding="8dp">
+        <TextView
+            android:id="@+id/widget_coin_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="FLIP A COIN"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-black"
+            android:textColor="#6750A4"
+            android:letterSpacing="0.1" />
 
-        <ImageView
-            android:id="@+id/widget_coin_image"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:src="@android:drawable/btn_star_big_on"
-            android:tint="#6750A4"
-            android:contentDescription="Coin" />
-    </FrameLayout>
+        <TextView
+            android:id="@+id/widget_coin_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="HEADS"
+            android:textSize="28sp"
+            android:fontFamily="sans-serif-black"
+            android:textColor="#1D1B20"
+            android:layout_marginTop="4dp"
+            android:letterSpacing="0.05" />
 
-    <TextView
-        android:id="@+id/widget_coin_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="TAP TO FLIP"
-        android:textSize="12sp"
-        android:fontFamily="sans-serif-black"
-        android:textColor="#1D1B20"
-        android:layout_marginTop="12dp" />
+        <ImageButton
+            android:id="@+id/widget_coin_button"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginTop="12dp"
+            android:src="@drawable/ic_heart"
+            android:background="@drawable/widget_button_primary"
+            android:padding="16dp"
+            android:scaleType="fitCenter"
+            android:tint="#FFFFFF"
+            android:elevation="4dp"
+            android:contentDescription="Flip" />
+    </LinearLayout>
 
-</LinearLayout>
+</RelativeLayout>

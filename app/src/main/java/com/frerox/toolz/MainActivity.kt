@@ -94,9 +94,9 @@ class MainActivity : AppCompatActivity() {
                             if (!dynamicColor) {
                                 Brush.verticalGradient(
                                     colors = if (isDark) {
-                                        listOf(surface, secondary.copy(alpha = 0.12f), surface)
+                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), surface)
                                     } else {
-                                        listOf(surface, secondary.copy(alpha = 0.06f), surface)
+                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.03f), surface)
                                     }
                                 )
                             } else {

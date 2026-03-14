@@ -41,6 +41,8 @@ object WidgetUtils {
             setTextViewColor(views, R.id.widget_step_count, textColor)
             setTextViewColor(views, R.id.widget_coin_text, textColor)
             setTextViewColor(views, R.id.widget_note_title, textColor)
+            setTextViewColor(views, R.id.widget_notes_title, textColor)
+            setTextViewColor(views, R.id.widget_flashlight_title, textColor)
 
             // Subtext Colors
             setTextViewColor(views, R.id.widget_music_artist, subTextColor)
@@ -48,6 +50,9 @@ object WidgetUtils {
             setTextViewColor(views, R.id.widget_step_label, subTextColor)
             setTextViewColor(views, R.id.widget_compass_label, subTextColor)
             setTextViewColor(views, R.id.widget_coin_label, subTextColor)
+            setTextViewColor(views, R.id.widget_flashlight_status, subTextColor)
+            setTextViewColor(views, R.id.widget_compass_direction, textColor) // Direction is primary info
+            setTextViewColor(views, R.id.widget_compass_degrees, subTextColor)
 
             // Icon Tints
             setIconColor(views, R.id.widget_step_icon, iconTint)

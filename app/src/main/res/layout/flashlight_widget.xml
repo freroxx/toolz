@@ -1,71 +1,91 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
-    android:padding="12dp"
-    android:gravity="center"
+    android:padding="16dp"
     android:background="@drawable/widget_background">
 
     <LinearLayout
-        android:id="@+id/widget_flashlight_toggle_container"
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1.2"
+        android:id="@+id/widget_text_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:layout_toStartOf="@id/widget_flashlight_toggle_container"
         android:orientation="vertical"
-        android:gravity="center"
-        android:layout_margin="2dp"
-        android:background="@drawable/widget_button_tonal">
-
-        <ImageButton
-            android:id="@+id/widget_flashlight_button"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:src="@android:drawable/ic_lock_power_off"
-            android:background="@drawable/widget_button_primary"
-            app:tint="#FFFFFF"
-            android:padding="10dp"
-            android:scaleType="fitCenter"
-            android:contentDescription="Toggle" />
+        android:layout_marginStart="8dp">
 
         <TextView
+            android:id="@+id/widget_flashlight_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="POWER"
-            android:textSize="10sp"
+            android:text="FLASHLIGHT"
+            android:textSize="14sp"
             android:fontFamily="sans-serif-black"
             android:textColor="#1D1B20"
-            android:layout_marginTop="6dp"
-            android:letterSpacing="0.1" />
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:id="@+id/widget_flashlight_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap to toggle"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-medium"
+            android:textColor="#49454F"
+            android:alpha="0.7" />
     </LinearLayout>
 
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center">
+        android:id="@+id/widget_actions_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toStartOf="@id/widget_flashlight_toggle_container"
+        android:layout_centerVertical="true"
+        android:orientation="horizontal"
+        android:layout_marginEnd="12dp">
 
         <ImageButton
             android:id="@+id/widget_flashlight_strobe"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:src="@android:drawable/ic_menu_compass"
             android:background="@drawable/widget_item_background"
-            app:tint="#49454F"
-            android:padding="10dp"
+            android:padding="8dp"
             android:scaleType="fitCenter"
+            android:tint="#49454F"
+            android:layout_marginEnd="8dp"
             android:contentDescription="Strobe" />
 
         <ImageButton
             android:id="@+id/widget_flashlight_sos"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:src="@android:drawable/ic_menu_help"
             android:background="@drawable/widget_item_background"
-            app:tint="#B3261E"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:tint="#B3261E"
+            android:contentDescription="SOS" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/widget_flashlight_toggle_container"
+        android:layout_width="86dp"
+        android:layout_height="54dp"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:background="@drawable/widget_button_tonal"
+        android:padding="4dp">
+
+        <ImageButton
+            android:id="@+id/widget_flashlight_button"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_gravity="start|center_vertical"
+            android:src="@drawable/ic_heart"
+            android:background="@drawable/widget_button_primary"
             android:padding="10dp"
             android:scaleType="fitCenter"
             android:layout_marginTop="8dp"

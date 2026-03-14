@@ -82,8 +82,22 @@ sealed class PillPage {
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
+    viewModel: DashboardViewModel = hiltViewModel(),
     settingsRepository: SettingsRepository
 ) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(100)
+        visible = true
+    }
+
+    val headerAlpha by animateFloatAsState(if (visible) 1f else 0f, tween(800), label = "")
+    val headerOffset by animateDpAsState(if (visible) 0.dp else (-20).dp, spring(Spring.DampingRatioMediumBouncy), label = "")
+
+    val contentAlpha by animateFloatAsState(if (visible) 1f else 0f, tween(1000, delayMillis = 200), label = "")
+    val contentScale by animateFloatAsState(if (visible) 1f else 0.98f, spring(Spring.DampingRatioLowBouncy), label = "")
+
+    val tools by viewModel.tools.collectAsState()
     val context = LocalContext.current
     val activity = context as? ComponentActivity
     
@@ -119,51 +133,60 @@ fun DashboardScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
-                tonalElevation = 0.dp
+            Column(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .graphicsLayer {
+                        alpha = headerAlpha
+                        translationY = headerOffset.toPx()
+                    }
             ) {
-                Column(
+                WelcomeHeader(
+                    userName = userName,
+                    onSettingsClick = { onNavigate(Screen.Settings.route) }
+                )
+                
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search 30+ precision tools...") },
                     modifier = Modifier
-                        .statusBarsPadding()
-                ) {
-                    WelcomeHeader(
-                        userName = userName,
-                        onSettingsClick = { onNavigate(Screen.Settings.route) }
-                    )
-                    
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search 30+ precision tools...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp),
-                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingIcon = { 
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
-                                }
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingIcon = { 
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Rounded.Close, contentDescription = "Clear")
                             }
-                        },
-                        shape = RoundedCornerShape(24.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        )
+                        }
+                    },
+                    shape = RoundedCornerShape(24.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                     )
-                    Spacer(Modifier.height(8.dp))
-                }
+                )
+                Spacer(Modifier.height(8.dp))
             }
-        },
-        containerColor = MaterialTheme.colorScheme.background
+        }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .graphicsLayer {
+                    alpha = contentAlpha
+                    scaleX = contentScale
+                    scaleY = contentScale
+                }
+        ) {
             if (dashboardView == "LIST") {
                 val allTools = remember(categories) { 
                     categories.flatMap { it.items }.distinctBy { it.route }.sortedBy { it.title } 
@@ -178,7 +201,6 @@ fun DashboardScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
                         .fadingEdge(
                             brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
                             length = 32.dp
@@ -198,7 +220,6 @@ fun DashboardScreen(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
                         .fadingEdge(
                             brush = Brush.verticalGradient(
                                 0f to Color.Transparent,
@@ -432,7 +453,8 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(notes.take(5)) { note ->
+            val pinnedNotes = notes.filter { it.isPinned }
+            items(pinnedNotes.take(5)) { note ->
                 Surface(
                     modifier = Modifier
                         .width(160.dp)
@@ -598,19 +620,42 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                     letterSpacing = 0.5.sp
                 )
             }
+
+            Spacer(Modifier.width(20.dp))
             
-            IconButton(
-                onClick = { viewModel.togglePlayPause() },
-                modifier = Modifier
-                    .size(52.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
+                IconButton(
+                    onClick = { viewModel.pauseMusic() },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f), CircleShape)
+                        .bouncyClick { viewModel.pauseMusic() }
+                ) {
+                    Icon(
+                        if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                
+                IconButton(
+                    onClick = { viewModel.stopMusic() },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f), CircleShape)
+                        .bouncyClick { viewModel.stopMusic() }
+                ) {
+                    Icon(
+                        Icons.Rounded.Stop,
+                        null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
         
@@ -874,7 +919,7 @@ fun WelcomeHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 28.dp, vertical = 20.dp),
+            .padding(vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -908,19 +953,36 @@ fun WelcomeHeader(
 }
 
 @Composable
-fun ImprovedToolCard(
-    tool: ToolItem,
-    onClick: () -> Unit
-) {
+fun ImprovedToolCard(tool: ToolItem, onClick: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    
+    val scale by animateFloatAsState(
+        targetValue = if (visible) 1f else 0.85f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "entranceScale"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(600),
+        label = "entranceAlpha"
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(130.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
@@ -1013,75 +1075,62 @@ fun EmptySearchState(searchQuery: String) {
 
 private fun getCategories() = listOf(
     ToolCategory(
-        "PRIVACY & FOCUS",
+        "FAVORITES & ESSENTIALS",
         listOf(
-            ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Screen time insights"),
+            ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Productivity insights"),
             ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
-            ToolItem("Clipboard", Icons.Rounded.ContentPaste, Screen.Clipboard.route, "Smart copy history")
-        )
-    ),
-    ToolCategory(
-        "FAVORITES",
-        listOf(
             ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
-            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Smart notes"),
-            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker"),
-            ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View documents")
+            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker")
         )
     ),
     ToolCategory(
-        "SCIENCE & SENSORS",
+        "UTILITIES & TOOLS",
         listOf(
-            ToolItem("Light Meter", Icons.Rounded.LightMode, Screen.LightMeter.route, "Lux measure"),
-            ToolItem("Periodic Table", Icons.Rounded.Science, Screen.PeriodicTable.route, "Atomic data"),
-            ToolItem("Equation Solver", Icons.Rounded.Calculate, Screen.EquationSolver.route, "Scientific math"),
-            ToolItem("Compass", Icons.Rounded.Explore, Screen.Compass.route, "Navigation")
+            ToolItem("Calculator", Icons.Rounded.Calculate, Screen.Calculator.route, "Standard math"),
+            ToolItem("Unit Converter", Icons.Rounded.SyncAlt, Screen.UnitConverter.route, "Instant conversion"),
+            ToolItem("Clipboard", Icons.Rounded.ContentPaste, Screen.Clipboard.route, "Smart copy history"),
+            ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Light tools"),
+            ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Precision leveling"),
+            ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Secure keys")
         )
     ),
     ToolCategory(
-        "TIME & FOCUS",
+        "TIME & PRODUCTIVITY",
         listOf(
             ToolItem("Timer", Icons.Rounded.Timer, Screen.Timer.route, "Countdown"),
+            ToolItem("Pomodoro", Icons.Rounded.AvTimer, Screen.Pomodoro.route, "Deep focus"),
             ToolItem("Stopwatch", Icons.Rounded.History, Screen.Stopwatch.route, "Laps"),
-            ToolItem("Pomodoro", Icons.Rounded.AvTimer, Screen.Pomodoro.route, "Productivity"),
-            ToolItem("World Clock", Icons.Rounded.Public, Screen.WorldClock.route, "Time zones")
+            ToolItem("World Clock", Icons.Rounded.Public, Screen.WorldClock.route, "Global time"),
+            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Quick notes")
         )
     ),
     ToolCategory(
         "MEDIA & DOCUMENTS",
         listOf(
-            ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View & annotate"),
-            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Write & sync"),
+            ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View documents"),
             ToolItem("Scanner", Icons.Rounded.QrCodeScanner, Screen.Scanner.route, "QR / Barcode"),
             ToolItem("Voice Recorder", Icons.Rounded.Mic, Screen.VoiceRecorder.route, "Audio memo"),
             ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom")
         )
     ),
     ToolCategory(
-        "UTILITIES",
+        "SCIENCE & SENSORS",
         listOf(
-            ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Leveling"),
+            ToolItem("Compass", Icons.Rounded.Explore, Screen.Compass.route, "Navigation"),
+            ToolItem("Light Meter", Icons.Rounded.LightMode, Screen.LightMeter.route, "Lux measure"),
+            ToolItem("Periodic Table", Icons.Rounded.Science, Screen.PeriodicTable.route, "Atomic data"),
+            ToolItem("Equation Solver", Icons.Rounded.Calculate, Screen.EquationSolver.route, "Scientific math"),
             ToolItem("Speedometer", Icons.Rounded.Speed, Screen.Speedometer.route, "GPS Speed"),
-            ToolItem("Altimeter", Icons.Rounded.FilterHdr, Screen.Altimeter.route, "Altitude"),
-            ToolItem("Calculator", Icons.Rounded.Calculate, Screen.Calculator.route, "Standard math")
+            ToolItem("Altimeter", Icons.Rounded.FilterHdr, Screen.Altimeter.route, "Altitude")
         )
     ),
     ToolCategory(
-        "CALCULATORS",
-        listOf(
-            ToolItem("Unit Converter", Icons.Rounded.SyncAlt, Screen.UnitConverter.route, "Units"),
-            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split"),
-            ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health")
-        )
-    ),
-    ToolCategory(
-        "SYSTEM",
+        "SYSTEM & HEALTH",
         listOf(
             ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
-            ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Security"),
+            ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health"),
+            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
             ToolItem("Ruler", Icons.Rounded.Straighten, Screen.Ruler.route, "Measure"),
-            ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Light tools"),
-            ToolItem("Screen Light", Icons.Rounded.LightMode, Screen.ScreenLight.route, "Pure illumination"),
             ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Decisions")
         )
     )
