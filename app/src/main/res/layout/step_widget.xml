@@ -6,23 +6,60 @@
     android:padding="16dp"
     android:background="@drawable/widget_background">
 
-    <Box
+    <FrameLayout
         android:id="@+id/widget_step_progress_container"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
         android:layout_alignParentStart="true"
         android:layout_centerVertical="true"
-        android:layout_marginStart="4dp">
+        android:layout_marginStart="8dp">
         
         <ProgressBar
             android:id="@+id/widget_step_progress"
             style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_gravity="center"
             android:indeterminate="false"
             android:progressDrawable="@drawable/circular_progress" />
-    </RelativeLayout>
+            
+        <ImageView
+            android:id="@+id/widget_step_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_heart"
+            android:tint="#6750A4"
+            android:contentDescription="Icon" />
+    </FrameLayout>
 
-</LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_toEndOf="@id/widget_step_progress_container"
+        android:layout_centerVertical="true"
+        android:layout_marginStart="20dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_step_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="STEPS"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-black"
+            android:textColor="#6750A4"
+            android:letterSpacing="0.1" />
+
+        <TextView
+            android:id="@+id/widget_step_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0"
+            android:textSize="24sp"
+            android:fontFamily="sans-serif-black"
+            android:textColor="#1D1B20"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+</RelativeLayout>
