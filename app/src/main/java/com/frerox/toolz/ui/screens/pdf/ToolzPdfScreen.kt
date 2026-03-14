@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +47,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,6 +113,8 @@ fun ToolzPdfScreen(
             } else {
                 ViewerTopBar(
                     title = activeTab?.title ?: "PDF Viewer",
+                    viewModel = viewModel,
+                    docState = docState,
                     isSearching = isSearchingInDoc,
                     searchQuery = internalSearchQuery,
                     onSearchQueryChange = { 
@@ -944,6 +949,8 @@ private fun TabRow(
 @Composable
 private fun ViewerTopBar(
     title: String,
+    viewModel: PdfViewModel,
+    docState: DocumentState,
     isSearching: Boolean,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
