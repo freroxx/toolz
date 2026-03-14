@@ -60,6 +60,16 @@
             android:fontFamily="sans-serif-black"
             android:textColor="#1D1B20"
             android:layout_marginTop="2dp" />
+
+        <TextView
+            android:id="@+id/widget_step_goal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="/ 10000"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:textColor="#49454F"
+            android:alpha="0.6" />
     </LinearLayout>
 
 </RelativeLayout>

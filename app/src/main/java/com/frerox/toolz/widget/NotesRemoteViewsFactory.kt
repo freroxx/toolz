@@ -49,17 +49,17 @@ class NotesRemoteViewsFactory(private val context: Context) : RemoteViewsService
         val note = notes[position]
         val views = RemoteViews(context.packageName, R.layout.note_widget_item)
         views.setTextViewText(R.id.widget_note_title, note.title.ifEmpty { "Note" })
-        views.setTextViewText(R.id.widget_note_content, note.content)
+        views.setTextViewText(R.id.widget_note_preview, note.content)
         
         // Material Expressive: Use a cleaner background if color is transparent or default
         val color = if (note.color == 0) 0xFFF5F5F5.toInt() else note.color
-        views.setInt(R.id.widget_note_container, "setBackgroundColor", color)
+        views.setInt(R.id.widget_note_item_root, "setBackgroundColor", color)
 
         val fillInIntent = Intent().apply {
             putExtra("note_id", note.id)
             putExtra("navigate_to", "notepad")
         }
-        views.setOnClickFillInIntent(R.id.widget_note_container, fillInIntent)
+        views.setOnClickFillInIntent(R.id.widget_note_item_root, fillInIntent)
 
         return views
     }

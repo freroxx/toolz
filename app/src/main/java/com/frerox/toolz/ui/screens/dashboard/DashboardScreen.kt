@@ -54,6 +54,7 @@ import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
 import com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel
 import com.frerox.toolz.ui.screens.sensors.RecordingState
 import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
+import kotlinx.coroutines.delay
 import java.util.*
 
 data class ToolCategory(
@@ -82,7 +83,6 @@ sealed class PillPage {
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
-    viewModel: DashboardViewModel = hiltViewModel(),
     settingsRepository: SettingsRepository
 ) {
     var visible by remember { mutableStateOf(false) }
@@ -97,7 +97,7 @@ fun DashboardScreen(
     val contentAlpha by animateFloatAsState(if (visible) 1f else 0f, tween(1000, delayMillis = 200), label = "")
     val contentScale by animateFloatAsState(if (visible) 1f else 0.98f, spring(Spring.DampingRatioLowBouncy), label = "")
 
-    val tools by viewModel.tools.collectAsState()
+    val tools = remember { getCategories().flatMap { it.items } }
     val context = LocalContext.current
     val activity = context as? ComponentActivity
     
@@ -628,11 +628,11 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 IconButton(
-                    onClick = { viewModel.pauseMusic() },
+                    onClick = { musicViewModel.pauseMusic() },
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { viewModel.pauseMusic() }
+                        .bouncyClick { musicViewModel.pauseMusic() }
                 ) {
                     Icon(
                         if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -643,11 +643,11 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                 }
                 
                 IconButton(
-                    onClick = { viewModel.stopMusic() },
+                    onClick = { musicViewModel.stopMusic() },
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { viewModel.stopMusic() }
+                        .bouncyClick { musicViewModel.stopMusic() }
                 ) {
                     Icon(
                         Icons.Rounded.Stop,

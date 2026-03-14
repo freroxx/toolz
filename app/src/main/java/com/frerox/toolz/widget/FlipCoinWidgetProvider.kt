@@ -50,16 +50,16 @@ class FlipCoinWidgetProvider : AppWidgetProvider() {
             
             repeat(4) {
                 delay(150)
-                views.setImageViewResource(R.id.widget_coin_image, android.R.drawable.btn_star_big_off)
+                views.setImageViewResource(R.id.widget_coin_button, android.R.drawable.btn_star_big_off)
                 appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
                 delay(150)
-                views.setImageViewResource(R.id.widget_coin_image, android.R.drawable.btn_star_big_on)
+                views.setImageViewResource(R.id.widget_coin_button, android.R.drawable.btn_star_big_on)
                 appWidgetManager.partiallyUpdateAppWidget(appWidgetId, views)
             }
 
             val isHeads = Random.nextBoolean()
             views.setTextViewText(R.id.widget_coin_text, if (isHeads) "HEADS" else "TAILS")
-            views.setImageViewResource(R.id.widget_coin_image, 
+            views.setImageViewResource(R.id.widget_coin_button, 
                 if (isHeads) android.R.drawable.btn_star_big_on else android.R.drawable.btn_star_big_off)
             
             appWidgetManager.updateAppWidget(appWidgetId, views)
