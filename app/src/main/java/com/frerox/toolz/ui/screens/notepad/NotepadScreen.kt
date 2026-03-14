@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -80,6 +81,8 @@ fun NotepadScreen(
     var noteToEdit by remember { mutableStateOf<Note?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     val isDark = isSystemInDarkTheme()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(initialNoteId, notes) {
         if (initialNoteId != null && notes.isNotEmpty()) {
@@ -138,6 +141,7 @@ fun NotepadScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { 
@@ -200,7 +204,19 @@ fun NotepadScreen(
                                 noteToEdit = note
                                 showEditor = false // We now open viewer first through noteToEdit being non-null
                             },
-                            onDelete = { viewModel.deleteNote(note) },
+                            onDelete = { 
+                                viewModel.deleteNote(note)
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "Note moved to trash",
+                                        actionLabel = "UNDO",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        viewModel.undoDelete()
+                                    }
+                                }
+                            },
                             onTogglePin = { viewModel.togglePin(note) },
                             onPlayAudio = { note.attachedAudioUri?.let { onPlayAudio(it) } },
                             onViewPdf = { note.attachedPdfUri?.let { onViewPdf(it) } }
@@ -510,10 +526,18 @@ fun ImprovedNoteItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (note.isPinned) {
+                    val pinScale by animateFloatAsState(if (note.isPinned) 1.2f else 1f, spring(Spring.DampingRatioHighBouncy), label = "pinScale")
                     Icon(
                         Icons.Rounded.PushPin, 
                         contentDescription = "Pinned", 
-                        modifier = Modifier.size(14.dp).padding(start = 2.dp), 
+                        modifier = Modifier
+                            .size(16.dp)
+                            .padding(start = 4.dp)
+                            .graphicsLayer { 
+                                scaleX = pinScale
+                                scaleY = pinScale
+                                rotationZ = -15f
+                            }, 
                         tint = onNoteColor
                     )
                 }

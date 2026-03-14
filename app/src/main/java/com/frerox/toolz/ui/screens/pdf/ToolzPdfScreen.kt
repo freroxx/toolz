@@ -12,6 +12,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1144,34 +1145,50 @@ fun OcrResultDialog(
     val context = LocalContext.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        containerColor = if (isAmoled) Color.Black.copy(alpha = 0.9f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = if (isAmoled) Color.White.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.4f)) },
+        modifier = Modifier.fillMaxHeight(0.85f)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(24.dp).heightIn(min = 400.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Extracted Text", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                IconButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("PDF OCR", text))
-                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                }) {
-                    Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "EXTRACTED TEXT", 
+                    style = MaterialTheme.typography.titleMedium, 
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+                IconButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("PDF OCR", text))
+                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            
             Surface(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = 24.dp),
+                color = if (isAmoled) Color.White.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(24.dp),
                 border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.1f) else Color.Transparent)
             ) {
-                Box(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-                    Text(text, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
+                Box(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = text, 
+                        style = MaterialTheme.typography.bodyLarge, 
+                        lineHeight = 26.sp,
+                        color = if (isAmoled) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
-            Spacer(Modifier.height(24.dp))
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("CLOSE") }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }

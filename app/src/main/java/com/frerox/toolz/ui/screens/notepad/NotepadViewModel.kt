@@ -27,6 +27,8 @@ class NotepadViewModel @Inject constructor(
     private val _availablePdfs = MutableStateFlow<List<com.frerox.toolz.data.pdf.PdfFile>>(emptyList())
     val availablePdfs = _availablePdfs.asStateFlow()
 
+    private var lastDeletedNote: Note? = null
+
     init {
         loadPdfs()
     }
@@ -75,7 +77,16 @@ class NotepadViewModel @Inject constructor(
 
     fun deleteNote(note: Note) {
         viewModelScope.launch {
+            lastDeletedNote = note
             noteDao.deleteNote(note)
+        }
+    }
+
+    fun undoDelete() {
+        val note = lastDeletedNote ?: return
+        viewModelScope.launch {
+            noteDao.insertNote(note)
+            lastDeletedNote = null
         }
     }
 

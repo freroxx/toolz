@@ -63,6 +63,8 @@ fun FocusFlowScreen(
     val usageStats by viewModel.combinedUsageStats.collectAsState(initial = emptyList())
     val productivityScore by viewModel.productivityScore.collectAsState()
     val isWeekly by viewModel.isWeekly.collectAsState()
+    val context = LocalContext.current
+    val canDrawOverlays = remember { Settings.canDrawOverlays(context) }
     var selectedAppForSettings by remember { mutableStateOf<AppUsageInfo?>(null) }
     var appToRename by remember { mutableStateOf<AppUsageInfo?>(null) }
 
@@ -109,7 +111,7 @@ fun FocusFlowScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Permission Warning
-                if (!Settings.canDrawOverlays(LocalContext.current)) {
+                if (!canDrawOverlays) {
                     item {
                         Surface(
                             onClick = {
