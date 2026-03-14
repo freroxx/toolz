@@ -37,30 +37,38 @@ fun SquigglySlider(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation = tween(1200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase_state"
     )
 
     val currentAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying && !isDragged) 5f else 0f,
-        animationSpec = tween(600, easing = FastOutSlowInEasing),
+        targetValue = if (isPlaying && !isDragged) 6f else if (isDragged) 8f else 0f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
         label = "amplitude_state"
     )
 
+    val thumbScale by animateFloatAsState(
+        targetValue = if (isDragged) 1.2f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy),
+        label = "thumb_scale"
+    )
+
     Box(
-        modifier = modifier.height(48.dp),
+        modifier = modifier.height(56.dp).padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Track layer
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(56.dp)
                 .drawWithCache {
                     val path = Path()
+                    val shadowPath = Path()
                     onDrawBehind {
-                        val horizontalPadding = 12.dp.toPx()
+                        val horizontalPadding = 16.dp.toPx()
                         val canvasWidth = size.width - (horizontalPadding * 2)
                         val centerY = size.height / 2
 
@@ -68,54 +76,87 @@ fun SquigglySlider(
                         val progress = if (range > 0) ((value - valueRange.start) / range).coerceIn(0f, 1f) else 0f
                         val thumbX = horizontalPadding + (canvasWidth * progress)
 
-                        val waveFreq = 32.dp.toPx()
+                        val waveFreq = 36.dp.toPx()
                         val maxAmp = currentAmplitude.dp.toPx()
+                        val taperDistance = 24.dp.toPx()
 
-                        // NEW: Taper distance ensures the wave starts and ends at 0 height
-                        val taperDistance = 20.dp.toPx()
-
-                        // 1. Draw Inactive Track (Right side)
+                        // 1. Inactive Track (Subtle glass line)
                         drawLine(
-                            color = inactiveColor,
+                            color = inactiveColor.copy(alpha = 0.3f),
                             start = Offset(thumbX, centerY),
                             end = Offset(size.width - horizontalPadding, centerY),
-                            strokeWidth = 4.dp.toPx(), // Slightly thinner for M3 look
+                            strokeWidth = 6.dp.toPx(),
                             cap = StrokeCap.Round
                         )
 
-                        // 2. Draw Active Squiggly Path (Left side)
+                        // 2. Active Squiggly Path (Glow & Multi-layer)
                         path.reset()
+                        shadowPath.reset()
                         path.moveTo(horizontalPadding, centerY)
+                        shadowPath.moveTo(horizontalPadding, centerY + 2.dp.toPx())
 
                         val activeWidth = thumbX - horizontalPadding
-                        val step = 2f // Smaller step = smoother curve on high-res screens
+                        val step = 1.5f
                         var x = 0f
 
                         while (x < activeWidth) {
-                            // CALCULATE TAPER:
-                            // This scales the amplitude down to 0 at the start and end of the active line.
                             val startTaper = (x / taperDistance).coerceIn(0f, 1f)
                             val endTaper = ((activeWidth - x) / taperDistance).coerceIn(0f, 1f)
                             val taperedAmp = maxAmp * startTaper * endTaper
 
                             val y = centerY + taperedAmp * sin((2 * PI * x / waveFreq) - phase).toFloat()
                             path.lineTo(horizontalPadding + x, y)
+                            shadowPath.lineTo(horizontalPadding + x, y + 2.dp.toPx())
                             x += step
                         }
 
-                        // Ensure we connect perfectly to the thumb's center
                         path.lineTo(thumbX, centerY)
+                        shadowPath.lineTo(thumbX, centerY + 2.dp.toPx())
 
+                        // Draw shadow layer first
+                        drawPath(
+                            path = shadowPath,
+                            color = activeColor.copy(alpha = 0.1f),
+                            style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
+                        )
+
+                        // Draw main glow layer
+                        drawPath(
+                            path = path,
+                            color = activeColor.copy(alpha = 0.2f),
+                            style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                        )
+
+                        // Draw main line
                         drawPath(
                             path = path,
                             color = activeColor,
                             style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
                         )
 
-                        // 3. Draw Thumb (Always present)
+                        // 3. Premium Thumb
+                        // Shadow
+                        drawCircle(
+                            color = Color.Black.copy(alpha = 0.2f),
+                            radius = (12.dp.toPx() * thumbScale) + 4.dp.toPx(),
+                            center = Offset(thumbX, centerY + 2.dp.toPx())
+                        )
+                        // Outer Glow
+                        drawCircle(
+                            color = activeColor.copy(alpha = 0.3f),
+                            radius = 16.dp.toPx() * thumbScale,
+                            center = Offset(thumbX, centerY)
+                        )
+                        // Main Thumb
                         drawCircle(
                             color = activeColor,
-                            radius = if (isDragged) 10.dp.toPx() else 8.dp.toPx(),
+                            radius = 10.dp.toPx() * thumbScale,
+                            center = Offset(thumbX, centerY)
+                        )
+                        // Inner Dot
+                        drawCircle(
+                            color = Color.White,
+                            radius = 4.dp.toPx() * thumbScale,
                             center = Offset(thumbX, centerY)
                         )
                     }
@@ -136,4 +177,4 @@ fun SquigglySlider(
             modifier = Modifier.fillMaxWidth()
         )
     }
-}
+}

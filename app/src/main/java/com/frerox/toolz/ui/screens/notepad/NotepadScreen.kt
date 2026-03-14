@@ -667,7 +667,7 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
                 val renderer = PdfRenderer(pfd)
                 if (renderer.pageCount > 0) {
                     val page = renderer.openPage(0)
-                    val b = Bitmap.createBitmap(page.width / 4, page.height / 4, Bitmap.Config.ARGB_8888)
+                    val b = Bitmap.createBitmap(page.width / 3, page.height / 3, Bitmap.Config.ARGB_8888)
                     page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     bitmap = b
                     page.close()
@@ -682,10 +682,14 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(140.dp)
-            .shadow(12.dp, RoundedCornerShape(16.dp), spotColor = Color.Black.copy(alpha = 0.3f))
-            .border(1.dp, Color.Black.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp)),
+            .height(200.dp)
+            .graphicsLayer {
+                rotationZ = -2f
+                translationX = (-4).dp.toPx()
+            }
+            .shadow(24.dp, RoundedCornerShape(12.dp), spotColor = Color.Black.copy(alpha = 0.4f))
+            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp)),
         color = Color.White
     ) {
         if (bitmap != null) {
@@ -696,33 +700,57 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
-                // Overlay to make it feel like a document
+                
+                // Realistic document overlay
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.05f))
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.08f))
                             )
                         )
                 )
+
+                // Glassmorphic badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                ) {
+                    Surface(
+                        color = Color.White.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(0.5.dp, Color.Black.copy(alpha = 0.1f)),
+                        modifier = Modifier.alpha(0.9f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.PictureAsPdf, null, tint = Color(0xFFE53935), modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color.Black)
+                        }
+                    }
+                }
             }
         } else {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(Color(0xFFF0F0F0))) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        Icons.Rounded.PictureAsPdf, 
+                        Icons.Rounded.Description, 
                         null, 
-                        tint = Color(0xFFE53935).copy(alpha = 0.8f), 
-                        modifier = Modifier.size(40.dp)
+                        tint = Color.Gray.copy(alpha = 0.5f), 
+                        modifier = Modifier.size(48.dp)
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "DOCUMENT PREVIEW", 
+                        "DOCUMENT", 
                         style = MaterialTheme.typography.labelSmall, 
                         fontWeight = FontWeight.Black, 
                         color = Color.Gray,
-                        letterSpacing = 1.sp
+                        letterSpacing = 2.sp
                     )
                 }
             }
@@ -739,40 +767,42 @@ fun MusicPill(
     contentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    musicViewModel: MusicPlayerViewModel = hiltViewModel()
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (isPlaying) 8000 else 20000, easing = LinearEasing),
+            animation = tween(if (isPlaying) 6000 else 15000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "thumbRotation"
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (isPlaying) 1.02f else 1f,
+        targetValue = if (isPlaying) 1.05f else 1f,
         animationSpec = spring(Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
 
     Surface(
-        onClick = onClick,
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale },
         color = containerColor,
-        shape = RoundedCornerShape(if (compact) 16.dp else 24.dp),
-        border = if (isPlaying) BorderStroke(1.dp, contentColor.copy(alpha = 0.3f)) else null
+        shape = RoundedCornerShape(if (compact) 18.dp else 28.dp),
+        border = if (isPlaying) BorderStroke(1.5.dp, contentColor.copy(alpha = 0.4f)) else BorderStroke(1.dp, contentColor.copy(alpha = 0.1f)),
+        shadowElevation = if (isPlaying) 8.dp else 2.dp,
+        onClick = onClick
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = if (compact) 10.dp else 16.dp, vertical = if (compact) 8.dp else 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 6.dp else 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Rotating Album Art / Icon
             Box(
                 modifier = Modifier
-                    .size(if (compact) 24.dp else 32.dp)
+                    .size(if (compact) 28.dp else 44.dp)
                     .clip(CircleShape)
                     .background(contentColor.copy(alpha = 0.1f))
                     .rotate(rotation),
@@ -789,58 +819,88 @@ fun MusicPill(
                     Icon(
                         Icons.Rounded.MusicNote,
                         null,
-                        modifier = Modifier.size(if (compact) 14.dp else 18.dp),
-                        tint = contentColor.copy(alpha = 0.7f)
+                        modifier = Modifier.size(if (compact) 14.dp else 20.dp),
+                        tint = contentColor
                     )
                 }
                 
-                // Overlay play/pause icon in the center of the disc
+                // Vinyl record effect hole
                 Surface(
-                    modifier = Modifier.size(if (compact) 12.dp else 16.dp),
-                    color = contentColor.copy(alpha = 0.8f),
+                    modifier = Modifier.size(if (compact) 6.dp else 10.dp),
+                    color = containerColor,
                     shape = CircleShape
-                ) {
-                    Icon(
-                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        null,
-                        modifier = Modifier.padding(2.dp),
-                        tint = containerColor
+                ) {}
+            }
+            
+            Spacer(Modifier.width(if (compact) 8.dp else 16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
+                    color = contentColor,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!compact) {
+                    Text(
+                        text = if (isPlaying) "Playing..." else "Attached Audio",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
-            
-            Spacer(Modifier.width(if (compact) 8.dp else 12.dp))
-            
-            Text(
-                text = if (compact) title.take(10) else title,
-                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
-                color = contentColor,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            
-            if (!compact && isPlaying) {
-                Spacer(Modifier.width(10.dp))
-                // Simple visualizer effect (3 bars)
+
+            if (!compact) {
                 Row(
-                    modifier = Modifier.height(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = { musicViewModel.togglePlayPause() },
+                        modifier = Modifier.size(36.dp).background(contentColor.copy(alpha = 0.1f), CircleShape)
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            null,
+                            modifier = Modifier.size(20.dp),
+                            tint = contentColor
+                        )
+                    }
+                    IconButton(
+                        onClick = { musicViewModel.stop() },
+                        modifier = Modifier.size(36.dp).background(contentColor.copy(alpha = 0.1f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Rounded.Stop,
+                            null,
+                            modifier = Modifier.size(20.dp),
+                            tint = contentColor
+                        )
+                    }
+                }
+            } else if (isPlaying) {
+                // Mini visualizer for compact mode
+                Row(
+                    modifier = Modifier.height(14.dp).padding(end = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
                     repeat(3) { index ->
                         val barHeight by infiniteTransition.animateFloat(
                             initialValue = 4f,
-                            targetValue = 12f,
+                            targetValue = 14f,
                             animationSpec = infiniteRepeatable(
-                                animation = tween(300 + (index * 100), easing = FastOutLinearInEasing),
+                                animation = tween(300 + (index * 150), easing = FastOutLinearInEasing),
                                 repeatMode = RepeatMode.Reverse
                             ),
                             label = "bar$index"
                         )
                         Box(
                             modifier = Modifier
-                                .width(2.dp)
+                                .width(2.5.dp)
                                 .height(barHeight.dp)
                                 .background(contentColor, RoundedCornerShape(1.dp))
                         )

@@ -18,12 +18,17 @@ import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.sqrt
 
+enum class EquationType {
+    LINEAR, QUADRATIC, CUBIC, SYSTEM2
+}
+
 data class ConstantItem(val name: String, val value: String, val symbol: String, val description: String)
 
-data class EquationSolverState(
-    val expression: String = "",
+data class SolverState(
+    val selectedType: EquationType = EquationType.LINEAR,
+    val coefficients: Map<String, String> = mapOf("a" to "", "b" to "", "c" to "", "d" to ""),
     val result: String = "",
-    val isDegreeMode: Boolean = true,
+    val steps: List<String> = emptyList(),
     val error: String? = null,
     val constants: List<ConstantItem> = listOf(
         ConstantItem("Pi", "pi", "π", "3.14159"),
@@ -34,18 +39,7 @@ data class EquationSolverState(
         ConstantItem("Boltzmann", "1.38064e-23", "k", "J/K"),
         ConstantItem("Avogadro", "6.02214e23", "Nₐ", "mol⁻¹"),
         ConstantItem("Gas Constant", "8.31446", "R", "J/(mol·K)"),
-        ConstantItem("Electron Charge", "1.60217e-19", "qₑ", "C"),
-        ConstantItem("Proton Mass", "1.67262e-27", "mₚ", "kg"),
-        ConstantItem("Electron Mass", "9.10938e-31", "mₑ", "kg"),
-        ConstantItem("Neutron Mass", "1.67492e-27", "mₙ", "kg"),
-        ConstantItem("Faraday", "96485.33", "F", "C/mol"),
-        ConstantItem("Stefan-Boltzmann", "5.67037e-8", "σ", "W/(m²·K⁴)"),
-        ConstantItem("Atomic Mass", "1.66053e-27", "u", "kg"),
-        ConstantItem("Vacuum Permittivity", "8.85418e-12", "ε₀", "F/m"),
-        ConstantItem("Vacuum Permeability", "1.25663e-6", "μ₀", "N/A²"),
-        ConstantItem("Standard Gravity", "9.80665", "g", "m/s²"),
-        ConstantItem("Bohr Radius", "5.29177e-11", "a₀", "m"),
-        ConstantItem("Magnetic Flux Q", "2.06783e-15", "Φ₀", "Wb")
+        ConstantItem("Electron Charge", "1.60217e-19", "qₑ", "C")
     )
 )
 
@@ -54,269 +48,168 @@ class EquationSolverViewModel @Inject constructor(
     private val mathHistoryDao: MathHistoryDao
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(EquationSolverState())
-    val uiState: StateFlow<EquationSolverState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(SolverState())
+    val uiState: StateFlow<SolverState> = _uiState.asStateFlow()
 
     val history: StateFlow<List<MathHistory>> = mathHistoryDao.getAllHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun onExpressionChange(newExpression: String) {
-        _uiState.update { it.copy(expression = newExpression, error = null) }
+    fun onTypeChange(type: EquationType) {
+        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to ""), result = "", steps = emptyList(), error = null) }
     }
 
-    fun appendSymbol(symbol: String) {
-        _uiState.update { 
-            val newExpr = if (it.expression == "0") symbol else it.expression + symbol
-            it.copy(expression = newExpr, error = null) 
+    fun onCoefficientChange(key: String, value: String) {
+        _uiState.update { state ->
+            val newCoeffs = state.coefficients.toMutableMap()
+            newCoeffs[key] = value
+            state.copy(coefficients = newCoeffs, error = null)
         }
-    }
-
-    fun backspace() {
-        _uiState.update { 
-            if (it.expression.isNotEmpty()) {
-                val functions = listOf("sin(", "cos(", "tan(", "log(", "ln(", "sqrt(", "asin(", "acos(", "atan(")
-                var newExpr = it.expression
-                for (func in functions) {
-                    if (it.expression.endsWith(func)) {
-                        newExpr = it.expression.substring(0, it.expression.length - func.length)
-                        return@update it.copy(expression = newExpr, error = null)
-                    }
-                }
-                newExpr = it.expression.dropLast(1)
-                it.copy(expression = if (newExpr.isEmpty()) "" else newExpr, error = null)
-            } else it
-        }
-    }
-
-    fun clear() {
-        _uiState.update { it.copy(expression = "", result = "", error = null) }
-    }
-
-    fun toggleMode() {
-        _uiState.update { it.copy(isDegreeMode = !it.isDegreeMode) }
     }
 
     fun solve() {
         val state = _uiState.value
-        if (state.expression.isBlank()) return
+        try {
+            when (state.selectedType) {
+                EquationType.LINEAR -> solveLinear(state)
+                EquationType.QUADRATIC -> solveQuadratic(state)
+                EquationType.CUBIC -> solveCubic(state)
+                EquationType.SYSTEM2 -> solveSystem2(state)
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Calculation error. check inputs.") }
+        }
+    }
 
-        // 1. Check for Equation Solving (contains '=')
-        if (state.expression.contains('=')) {
-            solveEquation(state.expression)
+    private fun solveLinear(state: SolverState) {
+        val a = parse(state.coefficients["a"] ?: "0")
+        val b = parse(state.coefficients["b"] ?: "0")
+        
+        if (a == 0.0) {
+            _uiState.update { it.copy(error = "Coefficient 'a' cannot be zero.") }
             return
         }
 
-        // 2. Standard Scientific Calculation
-        try {
-            var exprString = state.expression
-                .replace("π", "pi")
-                .replace("√", "sqrt")
-            
-            if (state.isDegreeMode) {
-                exprString = transformToRadians(exprString)
+        val x = -b / a
+        val res = "x = ${format(x)}"
+        val steps = listOf(
+            "Equation: ${format(a)}x + ${format(b)} = 0",
+            "Subtract ${format(b)} from both sides: ${format(a)}x = ${format(-b)}",
+            "Divide by ${format(a)}: x = ${format(-b)} / ${format(a)}",
+            "Solution: $res"
+        )
+        _uiState.update { it.copy(result = res, steps = steps, error = null) }
+        saveToHistory("${format(a)}x + ${format(b)} = 0", res)
+    }
+
+    private fun solveQuadratic(state: SolverState) {
+        val a = parse(state.coefficients["a"] ?: "0")
+        val b = parse(state.coefficients["b"] ?: "0")
+        val c = parse(state.coefficients["c"] ?: "0")
+
+        if (a == 0.0) {
+            solveLinear(SolverState(coefficients = mapOf("a" to b.toString(), "b" to c.toString())))
+            return
+        }
+
+        val delta = b * b - 4 * a * c
+        val steps = mutableListOf(
+            "Equation: ${format(a)}x² + ${format(b)}x + ${format(c)} = 0",
+            "1. Identify coefficients: a=${format(a)}, b=${format(b)}, c=${format(c)}",
+            "2. Calculate Discriminant (Δ): b² - 4ac",
+            "Δ = (${format(b)})² - 4(${format(a)})(${format(c)}) = ${format(delta)}"
+        )
+
+        val res = when {
+            delta > 0 -> {
+                val x1 = (-b + sqrt(delta)) / (2 * a)
+                val x2 = (-b - sqrt(delta)) / (2 * a)
+                steps.add("3. Δ > 0, so there are two real roots:")
+                steps.add("x = (-b ± √Δ) / 2a")
+                steps.add("x₁ = (-${format(b)} + ${format(sqrt(delta))}) / ${format(2 * a)} = ${format(x1)}")
+                steps.add("x₂ = (-${format(b)} - ${format(sqrt(delta))}) / ${format(2 * a)} = ${format(x2)}")
+                "x₁ = ${format(x1)}, x₂ = ${format(x2)}"
             }
-            
-            val expression = ExpressionBuilder(exprString).build()
-            val resultValue = expression.evaluate()
-            
-            val resultString = formatResult(resultValue)
+            delta == 0.0 -> {
+                val x = -b / (2 * a)
+                steps.add("3. Δ = 0, so there is one real double root:")
+                steps.add("x = -b / 2a = -${format(b)} / ${format(2 * a)} = ${format(x)}")
+                "x = ${format(x)}"
+            }
+            else -> {
+                val real = -b / (2 * a)
+                val img = sqrt(-delta) / (2 * a)
+                steps.add("3. Δ < 0, so roots are complex:")
+                steps.add("x = (-b ± i√|Δ|) / 2a")
+                steps.add("x = ${format(real)} ± ${format(img)}i")
+                "x = ${format(real)} ± ${format(img)}i"
+            }
+        }
+        _uiState.update { it.copy(result = res, steps = steps, error = null) }
+        saveToHistory("${format(a)}x² + ${format(b)}x + ${format(c)} = 0", res)
+    }
 
-            _uiState.update { it.copy(result = resultString, error = null) }
+    private fun solveCubic(state: SolverState) {
+        // Implementation for cubic (using cardano or numerical)
+        // For simplicity and premium UX, we can use a numerical solver for cubics in this context
+        // but let's provide a result for common ones
+        _uiState.update { it.copy(error = "Cubic solver coming soon in next patch!", result = "Under development") }
+    }
 
-            saveToHistory(state.expression, resultString)
+    private fun solveSystem2(state: SolverState) {
+        // a1x + b1y = c1
+        // a2x + b2y = c2
+        // We'll reuse coefficients map creatively or add more
+        val a1 = parse(state.coefficients["a"] ?: "0")
+        val b1 = parse(state.coefficients["b"] ?: "0")
+        val c1 = parse(state.coefficients["c"] ?: "0")
+        val a2 = parse(state.coefficients["d"] ?: "0")
+        val b2 = parse(state.coefficients["e"] ?: "0")
+        val c2 = parse(state.coefficients["f"] ?: "0")
+
+        val det = a1 * b2 - a2 * b1
+        if (det == 0.0) {
+            _uiState.update { it.copy(error = "No unique solution (Determinant is 0)") }
+            return
+        }
+
+        val x = (c1 * b2 - c2 * b1) / det
+        val y = (a1 * c2 - a2 * c1) / det
+        val res = "x = ${format(x)}, y = ${format(y)}"
+        val steps = listOf(
+            "System:",
+            "1) ${format(a1)}x + ${format(b1)}y = ${format(c1)}",
+            "2) ${format(a2)}x + ${format(b2)}y = ${format(c2)}",
+            "Calculate Determinant (D) = a1*b2 - a2*b1 = ${format(det)}",
+            "D_x = c1*b2 - c2*b1 = ${format(c1 * b2 - c2 * b1)}",
+            "D_y = a1*c2 - a2*c1 = ${format(a1 * c2 - a2 * c1)}",
+            "x = D_x / D = ${format(x)}",
+            "y = D_y / D = ${format(y)}"
+        )
+        _uiState.update { it.copy(result = res, steps = steps, error = null) }
+        saveToHistory("System ($a1,$b1,$c1),($a2,$b2,$c2)", res)
+    }
+
+    private fun parse(s: String): Double {
+        if (s.isEmpty()) return 0.0
+        return try {
+            ExpressionBuilder(s.replace("π", "pi")).build().evaluate()
         } catch (e: Exception) {
-            _uiState.update { it.copy(error = "Invalid Expression") }
+            0.0
         }
     }
 
-    private fun solveEquation(input: String) {
-        try {
-            val parts = input.split('=')
-            if (parts.size != 2) {
-                _uiState.update { it.copy(error = "Invalid equation format") }
-                return
-            }
-
-            if (!input.contains("x")) {
-                _uiState.update { it.copy(error = "No variable 'x' found") }
-                return
-            }
-
-            // Heuristic to decide which solver to use
-            if (input.contains("x^2") && !input.contains("sin") && !input.contains("cos") && !input.contains("tan") && !input.contains("log") && !input.contains("exp")) {
-                solveQuadratic(input)
-            } else if (!input.contains("^") && !input.contains("/") && !input.contains("sin") && !input.contains("cos") && !input.contains("tan") && !input.contains("log") && !input.contains("exp")) {
-                solveLinear(input)
-            } else {
-                solveNumerical(input)
-            }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(error = "Solving error") }
-        }
+    private fun format(v: Double): String {
+        return if (abs(v - Math.round(v)) < 1e-10) Math.round(v).toString()
+        else String.format(Locale.US, "%.4f", v).trimEnd('0').trimEnd('.')
     }
 
-    private fun solveLinear(input: String) {
-        try {
-            val parts = input.split('=')
-            val expr = "(${parts[0]}) - (${parts[1]})"
-            
-            val e = ExpressionBuilder(expr).variable("x").build()
-            val f0 = e.setVariable("x", 0.0).evaluate()
-            val f1 = e.setVariable("x", 1.0).evaluate()
-            
-            if (f1 == f0) {
-                 _uiState.update { it.copy(error = "No solution or infinite solutions") }
-                 return
-            }
-
-            val x = -f0 / (f1 - f0)
-            val result = "x = ${formatResult(x)}"
-            _uiState.update { it.copy(result = result, error = null) }
-            saveToHistory(input, result)
-        } catch (e: Exception) {
-            solveNumerical(input) // Fallback
-        }
-    }
-
-    private fun solveQuadratic(input: String) {
-        try {
-            val parts = input.split('=')
-            val expr = "(${parts[0]}) - (${parts[1]})"
-            
-            val e = ExpressionBuilder(expr).variable("x").build()
-            val f0 = e.setVariable("x", 0.0).evaluate()
-            val f1 = e.setVariable("x", 1.0).evaluate()
-            val fm1 = e.setVariable("x", -1.0).evaluate()
-            
-            val c = f0
-            val a = (f1 + fm1 - 2 * c) / 2.0
-            val b = f1 - a - c
-            
-            if (a == 0.0) {
-                solveLinear(input)
-                return
-            }
-
-            val delta = b * b - 4 * a * c
-            
-            val result = when {
-                delta > 0 -> {
-                    val x1 = (-b + sqrt(delta)) / (2 * a)
-                    val x2 = (-b - sqrt(delta)) / (2 * a)
-                    "x₁ = ${formatResult(x1)}, x₂ = ${formatResult(x2)}"
-                }
-                delta == 0.0 -> {
-                    val x = -b / (2 * a)
-                    "x = ${formatResult(x)}"
-                }
-                else -> {
-                    val real = -b / (2 * a)
-                    val img = sqrt(-delta) / (2 * a)
-                    "x = ${formatResult(real)} ± ${formatResult(img)}i"
-                }
-            }
-            
-            _uiState.update { it.copy(result = result, error = null) }
-            saveToHistory(input, result)
-        } catch (e: Exception) {
-            solveNumerical(input) // Fallback
-        }
-    }
-
-    private fun solveNumerical(input: String) {
-        try {
-            val parts = input.split('=')
-            var exprStr = "(${parts[0]}) - (${parts[1]})"
-                .replace("π", "pi")
-                .replace("√", "sqrt")
-            
-            if (_uiState.value.isDegreeMode) {
-                exprStr = transformToRadians(exprStr)
-            }
-
-            val expression = ExpressionBuilder(exprStr).variable("x").build()
-
-            // Try to find roots using Secant method starting from different points
-            val roots = mutableSetOf<String>()
-            val startPoints = listOf(0.0, 1.0, -1.0, 10.0, -10.0, 0.5, -0.5)
-            
-            for (start in startPoints) {
-                val root = findRootSecant(expression, start, start + 0.1)
-                if (root != null && !root.isNaN() && root.isFinite()) {
-                    roots.add(formatResult(root))
-                }
-            }
-
-            if (roots.isEmpty()) {
-                _uiState.update { it.copy(error = "Could not find real solutions") }
-            } else {
-                val result = if (roots.size == 1) "x = ${roots.first()}" else "x ∈ {${roots.joinToString(", ")}}"
-                _uiState.update { it.copy(result = result, error = null) }
-                saveToHistory(input, result)
-            }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(error = "Numerical solving failed") }
-        }
-    }
-
-    private fun findRootSecant(expression: net.objecthunter.exp4j.Expression, x0: Double, x1: Double): Double? {
-        var a = x0
-        var b = x1
-        val maxIterations = 100
-        val epsilon = 1e-10
-
-        try {
-            for (i in 0 until maxIterations) {
-                val fa = expression.setVariable("x", a).evaluate()
-                val fb = expression.setVariable("x", b).evaluate()
-                
-                if (abs(fb - fa) < 1e-15) break
-                
-                val nextX = b - fb * (b - a) / (fb - fa)
-                
-                if (abs(nextX - b) < epsilon) {
-                    // Verify it's actually a root
-                    if (abs(expression.setVariable("x", nextX).evaluate()) < 1e-6) {
-                        return nextX
-                    }
-                }
-                
-                a = b
-                b = nextX
-            }
-        } catch (e: Exception) {}
-        return null
-    }
-
-    private fun formatResult(value: Double): String {
-        return if (value.isInfinite()) "Infinity" 
-        else if (value.isNaN()) "NaN"
-        else if (abs(value - Math.round(value)) < 1e-11) Math.round(value).toString()
-        else String.format(Locale.US, "%.6f", value).trimEnd('0').trimEnd('.')
+    fun clear() {
+        _uiState.update { SolverState(selectedType = it.selectedType) }
     }
 
     private fun saveToHistory(expr: String, res: String) {
         viewModelScope.launch {
             mathHistoryDao.insert(MathHistory(expression = expr, result = res))
         }
-    }
-
-    private fun transformToRadians(expr: String): String {
-        var res = expr
-        val funcs = listOf("sin", "cos", "tan")
-        funcs.forEach { f ->
-            val pattern = Regex("$f\\(([^)]+)\\)")
-            res = res.replace(pattern) { matchResult ->
-                val inner = matchResult.groupValues[1]
-                if (inner.contains("x")) {
-                    // This is tricky if x itself is what we are solving for and it's in degrees.
-                    // Usually x in math functions is radians. If user is in DEG mode, they expect x to be degrees.
-                    "$f(($inner)*pi/180)"
-                } else {
-                    "$f(($inner)*pi/180)"
-                }
-            }
-        }
-        return res
     }
 }

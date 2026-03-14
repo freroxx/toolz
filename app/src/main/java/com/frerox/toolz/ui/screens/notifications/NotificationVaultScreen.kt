@@ -138,12 +138,11 @@ fun NotificationVaultScreen(
                             modifier = Modifier.fillMaxSize()
                                 .fadingEdge(
                                     brush = Brush.verticalGradient(
-                                    colors = if (isSystemInDarkTheme()) {
-                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.04f), surface)
-                                    } else {
-                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.02f), surface)
-                                    }
-                                ),
+                                        0f to Color.Transparent,
+                                        0.02f to Color.Black,
+                                        0.98f to Color.Black,
+                                        1f to Color.Transparent
+                                    ),
                                     length = 24.dp
                                 ),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),

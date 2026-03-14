@@ -13,7 +13,7 @@ class ShakeDetector(private val onShake: () -> Unit) : SensorEventListener {
     private var lastZ = 0f
     
     // Threshold for heavy shakes (increased for reliability)
-    private val SHAKE_THRESHOLD = 5000.0 
+    private val SHAKE_THRESHOLD = 3500.0
     // Counter for continuous shakes
     private var shakeCount = 0
     private var lastShakeTimestamp: Long = 0
