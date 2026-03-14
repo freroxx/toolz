@@ -62,6 +62,7 @@ fun ClipboardScreen(
 
     val groups = remember(entries) { viewModel.groupedEntries(entries) }
     val listState = rememberLazyListState()
+    var showClearAllConfirmation by remember { mutableStateOf(false) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshClipboard()
@@ -110,7 +111,7 @@ fun ClipboardScreen(
                             // Clear all
                             if (entries.isNotEmpty()) {
                                 IconButton(
-                                    onClick = { viewModel.clearAll() },
+                                    onClick = { showClearAllConfirmation = true },
                                     modifier = Modifier
                                         .padding(4.dp)
                                         .clip(RoundedCornerShape(12.dp))
@@ -126,6 +127,31 @@ fun ClipboardScreen(
             }
         }
     ) { padding ->
+        if (showClearAllConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showClearAllConfirmation = false },
+                title = { Text("Clear All History?", color = MaterialTheme.colorScheme.onSurface) },
+                text = { Text("This will permanently remove all unpinned items from your clipboard history.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.clearAll()
+                            showClearAllConfirmation = false
+                        }
+                    ) {
+                        Text("CLEAR ALL", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearAllConfirmation = false }) {
+                        Text("CANCEL")
+                    }
+                },
+                shape = RoundedCornerShape(28.dp),
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        }
+
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (entries.isEmpty()) {
                 EmptyClipboardState()
