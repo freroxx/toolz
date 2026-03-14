@@ -21,7 +21,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -261,13 +265,11 @@ fun NotepadScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalItemSpacing = 16.dp
                 ) {
-                    filteredNotes.forEachIndexed { index, note ->
-                        item(key = note.id) {
-                            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-                            Box(
-                                modifier = Modifier
-                                    .animateItem()
-                            ) {
+                    itemsIndexed(filteredNotes, key = { _, note -> note.id }) { index, note ->
+                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                        Box(
+                            modifier = Modifier.animateItem()
+                        ) {
                             ImprovedNoteItem(
                                 note = note, 
                                 isDark = isDark,
