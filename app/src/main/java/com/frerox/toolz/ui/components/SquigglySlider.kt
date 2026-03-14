@@ -22,6 +22,7 @@ import kotlin.math.sin
 fun SquigglySlider(
     value: Float,
     onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
     onValueChangeFinished: () -> Unit = {},
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean = true,
@@ -49,7 +50,7 @@ fun SquigglySlider(
     )
 
     Box(
-        modifier = Modifier.fillMaxWidth().height(48.dp),
+        modifier = modifier.height(48.dp),
         contentAlignment = Alignment.Center
     ) {
         Spacer(

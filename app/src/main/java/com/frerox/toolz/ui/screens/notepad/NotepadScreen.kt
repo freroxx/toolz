@@ -1014,8 +1014,8 @@ fun NoteEditorDialog(
                                     onValueChange = { fontSize = it },
                                     valueRange = 12f..48f,
                                     modifier = Modifier.weight(1f),
-                                    color = onBgColor,
-                                    squigglesEnabled = true
+                                    activeColor = onBgColor,
+                                    isPlaying = true
                                 )
                                 Text(
                                     "${fontSize.toInt()}", 
