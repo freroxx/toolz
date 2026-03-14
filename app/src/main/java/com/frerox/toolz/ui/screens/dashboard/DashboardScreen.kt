@@ -628,11 +628,11 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 IconButton(
-                    onClick = { musicViewModel.pauseMusic() },
+                    onClick = { viewModel.pauseMusic() },
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { musicViewModel.pauseMusic() }
+                        .bouncyClick { viewModel.pauseMusic() }
                 ) {
                     Icon(
                         if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -643,11 +643,11 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                 }
                 
                 IconButton(
-                    onClick = { musicViewModel.stopMusic() },
+                    onClick = { viewModel.stopMusic() },
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { musicViewModel.stopMusic() }
+                        .bouncyClick { viewModel.stopMusic() }
                 ) {
                     Icon(
                         Icons.Rounded.Stop,
