@@ -1,5 +1,8 @@
 package com.frerox.toolz.ui.screens.focus
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -105,6 +108,34 @@ fun FocusFlowScreen(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Permission Warning
+                if (!Settings.canDrawOverlays(LocalContext.current)) {
+                    item {
+                        Surface(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth().bouncyClick { },
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(16.dp))
+                                Column {
+                                    Text("LIMITS NOT ACTIVE", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                    Text("Tap to grant overlay permission to enable screen limits.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     EnhancedProductivityHeader(productivityScore)
                 }

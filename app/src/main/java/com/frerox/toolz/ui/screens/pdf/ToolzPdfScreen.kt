@@ -612,9 +612,10 @@ private fun ThumbnailScrubber(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(110.dp),
-        color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-        tonalElevation = 2.dp,
+            .height(115.dp),
+        color = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        tonalElevation = 12.dp,
+        shadowElevation = 8.dp
     ) {
         LazyRow(
             state = listState,
@@ -696,11 +697,16 @@ private fun ReaderBottomControls(
 ) {
     Row(
         modifier = Modifier
-            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .padding(horizontal = 24.dp, vertical = 16.dp)
             .fillMaxWidth()
             .background(
-                if (isAmoled) Color(0xFF1A1A1A) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
-                RoundedCornerShape(24.dp)
+                if (isAmoled) Color(0xFF1A1A1A).copy(alpha = 0.9f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                RoundedCornerShape(28.dp)
+            )
+            .border(
+                1.dp, 
+                if (isAmoled) Color.White.copy(alpha = 0.1f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                RoundedCornerShape(28.dp)
             )
             .padding(8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,

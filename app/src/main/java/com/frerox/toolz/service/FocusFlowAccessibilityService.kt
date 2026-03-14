@@ -95,8 +95,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val startTime = calendar.timeInMillis
         val endTime = System.currentTimeMillis()
 
-        // Sum usage from all daily stats entries to be accurate
-        val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+        val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, endTime)
         return stats?.filter { it.packageName == packageName }?.sumOf { it.totalTimeInForeground } ?: 0L
     }
 

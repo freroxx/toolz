@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.ui.components.bouncyClick
@@ -60,6 +62,10 @@ fun ClipboardScreen(
 
     val groups = remember(entries) { viewModel.groupedEntries(entries) }
     val listState = rememberLazyListState()
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshClipboard()
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -90,6 +96,17 @@ fun ClipboardScreen(
                             }
                         },
                         actions = {
+                            // Sync manually
+                            IconButton(
+                                onClick = { viewModel.refreshClipboard() },
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
+                            }
+
                             // Clear all
                             if (entries.isNotEmpty()) {
                                 IconButton(

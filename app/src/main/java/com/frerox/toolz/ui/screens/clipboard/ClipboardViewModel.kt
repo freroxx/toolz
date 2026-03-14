@@ -13,6 +13,7 @@ import com.frerox.toolz.service.ClipboardService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import android.content.ClipboardManager as AndroidClipboardManager
 import java.util.*
 import javax.inject.Inject
 
@@ -71,6 +72,32 @@ class ClipboardViewModel @Inject constructor(
 
     fun clearAll() {
         viewModelScope.launch { clipboardDao.clearAllUnpinned() }
+    }
+
+    fun refreshClipboard() {
+        viewModelScope.launch {
+            try {
+                val cm = application.getSystemService(Context.CLIPBOARD_SERVICE) as AndroidClipboardManager
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).coerceToText(application).toString()
+                    if (text.isNotBlank()) {
+                        val latest = clipboardDao.getLatestEntry()
+                        if (latest?.content != text) {
+                            val type = classifier.classify(text)
+                            val entry = ClipboardEntry(
+                                content = text,
+                                timestamp = System.currentTimeMillis(),
+                                type = type
+                            )
+                            clipboardDao.insert(entry)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun ensureServiceRunning() {
