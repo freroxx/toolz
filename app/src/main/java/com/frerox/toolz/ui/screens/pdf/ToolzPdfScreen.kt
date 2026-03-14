@@ -138,6 +138,8 @@ fun ToolzPdfScreen(
                     Column {
                         if (activeTab?.lastTool == PdfToolMode.TEXT_SELECT) {
                             TextSelectToolbar(
+                                currentLanguage = activeTab.ocrLanguage,
+                                onLanguageSelect = { viewModel.setOcrLanguage(it) },
                                 onViewFullText = { showOcrResult = true },
                                 onResetOcr = { viewModel.resetOcr() },
                                 isAmoled = isAmoled
@@ -970,10 +972,14 @@ private fun ViewerTopBar(
 
 @Composable
 private fun TextSelectToolbar(
+    currentLanguage: OcrLanguage,
+    onLanguageSelect: (OcrLanguage) -> Unit,
     onViewFullText: () -> Unit,
     onResetOcr: () -> Unit,
     isAmoled: Boolean
 ) {
+    var showLanguageMenu by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         color = if (isAmoled) Color(0xFF1A1A1A).copy(alpha = 0.9f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
@@ -985,12 +991,42 @@ private fun TextSelectToolbar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box {
+                TextButton(onClick = { showLanguageMenu = true }) {
+                    Icon(Icons.Rounded.Language, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(currentLanguage.displayName.split(" ").first(), fontWeight = FontWeight.Black)
+                }
+                DropdownMenu(
+                    expanded = showLanguageMenu,
+                    onDismissRequest = { showLanguageMenu = false },
+                    modifier = Modifier.background(if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                ) {
+                    OcrLanguage.entries.forEach { lang ->
+                        DropdownMenuItem(
+                            text = { Text(lang.displayName, style = MaterialTheme.typography.bodyMedium) },
+                            onClick = {
+                                onLanguageSelect(lang)
+                                showLanguageMenu = false
+                            },
+                            leadingIcon = {
+                                if (lang == currentLanguage) Icon(Icons.Rounded.Check, null)
+                            }
+                        )
+                    }
+                }
+            }
+
+            VerticalDivider(modifier = Modifier.height(24.dp).width(1.dp), color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            
             TextButton(onClick = onViewFullText) {
                 Icon(Icons.AutoMirrored.Rounded.Article, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Show Full Text", fontWeight = FontWeight.Black)
+                Text("Full Text", fontWeight = FontWeight.Black)
             }
+            
             VerticalDivider(modifier = Modifier.height(24.dp).width(1.dp), color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            
             TextButton(onClick = onResetOcr) {
                 Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))

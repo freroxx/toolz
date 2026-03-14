@@ -35,6 +35,7 @@ class SettingsRepository @Inject constructor(
     private val HIDDEN_NOTIFICATION_APPS = stringSetPreferencesKey("hidden_notification_apps")
     private val CUSTOM_NOTIFICATION_CATEGORIES = stringSetPreferencesKey("custom_notification_categories")
     private val APP_CATEGORY_MAPPINGS = stringSetPreferencesKey("app_category_mappings") // List of "package:category"
+    private val APP_NAME_MAPPINGS = stringSetPreferencesKey("app_name_mappings") // List of "package:customName"
     
     // Widget Design
     private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
@@ -106,6 +107,12 @@ class SettingsRepository @Inject constructor(
             parts[0] to parts.getOrElse(1) { "General" }
         } ?: emptyMap()
     }
+    val appNameMappings: Flow<Map<String, String>> = dataStore.data.map { pref ->
+        pref[APP_NAME_MAPPINGS]?.associate {
+            val idx = it.indexOf(":")
+            if (idx > 0) it.substring(0, idx) to it.substring(idx + 1) else it to it
+        } ?: emptyMap()
+    }
 
     // Widget Flows
     val widgetBackgroundColor: Flow<Int> = dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
@@ -173,6 +180,13 @@ class SettingsRepository @Inject constructor(
             val current = pref[APP_CATEGORY_MAPPINGS] ?: emptySet()
             val filtered = current.filterNot { it.startsWith("$packageName:") }.toSet()
             pref[APP_CATEGORY_MAPPINGS] = filtered + "$packageName:$category"
+        }
+    }
+    suspend fun setAppNameMapping(packageName: String, customName: String) {
+        dataStore.edit { pref ->
+            val current = pref[APP_NAME_MAPPINGS] ?: emptySet()
+            val filtered = current.filterNot { it.startsWith("$packageName:") }.toSet()
+            pref[APP_NAME_MAPPINGS] = filtered + "$packageName:$customName"
         }
     }
 

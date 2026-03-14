@@ -89,13 +89,20 @@ fun ToolzTheme(
                 onSecondaryContainer = if (darkTheme) Color.White else secondary,
                 outline = primary.copy(alpha = 0.5f),
                 outlineVariant = secondary.copy(alpha = 0.3f),
-                surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f)
+                surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f),
+                onSurface = if (darkTheme) Color.White else Color.Black,
+                onBackground = if (darkTheme) Color.White else Color.Black,
+                onSurfaceVariant = if (darkTheme) Color.White.copy(alpha = 0.8f) else Color.Black.copy(alpha = 0.8f)
             )
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            dynamic.copy(
+                onSurface = if (darkTheme) Color.White else dynamic.onSurface,
+                onBackground = if (darkTheme) Color.White else dynamic.onBackground
+            )
         }
-        darkTheme -> DarkColorScheme
+        darkTheme -> DarkColorScheme.copy(onSurface = Color.White, onBackground = Color.White)
         else -> LightColorScheme
     }
 

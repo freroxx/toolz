@@ -42,13 +42,18 @@ class FocusFlowViewModel @Inject constructor(
     private val userMappings = settingsRepository.appCategoryMappings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(_usageStats, _appLimits, userMappings) { stats, limits, mappings ->
+    private val appNameMappings = settingsRepository.appNameMappings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(_usageStats, _appLimits, userMappings, appNameMappings) { stats, limits, mappings, nameMap ->
         stats.map { stat ->
             val limit = limits.find { it.packageName == stat.packageName }
             val mappedCategory = mappings[stat.packageName]?.let { 
                 if (it == "Productive") AppCategory.TOOLZ else AppCategory.DISTRACTION 
             }
+            val customName = nameMap[stat.packageName]
             stat.copy(
+                appName = customName ?: stat.appName,
                 limitMillis = limit?.limitMillis,
                 category = mappedCategory ?: guessCategory(stat.packageName)
             )
@@ -83,35 +88,28 @@ class FocusFlowViewModel @Inject constructor(
             val statsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val calendar = Calendar.getInstance()
             
-            val startTime = if (_isWeekly.value) {
+            val startTime: Long
+            val endTime = System.currentTimeMillis()
+            
+            if (_isWeekly.value) {
                 calendar.set(Calendar.DAY_OF_WEEK, calendar.firstDayOfWeek)
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
                 calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
+                startTime = calendar.timeInMillis
             } else {
+                // Today: from midnight to now
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
                 calendar.set(Calendar.MILLISECOND, 0)
-                calendar.timeInMillis
-            }
-            
-            val endTime = if (_isWeekly.value) {
-                System.currentTimeMillis()
-            } else {
-                val endCal = Calendar.getInstance()
-                endCal.set(Calendar.HOUR_OF_DAY, 23)
-                endCal.set(Calendar.MINUTE, 59)
-                endCal.set(Calendar.SECOND, 59)
-                endCal.set(Calendar.MILLISECOND, 999)
-                endCal.timeInMillis
+                startTime = calendar.timeInMillis
             }
 
             val stats = withContext(Dispatchers.IO) {
                 statsManager.queryUsageStats(
-                    if (_isWeekly.value) UsageStatsManager.INTERVAL_WEEKLY else UsageStatsManager.INTERVAL_DAILY,
+                    UsageStatsManager.INTERVAL_BEST,
                     startTime, 
                     endTime
                 )
@@ -119,20 +117,35 @@ class FocusFlowViewModel @Inject constructor(
             
             val pm = context.packageManager
 
-            val aggregatedStats = stats.groupBy { it.packageName }.mapValues { entry ->
-                entry.value.sumOf { it.totalTimeInForeground }
-            }
+            // Aggregate by package and compute time within the requested window
+            val aggregatedStats = stats
+                .filter { it.totalTimeInForeground > 0 }
+                .groupBy { it.packageName }
+                .mapValues { entry ->
+                    entry.value.sumOf { it.totalTimeInForeground }
+                }
 
             val usageList = withContext(Dispatchers.Default) {
-                aggregatedStats.filter { it.value >= 60000 }.map { (packageName, time) ->
+                aggregatedStats.filter { it.value >= 60000 }.mapNotNull { (packageName, time) ->
                     val appInfo = try {
                         pm.getApplicationInfo(packageName, 0)
                     } catch (e: PackageManager.NameNotFoundException) {
                         null
                     }
+                    
+                    // Skip system packages without a launcher icon
+                    if (appInfo == null) return@mapNotNull null
 
-                    val appName = appInfo?.let { pm.getApplicationLabel(it).toString() } ?: packageName
-                    val icon = appInfo?.loadIcon(pm)
+                    val appName = try {
+                        pm.getApplicationLabel(appInfo).toString()
+                    } catch (_: Exception) {
+                        packageName
+                    }
+                    val icon = try {
+                        appInfo.loadIcon(pm)
+                    } catch (_: Exception) {
+                        null
+                    }
                     
                     AppUsageInfo(
                         packageName = packageName,
@@ -168,6 +181,12 @@ class FocusFlowViewModel @Inject constructor(
         viewModelScope.launch {
             val category = if (isProductive) "Productive" else "Distraction"
             settingsRepository.setAppCategoryMapping(packageName, category)
+        }
+    }
+
+    fun renameApp(packageName: String, customName: String) {
+        viewModelScope.launch {
+            settingsRepository.setAppNameMapping(packageName, customName)
         }
     }
 

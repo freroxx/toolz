@@ -1,6 +1,8 @@
 package com.frerox.toolz.ui.screens.clipboard
 
 import android.app.Application
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,8 +31,10 @@ class ClipboardViewModel @Inject constructor(
     val entries: StateFlow<List<ClipboardEntry>> = clipboardDao.getAllEntries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _isServiceRunning = MutableStateFlow(false)
-    val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
+    init {
+        // Always start the clipboard service automatically
+        ensureServiceRunning()
+    }
 
     fun groupedEntries(allEntries: List<ClipboardEntry>): List<ClipboardGroup> {
         val pinned = allEntries.filter { it.isPinned }
@@ -69,15 +73,12 @@ class ClipboardViewModel @Inject constructor(
         viewModelScope.launch { clipboardDao.clearAllUnpinned() }
     }
 
-    fun startService() {
-        val intent = Intent(application, ClipboardService::class.java)
-        application.startForegroundService(intent)
-        _isServiceRunning.value = true
-    }
-
-    fun stopService() {
-        val intent = Intent(application, ClipboardService::class.java)
-        application.stopService(intent)
-        _isServiceRunning.value = false
+    private fun ensureServiceRunning() {
+        try {
+            val intent = Intent(application, ClipboardService::class.java)
+            application.startForegroundService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

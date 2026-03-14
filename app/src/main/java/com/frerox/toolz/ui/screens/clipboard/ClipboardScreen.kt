@@ -56,7 +56,6 @@ fun ClipboardScreen(
     onBack: () -> Unit
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
-    val isServiceRunning by viewModel.isServiceRunning.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val groups = remember(entries) { viewModel.groupedEntries(entries) }
@@ -91,27 +90,6 @@ fun ClipboardScreen(
                             }
                         },
                         actions = {
-                            // Service toggle
-                            IconButton(
-                                onClick = {
-                                    if (isServiceRunning) viewModel.stopService()
-                                    else viewModel.startService()
-                                },
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        if (isServiceRunning) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                    )
-                            ) {
-                                Icon(
-                                    if (isServiceRunning) Icons.Rounded.SensorsOff else Icons.Rounded.Sensors,
-                                    contentDescription = "Toggle Service",
-                                    tint = if (isServiceRunning) MaterialTheme.colorScheme.primary
-                                           else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
                             // Clear all
                             if (entries.isNotEmpty()) {
                                 IconButton(
@@ -221,7 +199,7 @@ private fun EmptyClipboardState() {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Enable the monitor to start\ncapturing copied content",
+                "Copy anything and it shows here",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center

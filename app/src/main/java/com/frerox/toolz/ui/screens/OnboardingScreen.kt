@@ -114,7 +114,8 @@ fun WelcomeStep(onNext: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(32.dp)
+            .statusBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -143,7 +144,7 @@ fun WelcomeStep(onNext: () -> Unit) {
             }
         }
         
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
         
         Text(
             text = "Toolz Precision",
@@ -153,10 +154,10 @@ fun WelcomeStep(onNext: () -> Unit) {
             letterSpacing = (-1.5).sp
         )
         
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
         
         Text(
-            text = "The ultimate hardware-focused private toolkit for Android. Everything you need, unified in one engine.",
+            text = "30+ precision tools. One engine.\nPrivate, offline, and built for your hardware.",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
@@ -164,24 +165,36 @@ fun WelcomeStep(onNext: () -> Unit) {
             lineHeight = 24.sp
         )
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(36.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            WelcomeFeature(Icons.Rounded.Lock, "SAFE & PRIVATE", Modifier.weight(1f))
-            WelcomeFeature(Icons.Rounded.WifiOff, "OFFLINE FIRST", Modifier.weight(1f))
+        // Feature highlights grid — 4 pillars
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                WelcomeFeature(Icons.Rounded.Lock, "SAFE & PRIVATE", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.WifiOff, "OFFLINE FIRST", Modifier.weight(1f))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                WelcomeFeature(Icons.Rounded.Speed, "HARDWARE", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.AutoAwesome, "AI POWERED", Modifier.weight(1f))
+            }
         }
         
-        Spacer(Modifier.height(56.dp))
+        Spacer(Modifier.height(48.dp))
         
         Button(
             onClick = onNext,
             modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
             shape = RoundedCornerShape(20.dp)
         ) {
-            Text("INITIALIZE SETUP", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Text("GET STARTED", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -416,18 +429,27 @@ fun NameStep(
     onNameChange: (String) -> Unit,
     onComplete: () -> Unit
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "nameGlow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glow"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(32.dp)
+            .statusBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
             modifier = Modifier.size(100.dp),
             shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = glowAlpha),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
@@ -437,7 +459,7 @@ fun NameStep(
         Spacer(Modifier.height(40.dp))
         
         Text(
-            text = "Welcome Aboard",
+            text = "Who's Using Toolz?",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center
@@ -446,7 +468,7 @@ fun NameStep(
         Spacer(Modifier.height(12.dp))
         
         Text(
-            text = "How should Toolz address you?",
+            text = "Personalize your experience",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             fontWeight = FontWeight.Medium
@@ -457,7 +479,7 @@ fun NameStep(
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
-            placeholder = { Text("Enter your name") },
+            placeholder = { Text("Your name") },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
             singleLine = true,
@@ -474,10 +496,22 @@ fun NameStep(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 focusedContainerColor = MaterialTheme.colorScheme.surface
-            )
+            ),
+            leadingIcon = {
+                Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+            }
         )
         
-        Spacer(Modifier.height(56.dp))
+        Spacer(Modifier.height(16.dp))
+        
+        // Skip option
+        AnimatedVisibility(visible = name.isBlank()) {
+            TextButton(onClick = onComplete) {
+                Text("SKIP THIS STEP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+            }
+        }
+        
+        Spacer(Modifier.height(40.dp))
         
         Button(
             onClick = onComplete,
@@ -485,7 +519,9 @@ fun NameStep(
             modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
             shape = RoundedCornerShape(20.dp)
         ) {
-            Text("FINALIZE CONFIGURATION", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Text("LAUNCH TOOLZ", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Rounded.Rocket, null, modifier = Modifier.size(20.dp))
         }
     }
 }

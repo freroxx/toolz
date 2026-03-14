@@ -100,6 +100,10 @@ dependencies {
     implementation(libs.material)
     implementation(libs.barcode.scanning)
     implementation(libs.mlkit.text.recognition)
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation(libs.exp4j)
     
     // WorkManager
