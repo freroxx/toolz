@@ -72,6 +72,11 @@ class SettingsRepository @Inject constructor(
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
     private val LAST_TIMER_SECONDS = intPreferencesKey("last_timer_seconds")
 
+    // Update System
+    private val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
+    private val DOWNLOADED_APK_PATH = stringPreferencesKey("downloaded_apk_path")
+    private val AUTO_UPDATE_ENABLED = booleanPreferencesKey("auto_update_enabled")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -143,6 +148,10 @@ class SettingsRepository @Inject constructor(
 
     val lastTimerMinutes: Flow<Int> = dataStore.data.map { it[LAST_TIMER_MINUTES] ?: 0 }
     val lastTimerSeconds: Flow<Int> = dataStore.data.map { it[LAST_TIMER_SECONDS] ?: 0 }
+
+    val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
+    val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
+    val autoUpdateEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_UPDATE_ENABLED] ?: false }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -223,6 +232,14 @@ class SettingsRepository @Inject constructor(
             it[LAST_TIMER_SECONDS] = seconds
         }
     }
+
+    suspend fun setLastUpdateCheck(timestamp: Long) { dataStore.edit { it[LAST_UPDATE_CHECK] = timestamp } }
+    suspend fun setDownloadedApkPath(path: String?) {
+        dataStore.edit {
+            if (path == null) it.remove(DOWNLOADED_APK_PATH) else it[DOWNLOADED_APK_PATH] = path
+        }
+    }
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) { dataStore.edit { it[AUTO_UPDATE_ENABLED] = enabled } }
     
     suspend fun resetOnboarding() {
         dataStore.edit {
