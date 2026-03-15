@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -73,6 +74,7 @@ import com.frerox.toolz.ui.components.SquigglySlider
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.delay
 import java.util.*
 import kotlin.math.PI
 import kotlin.math.sin
@@ -478,26 +480,38 @@ fun TrackList(tracks: List<MusicTrack>, state: MusicUiState, viewModel: MusicPla
                 }
             }
         } else {
-            items(tracks, key = { it.uri }) { track ->
-                val isSelected = state.selectedTracks.contains(track.uri)
-                TrackItem(
-                    track = track,
-                    isCurrent = track.uri == state.currentTrack?.uri,
-                    isSelected = isSelected,
-                    isSelectionMode = state.isSelectionMode,
-                    onClick = {
-                        if (state.isSelectionMode) {
-                            viewModel.toggleTrackSelection(track.uri)
-                        } else {
-                            viewModel.playTrack(track, tracks)
-                        }
-                    },
-                    onLongClick = { viewModel.toggleTrackSelection(track.uri) },
-                    onDelete = { viewModel.deleteTrack(track) },
-                    onAddToPlaylist = { playlist: Playlist -> viewModel.addTrackToPlaylist(playlist, track) },
-                    onToggleFavorite = { viewModel.toggleFavorite(track) },
-                    playlists = state.playlists
-                )
+            itemsIndexed(tracks, key = { _, track -> track.uri }) { index, track ->
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    delay(index * 15L)
+                    visible = true
+                }
+                
+                AnimatedVisibility(
+                    visible = visible,
+                    enter = fadeIn() + slideInVertically { it / 2 },
+                    modifier = Modifier.animateItem()
+                ) {
+                    val isSelected = state.selectedTracks.contains(track.uri)
+                    TrackItem(
+                        track = track,
+                        isCurrent = track.uri == state.currentTrack?.uri,
+                        isSelected = isSelected,
+                        isSelectionMode = state.isSelectionMode,
+                        onClick = {
+                            if (state.isSelectionMode) {
+                                viewModel.toggleTrackSelection(track.uri)
+                            } else {
+                                viewModel.playTrack(track, tracks)
+                            }
+                        },
+                        onLongClick = { viewModel.toggleTrackSelection(track.uri) },
+                        onDelete = { viewModel.deleteTrack(track) },
+                        onAddToPlaylist = { playlist: Playlist -> viewModel.addTrackToPlaylist(playlist, track) },
+                        onToggleFavorite = { viewModel.toggleFavorite(track) },
+                        playlists = state.playlists
+                    )
+                }
             }
         }
     }
@@ -1597,6 +1611,7 @@ fun TrackItem(
                 TextButton(onClick = { showPlaylistPicker = false }) { Text(text = "CANCEL", fontWeight = FontWeight.Black) }
             },
             shape = RoundedCornerShape(40.dp)
+            ,containerColor = MaterialTheme.colorScheme.surface
         )
     }
 }
@@ -1789,6 +1804,7 @@ fun MultiSelectPlaylistPicker(
             TextButton(onClick = { onDismiss() }) { Text(text = "CANCEL", fontWeight = FontWeight.Black) }
         },
         shape = RoundedCornerShape(40.dp)
+        ,containerColor = MaterialTheme.colorScheme.surface
     )
 }
 

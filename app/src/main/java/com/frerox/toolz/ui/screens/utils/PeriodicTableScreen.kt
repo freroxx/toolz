@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,7 +87,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
             
             for (step in 1..10) {
                 loadingProgress = startProgress + (endProgress - startProgress) * (step / 10f)
-                delay(30)
+                delay(20)
             }
         }
         isLoading = false
@@ -234,9 +235,31 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(filteredElements, key = { it.atomicNumber }) { element ->
+                    itemsIndexed(filteredElements, key = { _, element -> element.atomicNumber }) { index, element ->
+                        var itemVisible by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            delay(index * 10L) // Staggered entry animation
+                            itemVisible = true
+                        }
+                        
+                        val scale by animateFloatAsState(
+                            targetValue = if (itemVisible) 1f else 0.5f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                            label = "scale"
+                        )
+                        val alpha by animateFloatAsState(
+                            targetValue = if (itemVisible) 1f else 0f,
+                            animationSpec = tween(400),
+                            label = "alpha"
+                        )
+
                         ModernElementCard(
-                            element = element
+                            element = element,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                this.alpha = alpha
+                            }
                         ) {
                             selectedElement = element
                         }
@@ -255,9 +278,9 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun ModernElementCard(element: Element, onClick: () -> Unit) {
+fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(24.dp),

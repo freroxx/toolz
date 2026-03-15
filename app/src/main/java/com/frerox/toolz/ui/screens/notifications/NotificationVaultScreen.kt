@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -58,6 +59,7 @@ import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -86,7 +88,18 @@ fun NotificationVaultScreen(
                 title = { 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("NOTIFICATION VAULT", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
-                        Text("ANTI-RECALL ENGINE ACTIVE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                            val alpha by infiniteTransition.animateFloat(
+                                initialValue = 0.4f,
+                                targetValue = 1f,
+                                animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                                label = "alpha"
+                            )
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ANTI-RECALL ENGINE ACTIVE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
                     }
                 },
                 navigationIcon = {
@@ -135,7 +148,6 @@ fun NotificationVaultScreen(
                     EmptyVaultState(searchQuery.isNotEmpty())
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        val surface = MaterialTheme.colorScheme.surface
                         LazyColumn(
                             modifier = Modifier.fillMaxSize()
                                 .fadingEdge(
@@ -150,9 +162,19 @@ fun NotificationVaultScreen(
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(notifications, key = { it.id }) { notification ->
+                            itemsIndexed(notifications, key = { _, item -> item.id }) { index, notification ->
+                                var itemVisible by remember { mutableStateOf(false) }
+                                LaunchedEffect(Unit) {
+                                    delay(index * 20L)
+                                    itemVisible = true
+                                }
+
                                 SwipeToDeleteContainer(
-                                    onDelete = { viewModel.deleteNotification(notification.id) }
+                                    onDelete = { viewModel.deleteNotification(notification.id) },
+                                    modifier = Modifier.graphicsLayer {
+                                        alpha = if (itemVisible) 1f else 0f
+                                        translationY = if (itemVisible) 0f else 20f
+                                    }.animateContentSize()
                                 ) {
                                     NotificationVaultCard(
                                         notification = notification,
@@ -580,6 +602,7 @@ fun VaultSettingsDialog(
 @Composable
 fun SwipeToDeleteContainer(
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -593,11 +616,10 @@ fun SwipeToDeleteContainer(
         }
     )
 
-    val isDismissing = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
-    
     // Simple, tight slide-to-delete animation
     SwipeToDismissBox(
         state = dismissState,
+        modifier = modifier,
         backgroundContent = {
             val color by animateColorAsState(
                 when (dismissState.targetValue) {

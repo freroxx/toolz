@@ -67,6 +67,9 @@ fun SettingsScreen(
     val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
     val userName by viewModel.userName.collectAsState(initial = "")
 
+    val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
+    val musicAudioFocus by viewModel.musicAudioFocus.collectAsState(initial = true)
+
     var showResetDialog by remember { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
 
@@ -281,6 +284,25 @@ fun SettingsScreen(
                                 colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                             )
                         }
+                    }
+                }
+
+                if (matches(searchQuery, "music", "shake", "skip", "audio focus")) {
+                    SettingsSection(title = "MEDIA ENGINE") {
+                        SettingsToggleItem(
+                            title = "Shake to Skip",
+                            subtitle = "Skip track with physical gesture",
+                            icon = Icons.Rounded.PhonelinkRing,
+                            checked = musicShakeToSkip,
+                            onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
+                        )
+                        SettingsToggleItem(
+                            title = "Audio Focus Management",
+                            subtitle = "Auto-pause when other apps play sound",
+                            icon = Icons.Rounded.Hearing,
+                            checked = musicAudioFocus,
+                            onCheckedChange = { viewModel.setMusicAudioFocus(it) }
+                        )
                     }
                 }
 

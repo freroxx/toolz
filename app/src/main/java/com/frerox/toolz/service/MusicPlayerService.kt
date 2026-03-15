@@ -3,9 +3,14 @@ package com.frerox.toolz.service
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.widget.RemoteViews
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -25,18 +30,28 @@ import com.frerox.toolz.widget.MusicWidgetProvider
 import com.frerox.toolz.widget.WidgetUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
+import kotlin.math.sqrt
 
 @UnstableApi
 @AndroidEntryPoint
-class MusicPlayerService : MediaSessionService() {
+class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var widgetUpdateJob: Job? = null
     private var currentRotation = 0f
     
+    private var sensorManager: SensorManager? = null
+    private var acceleration = 0f
+    private var currentAcceleration = 0f
+    private var lastAcceleration = 0f
+    private val SHAKE_THRESHOLD = 12f
+    private var lastShakeTime: Long = 0
+    private var isShakeRegistered = false
+
     @Inject
     lateinit var player: ExoPlayer
 
@@ -47,6 +62,11 @@ class MusicPlayerService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        acceleration = 10f
+        currentAcceleration = SensorManager.GRAVITY_EARTH
+        lastAcceleration = SensorManager.GRAVITY_EARTH
+
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -67,16 +87,77 @@ class MusicPlayerService : MediaSessionService() {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateWidget()
-                if (isPlaying) startWidgetTimer() else stopWidgetTimer()
+                if (isPlaying) {
+                    startWidgetTimer()
+                    observeShakeSetting()
+                } else {
+                    stopWidgetTimer()
+                    unregisterShakeListener()
+                }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateWidget()
             }
         })
         
-        if (player.isPlaying) startWidgetTimer()
+        if (player.isPlaying) {
+            startWidgetTimer()
+            observeShakeSetting()
+        }
         updateWidget()
     }
+
+    private fun observeShakeSetting() {
+        serviceScope.launch {
+            settingsRepository.musicShakeToSkip.collectLatest { enabled ->
+                if (enabled && player.isPlaying) {
+                    registerShakeListener()
+                } else {
+                    unregisterShakeListener()
+                }
+            }
+        }
+    }
+
+    private fun registerShakeListener() {
+        if (isShakeRegistered) return
+        val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (sensor != null) {
+            sensorManager?.registerListener(
+                this,
+                sensor,
+                SensorManager.SENSOR_DELAY_UI
+            )
+            isShakeRegistered = true
+        }
+    }
+
+    private fun unregisterShakeListener() {
+        sensorManager?.unregisterListener(this)
+        isShakeRegistered = false
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        val x = event.values[0]
+        val y = event.values[1]
+        val z = event.values[2]
+        lastAcceleration = currentAcceleration
+        currentAcceleration = sqrt(x * x + y * y + z * z)
+        val delta = currentAcceleration - lastAcceleration
+        acceleration = acceleration * 0.9f + delta
+
+        if (acceleration > SHAKE_THRESHOLD) {
+            val now = System.currentTimeMillis()
+            if (now - lastShakeTime > 1000) {
+                lastShakeTime = now
+                if (player.hasNextMediaItem()) {
+                    player.seekToNext()
+                }
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -225,6 +306,7 @@ class MusicPlayerService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
+        unregisterShakeListener()
         serviceScope.cancel()
         mediaSession?.run {
             release()

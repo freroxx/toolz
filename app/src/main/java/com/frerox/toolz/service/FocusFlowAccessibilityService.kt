@@ -28,61 +28,92 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var overlayView: View? = null
     private var isOverlayShowing = false
     private var currentPackage: String? = null
+    private var overlayShowingForPackage: String? = null
+    
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var checkJob: Job? = null
+    private var validationJob: Job? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val packageName = event.packageName?.toString() ?: return
-            
-            if (packageName == "com.frerox.toolz" || packageName == "com.android.systemui") {
-                hideOverlay()
-                currentPackage = null
-                return
-            }
-            
-            if (currentPackage != packageName) {
-                currentPackage = packageName
-                checkAppLimit(packageName)
-            }
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        
+        val packageName = event.packageName?.toString() ?: return
+        
+        // 1. Core Logic: If moving to Home or Toolz, kill the lock immediately.
+        if (packageName == "com.frerox.toolz" || isHomeApp(packageName)) {
+            if (isOverlayShowing) hideOverlay()
+            currentPackage = packageName
+            return
         }
+
+        // 2. Flicker Mitigation: 
+        // If the overlay is already blocking this specific package, ignore sub-window events 
+        // (keyboards, system UI transients, volume sliders) while we are in the locked app.
+        if (isOverlayShowing && (packageName == overlayShowingForPackage || 
+            packageName == "com.android.systemui" || 
+            packageName == "android" || 
+            packageName == "com.google.android.inputmethod.latin")) {
+            return
+        }
+
+        // 3. Update tracking state if package changed
+        if (currentPackage != packageName) {
+            currentPackage = packageName
+            checkAppLimit(packageName)
+        }
+    }
+
+    private fun isHomeApp(packageName: String): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
+        val res = packageManager.resolveActivity(intent, 0)
+        return res?.activityInfo?.packageName == packageName
     }
 
     override fun onCreate() {
         super.onCreate()
-        startPeriodicCheck()
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        startPeriodicValidation()
     }
 
-    private fun startPeriodicCheck() {
-        checkJob?.cancel()
-        checkJob = serviceScope.launch {
+    private fun startPeriodicValidation() {
+        validationJob?.cancel()
+        validationJob = serviceScope.launch {
             while (isActive) {
-                currentPackage?.let { checkAppLimit(it) }
-                delay(5000) // Check more frequently (every 5 seconds)
+                currentPackage?.let { pkg ->
+                    // Persistence Heartbeat: Ensure distraction apps stay locked even if events are missed
+                    if (pkg != "com.frerox.toolz" && !isHomeApp(pkg)) {
+                        validateAndLock(pkg)
+                    }
+                }
+                delay(1000) 
             }
         }
     }
 
-    private fun checkAppLimit(packageName: String) {
+    private fun validateAndLock(packageName: String) {
         serviceScope.launch {
             val limit = withContext(Dispatchers.IO) {
                 appLimitRepository.getLimitForApp(packageName)
             }
             
             if (limit != null && limit.isEnabled) {
-                val usageTime = withContext(Dispatchers.IO) {
-                    getTodayUsage(packageName)
-                }
-                
+                val usageTime = withContext(Dispatchers.IO) { getTodayUsage(packageName) }
                 if (usageTime >= limit.limitMillis) {
-                    showOverlay(packageName)
+                    if (!isOverlayShowing || overlayShowingForPackage != packageName) {
+                        showOverlay(packageName)
+                    }
                 } else {
-                    hideOverlay()
+                    // Usage is below limit (e.g. user increased limit or reset stats)
+                    if (overlayShowingForPackage == packageName) hideOverlay()
                 }
             } else {
-                hideOverlay()
+                // App is no longer limited
+                if (overlayShowingForPackage == packageName) hideOverlay()
             }
         }
+    }
+
+    private fun checkAppLimit(packageName: String) {
+        validateAndLock(packageName)
     }
 
     private fun getTodayUsage(packageName: String): Long {
@@ -100,20 +131,25 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun showOverlay(packageName: String) {
-        if (isOverlayShowing) return
+        if (isOverlayShowing && overlayShowingForPackage == packageName) return
 
         serviceScope.launch {
-            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            // Precise cleanup to avoid view leaks or double layering
+            if (isOverlayShowing) hideOverlay()
+
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 PixelFormat.TRANSLUCENT
             )
 
             val inflater = LayoutInflater.from(this@FocusFlowAccessibilityService)
-            overlayView = inflater.inflate(R.layout.layout_focus_lock, null)
+            val view = inflater.inflate(R.layout.layout_focus_lock, null)
             
             val pm = packageManager
             val appName = try {
@@ -123,21 +159,23 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 packageName
             }
 
-            overlayView?.findViewById<TextView>(R.id.tv_lock_message)?.text = 
-                "You've reached your daily limit for $appName.\nToolz suggests taking a break."
+            view.findViewById<TextView>(R.id.tv_lock_message)?.text = 
+                "Focus flow active for $appName. Toolz has secured your productivity session."
             
-            overlayView?.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
+            view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
                 val intent = Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_HOME)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(intent)
-                hideOverlay()
+                // Home detection in onAccessibilityEvent will handle the hideOverlay()
             }
 
             try {
-                windowManager?.addView(overlayView, params)
+                windowManager?.addView(view, params)
+                overlayView = view
                 isOverlayShowing = true
+                overlayShowingForPackage = packageName
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -149,16 +187,18 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             try {
                 windowManager?.removeView(overlayView)
             } catch (e: Exception) {
-                e.printStackTrace()
+                // System might have already detached the view
             }
             overlayView = null
             isOverlayShowing = false
+            overlayShowingForPackage = null
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        checkJob?.cancel()
+        hideOverlay()
+        validationJob?.cancel()
         serviceScope.cancel()
     }
 

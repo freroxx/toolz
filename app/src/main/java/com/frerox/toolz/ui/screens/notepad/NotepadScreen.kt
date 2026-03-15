@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridItemScope
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -351,8 +350,8 @@ fun NotepadScreen(
                     onDismiss = { showEditor = false },
                     onSave = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName ->
                         val updated = noteToEdit!!.copy(
-                            title = title, 
-                            content = content, 
+                            title = title,
+                            content = content,
                             color = color,
                             fontStyle = fontStyle,
                             fontSize = fontSize,
@@ -371,7 +370,7 @@ fun NotepadScreen(
             }
         }
     }
-}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1135,17 +1134,22 @@ fun NoteEditorDialog(
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp).width(120.dp)
+                                modifier = Modifier.padding(horizontal = 12.dp).width(160.dp)
                             ) {
                                 Icon(Icons.Rounded.TextFields, null, tint = onBgColor, modifier = Modifier.size(16.dp))
-                                com.frerox.toolz.ui.components.SquigglySlider(
+                                Spacer(Modifier.width(8.dp))
+                                Slider(
                                     value = fontSize,
                                     onValueChange = { fontSize = it },
                                     valueRange = 12f..48f,
                                     modifier = Modifier.weight(1f),
-                                    activeColor = onBgColor,
-                                    isPlaying = true
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = onBgColor,
+                                        activeTrackColor = onBgColor,
+                                        inactiveTrackColor = onBgColor.copy(alpha = 0.2f)
+                                    )
                                 )
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     "${fontSize.toInt()}", 
                                     color = onBgColor, 

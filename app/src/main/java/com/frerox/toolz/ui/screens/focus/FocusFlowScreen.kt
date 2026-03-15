@@ -112,6 +112,14 @@ fun FocusFlowScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(
+                        onClick = { viewModel.refreshStats() },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
@@ -323,7 +331,8 @@ fun FocusFlowScreen(
                     EnhancedUsageItem(
                         info = info, 
                         onClick = { selectedAppForSettings = info },
-                        onLongClick = { appToRename = info }
+                        onLongClick = { appToRename = info },
+                        onQuickLimit = { viewModel.setAppLimit(info.packageName, it) }
                     )
                 }
                 
@@ -766,7 +775,12 @@ fun EnhancedProductivityHeader(score: Int) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun EnhancedUsageItem(
+    info: AppUsageInfo, 
+    onClick: () -> Unit, 
+    onLongClick: () -> Unit,
+    onQuickLimit: (Long) -> Unit
+) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
     val scale by animateFloatAsState(if (visible) 1f else 0.9f, spring(Spring.DampingRatioMediumBouncy), label = "")
@@ -913,6 +927,21 @@ fun EnhancedUsageItem(info: AppUsageInfo, onClick: () -> Unit, onLongClick: () -
                                 )
                             )
                     )
+                }
+            } else if (info.category == AppCategory.DISTRACTION) {
+                // Quick add limit button for distractions
+                Surface(
+                    onClick = { onQuickLimit(30) },
+                    modifier = Modifier.padding(bottom = 12.dp, start = 16.dp, end = 16.dp).height(32.dp).fillMaxWidth().alpha(0.8f),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                ) {
+                    Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Timer, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Limit to 30m", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
