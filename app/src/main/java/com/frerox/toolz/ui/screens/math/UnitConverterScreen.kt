@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -33,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,12 +99,25 @@ fun UnitConverterScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     userScrollEnabled = false
                 ) {
-                    items(ConversionType.entries) { type ->
+                    itemsIndexed(ConversionType.entries) { index, type ->
                         val isSelected = state.type == type
+                        var itemVisible by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            delay(index * 20L)
+                            itemVisible = true
+                        }
                         
+                        val scale by animateFloatAsState(if (itemVisible) 1f else 0.8f)
+                        val alpha by animateFloatAsState(if (itemVisible) 1f else 0f)
+
                         Surface(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    this.alpha = alpha
+                                }
                                 .bouncyClick { viewModel.onTypeChange(type) },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,

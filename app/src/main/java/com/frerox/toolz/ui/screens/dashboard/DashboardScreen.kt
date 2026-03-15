@@ -10,15 +10,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
-import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
 import coil3.compose.AsyncImage
@@ -56,6 +56,7 @@ import com.frerox.toolz.ui.screens.sensors.RecordingState
 import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
 import kotlinx.coroutines.delay
 import java.util.*
+import kotlin.math.absoluteValue
 
 data class ToolCategory(
     val title: String,
@@ -97,7 +98,6 @@ fun DashboardScreen(
     val contentAlpha by animateFloatAsState(if (visible) 1f else 0f, tween(1000, delayMillis = 200), label = "")
     val contentScale by animateFloatAsState(if (visible) 1f else 0.98f, spring(Spring.DampingRatioLowBouncy), label = "")
 
-    val tools = remember { getCategories().flatMap { it.items } }
     val context = LocalContext.current
     val activity = context as? ComponentActivity
     
@@ -208,8 +208,20 @@ fun DashboardScreen(
                     contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 150.dp, top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(filteredTools, key = { it.route }) { tool ->
-                        ToolListItem(tool = tool, onClick = { onNavigate(tool.route) })
+                    itemsIndexed(filteredTools, key = { _, tool -> tool.route }) { index, tool ->
+                        var itemVisible by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            delay(index * 15L)
+                            itemVisible = true
+                        }
+                        
+                        AnimatedVisibility(
+                            visible = itemVisible,
+                            enter = fadeIn() + slideInHorizontally { -it / 4 },
+                            modifier = Modifier.animateItem()
+                        ) {
+                            ToolListItem(tool = tool, onClick = { onNavigate(tool.route) })
+                        }
                     }
                     if (filteredTools.isEmpty()) {
                         item { EmptySearchState(searchQuery) }
@@ -257,8 +269,33 @@ fun DashboardScreen(
                                 )
                             }
                         }
-                        items(category.items, key = { it.route + category.title }) { tool ->
-                            ImprovedToolCard(tool = tool, onClick = { onNavigate(tool.route) })
+                        itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { index, tool ->
+                            var itemVisible by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                delay(index * 20L)
+                                itemVisible = true
+                            }
+                            
+                            val scale by animateFloatAsState(
+                                targetValue = if (itemVisible) 1f else 0.8f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                label = ""
+                            )
+                            val alpha by animateFloatAsState(
+                                targetValue = if (itemVisible) 1f else 0f,
+                                animationSpec = tween(500),
+                                label = ""
+                            )
+
+                            ImprovedToolCard(
+                                tool = tool, 
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    this.alpha = alpha
+                                },
+                                onClick = { onNavigate(tool.route) }
+                            )
                         }
                     }
                     
@@ -278,7 +315,7 @@ fun DashboardScreen(
                 if (recorderState.isRecording) pages.add(PillPage.Recorder)
                 if (timerState.isRunning || timerState.remainingTime > 0) pages.add(PillPage.Timer)
                 if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) pages.add(PillPage.Stopwatch)
-                if (pomodoroState.isRunning || pomodoroTimeLeft(pomodoroState) > 0) pages.add(PillPage.Pomodoro)
+                if (pomodoroState.isRunning || (try { pomodoroState.remainingTime } catch(e: Exception) { 0L }) > 0) pages.add(PillPage.Pomodoro)
                 if (stepState.isEnabledInSettings) pages.add(PillPage.Steps) 
                 pages
             }
@@ -330,19 +367,19 @@ fun DashboardScreen(
                                     ).absoluteValue
                                     
                                     alpha = lerp(
-                                        start = 0.4f,
-                                        stop = 1f,
-                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                        0.4f,
+                                        1f,
+                                        1f - pageOffset.coerceIn(0f, 1f)
                                     )
                                     scaleX = lerp(
-                                        start = 0.9f,
-                                        stop = 1f,
-                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                        0.9f,
+                                        1f,
+                                        1f - pageOffset.coerceIn(0f, 1f)
                                     )
                                     scaleY = lerp(
-                                        start = 0.9f,
-                                        stop = 1f,
-                                        fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                                        0.9f,
+                                        1f,
+                                        1f - pageOffset.coerceIn(0f, 1f)
                                     )
                                 }
                                 .animateContentSize()
@@ -362,16 +399,6 @@ fun DashboardScreen(
         }
     }
 }
-
-private fun pomodoroTimeLeft(state: com.frerox.toolz.ui.screens.time.PomodoroState): Long {
-    return try { state.remainingTime } catch(e: Exception) { 0L }
-}
-
-private fun lerp(start: Float, stop: Float, fraction: Float): Float {
-    return (1 - fraction) * start + fraction * stop
-}
-
-private val Float.absoluteValue: Float get() = if (this < 0) -this else this
 
 @Composable
 fun ToolListItem(tool: ToolItem, onClick: () -> Unit) {
@@ -454,7 +481,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             val pinnedNotes = notes.filter { it.isPinned }
-            items(pinnedNotes.take(5)) { note ->
+            itemsIndexed(pinnedNotes.take(5), key = { _, note -> note.id }) { _, note ->
                 Surface(
                     modifier = Modifier
                         .width(160.dp)
@@ -632,7 +659,6 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { viewModel.togglePlayPause() }
                 ) {
                     Icon(
                         if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -647,7 +673,6 @@ fun MusicPill(state: com.frerox.toolz.ui.screens.media.MusicUiState, viewModel: 
                     modifier = Modifier
                         .size(44.dp)
                         .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f), CircleShape)
-                        .bouncyClick { viewModel.stop() }
                 ) {
                     Icon(
                         Icons.Rounded.Stop,
@@ -953,30 +978,11 @@ fun WelcomeHeader(
 }
 
 @Composable
-fun ImprovedToolCard(tool: ToolItem, onClick: () -> Unit) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    
-    val scale by animateFloatAsState(
-        targetValue = if (visible) 1f else 0.85f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "entranceScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(600),
-        label = "entranceAlpha"
-    )
-
+fun ImprovedToolCard(tool: ToolItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(130.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -1129,7 +1135,7 @@ private fun getCategories() = listOf(
         listOf(
             ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
             ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health"),
-            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
+            ToolItem("Tip Calc", Icons.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
             ToolItem("Ruler", Icons.Rounded.Straighten, Screen.Ruler.route, "Measure"),
             ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Decisions")
         )

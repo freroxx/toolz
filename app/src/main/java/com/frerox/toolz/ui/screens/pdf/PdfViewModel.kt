@@ -1,6 +1,5 @@
 package com.frerox.toolz.ui.screens.pdf
  
-import com.google.mlkit.vision.text.Text
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.LruCache
@@ -54,7 +53,8 @@ data class DocumentState(
     val searchResults: List<Int> = emptyList(),
     val isSearching: Boolean = false,
     val searchKeyword: String = "",
-    val showPages: Boolean = true
+    val showPages: Boolean = true,
+    val isThumbnailScrubberVisible: Boolean = true
 )
 
 @HiltViewModel
@@ -177,7 +177,6 @@ class PdfViewModel @Inject constructor(
             return
         }
 
-        // Set state immediately to reserve the viewer screen
         _uiState.value = PdfUiState.Viewer(uri)
         
         viewModelScope.launch {
@@ -220,6 +219,10 @@ class PdfViewModel @Inject constructor(
         _docState.update { it.copy(showPages = !it.showPages) }
     }
 
+    fun toggleThumbnailScrubber() {
+        _docState.update { it.copy(isThumbnailScrubberVisible = !it.isThumbnailScrubberVisible) }
+    }
+
     fun closeTab(tabId: String) {
         val tabs = _openTabs.value
         val removed = tabs.firstOrNull { it.id == tabId } ?: return
@@ -236,9 +239,10 @@ class PdfViewModel @Inject constructor(
     }
 
     fun updatePage(page: Int) {
-        if (_docState.value.currentPageIndex != page) {
-            _docState.update { it.copy(currentPageIndex = page) }
-            updateActiveTab { it.copy(page = page) }
+        val validPage = page.coerceIn(0, (_docState.value.totalPages - 1).coerceAtLeast(0))
+        if (_docState.value.currentPageIndex != validPage) {
+            _docState.update { it.copy(currentPageIndex = validPage) }
+            updateActiveTab { it.copy(page = validPage) }
         }
     }
 
@@ -257,7 +261,6 @@ class PdfViewModel @Inject constructor(
     fun setOcrLanguage(language: OcrLanguage) {
         val tab = _activeTab.value ?: return
         updateActiveTab { it.copy(ocrLanguage = language) }
-        // Rerun OCR if it's already extracted, or if the user is in TEXT_SELECT mode
         if (tab.lastTool == PdfToolMode.TEXT_SELECT) {
             runFullDocumentOcr(tab.copy(ocrLanguage = language))
         }
