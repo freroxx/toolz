@@ -40,6 +40,7 @@ import com.frerox.toolz.ui.screens.pdf.PdfViewModel
 import com.frerox.toolz.ui.screens.pdf.ToolzPdfScreen
 import com.frerox.toolz.ui.screens.sensors.*
 import com.frerox.toolz.ui.screens.settings.SettingsScreen
+import com.frerox.toolz.ui.screens.settings.UpdateScreen
 import com.frerox.toolz.ui.screens.time.*
 import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
@@ -48,6 +49,7 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.worker.NotificationCleanupWorker
+import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         
         scheduleCleanup()
+        scheduleUpdateCheck()
 
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
@@ -120,6 +123,9 @@ class MainActivity : AppCompatActivity() {
                                     navController.navigate(Screen.PdfReader.route)
                                 }
                             }
+                            if (intent?.getBooleanExtra("show_update", false) == true) {
+                                navController.navigate(Screen.Update.route)
+                            }
                         }
 
                         ToolzNavHost(navController, settingsRepository, pdfViewModel)
@@ -154,6 +160,23 @@ class MainActivity : AppCompatActivity() {
             "NotificationCleanup",
             ExistingPeriodicWorkPolicy.KEEP,
             cleanupRequest
+        )
+    }
+
+    private fun scheduleUpdateCheck() {
+        val updateCheckRequest = PeriodicWorkRequestBuilder<UpdateCheckWorker>(
+            24, TimeUnit.HOURS
+        ).setConstraints(
+            Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.UNMETERED)
+                .setRequiresBatteryNotLow(true)
+                .build()
+        ).build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "UpdateCheck",
+            ExistingPeriodicWorkPolicy.KEEP,
+            updateCheckRequest
         )
     }
 
@@ -219,10 +242,25 @@ fun ToolzNavHost(
             SettingsScreen(
                 viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
+                onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
+                }
+            )
+        }
+
+        composable(Screen.Update.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            UpdateScreen(
+                onBack = { navController.popBackStack() },
+                currentVersionName = packageInfo.versionName ?: "1.0.0",
+                currentVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    packageInfo.longVersionCode
+                } else {
+                    packageInfo.versionCode.toLong()
                 }
             )
         }

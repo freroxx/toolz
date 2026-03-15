@@ -4,6 +4,7 @@ sealed class Screen(val route: String) {
     object Loading : Screen("loading")
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
+    object Update : Screen("update")
     
     // Time & Productivity
     object Timer : Screen("timer")

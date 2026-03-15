@@ -41,6 +41,7 @@ import com.frerox.toolz.ui.components.fadingEdge
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
+    onNavigateToUpdate: () -> Unit,
     onResetOnboarding: () -> Unit
 ) {
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
@@ -447,7 +448,7 @@ fun SettingsScreen(
                     }
                 }
 
-                AboutSection()
+                AboutSection(onCheckUpdate = onNavigateToUpdate)
                 
                 Spacer(modifier = Modifier.height(64.dp))
             }
@@ -507,7 +508,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-fun AboutSection() {
+fun AboutSection(onCheckUpdate: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -549,6 +550,18 @@ fun AboutSection() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 fontWeight = FontWeight.Medium
             )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = onCheckUpdate,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("CHECK FOR UPDATES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+            }
             
             Spacer(modifier = Modifier.height(24.dp))
             
