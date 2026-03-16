@@ -1,7 +1,7 @@
 {
-  "versionCode": 2,
-  "versionName": "1.0.1",
-  "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.1/toolz-release.apk",
+  "versionCode": 3,
+  "versionName": "1.0.2",
+  "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.2/toolz-release.apk",
   "changelog": "Official BETA release",
-  "sha256": "ac63415c753a2f049857fd1ae76af32a75f7aa6a70fefda40331bbe6d3b261d1"
+  "sha256": "3cb2038def6338948fb83ca96934adba3dcd142747b50a785fe6d39c8fb6f845"
 }
