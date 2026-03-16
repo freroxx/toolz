@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.security.SecureRandom
 import javax.inject.Inject
-import kotlin.random.Random
 
 data class RandomGeneratorState(
     val randomNumber: String = "",
@@ -31,22 +31,24 @@ data class RandomGeneratorState(
 @HiltViewModel
 class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
 
+    private val secureRandom = SecureRandom()
     private val _uiState = MutableStateFlow(RandomGeneratorState())
     val uiState: StateFlow<RandomGeneratorState> = _uiState.asStateFlow()
 
     fun onMinChange(min: String) {
-        _uiState.update { it.copy(min = min.filter { c -> c.isDigit() }) }
+        _uiState.update { it.copy(min = min.filter { c -> c.isDigit() || c == '-' }) }
     }
 
     fun onMaxChange(max: String) {
-        _uiState.update { it.copy(max = max.filter { c -> c.isDigit() }) }
+        _uiState.update { it.copy(max = max.filter { c -> c.isDigit() || c == '-' }) }
     }
 
     fun generateNumber() {
-        val min = _uiState.value.min.toIntOrNull() ?: 1
-        val max = _uiState.value.max.toIntOrNull() ?: 100
+        val min = _uiState.value.min.toLongOrNull() ?: 1L
+        val max = _uiState.value.max.toLongOrNull() ?: 100L
         if (max >= min) {
-            val num = Random.nextInt(min, max + 1)
+            val range = max - min + 1
+            val num = min + (secureRandom.nextDouble() * range).toLong()
             _uiState.update { it.copy(randomNumber = num.toString()) }
         }
     }
@@ -65,26 +67,26 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
         val lower = "abcdefghijklmnopqrstuvwxyz"
         val upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         val numbers = "0123456789"
-        val symbols = if (_uiState.value.customSymbols.isNotEmpty()) _uiState.value.customSymbols else "!@#$%^&*"
+        val symbols = if (_uiState.value.customSymbols.isNotEmpty()) _uiState.value.customSymbols else "!@#$%^&*()_+-=[]{}|;:,.<>?"
         
         var charPool = ""
         val guaranteedChars = mutableListOf<Char>()
         
         if (_uiState.value.includeLower) {
             charPool += lower
-            guaranteedChars.add(lower[Random.nextInt(lower.length)])
+            guaranteedChars.add(lower[secureRandom.nextInt(lower.length)])
         }
         if (_uiState.value.includeUpper) {
             charPool += upper
-            guaranteedChars.add(upper[Random.nextInt(upper.length)])
+            guaranteedChars.add(upper[secureRandom.nextInt(upper.length)])
         }
         if (_uiState.value.includeNumbers) {
             charPool += numbers
-            guaranteedChars.add(numbers[Random.nextInt(numbers.length)])
+            guaranteedChars.add(numbers[secureRandom.nextInt(numbers.length)])
         }
         if (_uiState.value.includeSymbols && symbols.isNotEmpty()) {
             charPool += symbols
-            guaranteedChars.add(symbols[Random.nextInt(symbols.length)])
+            guaranteedChars.add(symbols[secureRandom.nextInt(symbols.length)])
         }
         
         if (charPool.isEmpty()) {
@@ -95,14 +97,15 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
         val length = _uiState.value.passwordLength.toInt()
         val pwdChars = mutableListOf<Char>()
         
-        for (i in 0 until length) {
-            if (i < guaranteedChars.size) {
-                pwdChars.add(guaranteedChars[i])
-            } else {
-                pwdChars.add(charPool[Random.nextInt(charPool.length)])
-            }
+        // Add guaranteed chars first
+        pwdChars.addAll(guaranteedChars.take(length))
+        
+        // Fill the rest
+        while (pwdChars.size < length) {
+            pwdChars.add(charPool[secureRandom.nextInt(charPool.length)])
         }
-        pwdChars.shuffle()
+        
+        pwdChars.shuffle(secureRandom)
         
         val pwd = pwdChars.joinToString("")
         _uiState.update { it.copy(password = pwd) }
@@ -115,7 +118,7 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
     fun rollDice() {
         val count = _uiState.value.diceCount.toInt()
         val sides = _uiState.value.diceSides.toInt()
-        val results = List(count) { Random.nextInt(1, sides + 1) }
+        val results = List(count) { secureRandom.nextInt(sides) + 1 }
         _uiState.update { it.copy(diceResults = results, totalDiceSum = results.sum()) }
     }
 
@@ -123,11 +126,19 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
     fun onWordCountChange(count: Float) = _uiState.update { it.copy(wordCount = count) }
 
     fun generateWords() {
-        val adjectives = listOf("Swift", "Silent", "Neon", "Crimson", "Azure", "Golden", "Shadow", "Crystal", "Electric", "Velvet", "Lunar", "Solar", "Cosmic", "Mystic", "Ancient", "Cyber", "Quantum", "Astral", "Frosted", "Blazing")
-        val nouns = listOf("Tiger", "Dragon", "Phoenix", "Wolf", "Eagle", "Falcon", "Panther", "Fox", "Bear", "Lion", "Shark", "Whale", "Hawk", "Cobra", "Viper", "Raven", "Owl", "Stag", "Lynx", "Griffin")
+        val adjectives = listOf(
+            "Swift", "Silent", "Neon", "Crimson", "Azure", "Golden", "Shadow", "Crystal", "Electric", "Velvet", 
+            "Lunar", "Solar", "Cosmic", "Mystic", "Ancient", "Cyber", "Quantum", "Astral", "Frosted", "Blazing",
+            "Midnight", "Ethereal", "Vibrant", "Primal", "Digital", "Kinetic", "Ethereal", "Infinite", "Stellar", "Titan"
+        )
+        val nouns = listOf(
+            "Tiger", "Dragon", "Phoenix", "Wolf", "Eagle", "Falcon", "Panther", "Fox", "Bear", "Lion", 
+            "Shark", "Whale", "Hawk", "Cobra", "Viper", "Raven", "Owl", "Stag", "Lynx", "Griffin",
+            "Nebula", "Pulsar", "Zenith", "Horizon", "Vortex", "Matrix", "Cipher", "Aegis", "Oracle", "Sentry"
+        )
         val count = _uiState.value.wordCount.toInt()
         val words = List(count) {
-            "${adjectives.random()} ${nouns.random()}"
+            "${adjectives[secureRandom.nextInt(adjectives.size)]} ${nouns[secureRandom.nextInt(nouns.size)]}"
         }
         _uiState.update { it.copy(generatedWords = words.joinToString("\n")) }
     }

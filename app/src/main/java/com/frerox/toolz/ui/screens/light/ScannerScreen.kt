@@ -125,7 +125,7 @@ fun ScannerScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -136,7 +136,7 @@ fun ScannerScreen(
                             isFlashOn = !isFlashOn
                             cameraController.enableTorch(isFlashOn)
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(
                             if (isFlashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
@@ -150,9 +150,10 @@ fun ScannerScreen(
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
@@ -305,14 +306,14 @@ fun ResultCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(24.dp),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(40.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 12.dp,
         shadowElevation = 16.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier.padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
@@ -335,6 +336,7 @@ fun ResultCard(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(Modifier.width(8.dp))
+                        @Suppress("DEPRECATION")
                         Text(
                             "SCAN RESULT",
                             style = MaterialTheme.typography.labelSmall,
@@ -353,7 +355,7 @@ fun ResultCard(
             
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             ) {
@@ -416,8 +418,8 @@ fun PermissionRequestView(onRequest: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            modifier = Modifier.size(120.dp),
-            shape = RoundedCornerShape(40.dp),
+            modifier = Modifier.size(140.dp),
+            shape = RoundedCornerShape(48.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
             border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
         ) {
@@ -447,9 +449,10 @@ fun PermissionRequestView(onRequest: () -> Unit) {
         Spacer(Modifier.height(40.dp))
         Button(
             onClick = onRequest,
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth().height(64.dp)
         ) {
+            @Suppress("DEPRECATION")
             Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
         }
     }

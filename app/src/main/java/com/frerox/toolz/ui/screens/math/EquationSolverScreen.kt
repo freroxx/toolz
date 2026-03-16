@@ -64,7 +64,7 @@ fun EquationSolverScreen(
             topBar = {
                 CenterAlignedTopAppBar(
                     title = { 
-                        Text("EQUATION SOLVER", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp) 
+                        Text("EQUATION SOLVER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) 
                     },
                     navigationIcon = {
                         IconButton(
@@ -90,7 +90,7 @@ fun EquationSolverScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
+                    .padding(top = padding.calculateTopPadding())
                     .padding(horizontal = 24.dp)
             ) {
                 // Type Selector
@@ -112,7 +112,7 @@ fun EquationSolverScreen(
                         Surface(
                             onClick = { viewModel.onTypeChange(type) },
                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
                             modifier = Modifier.bouncyClick { viewModel.onTypeChange(type) }
                         ) {
@@ -131,10 +131,10 @@ fun EquationSolverScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(40.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(28.dp)) {
                         EquationPreview(state)
                         
                         // Dynamic inputs based on type
@@ -170,7 +170,7 @@ fun EquationSolverScreen(
                         focusManager.clearFocus()
                     },
                     modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick { viewModel.solve() },
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("SOLVE EQUATION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
@@ -183,10 +183,10 @@ fun EquationSolverScreen(
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
-                            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("SOLUTION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                 Text(state.result, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                             }
@@ -197,7 +197,7 @@ fun EquationSolverScreen(
                         OutlinedButton(
                             onClick = { showSteps = true },
                             modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { showSteps = true },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(20.dp),
                             border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                         ) {
                             Text("HOW TO SOLVE?", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
@@ -277,7 +277,7 @@ fun CoeffInput(label: String, value: String, onValueChange: (String) -> Unit) {
         shape = RoundedCornerShape(12.dp),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
         singleLine = true,
-        colors = TextFieldDefaults.colors(
+        colors = OutlinedTextFieldDefaults.colors(
             unfocusedContainerColor = Color.Transparent,
             focusedContainerColor = Color.Transparent
         )
@@ -293,9 +293,9 @@ fun StepsBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)
     ) {
-        Column(modifier = Modifier.fillMaxHeight(0.7f).padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
+        Column(modifier = Modifier.fillMaxHeight(0.7f).padding(horizontal = 28.dp).padding(bottom = 48.dp)) {
             Text(
                 "SOLUTION STEPS",
                 style = MaterialTheme.typography.labelSmall,
@@ -321,7 +321,7 @@ fun StepsBottomSheet(
                         Text(steps[index], style = MaterialTheme.typography.bodyLarge)
                     }
                     if (index < steps.size - 1) {
-                        Divider(modifier = Modifier.padding(start = 44.dp, top = 16.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.surfaceVariant)
+                        HorizontalDivider(modifier = Modifier.padding(start = 44.dp, top = 16.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.surfaceVariant)
                     }
                 }
             }
@@ -386,9 +386,9 @@ fun HistoryBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)
     ) {
-        Column(modifier = Modifier.fillMaxHeight(0.6f).padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
+        Column(modifier = Modifier.fillMaxHeight(0.6f).padding(horizontal = 28.dp).padding(bottom = 32.dp)) {
             Text(
                 "HISTORY LOG",
                 style = MaterialTheme.typography.labelSmall,
@@ -397,19 +397,19 @@ fun HistoryBottomSheet(
                 letterSpacing = 2.sp,
                 modifier = Modifier.padding(vertical = 16.dp)
             )
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(history) { item ->
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .bouncyClick { onSelect(item) },
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(32.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
-                        Column(modifier = Modifier.padding(20.dp)) {
+                        Column(modifier = Modifier.padding(24.dp)) {
                             Text(item.expression, style = MaterialTheme.typography.bodyLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(8.dp))
                             Text(
                                 "Result: ${item.result}",
                                 style = MaterialTheme.typography.titleMedium,

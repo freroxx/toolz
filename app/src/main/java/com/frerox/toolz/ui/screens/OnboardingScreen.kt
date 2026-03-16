@@ -13,10 +13,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -29,7 +27,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -62,15 +59,15 @@ fun OnboardingScreen(
 
     val infiniteTransition = rememberInfiniteTransition(label = "bg")
     val color1 by infiniteTransition.animateColor(
-        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-        targetValue = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.05f),
-        animationSpec = infiniteRepeatable(tween(5000, easing = LinearEasing), RepeatMode.Reverse),
+        initialValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        targetValue = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
+        animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Reverse),
         label = "c1"
     )
     val color2 by infiniteTransition.animateColor(
-        initialValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f),
-        targetValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-        animationSpec = infiniteRepeatable(tween(5000, easing = LinearEasing), RepeatMode.Reverse),
+        initialValue = MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
+        targetValue = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Reverse),
         label = "c2"
     )
 
@@ -122,79 +119,89 @@ fun WelcomeStep(onNext: () -> Unit) {
         val infiniteTransition = rememberInfiniteTransition(label = "icon")
         val scale by infiniteTransition.animateFloat(
             initialValue = 1f,
-            targetValue = 1.1f,
+            targetValue = 1.15f,
             animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
             label = "scale"
         )
 
         Surface(
-            modifier = Modifier.size(120.dp).graphicsLayer { scaleX = scale; scaleY = scale },
-            shape = RoundedCornerShape(40.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-            shadowElevation = 8.dp
+            modifier = Modifier
+                .size(140.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            shape = RoundedCornerShape(48.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+            shadowElevation = 12.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Rounded.BuildCircle,
+                    Icons.Rounded.Bolt,
                     contentDescription = null,
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier.size(80.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
         }
         
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(48.dp))
         
         Text(
-            text = "Toolz Precision",
-            style = MaterialTheme.typography.displayMedium,
+            text = "TOOLZ PRO",
+            style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
-            letterSpacing = (-1.5).sp
+            letterSpacing = 2.sp,
+            color = MaterialTheme.colorScheme.primary
         )
         
         Spacer(Modifier.height(12.dp))
         
         Text(
-            text = "30+ precision tools. One engine.\nPrivate, offline, and built for your hardware.",
+            text = "Your device, fully orchestrated.\n30+ precision instruments optimized for performance.",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             modifier = Modifier.padding(horizontal = 16.dp),
-            lineHeight = 24.sp
+            lineHeight = 26.sp,
+            fontWeight = FontWeight.Black
         )
 
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(48.dp))
 
-        // Feature highlights grid — 4 pillars
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                WelcomeFeature(Icons.Rounded.Lock, "SAFE & PRIVATE", Modifier.weight(1f))
-                WelcomeFeature(Icons.Rounded.WifiOff, "OFFLINE FIRST", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.Lock, "SECURE ARCHIVE", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.WifiOff, "OFFLINE ENGINE", Modifier.weight(1f))
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                WelcomeFeature(Icons.Rounded.Speed, "HARDWARE", Modifier.weight(1f))
-                WelcomeFeature(Icons.Rounded.AutoAwesome, "AI POWERED", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.Speed, "RAW HARDWARE", Modifier.weight(1f))
+                WelcomeFeature(Icons.Rounded.Memory, "AI OPTIMIZED", Modifier.weight(1f))
             }
         }
         
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(64.dp))
         
         Button(
             onClick = onNext,
-            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
-            shape = RoundedCornerShape(20.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .bouncyClick {},
+            shape = RoundedCornerShape(24.dp),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
         ) {
-            Text("GET STARTED", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
-            Spacer(Modifier.width(8.dp))
-            Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(20.dp))
+            Text("INITIALIZE ENGINE", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.width(12.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -203,17 +210,17 @@ fun WelcomeStep(onNext: () -> Unit) {
 fun WelcomeFeature(icon: ImageVector, text: String, modifier: Modifier) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(28.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.height(8.dp))
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(10.dp))
             Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }
     }
@@ -262,32 +269,33 @@ fun PermissionsStep(onNext: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(28.dp)
             .statusBarsPadding()
     ) {
         Text(
-            text = "Hardware Keys",
+            text = "Core Protocols",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
             modifier = Modifier.padding(bottom = 8.dp)
         )
         Text(
-            text = "Engage the required sensors and storage modules to power the Toolz engine. Data never leaves your device.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            text = "Enable the following modules to unlock the full potential of your device's hardware sensors and storage engines.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Medium
         )
         
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(36.dp))
         
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item {
                 PermissionCard(
-                    title = "System Core & Media",
-                    desc = "Essential for Flashlight, Camera, GPS, and Storage.",
+                    title = "System I/O & Sensors",
+                    desc = "Flashlight, GPS, Camera, and activity tracking engine.",
                     icon = Icons.Rounded.DeveloperBoard,
                     granted = permissionsState.allPermissionsGranted,
                     onClick = { permissionsState.launchMultiplePermissionRequest() }
@@ -296,8 +304,8 @@ fun PermissionsStep(onNext: () -> Unit) {
             
             item {
                 PermissionCard(
-                    title = "Focus Analytics",
-                    desc = "Empowers Focus Flow with screen-time insights.",
+                    title = "Telemetry & Focus",
+                    desc = "Required for screen-time analytics and Focus Flow.",
                     icon = Icons.Rounded.Timeline,
                     granted = usageStatsGranted,
                     onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
@@ -306,8 +314,8 @@ fun PermissionsStep(onNext: () -> Unit) {
 
             item {
                 PermissionCard(
-                    title = "Anti-Recall Archive",
-                    desc = "Allows Notification Vault to secure system alerts.",
+                    title = "Archive Listener",
+                    desc = "Securely indexes system alerts for Notification Vault.",
                     icon = Icons.Rounded.Security,
                     granted = notificationListenerGranted,
                     onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
@@ -316,8 +324,8 @@ fun PermissionsStep(onNext: () -> Unit) {
 
             item {
                 PermissionCard(
-                    title = "Accessibility Bridge",
-                    desc = "Enables Hard-Lock security for focus sessions.",
+                    title = "System Bridge",
+                    desc = "Accessibility layer for advanced hard-lock focus features.",
                     icon = Icons.Rounded.Hub,
                     granted = accessibilityGranted,
                     onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
@@ -328,8 +336,11 @@ fun PermissionsStep(onNext: () -> Unit) {
         Column(modifier = Modifier.padding(vertical = 16.dp)) {
             Button(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .bouncyClick {},
+                shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (permissionsState.allPermissionsGranted) 
                         MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
@@ -337,14 +348,16 @@ fun PermissionsStep(onNext: () -> Unit) {
                         MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             ) {
-                Text("PROCEED TO FINALIZE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text("NEXT STEP", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
             
             TextButton(
                 onClick = onNext, 
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
             ) {
-                Text("SKIP TO DASHBOARD", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                Text("SKIP TO DASHBOARD", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline, letterSpacing = 1.sp)
             }
         }
     }
@@ -359,23 +372,25 @@ fun PermissionCard(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = if (granted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) 
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(32.dp),
+        color = if (granted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) 
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(
             1.5.dp, 
-            if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) 
+            if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) 
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         )
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.size(56.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -383,20 +398,20 @@ fun PermissionCard(
                         if (granted) Icons.Rounded.CheckCircle else icon,
                         null,
                         tint = if (granted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }
             
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(20.dp))
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), lineHeight = 16.sp, fontWeight = FontWeight.Medium)
+                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), lineHeight = 16.sp, fontWeight = FontWeight.Black)
             }
             
             if (!granted) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), modifier = Modifier.size(28.dp))
             }
         }
     }
@@ -431,8 +446,8 @@ fun NameStep(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "nameGlow")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.1f,
-        targetValue = 0.3f,
+        initialValue = 0.15f,
+        targetValue = 0.4f,
         animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "glow"
     )
@@ -446,42 +461,44 @@ fun NameStep(
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            modifier = Modifier.size(100.dp),
-            shape = RoundedCornerShape(32.dp),
+            modifier = Modifier.size(120.dp),
+            shape = RoundedCornerShape(40.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = glowAlpha),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha))
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha)),
+            shadowElevation = 16.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
         
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(48.dp))
         
         Text(
-            text = "Who's Using Toolz?",
+            text = "Who are you?",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            letterSpacing = (-1).sp
         )
         
         Spacer(Modifier.height(12.dp))
         
         Text(
-            text = "Personalize your experience",
+            text = "Personalize your Toolz workspace.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Black
         )
         
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(56.dp))
         
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
-            placeholder = { Text("Your name") },
+            placeholder = { Text("Display Name") },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Black),
             keyboardOptions = KeyboardOptions(
@@ -494,34 +511,36 @@ fun NameStep(
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedBorderColor = Color.Transparent,
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                 focusedContainerColor = MaterialTheme.colorScheme.surface
             ),
             leadingIcon = {
-                Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                Icon(Icons.Rounded.Fingerprint, null, tint = MaterialTheme.colorScheme.primary)
             }
         )
         
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
         
-        // Skip option
         AnimatedVisibility(visible = name.isBlank()) {
             TextButton(onClick = onComplete) {
-                Text("SKIP THIS STEP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                Text("BYPASS CONFIGURATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline, letterSpacing = 1.sp)
             }
         }
         
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(48.dp))
         
         Button(
             onClick = onComplete,
             enabled = name.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
-            shape = RoundedCornerShape(20.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .bouncyClick {},
+            shape = RoundedCornerShape(24.dp)
         ) {
-            Text("LAUNCH TOOLZ", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
-            Spacer(Modifier.width(8.dp))
-            Icon(Icons.Rounded.Rocket, null, modifier = Modifier.size(20.dp))
+            Text("LAUNCH DASHBOARD", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.width(12.dp))
+            Icon(Icons.Rounded.RocketLaunch, null, modifier = Modifier.size(24.dp))
         }
     }
 }

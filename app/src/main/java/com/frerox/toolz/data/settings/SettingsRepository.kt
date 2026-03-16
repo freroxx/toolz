@@ -76,6 +76,9 @@ class SettingsRepository @Inject constructor(
     private val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
     private val DOWNLOADED_APK_PATH = stringPreferencesKey("downloaded_apk_path")
     private val AUTO_UPDATE_ENABLED = booleanPreferencesKey("auto_update_enabled")
+    private val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_available_version")
+    private val UPDATE_CHANGELOG = stringPreferencesKey("update_changelog")
+    private val UPDATE_APK_URL = stringPreferencesKey("update_apk_url")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -152,6 +155,9 @@ class SettingsRepository @Inject constructor(
     val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
     val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
     val autoUpdateEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_UPDATE_ENABLED] ?: false }
+    val updateAvailableVersion: Flow<String?> = dataStore.data.map { it[UPDATE_AVAILABLE_VERSION] }
+    val updateChangelog: Flow<String?> = dataStore.data.map { it[UPDATE_CHANGELOG] }
+    val updateApkUrl: Flow<String?> = dataStore.data.map { it[UPDATE_APK_URL] }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -241,6 +247,14 @@ class SettingsRepository @Inject constructor(
     }
     suspend fun setAutoUpdateEnabled(enabled: Boolean) { dataStore.edit { it[AUTO_UPDATE_ENABLED] = enabled } }
     
+    suspend fun setAvailableUpdate(version: String?, changelog: String?, apkUrl: String?) {
+        dataStore.edit {
+            if (version == null) it.remove(UPDATE_AVAILABLE_VERSION) else it[UPDATE_AVAILABLE_VERSION] = version
+            if (changelog == null) it.remove(UPDATE_CHANGELOG) else it[UPDATE_CHANGELOG] = changelog
+            if (apkUrl == null) it.remove(UPDATE_APK_URL) else it[UPDATE_APK_URL] = apkUrl
+        }
+    }
+
     suspend fun resetOnboarding() {
         dataStore.edit {
             it.remove(USER_NAME)

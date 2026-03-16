@@ -133,8 +133,8 @@ fun ScreenLightScreen(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
-                    modifier = Modifier.size(120.dp),
-                    shape = RoundedCornerShape(40.dp),
+                    modifier = Modifier.size(140.dp),
+                    shape = RoundedCornerShape(48.dp),
                     color = contentColor.copy(alpha = 0.15f),
                     border = BorderStroke(2.dp, contentColor.copy(alpha = 0.2f))
                 ) {
@@ -143,7 +143,7 @@ fun ScreenLightScreen(
                             Icons.Rounded.Lock,
                             contentDescription = "Locked",
                             tint = contentColor,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(56.dp)
                         )
                     }
                 }
@@ -183,14 +183,14 @@ fun ScreenLightScreen(
                 ) {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.15f))
+                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(contentColor.copy(alpha = 0.15f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = contentColor)
                     }
                     
                     Surface(
                         color = contentColor.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
                             "SCREEN LIGHT",
@@ -204,7 +204,7 @@ fun ScreenLightScreen(
 
                     IconButton(
                         onClick = { viewModel.toggleLock() },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.15f))
+                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(contentColor.copy(alpha = 0.15f))
                     ) {
                         Icon(Icons.Rounded.LockOpen, "Lock", tint = contentColor)
                     }
@@ -216,18 +216,18 @@ fun ScreenLightScreen(
                         .align(Alignment.BottomCenter)
                         .padding(24.dp)
                         .fillMaxWidth(),
-                    shape = RoundedCornerShape(40.dp),
+                    shape = RoundedCornerShape(48.dp),
                     color = (if (state.color.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.2f),
                     border = BorderStroke(1.dp, contentColor.copy(alpha = 0.2f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // Intensity Slider
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.LightMode, null, tint = contentColor, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
+                            Icon(Icons.Rounded.LightMode, null, tint = contentColor, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
                             Slider(
                                 value = state.brightness,
                                 onValueChange = { viewModel.setBrightness(it) },
@@ -238,13 +238,13 @@ fun ScreenLightScreen(
                                     inactiveTrackColor = contentColor.copy(alpha = 0.2f)
                                 )
                             )
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(16.dp))
                             Text(
                                 "${(state.brightness * 100).toInt()}%",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = contentColor,
-                                modifier = Modifier.width(36.dp)
+                                modifier = Modifier.width(40.dp)
                             )
                         }
 
@@ -252,17 +252,17 @@ fun ScreenLightScreen(
 
                         // Presets
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
                             contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
                             items(presets) { color ->
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(52.dp)
                                         .clip(CircleShape)
                                         .background(color)
                                         .border(
-                                            width = if (state.color == color) 3.dp else 1.dp,
+                                            width = if (state.color == color) 3.5.dp else 1.dp,
                                             color = if (state.color == color) contentColor else contentColor.copy(alpha = 0.2f),
                                             shape = CircleShape
                                         )
@@ -273,14 +273,14 @@ fun ScreenLightScreen(
                                             Icons.Rounded.Check, 
                                             null, 
                                             tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
-                                            modifier = Modifier.align(Alignment.Center).size(20.dp)
+                                            modifier = Modifier.align(Alignment.Center).size(24.dp)
                                         )
                                     }
                                 }
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(32.dp))
                         
                         // Custom Color Hue Slider
                         var hue by remember { mutableFloatStateOf(0f) }
@@ -293,8 +293,8 @@ fun ScreenLightScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(5.dp))
                                 .background(Brush.horizontalGradient(hueColors))
                         )
                         

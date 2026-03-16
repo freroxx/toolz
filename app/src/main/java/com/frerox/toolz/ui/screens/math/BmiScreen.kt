@@ -47,15 +47,16 @@ fun BmiScreen(
                 title = {
                     Text(
                         text = "HEALTH INDEX",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
+                        letterSpacing = 2.sp,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -63,7 +64,7 @@ fun BmiScreen(
                 actions = {
                     IconButton(
                         onClick = { viewModel.onGenderChange(if (state.gender == Gender.MALE) Gender.FEMALE else Gender.MALE) },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                     ) {
                         Icon(
                             if (state.gender == Gender.MALE) Icons.Rounded.Male else Icons.Rounded.Female, 
@@ -72,20 +73,22 @@ fun BmiScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .padding(top = padding.calculateTopPadding())
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .fadingEdge(
-                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
+                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
                         length = 24.dp
                     )
                     .verticalScroll(rememberScrollState())
@@ -99,12 +102,12 @@ fun BmiScreen(
                 // Input Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
+                    shape = RoundedCornerShape(40.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(28.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         // Age & Weight Row
@@ -291,7 +294,7 @@ fun AdvancedMetrics(state: BmiState) {
 fun MetricCard(title: String, value: String, unit: String, subtitle: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
@@ -323,7 +326,7 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(40.dp),
+        shape = RoundedCornerShape(48.dp),
         color = color.copy(alpha = 0.05f),
         border = BorderStroke(2.dp, color.copy(alpha = 0.15f)),
     ) {
@@ -363,7 +366,7 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
             Spacer(Modifier.height(24.dp))
             Surface(
                 color = color,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 shadowElevation = 4.dp
             ) {
                 Text(
@@ -407,7 +410,7 @@ fun BmiInfoSection(bmi: Float, healthyRange: Pair<Float, Float>) {
 fun BmiCategoryItem(label: String, range: String, color: Color, isSelected: Boolean) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         color = if (isSelected) color.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
         border = if (isSelected) BorderStroke(1.5.dp, color.copy(alpha = 0.3f)) else null
     ) {

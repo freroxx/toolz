@@ -60,19 +60,22 @@ fun PomodoroScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .padding(top = padding.calculateTopPadding())
+            .fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -88,23 +91,23 @@ fun PomodoroScreen(
                             PomodoroMode.WORK -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                             else -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
                         },
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(32.dp),
                         border = BorderStroke(
                             1.5.dp, 
                             (if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.2f)
                         )
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(24.dp),
                                 tint = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
                             )
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(12.dp))
                             Text(
                                 text = when (state.mode) {
                                     PomodoroMode.WORK -> "FOCUS TIME"
@@ -114,20 +117,20 @@ fun PomodoroScreen(
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Black,
                                 color = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
-                                letterSpacing = 1.sp
+                                letterSpacing = 1.5.sp
                             )
                         }
                     }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
                     
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
                             text = "SESSION #${state.sessionsCompleted + 1}",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Black,
@@ -147,7 +150,7 @@ fun PomodoroScreen(
                     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                     val glowAlpha by infiniteTransition.animateFloat(
                         initialValue = 0.05f,
-                        targetValue = 0.12f,
+                        targetValue = 0.15f,
                         animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
                         label = ""
                     )
@@ -161,14 +164,14 @@ fun PomodoroScreen(
                         )
                         drawCircle(
                             color = surfaceVariant.copy(alpha = 0.5f),
-                            style = Stroke(width = 14.dp.toPx())
+                            style = Stroke(width = 16.dp.toPx())
                         )
                     }
 
                     CircularProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 14.dp,
+                        strokeWidth = 16.dp,
                         strokeCap = StrokeCap.Round,
                         color = activeColor,
                         trackColor = Color.Transparent,
@@ -180,8 +183,8 @@ fun PomodoroScreen(
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 76.sp,
-                                letterSpacing = (-3).sp
+                                fontSize = 80.sp,
+                                letterSpacing = (-4).sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -194,12 +197,12 @@ fun PomodoroScreen(
                             IconButton(
                                 onClick = { viewModel.stopRingtone() },
                                 modifier = Modifier
-                                    .padding(top = 12.dp)
-                                    .size(56.dp)
+                                    .padding(top = 16.dp)
+                                    .size(64.dp)
                                     .clip(CircleShape)
                                     .background(MaterialTheme.colorScheme.error)
                             ) {
-                                Icon(Icons.Rounded.NotificationsOff, contentDescription = "Stop", tint = Color.White)
+                                Icon(Icons.Rounded.NotificationsOff, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(32.dp))
                             }
                         }
                     }
@@ -209,7 +212,8 @@ fun PomodoroScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 32.dp),
+                        .padding(bottom = 48.dp)
+                        .navigationBarsPadding(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -217,10 +221,10 @@ fun PomodoroScreen(
                         onClick = { viewModel.reset() },
                         modifier = Modifier
                             .size(64.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(28.dp))
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
                     }
 
                     Surface(
@@ -228,16 +232,16 @@ fun PomodoroScreen(
                             if (state.isFinished) viewModel.stopRingtone()
                             viewModel.toggleStartStop() 
                         },
-                        modifier = Modifier.size(90.dp).bouncyClick {},
+                        modifier = Modifier.size(100.dp).bouncyClick {},
                         shape = CircleShape,
                         color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                        shadowElevation = 8.dp
+                        shadowElevation = 16.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = if (state.isRunning) "Pause" else "Start",
-                                modifier = Modifier.size(44.dp),
+                                modifier = Modifier.size(48.dp),
                                 tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
                             )
                         }
@@ -247,10 +251,10 @@ fun PomodoroScreen(
                         onClick = { viewModel.skip() },
                         modifier = Modifier
                             .size(64.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Rounded.SkipNext, contentDescription = "Skip", modifier = Modifier.size(28.dp))
+                        Icon(Icons.Rounded.SkipNext, contentDescription = "Skip", modifier = Modifier.size(32.dp))
                     }
                 }
             }
