@@ -12,6 +12,7 @@ sealed class Screen(val route: String) {
     object WorldClock : Screen("world_clock")
     object Pomodoro : Screen("pomodoro")
     object FocusFlow : Screen("focus_flow")
+    object Todo : Screen("todo")
     
     // Light & Optics
     object Flashlight : Screen("flashlight")
@@ -47,6 +48,7 @@ sealed class Screen(val route: String) {
     object PdfReader : Screen("pdf_reader")
     object NotificationVault : Screen("notification_vault")
     object Clipboard : Screen("clipboard")
+    object DeviceInfo : Screen("device_info")
     
     // Media
     object MusicPlayer : Screen("music_player")

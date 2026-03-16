@@ -15,7 +15,7 @@ android {
         minSdk = 31
         targetSdk = 36
         versionCode = 1
-        versionName = "1.7.6"
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -136,5 +136,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     
     ksp(libs.androidx.room.compiler)
+    // Migrated Moshi Codegen to KSP to fix warning
     ksp(libs.moshi.kotlin.codegen)
 }

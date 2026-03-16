@@ -32,32 +32,44 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var validationJob: Job? = null
+    private var lastEventTime = 0L
+    private var lastValidPackage: String? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
         
         val packageName = event.packageName?.toString() ?: return
+        val currentTime = System.currentTimeMillis()
         
-        // 1. Core Logic: If moving to Home or Toolz, kill the lock immediately.
+        // Ignore system UI transients and keyboard while we are in a potentially locked state
+        val systemPackages = listOf(
+            "com.android.systemui", 
+            "android", 
+            "com.google.android.inputmethod.latin",
+            "com.samsung.android.honeyboard",
+            "com.google.android.gms"
+        )
+        
+        if (systemPackages.contains(packageName)) {
+            return
+        }
+
+        // Core Logic: If moving to Home or Toolz, kill the lock immediately.
         if (packageName == "com.frerox.toolz" || isHomeApp(packageName)) {
             if (isOverlayShowing) hideOverlay()
             currentPackage = packageName
+            lastValidPackage = packageName
             return
         }
 
-        // 2. Flicker Mitigation: 
-        // If the overlay is already blocking this specific package, ignore sub-window events 
-        // (keyboards, system UI transients, volume sliders) while we are in the locked app.
-        if (isOverlayShowing && (packageName == overlayShowingForPackage || 
-            packageName == "com.android.systemui" || 
-            packageName == "android" || 
-            packageName == "com.google.android.inputmethod.latin")) {
-            return
-        }
+        // Debounce events to prevent flickering during rapid window transitions
+        if (packageName == currentPackage && currentTime - lastEventTime < 300) return
+        lastEventTime = currentTime
 
-        // 3. Update tracking state if package changed
         if (currentPackage != packageName) {
             currentPackage = packageName
+            lastValidPackage = packageName
             checkAppLimit(packageName)
         }
     }
@@ -78,13 +90,14 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         validationJob?.cancel()
         validationJob = serviceScope.launch {
             while (isActive) {
-                currentPackage?.let { pkg ->
-                    // Persistence Heartbeat: Ensure distraction apps stay locked even if events are missed
+                lastValidPackage?.let { pkg ->
                     if (pkg != "com.frerox.toolz" && !isHomeApp(pkg)) {
                         validateAndLock(pkg)
+                    } else if (isOverlayShowing) {
+                        hideOverlay()
                     }
                 }
-                delay(1000) 
+                delay(1500) 
             }
         }
     }
@@ -99,15 +112,19 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 val usageTime = withContext(Dispatchers.IO) { getTodayUsage(packageName) }
                 if (usageTime >= limit.limitMillis) {
                     if (!isOverlayShowing || overlayShowingForPackage != packageName) {
-                        showOverlay(packageName)
+                        withContext(Dispatchers.Main) {
+                            showOverlay(packageName)
+                        }
                     }
-                } else {
-                    // Usage is below limit (e.g. user increased limit or reset stats)
-                    if (overlayShowingForPackage == packageName) hideOverlay()
+                } else if (overlayShowingForPackage == packageName) {
+                    withContext(Dispatchers.Main) {
+                        hideOverlay()
+                    }
                 }
-            } else {
-                // App is no longer limited
-                if (overlayShowingForPackage == packageName) hideOverlay()
+            } else if (overlayShowingForPackage == packageName) {
+                withContext(Dispatchers.Main) {
+                    hideOverlay()
+                }
             }
         }
     }
@@ -126,59 +143,60 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val startTime = calendar.timeInMillis
         val endTime = System.currentTimeMillis()
 
-        val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, endTime)
+        val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
         return stats?.filter { it.packageName == packageName }?.sumOf { it.totalTimeInForeground } ?: 0L
     }
 
     private fun showOverlay(packageName: String) {
+        // Double check we are still on the same package and it's not a safe one
+        if (currentPackage != packageName || packageName == "com.frerox.toolz" || isHomeApp(packageName)) return
+        
         if (isOverlayShowing && overlayShowingForPackage == packageName) return
 
-        serviceScope.launch {
-            // Precise cleanup to avoid view leaks or double layering
-            if (isOverlayShowing) hideOverlay()
+        if (isOverlayShowing) hideOverlay()
 
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                PixelFormat.TRANSLUCENT
-            )
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            PixelFormat.TRANSLUCENT
+        )
 
-            val inflater = LayoutInflater.from(this@FocusFlowAccessibilityService)
-            val view = inflater.inflate(R.layout.layout_focus_lock, null)
-            
-            val pm = packageManager
-            val appName = try {
-                val ai = pm.getApplicationInfo(packageName, 0)
-                pm.getApplicationLabel(ai).toString()
-            } catch (e: Exception) {
-                packageName
+        val inflater = LayoutInflater.from(this)
+        val view = inflater.inflate(R.layout.layout_focus_lock, null)
+        
+        val pm = packageManager
+        val appName = try {
+            val ai = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(ai).toString()
+        } catch (e: Exception) {
+            packageName
+        }
+
+        view.findViewById<TextView>(R.id.tv_lock_message)?.text = 
+            "Focus flow active for $appName. Toolz has secured your productivity session."
+        
+        view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
+            startActivity(intent)
+            hideOverlay()
+        }
 
-            view.findViewById<TextView>(R.id.tv_lock_message)?.text = 
-                "Focus flow active for $appName. Toolz has secured your productivity session."
-            
-            view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
-                val intent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                startActivity(intent)
-                // Home detection in onAccessibilityEvent will handle the hideOverlay()
-            }
-
-            try {
-                windowManager?.addView(view, params)
-                overlayView = view
-                isOverlayShowing = true
-                overlayShowingForPackage = packageName
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+        try {
+            windowManager?.addView(view, params)
+            overlayView = view
+            isOverlayShowing = true
+            overlayShowingForPackage = packageName
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -187,7 +205,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             try {
                 windowManager?.removeView(overlayView)
             } catch (e: Exception) {
-                // System might have already detached the view
+                // Ignore if view already gone
             }
             overlayView = null
             isOverlayShowing = false

@@ -57,6 +57,18 @@ class ToolService : Service() {
     private var pomodoroMode = "WORK"
     private var pomodoroEndTimestamp: Long = 0L
 
+    // Todo Session State
+    private val _todoSessionTime = MutableStateFlow(0L)
+    val todoSessionTime: StateFlow<Long> = _todoSessionTime
+    private val _isTodoSessionActive = MutableStateFlow(false)
+    val isTodoSessionActive: StateFlow<Boolean> = _isTodoSessionActive
+    private val _todoTaskId = MutableStateFlow<Int?>(null)
+    val todoTaskId: StateFlow<Int?> = _todoTaskId
+    private val _todoTaskTitle = MutableStateFlow<String?>(null)
+    val todoTaskTitle: StateFlow<String?> = _todoTaskTitle
+    private var todoJob: Job? = null
+    private var todoBase: Long = 0L
+
     private val binder = LocalBinder()
 
     inner class LocalBinder : Binder() {
@@ -76,6 +88,7 @@ class ToolService : Service() {
                 else startPomodoro(_pomodoroRemaining.value, pomodoroMode)
             }
             ACTION_POMODORO_STOP -> resetPomodoro()
+            ACTION_TODO_STOP -> stopTodoSession()
         }
         return START_STICKY
     }
@@ -100,6 +113,7 @@ class ToolService : Service() {
         if (_isStopwatchRunning.value) updateStopwatchNotification()
         if (_isTimerRunning.value) updateTimerNotification()
         if (_isPomodoroRunning.value) updatePomodoroNotification()
+        if (_isTodoSessionActive.value) updateTodoNotification()
     }
 
     // --- Stopwatch Logic ---
@@ -203,6 +217,31 @@ class ToolService : Service() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
         _pomodoroRemaining.value = 0L
+        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    // --- Todo Session Logic ---
+    fun startTodoSession(taskId: Int, title: String) {
+        _todoTaskId.value = taskId
+        _todoTaskTitle.value = title
+        _isTodoSessionActive.value = true
+        todoBase = SystemClock.elapsedRealtime() - _todoSessionTime.value
+        todoJob?.cancel()
+        todoJob = serviceScope.launch {
+            while (_isTodoSessionActive.value) {
+                _todoSessionTime.value = SystemClock.elapsedRealtime() - todoBase
+                delay(1000)
+            }
+        }
+        startForeground(TODO_NOTIFICATION_ID, createTodoNotification())
+    }
+
+    fun stopTodoSession() {
+        _isTodoSessionActive.value = false
+        todoJob?.cancel()
+        _todoSessionTime.value = 0L
+        _todoTaskId.value = null
+        _todoTaskTitle.value = null
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
@@ -334,6 +373,30 @@ class ToolService : Service() {
         manager.notify(POMODORO_NOTIFICATION_ID, createPomodoroNotification(text))
     }
 
+    private fun createTodoNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "todo") }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TODO_STOP }
+        val stopPI = PendingIntent.getService(this, 41, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Active Task: ${_todoTaskTitle.value}")
+            .setContentText("Focus session in progress")
+            .setSmallIcon(android.R.drawable.checkbox_on_background)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .setUsesChronometer(true)
+            .setWhen(System.currentTimeMillis() - _todoSessionTime.value)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Session", stopPI)
+            .build()
+    }
+
+    private fun updateTodoNotification() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(TODO_NOTIFICATION_ID, createTodoNotification())
+    }
+
     private fun formatTime(millis: Long): String {
         val totalSeconds = (millis + 999) / 1000
         val min = totalSeconds / 60
@@ -351,6 +414,7 @@ class ToolService : Service() {
         const val STOPWATCH_NOTIFICATION_ID = 2001
         const val TIMER_NOTIFICATION_ID = 2002
         const val POMODORO_NOTIFICATION_ID = 2003
+        const val TODO_NOTIFICATION_ID = 2004
 
         const val ACTION_STOPWATCH_TOGGLE = "com.frerox.toolz.STOPWATCH_TOGGLE"
         const val ACTION_STOPWATCH_STOP = "com.frerox.toolz.STOPWATCH_STOP"
@@ -358,5 +422,6 @@ class ToolService : Service() {
         const val ACTION_TIMER_STOP = "com.frerox.toolz.TIMER_STOP"
         const val ACTION_POMODORO_TOGGLE = "com.frerox.toolz.POMODORO_TOGGLE"
         const val ACTION_POMODORO_STOP = "com.frerox.toolz.POMODORO_STOP"
+        const val ACTION_TODO_STOP = "com.frerox.toolz.TODO_STOP"
     }
 }

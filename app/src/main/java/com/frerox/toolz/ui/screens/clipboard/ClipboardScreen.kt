@@ -15,22 +15,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -56,7 +51,8 @@ import kotlin.math.sin
 @Composable
 fun ClipboardScreen(
     viewModel: ClipboardViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onConvertToTask: (String) -> Unit = {}
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -71,7 +67,7 @@ fun ClipboardScreen(
         if (searchQuery.isBlank()) entries
         else entries.filter { it.content.contains(searchQuery, ignoreCase = true) }
     }
-    // Note: Groups should probably be based on filteredEntries if search is active
+    
     val displayGroups = remember(filteredEntries, groups) {
         if (searchQuery.isBlank()) groups
         else viewModel.groupedEntries(filteredEntries)
@@ -110,7 +106,6 @@ fun ClipboardScreen(
                             }
                         },
                         actions = {
-                            // Search
                             IconButton(
                                 onClick = { isSearchActive = !isSearchActive },
                                 modifier = Modifier
@@ -125,7 +120,6 @@ fun ClipboardScreen(
                                 )
                             }
 
-                            // Sync manually
                             IconButton(
                                 onClick = { viewModel.refreshClipboard() },
                                 modifier = Modifier
@@ -136,7 +130,6 @@ fun ClipboardScreen(
                                 Icon(Icons.Rounded.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
                             }
 
-                            // Clear all
                             if (entries.isNotEmpty()) {
                                 IconButton(
                                     onClick = { showClearAllConfirmation = true },
@@ -244,7 +237,6 @@ fun ClipboardScreen(
                             val index = listState.firstVisibleItemIndex
                             LiquidStackCard(
                                 entry = entry,
-                                classifier = viewModel.classifier,
                                 scrollOffset = index,
                                 onCopy = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -253,11 +245,16 @@ fun ClipboardScreen(
                                 },
                                 onDelete = { viewModel.deleteEntry(entry) },
                                 onPin = { viewModel.togglePin(entry.id) },
-                                onAction = { action -> handleContextualAction(context, action, entry) }
+                                onAction = { action -> 
+                                    if (action == "convert_to_task") {
+                                        onConvertToTask(entry.content)
+                                    } else {
+                                        handleContextualAction(context, action, entry)
+                                    }
+                                }
                             )
                         }
 
-                        // Squiggly divider between groups
                         item(key = "divider_${group.label}") {
                             SquigglyDivider()
                         }
@@ -309,7 +306,6 @@ private fun EmptyClipboardState() {
 @Composable
 private fun LiquidStackCard(
     entry: ClipboardEntry,
-    classifier: com.frerox.toolz.data.clipboard.ClipboardClassifier,
     scrollOffset: Int,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
@@ -335,7 +331,6 @@ private fun LiquidStackCard(
         tonalElevation = 4.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header row: type icon + type label + pin/delete
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -372,7 +367,6 @@ private fun LiquidStackCard(
 
             Spacer(Modifier.height(8.dp))
 
-            // Content
             Text(
                 text = entry.content,
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -386,19 +380,16 @@ private fun LiquidStackCard(
 
             Spacer(Modifier.height(12.dp))
 
-            // Contextual actions
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Always copy
                 ActionChip("Copy", Icons.Rounded.ContentCopy) { onCopy() }
+                ActionChip("Task", Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") }
 
-                // Type-specific
                 when (entry.type) {
                     "PHONE" -> {
                         ActionChip("Call", Icons.Rounded.Call) { onAction("call") }
-                        ActionChip("WhatsApp", Icons.Rounded.Chat) { onAction("whatsapp") }
                     }
                     "URL", "SOCIAL" -> {
                         ActionChip("Open", Icons.Rounded.OpenInBrowser) { onAction("open_url") }
@@ -406,19 +397,12 @@ private fun LiquidStackCard(
                     "EMAIL" -> {
                         ActionChip("Email", Icons.Rounded.Email) { onAction("email") }
                     }
-                    "COLOR" -> {
-                        ActionChip("Hex", Icons.Rounded.Palette) { onCopy() }
-                    }
-                    "CRYPTO" -> {
-                        ActionChip("Explorer", Icons.Rounded.AccountBalanceWallet) { onAction("open_url") }
-                    }
                     else -> {
                         ActionChip("Share", Icons.Rounded.Share) { onAction("share") }
                     }
                 }
             }
 
-            // Timestamp
             Spacer(Modifier.height(8.dp))
             val timeString = remember(entry.timestamp) { formatTimestamp(entry.timestamp) }
             Text(
@@ -434,7 +418,6 @@ private fun LiquidStackCard(
 private fun TypeIcon(type: String, content: String) {
     when (type) {
         "COLOR" -> {
-            // Squircle with actual color
             val color = try {
                 Color(android.graphics.Color.parseColor(content.trim()))
             } catch (_: Exception) {

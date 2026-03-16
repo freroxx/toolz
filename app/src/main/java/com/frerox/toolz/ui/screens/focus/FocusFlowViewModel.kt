@@ -35,6 +35,11 @@ class FocusFlowViewModel @Inject constructor(
     private val _productivityScore = MutableStateFlow(0)
     val productivityScore: StateFlow<Int> = _productivityScore.asStateFlow()
 
+    private val _performanceMode = settingsRepository.performanceMode.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), false
+    )
+    val performanceMode = _performanceMode
+
     private val _appLimits = appLimitRepository.allLimits.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
@@ -65,7 +70,7 @@ class FocusFlowViewModel @Inject constructor(
         // Auto-refresh every minute
         viewModelScope.launch {
             while (true) {
-                delay(60000)
+                delay(if (_performanceMode.value) 120000 else 60000)
                 refreshStats()
             }
         }
@@ -99,7 +104,8 @@ class FocusFlowViewModel @Inject constructor(
                 calendar.set(Calendar.MILLISECOND, 0)
                 startTime = calendar.timeInMillis
             } else {
-                // Today: from midnight to now
+                // Today: from 00:00 to now (12PM colloquially means end of day or noon, 
+                // but "day's screen time" usually means midnight to midnight)
                 calendar.set(Calendar.HOUR_OF_DAY, 0)
                 calendar.set(Calendar.MINUTE, 0)
                 calendar.set(Calendar.SECOND, 0)
@@ -107,33 +113,21 @@ class FocusFlowViewModel @Inject constructor(
                 startTime = calendar.timeInMillis
             }
 
-            val stats = withContext(Dispatchers.IO) {
-                statsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_BEST,
-                    startTime, 
-                    endTime
-                )
+            // Using queryAndAggregateUsageStats for better performance and "Settings-like" accuracy
+            val aggregatedStats = withContext(Dispatchers.IO) {
+                statsManager.queryAndAggregateUsageStats(startTime, endTime)
             }
             
             val pm = context.packageManager
 
-            // Aggregate by package and compute time within the requested window
-            val aggregatedStats = stats
-                .filter { it.totalTimeInForeground > 0 }
-                .groupBy { it.packageName }
-                .mapValues { entry ->
-                    entry.value.sumOf { it.totalTimeInForeground }
-                }
-
             val usageList = withContext(Dispatchers.Default) {
-                aggregatedStats.filter { it.value >= 60000 }.mapNotNull { (packageName, time) ->
+                aggregatedStats.filter { it.value.totalTimeInForeground >= 60000 }.mapNotNull { (packageName, stats) ->
                     val appInfo = try {
                         pm.getApplicationInfo(packageName, 0)
                     } catch (e: PackageManager.NameNotFoundException) {
                         null
                     }
                     
-                    // Skip system packages without a launcher icon
                     if (appInfo == null) return@mapNotNull null
 
                     val appName = try {
@@ -141,17 +135,12 @@ class FocusFlowViewModel @Inject constructor(
                     } catch (_: Exception) {
                         packageName
                     }
-                    val icon = try {
-                        appInfo.loadIcon(pm)
-                    } catch (_: Exception) {
-                        null
-                    }
                     
                     AppUsageInfo(
                         packageName = packageName,
                         appName = appName,
-                        usageTimeMillis = time,
-                        icon = icon
+                        usageTimeMillis = stats.totalTimeInForeground,
+                        icon = null // We'll load icons lazily in the UI or use a placeholder to save memory
                     )
                 }
             }
@@ -201,7 +190,8 @@ class FocusFlowViewModel @Inject constructor(
             lower.contains("facebook") || lower.contains("instagram") || lower.contains("tiktok") || 
             lower.contains("youtube") || lower.contains("twitter") || lower.contains("x.android") || 
             lower.contains("snapchat") || lower.contains("netflix") || lower.contains("disney") || 
-            lower.contains("game") || lower.contains("pubg") || lower.contains("freefire") -> AppCategory.DISTRACTION
+            lower.contains("game") || lower.contains("pubg") || lower.contains("freefire") ||
+            lower.contains("reels") || lower.contains("shorts") -> AppCategory.DISTRACTION
             
             else -> AppCategory.OTHER
         }

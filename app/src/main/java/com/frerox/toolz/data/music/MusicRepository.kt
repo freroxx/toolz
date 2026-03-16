@@ -6,9 +6,6 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
-import com.frerox.toolz.data.music.MusicDao
-import com.frerox.toolz.data.music.MusicTrack
-import com.frerox.toolz.data.music.Playlist
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -20,40 +17,18 @@ import javax.inject.Singleton
 
 @Singleton
 class MusicRepository @Inject constructor(
-    private val musicDao: MusicDao,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val musicDao: MusicDao
 ) {
+
     val allTracks: Flow<List<MusicTrack>> = musicDao.getAllTracks()
     val allPlaylists: Flow<List<Playlist>> = musicDao.getAllPlaylists()
     val favoriteTracks: Flow<List<MusicTrack>> = musicDao.getFavoriteTracks()
     val recentlyPlayed: Flow<List<MusicTrack>> = musicDao.getRecentlyPlayed()
     val mostPlayed: Flow<List<MusicTrack>> = musicDao.getMostPlayed()
 
-    suspend fun addTrack(track: MusicTrack) = musicDao.insertTrack(track)
-    suspend fun updateTrack(track: MusicTrack) = musicDao.updateTrack(track)
-    suspend fun deleteTrack(track: MusicTrack) = musicDao.deleteTrack(track)
-    
-    suspend fun toggleFavorite(track: MusicTrack) {
-        val updatedTrack = track.copy(isFavorite = !track.isFavorite)
-        musicDao.updateTrack(updatedTrack)
-    }
-
-    suspend fun incrementPlayCount(uri: String) {
-        musicDao.incrementPlayCount(uri, System.currentTimeMillis())
-    }
-
-    suspend fun createPlaylist(playlist: Playlist) = musicDao.insertPlaylist(playlist)
-    suspend fun updatePlaylist(playlist: Playlist) = musicDao.updatePlaylist(playlist)
-    suspend fun deletePlaylist(playlist: Playlist) = musicDao.deletePlaylist(playlist)
-
     suspend fun scanDeviceForMusic(): List<MusicTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<MusicTrack>()
-        val collection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        }
-
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
@@ -64,23 +39,25 @@ class MusicRepository @Inject constructor(
             MediaStore.Audio.Media.DATA
         )
 
-        val selection = "${MediaStore.Audio.Media.DURATION} >= ?"
-        val selectionArgs = arrayOf("10000") // 10 seconds minimum
-        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
-        context.contentResolver.query(
-            collection,
+        val cursor = context.contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             projection,
             selection,
-            selectionArgs,
+            null,
             sortOrder
-        )?.use { cursor ->
+        )
+
+        cursor?.use {
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
             val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -89,24 +66,36 @@ class MusicRepository @Inject constructor(
                 val album = cursor.getString(albumColumn) ?: "Unknown Album"
                 val albumId = cursor.getLong(albumIdColumn)
                 val duration = cursor.getLong(durationColumn)
+                val path = cursor.getString(dataColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                 
-                val existingTrack = musicDao.getTrackByUri(contentUri.toString())
+                val existingTrack = musicDao.getTrackByUri(contentUri.toString()) 
+                    ?: (path?.let { musicDao.getTrackByPath(it) })
+                    ?: musicDao.findDuplicate(title, artist, duration, path)
                 
-                tracks.add(
-                    MusicTrack(
-                        uri = contentUri.toString(),
-                        title = title,
-                        artist = artist,
-                        album = album,
-                        albumId = albumId,
-                        duration = duration,
-                        thumbnailUri = getAlbumArtUri(albumId).toString(),
-                        isFavorite = existingTrack?.isFavorite ?: false,
-                        lastPlayed = existingTrack?.lastPlayed ?: 0L,
-                        playCount = existingTrack?.playCount ?: 0
+                if (existingTrack == null) {
+                    tracks.add(
+                        MusicTrack(
+                            uri = contentUri.toString(),
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            albumId = albumId,
+                            duration = duration,
+                            thumbnailUri = getAlbumArtUri(albumId).toString(),
+                            isFavorite = false,
+                            lastPlayed = 0L,
+                            playCount = 0,
+                            path = path,
+                            dateAdded = java.lang.System.currentTimeMillis()
+                        )
                     )
-                )
+                } else {
+                    // Update existing track if necessary, but don't duplicate
+                    if (existingTrack.uri != contentUri.toString() || existingTrack.path != path) {
+                         musicDao.updateTrack(existingTrack.copy(uri = contentUri.toString(), path = path))
+                    }
+                }
             }
         }
         
@@ -131,9 +120,25 @@ class MusicRepository @Inject constructor(
                     scanRecursive(file)
                 } else if (isAudioFile(file.name ?: "")) {
                     try {
-                        val track = extractMetadata(file.uri)
-                        tracks.add(track)
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(context, file.uri)
+                        val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
+                            ?: file.name?.substringBeforeLast(".") ?: "Unknown"
+                        val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Unknown Artist"
+                        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
+                        retriever.release()
+
+                        val existingTrack = musicDao.getTrackByUri(file.uri.toString())
+                            ?: musicDao.findDuplicate(title, artist, duration, file.uri.path)
+
+                        if (existingTrack == null) {
+                            tracks.add(extractMetadata(file.uri))
+                        }
                     } catch (e: Exception) {
+                        val existingTrack = musicDao.getTrackByUri(file.uri.toString())
+                        if (existingTrack == null) {
+                            tracks.add(extractMetadata(file.uri))
+                        }
                     }
                 }
             }
@@ -169,8 +174,6 @@ class MusicRepository @Inject constructor(
                 thumbnailUri = Uri.fromFile(file).toString()
             }
 
-            val existingTrack = musicDao.getTrackByUri(uri.toString())
-
             MusicTrack(
                 uri = uri.toString(),
                 title = title,
@@ -178,12 +181,13 @@ class MusicRepository @Inject constructor(
                 album = album,
                 duration = duration,
                 thumbnailUri = thumbnailUri ?: uri.toString(),
-                isFavorite = existingTrack?.isFavorite ?: false,
-                lastPlayed = existingTrack?.lastPlayed ?: 0L,
-                playCount = existingTrack?.playCount ?: 0
+                isFavorite = false,
+                lastPlayed = 0L,
+                playCount = 0,
+                path = null,
+                dateAdded = java.lang.System.currentTimeMillis()
             )
         } catch (e: Exception) {
-            val existingTrack = musicDao.getTrackByUri(uri.toString())
             MusicTrack(
                 uri = uri.toString(),
                 title = uri.lastPathSegment?.substringBeforeLast(".") ?: "Unknown",
@@ -191,14 +195,40 @@ class MusicRepository @Inject constructor(
                 album = "Unknown Album",
                 duration = 0,
                 thumbnailUri = uri.toString(),
-                isFavorite = existingTrack?.isFavorite ?: false,
-                lastPlayed = existingTrack?.lastPlayed ?: 0L,
-                playCount = existingTrack?.playCount ?: 0
+                isFavorite = false,
+                lastPlayed = 0L,
+                playCount = 0,
+                path = null,
+                dateAdded = java.lang.System.currentTimeMillis()
             )
         } finally {
             try {
                 retriever.release()
             } catch (e: Exception) {}
         }
+    }
+
+    suspend fun incrementPlayCount(uri: String) {
+        musicDao.incrementPlayCount(uri, System.currentTimeMillis())
+    }
+
+    suspend fun createPlaylist(playlist: Playlist) {
+        musicDao.insertPlaylist(playlist)
+    }
+
+    suspend fun updatePlaylist(playlist: Playlist) {
+        musicDao.updatePlaylist(playlist)
+    }
+
+    suspend fun deletePlaylist(playlist: Playlist) {
+        musicDao.deletePlaylist(playlist)
+    }
+
+    suspend fun deleteTrack(track: MusicTrack) {
+        musicDao.deleteTrack(track)
+    }
+
+    suspend fun toggleFavorite(track: MusicTrack) {
+        musicDao.updateTrack(track.copy(isFavorite = !track.isFavorite))
     }
 }

@@ -14,7 +14,9 @@ data class MusicTrack(
     val thumbnailUri: String? = null,
     val isFavorite: Boolean = false,
     val lastPlayed: Long = 0L,
-    val playCount: Int = 0
+    val playCount: Int = 0,
+    val path: String? = null,
+    val dateAdded: Long = java.lang.System.currentTimeMillis()
 )
 
 @Entity(tableName = "playlists")
@@ -23,5 +25,6 @@ data class Playlist(
     val name: String,
     val thumbnailUri: String? = null,
     val trackUris: List<String> = emptyList(),
-    val isSystemPlaylist: Boolean = false
+    val isSystemPlaylist: Boolean = false,
+    val createdAt: Long = java.lang.System.currentTimeMillis()
 )

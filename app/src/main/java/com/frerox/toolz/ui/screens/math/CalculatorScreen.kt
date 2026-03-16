@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.math
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -25,6 +26,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,6 +34,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.rounded.Calculate
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +44,7 @@ fun CalculatorScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
 
     Scaffold(
         topBar = {
@@ -114,7 +119,11 @@ fun CalculatorScreen(
                     AnimatedContent(
                         targetState = state.formula,
                         transitionSpec = { 
-                            fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                            if (performanceMode) {
+                                fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
+                            } else {
+                                fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                            }
                         }, label = "formula"
                     ) { formula ->
                         Text(
@@ -146,6 +155,7 @@ fun CalculatorScreen(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.padding(top = 16.dp)
                         ) {
+                            @Suppress("DEPRECATION")
                             Text(
                                 text = it.uppercase(),
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -165,6 +175,7 @@ fun CalculatorScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "ADVANCED CALCULUS", 
                         style = MaterialTheme.typography.labelSmall, 
@@ -179,6 +190,7 @@ fun CalculatorScreen(
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             if (state.isDegreeMode) "DEG" else "RAD",
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -196,8 +208,12 @@ fun CalculatorScreen(
                 AnimatedContent(
                     targetState = state.isScientific,
                     transitionSpec = {
-                        (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f))
-                            .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.95f))
+                        if (performanceMode) {
+                            fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
+                        } else {
+                            (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f))
+                                .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.95f))
+                        }
                     }, label = "keypad"
                 ) { isScientific ->
                     if (isScientific) {
@@ -215,6 +231,8 @@ fun CalculatorScreen(
 
 @Composable
 fun StandardKeypad(viewModel: CalculatorViewModel) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val buttons = listOf(
         "C", "÷", "×", "DEL",
         "7", "8", "9", "-",
@@ -232,11 +250,18 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
     ) {
         items(buttons) { btn ->
             when (btn) {
-                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() })
+                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, {
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    viewModel.onBackspace() 
+                })
                 else -> {
                     CalculatorButton(
                         text = btn,
                         onClick = {
+                            if (hapticEnabled) {
+                                if (btn == "=") view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                else view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
                             when (btn) {
                                 "C" -> viewModel.onClear()
                                 "=" -> viewModel.onEquals()
@@ -257,6 +282,8 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 
 @Composable
 fun ScientificKeypad(viewModel: CalculatorViewModel) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val buttons = listOf(
         "sin", "cos", "tan", "inv",
         "asin", "acos", "atan", "exp",
@@ -277,11 +304,17 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
     ) {
         items(buttons) { btn ->
             when (btn) {
-                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, { viewModel.onBackspace() }, isScientific = true)
+                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, {
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    viewModel.onBackspace() 
+                }, isScientific = true)
                 "C" -> {
                     CalculatorButton(
                         text = "C",
-                        onClick = { viewModel.onClear() },
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            viewModel.onClear() 
+                        },
                         isScientific = true,
                         isClear = true
                     )
@@ -290,6 +323,10 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
                     CalculatorButton(
                         text = btn,
                         onClick = {
+                            if (hapticEnabled) {
+                                if (btn == "=") view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                else view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
                             when (btn) {
                                 "=" -> viewModel.onEquals()
                                 "+", "-", "×", "÷", "^", "(", ")" -> viewModel.onOperator(btn)
@@ -314,6 +351,7 @@ fun CalculatorButton(
     isScientific: Boolean = false,
     isClear: Boolean = false
 ) {
+    val performanceMode = LocalPerformanceMode.current
     val isOperator = text in listOf("=", "+", "-", "×", "÷", "^", "(", ")")
     val isFunction = text in listOf("sin", "cos", "tan", "log10", "ln", "sqrt", "abs", "exp", "inv", "asin", "acos", "atan")
     
@@ -340,9 +378,11 @@ fun CalculatorButton(
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(if (isScientific) 20.dp else 32.dp),
         color = containerColor,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+        shadowElevation = if (performanceMode) 0.dp else 2.dp
     ) {
         Box(contentAlignment = Alignment.Center) {
+            @Suppress("DEPRECATION")
             Text(
                 text = text,
                 style = if (isScientific) {
@@ -360,6 +400,7 @@ fun CalculatorButton(
 
 @Composable
 fun CalculatorIconButton(icon: ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
+    val performanceMode = LocalPerformanceMode.current
     Surface(
         modifier = Modifier
             .aspectRatio(if (isScientific) 1.45f else 1f)
@@ -367,7 +408,8 @@ fun CalculatorIconButton(icon: ImageVector, onClick: () -> Unit, isScientific: B
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(if (isScientific) 20.dp else 32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+        shadowElevation = if (performanceMode) 0.dp else 2.dp
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(

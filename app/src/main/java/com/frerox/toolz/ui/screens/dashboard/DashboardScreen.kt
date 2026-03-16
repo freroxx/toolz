@@ -1,9 +1,11 @@
 package com.frerox.toolz.ui.screens.dashboard
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -17,13 +19,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -31,9 +34,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +49,7 @@ import androidx.activity.ComponentActivity
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.navigation.Screen
@@ -55,7 +62,15 @@ import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
 import com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel
 import com.frerox.toolz.ui.screens.sensors.RecordingState
 import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
+import com.frerox.toolz.ui.screens.todo.TodoViewModel
+import com.frerox.toolz.ui.screens.todo.TodoUiState
+import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.util.VibrationManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.*
 import kotlin.math.absoluteValue
 
@@ -79,6 +94,8 @@ sealed class PillPage {
     object Pomodoro : PillPage()
     object Steps : PillPage()
     object Recorder : PillPage()
+    object Todo : PillPage()
+    object Focus : PillPage()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,16 +104,34 @@ fun DashboardScreen(
     onNavigate: (String) -> Unit,
     settingsRepository: SettingsRepository
 ) {
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
+    
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(100)
-        visible = true
+        if (performanceMode) {
+            visible = true
+        } else {
+            delay(100)
+            visible = true
+        }
     }
 
-    val headerAlpha by animateFloatAsState(if (visible) 1f else 0f, tween(800), label = "")
-    val headerOffset by animateDpAsState(if (visible) 0.dp else (-20).dp, spring(Spring.DampingRatioMediumBouncy), label = "")
+    val headerAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f, 
+        animationSpec = if (performanceMode) snap() else tween(800), 
+        label = ""
+    )
+    val headerOffset by animateDpAsState(
+        targetValue = if (visible) 0.dp else (-20).dp, 
+        animationSpec = if (performanceMode) snap() else spring(Spring.DampingRatioMediumBouncy), 
+        label = ""
+    )
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val activity = context as? ComponentActivity
 
     val musicViewModel: MusicPlayerViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
@@ -106,6 +141,8 @@ fun DashboardScreen(
     val stepViewModel: StepCounterViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val recorderViewModel: VoiceRecorderViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val notepadViewModel: NotepadViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val todoViewModel: TodoViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val focusViewModel: FocusFlowViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
     var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
@@ -116,10 +153,20 @@ fun DashboardScreen(
     val stepState by stepViewModel.uiState.collectAsState()
     val recorderState by recorderViewModel.uiState.collectAsState()
     val notes by notepadViewModel.notes.collectAsState()
+    val todoState by todoViewModel.uiState.collectAsState()
+    val productivityScore by focusViewModel.productivityScore.collectAsState()
 
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
+    val pillTodoEnabled by settingsRepository.pillTodoEnabled.collectAsState(initial = true)
+    val pillFocusEnabled by settingsRepository.pillFocusEnabled.collectAsState(initial = true)
+    
     val userName by settingsRepository.userName.collectAsState(initial = "")
     val dashboardView by settingsRepository.dashboardView.collectAsState(initial = "DEFAULT")
+    val pinnedTools by settingsRepository.pinnedTools.collectAsState(initial = emptySet())
+    val recentTools by settingsRepository.recentTools.collectAsState(initial = emptyList())
+    
+    val showRecentTools by settingsRepository.showRecentTools.collectAsState(initial = true)
+    val showQuickNotes by settingsRepository.showQuickNotes.collectAsState(initial = true)
 
     val filteredCategories = remember(searchQuery, categories) {
         categories.map { category ->
@@ -128,6 +175,34 @@ fun DashboardScreen(
                 it.description.contains(searchQuery, ignoreCase = true)
             })
         }.filter { it.items.isNotEmpty() }
+    }
+
+    val pinnedToolItems = remember(pinnedTools, categories) {
+        val allItems = categories.flatMap { it.items }
+        pinnedTools.mapNotNull { route -> allItems.find { it.route == route } }
+    }
+
+    val recentToolItems = remember(recentTools, categories) {
+        val allItems = categories.flatMap { it.items }
+        recentTools.mapNotNull { route -> allItems.find { it.route == route } }
+    }
+
+    val performHaptic = { effect: Int ->
+        if (hapticEnabled) {
+            if (vibrationManager != null && effect == HapticFeedbackConstants.KEYBOARD_TAP) {
+                vibrationManager.vibrateClick()
+            } else if (vibrationManager != null && effect == HapticFeedbackConstants.LONG_PRESS) {
+                vibrationManager.vibrateLongClick()
+            } else {
+                view.performHapticFeedback(effect)
+            }
+        }
+    }
+
+    val navigateWithRecent = { route: String ->
+        performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+        scope.launch { settingsRepository.addRecentTool(route) }
+        onNavigate(route)
     }
 
     Scaffold(
@@ -144,7 +219,10 @@ fun DashboardScreen(
             ) {
                 WelcomeHeader(
                     userName = userName,
-                    onSettingsClick = { onNavigate(Screen.Settings.route) }
+                    onSettingsClick = { 
+                        performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onNavigate(Screen.Settings.route) 
+                    }
                 )
 
                 OutlinedTextField(
@@ -157,7 +235,10 @@ fun DashboardScreen(
                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = { 
+                                performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+                                searchQuery = "" 
+                            }) {
                                 Icon(Icons.Rounded.Close, contentDescription = "Clear")
                             }
                         }
@@ -192,7 +273,7 @@ fun DashboardScreen(
                 }
                 
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 16.dp),
+                    modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(
                         start = 24.dp, 
                         end = 24.dp, 
@@ -201,8 +282,52 @@ fun DashboardScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (pinnedToolItems.isNotEmpty() && searchQuery.isEmpty()) {
+                        item {
+                            SectionHeader("PINNED INSTRUMENTS")
+                        }
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { _, tool ->
+                            ToolListItem(
+                                tool = tool, 
+                                isPinned = true,
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
+                        }
+                        item { Spacer(Modifier.height(16.dp)) }
+                    }
+
+                    if (showRecentTools && recentToolItems.isNotEmpty() && searchQuery.isEmpty()) {
+                        item {
+                            SectionHeader("RECENTLY USED")
+                        }
+                        itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { _, tool ->
+                            ToolListItem(
+                                tool = tool, 
+                                isPinned = pinnedTools.contains(tool.route),
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
+                        }
+                        item { Spacer(Modifier.height(16.dp)) }
+                    }
+
                     itemsIndexed(filteredTools, key = { _, tool -> tool.route }) { _, tool ->
-                        ToolListItem(tool = tool, onClick = { onNavigate(tool.route) })
+                        ToolListItem(
+                            tool = tool, 
+                            isPinned = pinnedTools.contains(tool.route),
+                            onClick = { navigateWithRecent(tool.route) },
+                            onLongClick = {
+                                performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                            }
+                        )
                     }
                     if (filteredTools.isEmpty()) {
                         item { EmptySearchState(searchQuery) }
@@ -211,7 +336,7 @@ fun DashboardScreen(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 16.dp),
+                    modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(
                         start = 20.dp, 
                         end = 20.dp, 
@@ -221,7 +346,43 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (notes.isNotEmpty() && searchQuery.isEmpty()) {
+                    if (pinnedToolItems.isNotEmpty() && searchQuery.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SectionHeader("PINNED INSTRUMENTS", topPadding = 8.dp)
+                        }
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_grid_${tool.route}" }) { _, tool ->
+                            ImprovedToolCard(
+                                tool = tool,
+                                isPinned = true,
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
+                        }
+                    }
+
+                    if (showRecentTools && recentToolItems.isNotEmpty() && searchQuery.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SectionHeader("RECENTLY USED", topPadding = 24.dp)
+                        }
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                itemsIndexed(recentToolItems, key = { _, tool -> "recent_row_${tool.route}" }) { _, tool ->
+                                    RecentToolChip(
+                                        tool = tool,
+                                        onClick = { navigateWithRecent(tool.route) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (showQuickNotes && notes.isNotEmpty() && searchQuery.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             NotepadPreview(notes = notes, onNoteClick = { onNavigate(Screen.Notepad.route) })
                         }
@@ -229,19 +390,17 @@ fun DashboardScreen(
 
                     filteredCategories.forEach { category ->
                         item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
-                            Text(
-                                text = category.title,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 8.dp, top = 24.dp, bottom = 8.dp),
-                                letterSpacing = 2.sp
-                            )
+                            SectionHeader(category.title, topPadding = 24.dp)
                         }
                         itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { _, tool ->
                             ImprovedToolCard(
                                 tool = tool,
-                                onClick = { onNavigate(tool.route) }
+                                isPinned = pinnedTools.contains(tool.route),
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
                             )
                         }
                     }
@@ -255,7 +414,7 @@ fun DashboardScreen(
             }
 
             // Universal App Pill
-            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, recorderState, showPillSetting) {
+            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, recorderState, todoState, productivityScore, showPillSetting, pillTodoEnabled, pillFocusEnabled) {
                 if (!showPillSetting) return@remember emptyList<PillPage>()
                 val pages = mutableListOf<PillPage>()
                 if (musicState.currentTrack != null) pages.add(PillPage.Music)
@@ -264,13 +423,15 @@ fun DashboardScreen(
                 if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) pages.add(PillPage.Stopwatch)
                 if (pomodoroState.isRunning || (try { pomodoroState.remainingTime } catch(e: Exception) { 0L }) > 0) pages.add(PillPage.Pomodoro)
                 if (stepState.isEnabledInSettings) pages.add(PillPage.Steps)
+                if (pillTodoEnabled && todoState.isSessionActive) pages.add(PillPage.Todo)
+                if (pillFocusEnabled) pages.add(PillPage.Focus)
                 pages
             }
 
             AnimatedVisibility(
                 visible = activePages.isNotEmpty(),
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn() + scaleIn(initialScale = 0.9f),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut() + scaleOut(targetScale = 0.9f),
+                enter = if (performanceMode) fadeIn() else (slideInVertically(initialOffsetY = { it }) + fadeIn() + scaleIn(initialScale = 0.9f)),
+                exit = if (performanceMode) fadeOut() else (slideOutVertically(targetOffsetY = { it }) + fadeOut() + scaleOut(targetScale = 0.9f)),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp + padding.calculateBottomPadding())
@@ -283,8 +444,9 @@ fun DashboardScreen(
                         .padding(horizontal = 20.dp)
                         .fillMaxWidth()
                         .height(115.dp)
-                        .shadow(24.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                        .then(if (performanceMode) Modifier else Modifier.shadow(24.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)))
                         .bouncyClick {
+                            performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
                             val currentRoute = when(activePages[pagerState.currentPage]) {
                                 PillPage.Music -> Screen.MusicPlayer.route
                                 PillPage.Timer -> Screen.Timer.route
@@ -292,28 +454,33 @@ fun DashboardScreen(
                                 PillPage.Pomodoro -> Screen.Pomodoro.route
                                 PillPage.Steps -> Screen.StepCounter.route
                                 PillPage.Recorder -> Screen.VoiceRecorder.route
+                                PillPage.Todo -> Screen.Todo.route
+                                PillPage.Focus -> Screen.FocusFlow.route
                             }
                             onNavigate(currentRoute)
                         },
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = if (performanceMode) 1f else 0.95f),
                     shape = CircleShape,
                     tonalElevation = 8.dp,
                     border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                 ) {
                     HorizontalPager(
                         state = pagerState,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        userScrollEnabled = true
                     ) { pageIndex ->
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    val pageOffset = (
-                                        (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                                    ).absoluteValue
+                                    if (!performanceMode) {
+                                        val pageOffset = (
+                                            (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                        ).absoluteValue
 
-                                    alpha = lerp(0.3f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                    scaleX = lerp(0.95f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                        alpha = lerp(0.3f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                        scaleX = lerp(0.95f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                    }
                                 }
                         ) {
                             when (activePages[pageIndex]) {
@@ -323,6 +490,8 @@ fun DashboardScreen(
                                 PillPage.Pomodoro -> PomodoroPill(pomodoroState, pomodoroViewModel)
                                 PillPage.Steps -> StepsPill(stepState)
                                 PillPage.Recorder -> RecorderPill(recorderState, recorderViewModel)
+                                PillPage.Todo -> TodoPill(todoState, todoViewModel)
+                                PillPage.Focus -> FocusPill(productivityScore)
                             }
                         }
                     }
@@ -333,15 +502,184 @@ fun DashboardScreen(
 }
 
 @Composable
-fun ToolListItem(tool: ToolItem, onClick: () -> Unit) {
+fun SectionHeader(title: String, topPadding: androidx.compose.ui.unit.Dp = 0.dp) {
+    Text(
+        text = title.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Black,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 8.dp, top = topPadding, bottom = 8.dp),
+        letterSpacing = 2.sp
+    )
+}
+
+@Composable
+fun RecentToolChip(tool: ToolItem, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .width(140.dp)
+            .height(64.dp)
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(tool.icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Text(
+                tool.title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
+    val task = state.tasks.find { it.id == state.sessionTaskId } ?: return
+    val doneSub = task.subTasks.count { it.isDone }
+    val totalSub = task.subTasks.size
+    val progress = if (totalSub > 0) doneSub.toFloat() / totalSub else 0f
+    
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress, 
+        animationSpec = if (performanceMode) snap() else tween(500),
+        label = "todoProgress"
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(animatedProgress)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+        )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.TaskAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("ACTIVE TASK", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    task.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (totalSub > 0) {
+                    Text("$doneSub/$totalSub MILESTONES", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+            
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatSessionTime(state.sessionTimeMillis),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                IconButton(onClick = { 
+                    if (vibrationManager != null) vibrationManager.vibrateClick() else if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) else Unit
+                    viewModel.stopSession() 
+                }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter).height(6.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun FocusPill(score: Int) {
+    Row(
+        modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { score / 100f },
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                strokeWidth = 6.dp,
+                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+            )
+            Icon(Icons.Rounded.Toll, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("PRODUCTIVITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Flow State: $score%",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Icon(
+            if (score > 70) Icons.AutoMirrored.Rounded.TrendingUp else Icons.AutoMirrored.Rounded.TrendingFlat,
+            null,
+            tint = if (score > 70) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(32.dp)
+        )
+    }
+}
+
+@Composable
+fun ToolListItem(tool: ToolItem, isPinned: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(96.dp)
-            .bouncyClick(onClick = onClick),
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() }
+                )
+            },
         shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+        border = BorderStroke(1.dp, if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -363,12 +701,18 @@ fun ToolListItem(tool: ToolItem, onClick: () -> Unit) {
             }
             Spacer(Modifier.width(20.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = tool.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = tool.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isPinned) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Rounded.PushPin, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                    }
+                }
                 Text(
                     text = tool.description,
                     style = MaterialTheme.typography.bodySmall,
@@ -389,6 +733,7 @@ fun ToolListItem(tool: ToolItem, onClick: () -> Unit) {
 
 @Composable
 fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -402,7 +747,10 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary,
                 letterSpacing = 2.sp
             )
-            TextButton(onClick = onNoteClick) {
+            TextButton(onClick = {
+                vibrationManager?.vibrateClick()
+                onNoteClick()
+            }) {
                 Text("VIEW ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
             }
         }
@@ -418,7 +766,10 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                     modifier = Modifier
                         .width(180.dp)
                         .height(120.dp)
-                        .bouncyClick(onClick = onNoteClick),
+                        .bouncyClick(onClick = {
+                            vibrationManager?.vibrateClick()
+                            onNoteClick()
+                        }),
                     shape = RoundedCornerShape(40.dp),
                     color = Color(note.color).copy(alpha = 0.9f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
@@ -450,6 +801,9 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
 
 @Composable
 fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    
     Row(
         modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically
@@ -461,7 +815,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
         ) {
             Box(contentAlignment = Alignment.Center) {
                 val infiniteTransition = rememberInfiniteTransition(label = "recording")
-                val alphaAnim by infiniteTransition.animateFloat(
+                val alphaAnim by if (performanceMode) remember { mutableFloatStateOf(1f) } else infiniteTransition.animateFloat(
                     initialValue = 0.4f,
                     targetValue = 1f,
                     animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
@@ -487,7 +841,10 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
             )
         }
         IconButton(
-            onClick = { if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording() },
+            onClick = { 
+                vibrationManager?.vibrateClick()
+                if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording() 
+            },
             modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.error, CircleShape)
         ) {
             Icon(
@@ -503,9 +860,14 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
 @Composable
 fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
     val track = state.currentTrack ?: return
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    
+    val duration by viewModel.duration.collectAsState()
+    val playbackPosition by viewModel.playbackPosition.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
-    val rotation by infiniteTransition.animateFloat(
+    val rotation by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -516,10 +878,10 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        val targetProgress = if (state.duration > 0) state.playbackPosition.toFloat() / state.duration else 0f
+        val targetProgress = if (duration > 0) playbackPosition.toFloat() / duration else 0f
         val animatedProgress by animateFloatAsState(
             targetValue = targetProgress,
-            animationSpec = tween(500, easing = LinearOutSlowInEasing),
+            animationSpec = if (performanceMode) snap() else tween(500, easing = LinearOutSlowInEasing),
             label = "smoothProgress"
         )
 
@@ -537,10 +899,10 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
             Surface(
                 modifier = Modifier
                     .size(76.dp)
-                    .rotate(if (state.isPlaying && state.rotationEnabled) rotation else 0f),
+                    .rotate(if (state.isPlaying && state.rotationEnabled && !performanceMode) rotation else 0f),
                 shape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                shadowElevation = 12.dp
+                shadowElevation = if (performanceMode) 0.dp else 12.dp
             ) {
                 AsyncImage(
                     model = track.thumbnailUri,
@@ -585,7 +947,10 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
             }
 
             IconButton(
-                onClick = { viewModel.togglePlayPause() },
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    viewModel.togglePlayPause() 
+                },
                 modifier = Modifier
                     .size(56.dp)
                     .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
@@ -611,11 +976,14 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
 
 @Composable
 fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: TimerViewModel) {
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    
     val initialTime = if (state.initialTime > 0) state.initialTime else 1L
     val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
-        animationSpec = tween(500, easing = LinearOutSlowInEasing),
+        animationSpec = if (performanceMode) snap() else tween(500, easing = LinearOutSlowInEasing),
         label = "smoothProgress"
     )
 
@@ -652,7 +1020,10 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
                 )
             }
             IconButton(
-                onClick = { viewModel.toggleStartStop() },
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    viewModel.toggleStartStop() 
+                },
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
             ) {
                 Icon(
@@ -676,6 +1047,7 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
 
 @Composable
 fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewModel: StopwatchViewModel) {
+    val vibrationManager = LocalVibrationManager.current
     Row(
         modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically
@@ -701,7 +1073,10 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
             )
         }
         IconButton(
-            onClick = { viewModel.toggleStartStop() },
+            onClick = { 
+                vibrationManager?.vibrateClick()
+                viewModel.toggleStartStop() 
+            },
             modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape)
         ) {
             Icon(
@@ -716,11 +1091,14 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
 
 @Composable
 fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewModel: PomodoroViewModel) {
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    
     val initialTime = state.mode.minutes * 60 * 1000L
     val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
-        animationSpec = tween(500, easing = LinearOutSlowInEasing),
+        animationSpec = if (performanceMode) snap() else tween(500, easing = LinearOutSlowInEasing),
         label = "smoothProgress"
     )
 
@@ -757,7 +1135,10 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
                 )
             }
             IconButton(
-                onClick = { viewModel.toggleStartStop() },
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    viewModel.toggleStartStop() 
+                },
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.error, CircleShape)
             ) {
                 Icon(
@@ -821,6 +1202,14 @@ private fun formatTimeDashboard(millis: Long): String {
     return String.format(Locale.getDefault(), "%02d:%02d", min, sec)
 }
 
+private fun formatSessionTime(millis: Long): String {
+    val seconds = (millis / 1000) % 60
+    val minutes = (millis / (1000 * 60)) % 60
+    val hours = (millis / (1000 * 60 * 60))
+    return if (hours > 0) String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+    else String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+}
+
 @Composable
 fun WelcomeHeader(
     userName: String,
@@ -872,30 +1261,38 @@ fun WelcomeHeader(
 }
 
 @Composable
-fun ImprovedToolCard(tool: ToolItem, onClick: () -> Unit) {
+fun ImprovedToolCard(tool: ToolItem, isPinned: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val performanceMode = LocalPerformanceMode.current
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(140.dp)
-            .bouncyClick(onClick = onClick),
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() }
+                )
+            },
         shape = RoundedCornerShape(40.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 6.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+        border = BorderStroke(1.dp, if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+            if (!performanceMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+                                )
                             )
                         )
-                    )
-            )
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -903,17 +1300,32 @@ fun ImprovedToolCard(tool: ToolItem, onClick: () -> Unit) {
                     .padding(20.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
+                    Surface(
+                        modifier = Modifier.size(52.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = tool.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    
+                    if (isPinned) {
                         Icon(
-                            imageVector = tool.icon,
+                            Icons.Rounded.PushPin,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(28.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
@@ -975,6 +1387,7 @@ private fun getCategories() = listOf(
         "FAVORITES & ESSENTIALS",
         listOf(
             ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Productivity insights"),
+            ToolItem("Todo List", Icons.Rounded.TaskAlt, Screen.Todo.route, "Physics task flow"),
             ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
             ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
             ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker")
@@ -1025,8 +1438,9 @@ private fun getCategories() = listOf(
         "SYSTEM & HEALTH",
         listOf(
             ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
+            ToolItem("Device Info", Icons.Rounded.Info, Screen.DeviceInfo.route, "Intelligence"),
             ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health"),
-            ToolItem("Tip Calc", Icons.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
+            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
             ToolItem("Ruler", Icons.Rounded.Straighten, Screen.Ruler.route, "Measure"),
             ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Decisions")
         )

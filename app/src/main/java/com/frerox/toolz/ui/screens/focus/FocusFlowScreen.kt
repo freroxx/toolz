@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.focus
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -27,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -34,13 +36,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +57,8 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.rememberLifecycleEvent
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +70,9 @@ fun FocusFlowScreen(
     val usageStats by viewModel.combinedUsageStats.collectAsState(initial = emptyList())
     val productivityScore by viewModel.productivityScore.collectAsState()
     val isWeekly by viewModel.isWeekly.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val context = LocalContext.current
     
     val canDrawOverlays = remember { Settings.canDrawOverlays(context) }
@@ -76,7 +83,6 @@ fun FocusFlowScreen(
     
     val lifecycleEvent = rememberLifecycleEvent()
     
-    // Check for accessibility permission whenever the screen is resumed
     LaunchedEffect(lifecycleEvent) {
         if (lifecycleEvent == Lifecycle.Event.ON_RESUME) {
             val accessibilityEnabled = try {
@@ -96,7 +102,7 @@ fun FocusFlowScreen(
             CenterAlignedTopAppBar(
                 title = { 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("FOCUS FLOW", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
+                        Text("FOCUS FLOW", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, letterSpacing = 2.sp)
                         Text(
                             if (isWeekly) "WEEKLY PERFORMANCE" else "TODAY'S USAGE", 
                             style = MaterialTheme.typography.labelSmall, 
@@ -108,15 +114,18 @@ fun FocusFlowScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.refreshStats() },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.refreshStats() 
+                        },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                     }
@@ -129,15 +138,15 @@ fun FocusFlowScreen(
         Box(modifier = Modifier.padding(top = padding.calculateTopPadding()).fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize()
-                    .fadingEdges(top = 16.dp, bottom = 16.dp),
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Permission Warning
                 if (!canDrawOverlays || !isAccessibilityEnabled) {
                     item {
                         Surface(
                             onClick = {
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 if (!canDrawOverlays) {
                                     val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
                                     context.startActivity(intent)
@@ -164,14 +173,14 @@ fun FocusFlowScreen(
                                             modifier = Modifier.size(28.dp)
                                         )
                                     }
-                                    Spacer(Modifier.width(20.dp))
+                                    Spacer(Modifier.width(16.dp))
                                     Column {
                                         Text(
                                             if (!canDrawOverlays) "OVERLAY REQUIRED" else "ACCESSIBILITY REQUIRED", 
                                             fontWeight = FontWeight.Black, 
                                             color = MaterialTheme.colorScheme.error, 
                                             style = MaterialTheme.typography.labelSmall,
-                                            letterSpacing = 2.sp
+                                            letterSpacing = 1.sp
                                         )
                                         Text(
                                             if (!canDrawOverlays) "CRITICAL FOR LIMITS" else "CRITICAL FOR ENGINE", 
@@ -186,16 +195,16 @@ fun FocusFlowScreen(
                                     else "The focus engine requires accessibility access to analyze app changes and enforce your limits.", 
                                     style = MaterialTheme.typography.bodyMedium, 
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 20.sp
+                                    lineHeight = 22.sp
                                 )
-                                Spacer(Modifier.height(20.dp))
+                                Spacer(Modifier.height(24.dp))
                                 Surface(
                                     color = MaterialTheme.colorScheme.error,
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth().height(56.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text("RESOLVE PERMISSION", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall)
+                                        Text("RESOLVE PERMISSION", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onError, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
                                     }
                                 }
                             }
@@ -204,14 +213,13 @@ fun FocusFlowScreen(
                 }
 
                 item {
-                    EnhancedProductivityHeader(productivityScore)
+                    EnhancedProductivityHeader(productivityScore, performanceMode)
                 }
 
-                // Total screen time summary
                 item {
                     val totalTime = usageStats.sumOf { it.usageTimeMillis }
-                    val totalHours = totalTime / 3600000
-                    val totalMinutes = (totalTime % 3600000) / 60000
+                    val hours = totalTime / 3600000
+                    val minutes = (totalTime % 3600000) / 60000
                     val appCount = usageStats.size
                     
                     Row(
@@ -224,11 +232,11 @@ fun FocusFlowScreen(
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
-                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Rounded.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Rounded.PhoneAndroid, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                                 Spacer(Modifier.height(8.dp))
                                 Text(
-                                    if (totalHours > 0) "${totalHours}h ${totalMinutes}m" else "${totalMinutes}m",
+                                    if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Black
                                 )
@@ -241,8 +249,8 @@ fun FocusFlowScreen(
                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
                         ) {
-                            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Rounded.Apps, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Rounded.Apps, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     "$appCount",
@@ -257,37 +265,38 @@ fun FocusFlowScreen(
 
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                "ANALYTICS",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 1.sp
-                            )
-                        }
+                        Text(
+                            "ANALYTICS",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.sp
+                        )
                         
                         SingleChoiceSegmentedButtonRow(
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.height(44.dp)
                         ) {
                             SegmentedButton(
                                 selected = !isWeekly,
-                                onClick = { viewModel.toggleWeekly(false) },
+                                onClick = { 
+                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    viewModel.toggleWeekly(false) 
+                                },
                                 shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                             ) {
                                 Text("Daily", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
                             SegmentedButton(
                                 selected = isWeekly,
-                                onClick = { viewModel.toggleWeekly(true) },
+                                onClick = { 
+                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    viewModel.toggleWeekly(true) 
+                                },
                                 shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                             ) {
                                 Text("Weekly", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -307,11 +316,11 @@ fun FocusFlowScreen(
                         Box(modifier = Modifier.fillMaxWidth().padding(top = 64.dp), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Surface(
-                                    modifier = Modifier.size(80.dp),
-                                    shape = RoundedCornerShape(24.dp),
+                                    modifier = Modifier.size(100.dp),
+                                    shape = RoundedCornerShape(28.dp),
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 ) {
-                                    Icon(Icons.Rounded.Assessment, null, modifier = Modifier.padding(20.dp), tint = MaterialTheme.colorScheme.outline)
+                                    Icon(Icons.Rounded.Assessment, null, modifier = Modifier.padding(24.dp), tint = MaterialTheme.colorScheme.outline)
                                 }
                                 Spacer(Modifier.height(16.dp))
                                 Text("No usage data collected yet.", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.outline)
@@ -323,9 +332,24 @@ fun FocusFlowScreen(
                 items(usageStats, key = { it.packageName }) { info ->
                     EnhancedUsageItem(
                         info = info, 
-                        onClick = { selectedAppForSettings = info },
-                        onLongClick = { appToRename = info },
-                        onQuickLimit = { viewModel.setAppLimit(info.packageName, it) }
+                        performanceMode = performanceMode,
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            selectedAppForSettings = info 
+                        },
+                        onLongClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            appToRename = info 
+                        },
+                        onQuickLimit = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.setAppLimit(info.packageName, it) 
+                        },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = if (performanceMode) snap() else spring(),
+                            fadeOutSpec = if (performanceMode) snap() else spring(),
+                            placementSpec = if (performanceMode) snap() else spring()
+                        )
                     )
                 }
                 
@@ -335,7 +359,6 @@ fun FocusFlowScreen(
             }
         }
 
-        // App Settings Sheet
         selectedAppForSettings?.let { app ->
             FocusAppSettingsSheet(
                 app = app,
@@ -353,7 +376,6 @@ fun FocusFlowScreen(
             )
         }
 
-        // Rename Dialog
         val currentAppToRename = appToRename
         if (currentAppToRename != null) {
             var nameInput by remember(currentAppToRename.packageName) { 
@@ -364,6 +386,7 @@ fun FocusFlowScreen(
                 onDismissRequest = { appToRename = null },
                 confirmButton = {
                     TextButton(onClick = {
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         if (nameInput.isNotBlank()) {
                             viewModel.renameApp(currentAppToRename.packageName, nameInput.trim())
                         }
@@ -373,7 +396,10 @@ fun FocusFlowScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { appToRename = null }) {
+                    TextButton(onClick = { 
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        appToRename = null 
+                    }) {
                         Text("CANCEL")
                     }
                 },
@@ -385,7 +411,7 @@ fun FocusFlowScreen(
                         label = { Text("Custom Name") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(20.dp)
                     )
                 },
                 shape = RoundedCornerShape(32.dp)
@@ -402,6 +428,8 @@ fun FocusAppSettingsSheet(
     onSaveLimit: (Long) -> Unit,
     onUpdateCategory: (Boolean) -> Unit
 ) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val initialMinutes = app.limitMillis?.div(60000) ?: 0L
     var selectedHours by remember { mutableStateOf((initialMinutes / 60).toInt()) }
     var selectedMins by remember { mutableStateOf((initialMinutes % 60).toInt()) }
@@ -410,8 +438,9 @@ fun FocusAppSettingsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp),
-        containerColor = MaterialTheme.colorScheme.surface
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
             Row(
@@ -420,7 +449,7 @@ fun FocusAppSettingsSheet(
             ) {
                 Surface(
                     modifier = Modifier.size(64.dp), 
-                    shape = RoundedCornerShape(16.dp), 
+                    shape = RoundedCornerShape(18.dp), 
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
@@ -433,7 +462,7 @@ fun FocusAppSettingsSheet(
                 }
                 Spacer(Modifier.width(20.dp))
                 Column {
-                    Text(app.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(app.appName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                     Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
             }
@@ -448,9 +477,12 @@ fun FocusAppSettingsSheet(
                     val activeColor = if (isProd) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     
                     Surface(
-                        onClick = { onUpdateCategory(isProd) },
-                        modifier = Modifier.weight(1f).height(60.dp).bouncyClick {},
-                        shape = RoundedCornerShape(24.dp),
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onUpdateCategory(isProd) 
+                        },
+                        modifier = Modifier.weight(1f).height(64.dp).bouncyClick {},
+                        shape = RoundedCornerShape(20.dp),
                         color = if (isSelected) activeColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(
                             2.dp, 
@@ -462,7 +494,7 @@ fun FocusAppSettingsSheet(
                                 Icon(
                                     if (isProd) Icons.Rounded.AddModerator else Icons.Rounded.Block, 
                                     null, 
-                                    modifier = Modifier.size(20.dp), 
+                                    modifier = Modifier.size(24.dp), 
                                     tint = if (isSelected) activeColor else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(Modifier.width(10.dp))
@@ -477,10 +509,10 @@ fun FocusAppSettingsSheet(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 listOf(15, 30, 60, 120).forEach { mins ->
                     val isSelected = (selectedHours * 60 + selectedMins) == mins
@@ -488,10 +520,11 @@ fun FocusAppSettingsSheet(
                     
                     Surface(
                         onClick = {
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             selectedHours = mins / 60
                             selectedMins = mins % 60
                         },
-                        modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
+                        modifier = Modifier.weight(1f).height(40.dp).bouncyClick { },
                         shape = RoundedCornerShape(12.dp),
                         color = if (isSelected) activeColor else activeColor.copy(alpha = 0.1f),
                         border = if (isSelected) null else BorderStroke(1.dp, activeColor.copy(alpha = 0.2f))
@@ -509,14 +542,16 @@ fun FocusAppSettingsSheet(
                 
                 Surface(
                     onClick = {
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         selectedHours = 0
                         selectedMins = 0
                     },
-                    modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
+                    modifier = Modifier.weight(1f).height(40.dp).bouncyClick { },
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
+                        @Suppress("DEPRECATION")
                         Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -532,14 +567,13 @@ fun FocusAppSettingsSheet(
             
             Surface(
                 modifier = Modifier.fillMaxWidth().height(160.dp),
-                shape = RoundedCornerShape(32.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    // Selection Highlight Overlay
                     Surface(
-                        modifier = Modifier.fillMaxWidth(0.6f).height(44.dp),
+                        modifier = Modifier.fillMaxWidth(0.6f).height(48.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
@@ -550,7 +584,6 @@ fun FocusAppSettingsSheet(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Hours Picker
                         ScrollableNumberPicker(
                             range = 0..23,
                             selectedItem = selectedHours,
@@ -562,7 +595,6 @@ fun FocusAppSettingsSheet(
                         Text(":", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(0.5f))
                         Spacer(Modifier.width(24.dp))
                         
-                        // Minutes Picker
                         ScrollableNumberPicker(
                             range = 0..59,
                             selectedItem = selectedMins,
@@ -577,11 +609,12 @@ fun FocusAppSettingsSheet(
             Spacer(Modifier.height(32.dp))
             Button(
                 onClick = { 
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     val totalMins = (selectedHours * 60L) + selectedMins
                     onSaveLimit(totalMins)
                     onDismiss()
                 },
-                modifier = Modifier.fillMaxWidth().height(60.dp).shadow(8.dp, RoundedCornerShape(20.dp), spotColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth().height(64.dp),
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
@@ -600,20 +633,20 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>) {
     
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(40.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(28.dp)) {
+        Column(modifier = Modifier.padding(24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Timeline, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("WEEKLY INVESTMENT", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
-                style = MaterialTheme.typography.displayMedium,
+                style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -641,10 +674,9 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>) {
             }
             
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 LegendItem("Productive", MaterialTheme.colorScheme.primary)
                 LegendItem("Distraction", MaterialTheme.colorScheme.error)
-                LegendItem("Other", MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
@@ -654,19 +686,19 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>) {
 fun LegendItem(label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-fun EnhancedProductivityHeader(score: Int) {
+fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean) {
     val primary = MaterialTheme.colorScheme.primary
     val container = MaterialTheme.colorScheme.primaryContainer
     
     val isElite = score > 85
     val glowTransition = rememberInfiniteTransition(label = "glow")
-    val glowAlpha by glowTransition.animateFloat(
+    val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.4f) } else glowTransition.animateFloat(
         initialValue = 0.3f,
         targetValue = 0.8f,
         animationSpec = infiniteRepeatable(
@@ -679,29 +711,33 @@ fun EnhancedProductivityHeader(score: Int) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = if (isElite) 24.dp else 16.dp, 
-                shape = RoundedCornerShape(48.dp), 
+            .then(if (performanceMode) Modifier else Modifier.shadow(
+                elevation = if (isElite) 24.dp else 12.dp, 
+                shape = RoundedCornerShape(40.dp), 
                 spotColor = if (isElite) primary else primary.copy(alpha = 0.3f)
-            ),
-        shape = RoundedCornerShape(48.dp),
+            )),
+        shape = RoundedCornerShape(40.dp),
         color = container.copy(alpha = 0.1f),
-        border = BorderStroke(2.dp, Brush.verticalGradient(listOf(primary.copy(alpha = if (isElite) glowAlpha else 0.5f), Color.Transparent)))
+        border = BorderStroke(
+            2.dp, 
+            if (performanceMode) SolidColor(primary.copy(alpha = 0.3f)) 
+            else Brush.verticalGradient(listOf(primary.copy(alpha = if (isElite) glowAlpha else 0.5f), Color.Transparent))
+        )
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 40.dp, horizontal = 32.dp),
+            modifier = Modifier.padding(vertical = 40.dp, horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(contentAlignment = Alignment.Center) {
                 val infiniteTransition = rememberInfiniteTransition(label = "arc")
-                val rotation by infiniteTransition.animateFloat(
+                val rotation by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
                     initialValue = 0f,
                     targetValue = 360f,
                     animationSpec = infiniteRepeatable(tween(10000, easing = LinearEasing)),
                     label = "rotation"
                 )
 
-                Canvas(modifier = Modifier.size(220.dp).rotate(rotation)) {
+                Canvas(modifier = Modifier.size(200.dp).rotate(rotation)) {
                     drawArc(
                         color = primary.copy(alpha = 0.1f),
                         startAngle = 0f,
@@ -722,7 +758,7 @@ fun EnhancedProductivityHeader(score: Int) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isElite) {
                             Icon(Icons.Rounded.AutoAwesome, null, tint = primary, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                         }
                         Text(
                             "FLOW STATE",
@@ -734,15 +770,15 @@ fun EnhancedProductivityHeader(score: Int) {
                     }
                     
                     Row(verticalAlignment = Alignment.Bottom) {
-                        val animatedScore by animateIntAsState(targetValue = score, animationSpec = tween(1500, easing = FastOutSlowInEasing), label = "")
+                        val animatedScore by animateIntAsState(targetValue = score, animationSpec = if (performanceMode) snap() else tween(1500, easing = FastOutSlowInEasing), label = "")
                         Text(
                             "$animatedScore",
-                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 90.sp),
+                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 80.sp),
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.graphicsLayer {
-                                if (isElite) {
-                                    val pulse = glowAlpha * 0.05f
+                                if (isElite && !performanceMode) {
+                                    val pulse = glowAlpha * 0.04f
                                     scaleX = 1f + pulse
                                     scaleY = 1f + pulse
                                 }
@@ -750,8 +786,8 @@ fun EnhancedProductivityHeader(score: Int) {
                         )
                         Text(
                             "%",
-                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp),
-                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.padding(bottom = 18.dp, start = 4.dp),
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
                             color = primary
                         )
@@ -759,16 +795,16 @@ fun EnhancedProductivityHeader(score: Int) {
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
             
             SquigglySlider(
                 value = score.toFloat(),
                 onValueChange = {},
                 valueRange = 0f..100f,
-                isPlaying = true
+                isPlaying = !performanceMode
             )
             
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(32.dp))
             
             Surface(
                 color = (if (score > 50) primary else MaterialTheme.colorScheme.error).copy(alpha = 0.1f),
@@ -781,7 +817,7 @@ fun EnhancedProductivityHeader(score: Int) {
                         score > 70 -> "HIGH PRODUCTIVITY"
                         score > 50 -> "BALANCED FOCUS"
                         score > 30 -> "MODERATE DISTRACTION"
-                        else -> "CRITICAL REFOCUS NEEDED"
+                        else -> "CRITICAL REFOCUS"
                     },
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelLarge,
@@ -798,14 +834,16 @@ fun EnhancedProductivityHeader(score: Int) {
 @Composable
 fun EnhancedUsageItem(
     info: AppUsageInfo, 
+    performanceMode: Boolean,
     onClick: () -> Unit, 
     onLongClick: () -> Unit,
-    onQuickLimit: (Long) -> Unit
+    onQuickLimit: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
-    val scale by animateFloatAsState(if (visible) 1f else 0.9f, spring(Spring.DampingRatioMediumBouncy), label = "")
-    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(500), label = "")
+    val scale by animateFloatAsState(if (visible || performanceMode) 1f else 0.9f, if (performanceMode) snap() else spring(Spring.DampingRatioMediumBouncy), label = "")
+    val alpha by animateFloatAsState(if (visible || performanceMode) 1f else 0f, if (performanceMode) snap() else tween(500), label = "")
 
     val hours = info.usageTimeMillis / 3600000
     val minutes = (info.usageTimeMillis % 3600000) / 60000
@@ -814,7 +852,7 @@ fun EnhancedUsageItem(
     val isOverLimit = info.limitMillis != null && info.usageTimeMillis >= info.limitMillis
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = scale
@@ -825,14 +863,13 @@ fun EnhancedUsageItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         border = BorderStroke(
-            1.dp, 
+            1.5.dp, 
             if (isOverLimit) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) 
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-        ),
-        shadowElevation = if (isOverLimit) 2.dp else 0.dp
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        )
     ) {
         Column {
             Row(
@@ -843,14 +880,20 @@ fun EnhancedUsageItem(
                     modifier = Modifier.size(52.dp),
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 2.dp
+                    shadowElevation = if (performanceMode) 0.dp else 1.dp
                 ) {
-                    Image(
-                        painter = rememberAsyncImagePainter(model = info.icon),
-                        contentDescription = null,
-                        modifier = Modifier.padding(10.dp),
-                        contentScale = ContentScale.Fit
-                    )
+                    if (info.icon != null) {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = info.icon),
+                            contentDescription = null,
+                            modifier = Modifier.padding(10.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Android, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        }
+                    }
                 }
 
                 Spacer(Modifier.width(16.dp))
@@ -878,7 +921,7 @@ fun EnhancedUsageItem(
                             Text(
                                 info.packageName.lowercase(), 
                                 style = MaterialTheme.typography.labelSmall, 
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -905,28 +948,28 @@ fun EnhancedUsageItem(
                             when(info.category) {
                                 AppCategory.TOOLZ -> "PRODUCTIVE"
                                 AppCategory.DISTRACTION -> "DISTRACTION"
-                                else -> "UNCATEGORIZED"
+                                else -> "OTHER"
                             },
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
+                            fontSize = 8.sp,
                             color = when(info.category) {
                                 AppCategory.TOOLZ -> MaterialTheme.colorScheme.primary
                                 AppCategory.DISTRACTION -> MaterialTheme.colorScheme.error
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             }
                         )
                     }
                 }
             }
             
-            // Progress bar if limit exists
             if (info.limitMillis != null) {
                 val progress = (info.usageTimeMillis.toFloat() / info.limitMillis).coerceIn(0f, 1.2f)
                 val barProgress = progress.coerceIn(0f, 1f)
                 val color = when {
                     progress >= 1f -> MaterialTheme.colorScheme.error
-                    progress > 0.8f -> Color(0xFFFFA000) // Warning orange
+                    progress > 0.8f -> Color(0xFFFFA000)
                     else -> MaterialTheme.colorScheme.primary
                 }
                 
@@ -934,26 +977,21 @@ fun EnhancedUsageItem(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                        .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .fillMaxWidth(barProgress)
-                            .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = if (barProgress >= 1f) 32.dp else 0.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(color.copy(alpha = 0.7f), color)
-                                )
-                            )
+                            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = if (barProgress >= 1f) 28.dp else 0.dp))
+                            .background(color)
                     )
                 }
             } else if (info.category == AppCategory.DISTRACTION) {
-                // Quick add limit button for distractions
                 Surface(
                     onClick = { onQuickLimit(30) },
-                    modifier = Modifier.padding(bottom = 12.dp, start = 16.dp, end = 16.dp).height(32.dp).fillMaxWidth().alpha(0.8f),
+                    modifier = Modifier.padding(bottom = 12.dp, start = 16.dp, end = 16.dp).height(32.dp).fillMaxWidth(),
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.05f),
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
@@ -978,11 +1016,12 @@ fun ScrollableNumberPicker(
     formatTwoDigits: Boolean = false,
     visibleItemsCount: Int = 3
 ) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val items = range.toList()
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = items.indexOf(selectedItem).coerceAtLeast(0))
     val itemHeight = 44.dp
     
-    // Auto-snap logic
     LaunchedEffect(listState.isScrollInProgress) {
         if (!listState.isScrollInProgress && listState.layoutInfo.visibleItemsInfo.isNotEmpty()) {
             val centerOffset = listState.layoutInfo.viewportEndOffset / 2
@@ -994,12 +1033,12 @@ fun ScrollableNumberPicker(
                 if (index in items.indices) {
                     onItemSelected(items[index])
                     listState.animateScrollToItem(index)
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                 }
             }
         }
     }
 
-    // Scroll to new selected item if changed externally
     LaunchedEffect(selectedItem) {
         val index = items.indexOf(selectedItem)
         if (index >= 0 && !listState.isScrollInProgress) {
@@ -1018,11 +1057,11 @@ fun ScrollableNumberPicker(
             items(items) { item ->
                 val isSelected = item == selectedItem
                 val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.2f else 0.8f,
+                    targetValue = if (isSelected) 1.25f else 0.75f,
                     animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
                 )
                 val alpha by animateFloatAsState(
-                    targetValue = if (isSelected) 1f else 0.4f,
+                    targetValue = if (isSelected) 1f else 0.35f,
                     animationSpec = tween(150)
                 )
 
@@ -1033,7 +1072,7 @@ fun ScrollableNumberPicker(
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = if (formatTwoDigits) String.format("%02d", item) else item.toString(),
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.scale(scale).alpha(alpha)

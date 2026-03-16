@@ -45,45 +45,39 @@ class FlashlightViewModel @Inject constructor(
     init {
         try {
             val ids = cameraManager.cameraIdList
-            if (ids.isNotEmpty()) {
-                cameraId = ids[0]
-                checkBrightnessSupport()
+            for (id in ids) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+                if (hasFlash) {
+                    cameraId = id
+                    checkBrightnessSupport(characteristics)
+                    break
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun checkBrightnessSupport() {
+    private fun checkBrightnessSupport(characteristics: CameraCharacteristics) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
-                cameraId?.let { id ->
-                    val characteristics = cameraManager.getCameraCharacteristics(id)
-                    
-                    // Use reflection to avoid "Unresolved reference" errors at compile time
-                    // if the SDK environment is not properly set up for API 33+
-                    val maxLevel = try {
-                        val keyField = CameraCharacteristics::class.java.getDeclaredField("FLASH_INFO_STRENGTH_MAX_LEVEL")
-                        @Suppress("UNCHECKED_CAST")
-                        val key = keyField.get(null) as CameraCharacteristics.Key<Int>
-                        characteristics.get(key)
-                    } catch (e: Exception) {
-                        // Fallback: manually construct the key using its documented string identifier
-                        try {
-                            val manualKey = CameraCharacteristics.Key("android.flash.info.strengthMaxLevel", Int::class.javaObjectType)
-                            characteristics.get(manualKey)
-                        } catch (e2: Exception) {
-                            null
-                        }
-                    }
-                    
-                    if (maxLevel != null && maxLevel > 1) {
-                        _uiState.update { it.copy(
-                            isBrightnessSupported = true,
-                            maxBrightness = maxLevel,
-                            brightness = 1.0f
-                        ) }
-                    }
+                // Use reflection or string key to avoid unresolved reference if API 33 symbols are missing
+                val key = try {
+                    @Suppress("UNCHECKED_CAST")
+                    CameraCharacteristics::class.java.getDeclaredField("FLASH_INFO_STRENGTH_MAX_LEVEL").get(null) as CameraCharacteristics.Key<Int>
+                } catch (e: Exception) {
+                    CameraCharacteristics.Key("android.flash.info.strengthMaxLevel", Int::class.javaObjectType)
+                }
+                
+                val maxLevel = characteristics.get(key)
+                
+                if (maxLevel != null && maxLevel.toInt() > 1) {
+                    _uiState.update { it.copy(
+                        isBrightnessSupported = true,
+                        maxBrightness = maxLevel.toInt(),
+                        brightness = 1.0f
+                    ) }
                 }
             } catch (e: Exception) {
                 // Not supported
@@ -140,7 +134,6 @@ class FlashlightViewModel @Inject constructor(
                     val max = _uiState.value.maxBrightness
                     val level = (_uiState.value.brightness * max).toInt().coerceIn(1, max)
                     
-                    // Use reflection to call turnOnTorchWithStrengthLevel to avoid compilation errors
                     try {
                         val method = cameraManager.javaClass.getMethod("turnOnTorchWithStrengthLevel", String::class.java, Int::class.javaPrimitiveType)
                         method.invoke(cameraManager, id, level)
@@ -149,7 +142,7 @@ class FlashlightViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                setTorchManual(true)
             }
         } else {
             setTorchManual(true)
@@ -179,17 +172,15 @@ class FlashlightViewModel @Inject constructor(
     }
 
     private suspend fun runSos() {
-        val dot = 200L
-        val dash = 600L
-        val gap = 200L
-        val letterGap = 600L
-
         while (true) {
-            repeat(3) { setTorchManual(true); delay(dot); setTorchManual(false); delay(gap) }
-            delay(letterGap)
-            repeat(3) { setTorchManual(true); delay(dash); setTorchManual(false); delay(gap) }
-            delay(letterGap)
-            repeat(3) { setTorchManual(true); delay(dot); setTorchManual(false); delay(gap) }
+            // S: ...
+            repeat(3) { setTorchManual(true); delay(200); setTorchManual(false); delay(200) }
+            delay(400)
+            // O: ---
+            repeat(3) { setTorchManual(true); delay(600); setTorchManual(false); delay(200) }
+            delay(400)
+            // S: ...
+            repeat(3) { setTorchManual(true); delay(200); setTorchManual(false); delay(200) }
             delay(2000L)
         }
     }
@@ -197,9 +188,9 @@ class FlashlightViewModel @Inject constructor(
     private suspend fun runStrobe() {
         while (true) {
             setTorchManual(true)
-            delay(100)
+            delay(80)
             setTorchManual(false)
-            delay(100)
+            delay(80)
         }
     }
 

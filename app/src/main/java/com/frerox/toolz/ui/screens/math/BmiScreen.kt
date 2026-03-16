@@ -17,19 +17,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import java.util.*
 
@@ -46,7 +42,7 @@ fun BmiScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = "HEALTH INDEX",
+                        text = "HEALTH INDEX PRO",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -254,7 +250,7 @@ fun AdvancedMetrics(state: BmiState) {
             shape = RoundedCornerShape(8.dp)
         ) {
             Text(
-                "DETAILED HEALTH METRICS", 
+                "ADVANCED BODY COMPOSITION", 
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.labelSmall, 
                 fontWeight = FontWeight.Black, 
@@ -275,18 +271,27 @@ fun AdvancedMetrics(state: BmiState) {
                 title = "TDEE",
                 value = String.format("%.0f", state.tdee),
                 unit = "KCAL/D",
-                subtitle = "DAILY LOAD",
+                subtitle = "DAILY BURN",
                 modifier = Modifier.weight(1f)
             )
         }
         
-        MetricCard(
-            title = "IDEAL WEIGHT",
-            value = String.format("%.1f", state.ibw),
-            unit = if (state.isKg) "KG" else "LB",
-            subtitle = "OPTIMAL PHYSICAL WEIGHT RANGE",
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            MetricCard(
+                title = "BODY FAT",
+                value = if (state.bfp != null) String.format("%.1f", state.bfp) else "--",
+                unit = "%",
+                subtitle = "ESTIMATED FAT",
+                modifier = Modifier.weight(1f)
+            )
+            MetricCard(
+                title = "IDEAL WT",
+                value = String.format("%.1f", state.ibw),
+                unit = if (state.isKg) "KG" else "LB",
+                subtitle = "OPTIMAL RANGE",
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 
@@ -295,8 +300,8 @@ fun MetricCard(title: String, value: String, unit: String, subtitle: String, mod
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
@@ -304,7 +309,7 @@ fun MetricCard(title: String, value: String, unit: String, subtitle: String, mod
                 Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp, start = 4.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             }
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
         }
     }
 }
@@ -318,6 +323,7 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
     )
 
     val color = when {
+        animatedBmi <= 0f -> MaterialTheme.colorScheme.outline
         animatedBmi < range.first -> Color(0xFF4FC3F7)
         animatedBmi <= range.second -> Color(0xFF66BB6A)
         animatedBmi < 30f -> Color(0xFFFFA726)
@@ -370,7 +376,7 @@ fun ResultCard(bmi: Float?, category: String, range: Pair<Float, Float>) {
                 shadowElevation = 4.dp
             ) {
                 Text(
-                    text = category.ifEmpty { "WAITING..." }.uppercase(),
+                    text = category.ifEmpty { "CALCULATING..." }.uppercase(),
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Black,

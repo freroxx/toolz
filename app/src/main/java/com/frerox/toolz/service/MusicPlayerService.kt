@@ -6,11 +6,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
-import android.graphics.drawable.BitmapDrawable
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
 import android.widget.RemoteViews
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -52,6 +52,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var lastShakeTime: Long = 0
     private var isShakeRegistered = false
 
+    private var cachedProcessedBitmap: Bitmap? = null
+    private var lastTrackUri: String? = null
+    private var lastShape: String? = null
+
     @Inject
     lateinit var player: ExoPlayer
 
@@ -83,7 +87,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateWidget()
+                updateWidget(forceBitmapRefresh = true)
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateWidget()
@@ -104,7 +108,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             startWidgetTimer()
             observeShakeSetting()
         }
-        updateWidget()
+        updateWidget(forceBitmapRefresh = true)
     }
 
     private fun observeShakeSetting() {
@@ -142,7 +146,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val y = event.values[1]
         val z = event.values[2]
         lastAcceleration = currentAcceleration
-        currentAcceleration = sqrt(x * x + y * y + z * z)
+        currentAcceleration = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
         val delta = currentAcceleration - lastAcceleration
         acceleration = acceleration * 0.9f + delta
 
@@ -180,7 +184,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     currentRotation = (currentRotation + 5f) % 360f
                 }
                 updateWidget()
-                delay(500) // Update faster for smoother rotation and progress
+                delay(500) 
             }
         }
     }
@@ -190,12 +194,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         updateWidget()
     }
 
-    private fun updateWidget() {
+    private fun updateWidget(forceBitmapRefresh: Boolean = false) {
         val appWidgetManager = AppWidgetManager.getInstance(this)
         val componentName = ComponentName(this, MusicWidgetProvider::class.java)
         val views = RemoteViews(packageName, R.layout.music_widget)
 
-        // Apply custom themes and opacity
         WidgetUtils.applyTheme(this, views, settingsRepository)
 
         val currentItem = player.currentMediaItem
@@ -214,18 +217,22 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             serviceScope.launch {
                 val artShape = settingsRepository.musicArtShape.first()
                 val rotationEnabled = settingsRepository.musicRotationEnabled.first()
-                val artUri = currentItem.mediaMetadata.artworkUri
+                val artUri = currentItem.mediaMetadata.artworkUri?.toString()
                 
-                var bitmap = if (artUri != null) loadBitmap(artUri.toString()) else null
-                
-                if (bitmap == null) {
-                    // Fallback icon
-                    bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
+                if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
+                    var bitmap = if (artUri != null) loadBitmap(artUri) else null
+                    if (bitmap == null) {
+                        bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
+                    }
+                    bitmap?.let {
+                        cachedProcessedBitmap = processThumbnail(it, artShape)
+                        lastTrackUri = artUri
+                        lastShape = artShape
+                    }
                 }
 
-                bitmap?.let {
-                    val processedBitmap = processThumbnail(it, artShape)
-                    views.setImageViewBitmap(R.id.widget_music_album_art, processedBitmap)
+                cachedProcessedBitmap?.let {
+                    views.setImageViewBitmap(R.id.widget_music_album_art, it)
                     if (player.isPlaying && rotationEnabled) {
                         views.setFloat(R.id.widget_music_album_art, "setRotation", currentRotation)
                     } else {
@@ -243,13 +250,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             views.setImageViewResource(R.id.widget_music_play_pause, android.R.drawable.ic_media_play)
             views.setImageViewResource(R.id.widget_music_album_art, R.drawable.ic_music_note)
             views.setFloat(R.id.widget_music_album_art, "setRotation", 0f)
+            cachedProcessedBitmap = null
+            lastTrackUri = null
             setupIntents(views)
             appWidgetManager.updateAppWidget(componentName, views)
         }
     }
 
     private fun processThumbnail(bitmap: Bitmap, shape: String): Bitmap {
-        val size = minOf(bitmap.width, bitmap.height)
+        val size = minOf(bitmap.width, bitmap.height).coerceAtMost(256)
         val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -258,13 +267,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         if (shape == "CIRCLE") {
             canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
             paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            canvas.drawBitmap(bitmap, rect, rect, paint)
+            canvas.drawBitmap(bitmap, null, rect, paint)
         } else {
-            // Rounded Square
             val cornerRadius = size * 0.2f
             canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), cornerRadius, cornerRadius, paint)
             paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            canvas.drawBitmap(bitmap, rect, rect, paint)
+            canvas.drawBitmap(bitmap, null, rect, paint)
         }
         return output
     }
@@ -293,7 +301,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             val loader = ImageLoader(this@MusicPlayerService)
             val request = ImageRequest.Builder(this@MusicPlayerService)
                 .data(uri)
-                .size(300, 300)
+                .size(256, 256)
                 .allowHardware(false)
                 .build()
             val result = loader.execute(request).image

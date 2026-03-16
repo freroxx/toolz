@@ -43,14 +43,27 @@ fun FlipCoinScreen(
     val view = LocalView.current
 
     val rotation = animateFloatAsState(
-        targetValue = if (isFlipping) 1800f else 0f,
-        animationSpec = tween(durationMillis = 1000, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1f)),
+        targetValue = if (isFlipping) 2160f else 0f,
+        animationSpec = if (isFlipping) {
+            tween(durationMillis = 1200, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1f))
+        } else {
+            snap()
+        },
         label = "CoinFlip"
     )
 
     val scale = animateFloatAsState(
-        targetValue = if (isFlipping) 1.5f else 1f,
-        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        targetValue = if (isFlipping) 1.4f else 1f,
+        animationSpec = if (isFlipping) {
+            keyframes {
+                durationMillis = 1200
+                1.0f at 0 with FastOutSlowInEasing
+                1.8f at 600 with FastOutSlowInEasing
+                1.4f at 1200 with FastOutSlowInEasing
+            }
+        } else {
+            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+        },
         label = "CoinScale"
     )
 
@@ -60,11 +73,15 @@ fun FlipCoinScreen(
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             isFlipping = true
             val nextResult = Random.nextBoolean()
-            delay(500)
+
+            // Wait for half the animation to change the visual result
+            delay(600)
             isHeads = nextResult
-            delay(500)
+
+            delay(600)
             isFlipping = false
-            history = (listOf(nextResult) + history).take(10)
+            history = (listOf(nextResult) + history).take(12)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
             } else {
@@ -76,17 +93,32 @@ fun FlipCoinScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("COIN FLIP", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = {
+                    Text(
+                        "COIN FLIP",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { history = emptyList() }) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset History")
+                    IconButton(
+                        onClick = { history = emptyList() },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", tint = MaterialTheme.colorScheme.primary)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
@@ -96,24 +128,43 @@ fun FlipCoinScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // History Row
-            Row(
-                modifier = Modifier.fillMaxWidth().height(40.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (history.isEmpty()) {
-                    Text("No flips yet", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-                } else {
-                    history.forEach { heads ->
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .size(24.dp)
-                                .clip(CircleShape)
-                                .background(if (heads) Color(0xFFFFD700) else Color(0xFFC0C0C0)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(if (heads) "H" else "T", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "RECENT FLIPS",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.outline,
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (history.isEmpty()) {
+                        Text("No history", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                    } else {
+                        history.forEachIndexed { index, heads ->
+                            val itemScale by animateFloatAsState(1f)
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .size(if (index == 0) 32.dp else 24.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (heads) Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFB8860B)))
+                                        else Brush.linearGradient(listOf(Color(0xFFC0C0C0), Color(0xFF708090)))
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (heads) "H" else "T",
+                                    fontSize = if (index == 0) 14.sp else 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -122,64 +173,73 @@ fun FlipCoinScreen(
             // Coin Display
             Box(
                 modifier = Modifier
-                    .size(240.dp)
+                    .size(260.dp)
                     .scale(scale.value)
                     .graphicsLayer {
-                        rotationX = rotation.value
-                        cameraDistance = 12f * density
+                        rotationY = rotation.value
+                        cameraDistance = 15f * density
                     }
-                    .bouncyClick { flipCoin() },
+                    .bouncyClick(enabled = !isFlipping) { flipCoin() },
                 contentAlignment = Alignment.Center
             ) {
-                // Outer Ring
+                // Coin Design
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     shape = CircleShape,
-                    color = if (isHeads) Color(0xFFFFD700) else Color(0xFFC0C0C0),
-                    shadowElevation = 12.dp,
-                    tonalElevation = 8.dp
+                    color = Color.Transparent,
+                    shadowElevation = if (isFlipping) 24.dp else 8.dp
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(8.dp)
-                            .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.3f),
-                                        Color.Black.copy(alpha = 0.1f)
-                                    )
+                                    if (isHeads) listOf(Color(0xFFFFE082), Color(0xFFFFA000), Color(0xFFB8860B))
+                                    else listOf(Color(0xFFE0E0E0), Color(0xFF9E9E9E), Color(0xFF616161))
                                 )
-                            ),
+                            )
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize(0.85f),
-                            shape = CircleShape,
-                            color = Color.Transparent,
-                            border = androidx.compose.foundation.BorderStroke(2.dp, Color.Black.copy(alpha = 0.1f))
+                        // Inner ring
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.05f))
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = if (isHeads) "H" else "T",
-                                    style = MaterialTheme.typography.displayLarge,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 100.sp,
-                                    color = Color.Black.copy(alpha = 0.6f)
-                                )
+                            Text(
+                                text = if (isHeads) "H" else "T",
+                                style = MaterialTheme.typography.displayLarge,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 120.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+
+                            // Edge details
+                            repeat(12) { i ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer { rotationZ = i * 30f },
+                                    contentAlignment = Alignment.TopCenter
+                                ) {
+                                    Box(Modifier.size(4.dp, 12.dp).background(Color.White.copy(alpha = 0.3f), CircleShape))
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Result Text
+            // Result Text and Button
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedContent(
-                    targetState = if (isFlipping) "Flipping..." else if (isHeads) "HEADS" else "TAILS",
+                    targetState = if (isFlipping) "FLIPPING..." else if (isHeads) "HEADS" else "TAILS",
                     transitionSpec = {
-                        slideInVertically { it } + fadeIn() togetherWith slideOutVertically { -it } + fadeOut()
+                        (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
                     },
                     label = "ResultAnim"
                 ) { text ->
@@ -187,23 +247,28 @@ fun FlipCoinScreen(
                         text = text,
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Black,
-                        color = if (isFlipping) MaterialTheme.colorScheme.outline 
-                                else if (isHeads) Color(0xFFB8860B) else Color(0xFF708090)
+                        color = if (isFlipping) MaterialTheme.colorScheme.outline
+                                else if (isHeads) Color(0xFFFFA000) else Color(0xFF757575),
+                        letterSpacing = 2.sp
                     )
                 }
-                
-                Spacer(Modifier.height(32.dp))
+
+                Spacer(Modifier.height(48.dp))
 
                 Button(
                     onClick = { flipCoin() },
                     modifier = Modifier.fillMaxWidth().height(80.dp),
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(28.dp),
                     enabled = !isFlipping,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                 ) {
                     Icon(Icons.Rounded.Casino, null, modifier = Modifier.size(28.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("FLIP COIN", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text("FLIP COIN", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 }
             }
         }

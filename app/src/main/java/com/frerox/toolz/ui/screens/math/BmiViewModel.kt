@@ -21,6 +21,8 @@ data class BmiState(
     val bmr: Float? = null,
     val tdee: Float? = null,
     val ibw: Float? = null,
+    val bfp: Float? = null, // Body Fat Percentage
+    val whr: Float? = null, // Waist-to-Height Ratio (placeholder if we add waist)
     val isCm: Boolean = true,
     val isKg: Boolean = true,
     val healthyRange: Pair<Float, Float> = 18.5f to 24.9f
@@ -73,29 +75,40 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         val heightInMeters = heightInCm / 100f
         
         if (weightInKg > 0 && heightInMeters > 0) {
-            // 1. BMI Calculation (Standard WHO Formula)
+            // 1. BMI Calculation
             val bmiValue = weightInKg / heightInMeters.pow(2)
             
-            // 2. Adjust categories based on age (Standard trusted categories)
+            // 2. Categories
             val (category, range) = getBmiCategoryAndRange(bmiValue, ageVal)
             
-            // 3. BMR (Mifflin-St Jeor Equation - most accurate for modern population)
+            // 3. BMR (Mifflin-St Jeor)
             val bmrValue = if (state.gender == Gender.MALE) {
                 (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) + 5f
             } else {
                 (10f * weightInKg) + (6.25f * heightInCm) - (5f * ageVal.toFloat()) - 161f
             }
 
-            // 4. TDEE (Sedentary baseline: BMR * 1.2)
+            // 4. TDEE (Sedentary)
             val tdeeValue = bmrValue * 1.2f
 
-            // 5. Ideal Body Weight (Devine Formula - industry standard)
+            // 5. Ideal Body Weight (Devine)
             val heightInInches = heightInCm / 2.54f
             val inchesOver5Feet = (heightInInches - 60).coerceAtLeast(0f)
             val ibwValue = if (state.gender == Gender.MALE) {
                 50f + (2.3f * inchesOver5Feet)
             } else {
                 45.5f + (2.3f * inchesOver5Feet)
+            }
+
+            // 6. Body Fat Percentage (Deurenberg Formula)
+            // Adult BFP = (1.20 × BMI) + (0.23 × Age) − (10.8 × sex) − 5.4
+            // where sex is 1 for male, 0 for female
+            val sexModifier = if (state.gender == Gender.MALE) 1 else 0
+            val bfpValue = if (ageVal >= 18) {
+                (1.20f * bmiValue) + (0.23f * ageVal.toFloat()) - (10.8f * sexModifier) - 5.4f
+            } else {
+                // Child/Teen formula
+                (1.51f * bmiValue) - (0.70f * ageVal.toFloat()) - (3.6f * sexModifier) + 1.4f
             }
 
             _uiState.update { 
@@ -105,20 +118,20 @@ class BmiViewModel @Inject constructor() : ViewModel() {
                     bmr = bmrValue,
                     tdee = tdeeValue,
                     ibw = ibwValue,
+                    bfp = bfpValue,
                     healthyRange = range
                 ) 
             }
         } else {
-            _uiState.update { it.copy(bmi = null, category = "", bmr = null, tdee = null, ibw = null) }
+            _uiState.update { it.copy(bmi = null, category = "", bmr = null, tdee = null, ibw = null, bfp = null) }
         }
     }
 
     private fun getBmiCategoryAndRange(bmi: Float, age: Int): Pair<String, Pair<Float, Float>> {
-        // WHO standard range, with adjustment for older adults if needed
         val range = if (age >= 65) {
-            22.0f to 27.0f // Recommended range for seniors
+            22.0f to 27.0f
         } else {
-            18.5f to 24.9f // Standard WHO range
+            18.5f to 24.9f
         }
 
         val category = when {

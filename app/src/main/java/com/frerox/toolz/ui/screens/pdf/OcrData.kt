@@ -24,7 +24,7 @@ data class OcrDocumentData(
 )
 
 data class FormulaOcrResult(
-    val plainText: String,
+    val normalizedText: String,
     val latex: String,
     val confidence: Float
 )
