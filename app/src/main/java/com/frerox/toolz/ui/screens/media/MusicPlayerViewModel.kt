@@ -8,9 +8,6 @@ import android.hardware.SensorManager
 import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,14 +26,17 @@ import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.MusicPlayerService
+import com.frerox.toolz.util.VibrationManager
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 enum class SortOrder {
@@ -51,8 +51,6 @@ data class MusicUiState(
     val mostPlayed: List<MusicTrack> = emptyList(),
     val currentTrack: MusicTrack? = null,
     val isPlaying: Boolean = false,
-    val playbackPosition: Long = 0L,
-    val duration: Long = 0L,
     val isShuffleOn: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val sortOrder: SortOrder = SortOrder.RECENT,
@@ -68,19 +66,30 @@ data class MusicUiState(
     val hapticIntensity: Float = 0.5f,
     val pipEnabled: Boolean = false,
     val sleepTimerActive: Boolean = false,
-    val sleepTimerRemaining: Long? = null
+    val sleepTimerRemaining: Long? = null,
+    val queue: List<MusicTrack> = emptyList(),
+    val performanceMode: Boolean = false,
+    val playbackPosition: Long = 0L,
+    val duration: Long = 0L
 )
 
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val settingsRepository: SettingsRepository,
+    private val vibrationManager: VibrationManager,
     val player: ExoPlayer,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MusicUiState())
     val uiState = _uiState.asStateFlow()
+
+    private val _playbackPosition = MutableStateFlow(0L)
+    val playbackPosition = _playbackPosition.asStateFlow()
+
+    private val _duration = MutableStateFlow(0L)
+    val duration = _duration.asStateFlow()
 
     private val _sliderPosition = MutableStateFlow<Long?>(null)
     val sliderPosition = _sliderPosition.asStateFlow()
@@ -98,12 +107,8 @@ class MusicPlayerViewModel @Inject constructor(
     private var equalizer: Equalizer? = null
     private var shakeDetector: ShakeDetector? = null
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-    } else {
-        @Suppress("DEPRECATION")
-        context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-    }
+
+    private var currentQueueUris: List<String> = emptyList()
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -112,7 +117,7 @@ class MusicPlayerViewModel @Inject constructor(
                 startProgressUpdate()
                 startPlayerService()
                 initEqualizer()
-                performHapticFeedback()
+                vibrationManager.vibrateClick()
                 
                 val currentUri = player.currentMediaItem?.mediaId
                 if (currentUri != null) {
@@ -122,43 +127,71 @@ class MusicPlayerViewModel @Inject constructor(
                 }
             } else {
                 stopProgressUpdate()
-                performHapticFeedback()
+                vibrationManager.vibrateClick()
             }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
             val track = _uiState.value.tracks.find { it.uri == uri }
-            _uiState.update { 
-                it.copy(
-                    currentTrack = track,
-                    duration = player.duration.coerceAtLeast(0L)
-                ) 
-            }
+            val dur = player.duration.coerceAtLeast(0L)
+            _uiState.update { it.copy(currentTrack = track, duration = dur) }
+            _duration.value = dur
+            
+            updateQueue()
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
-                 performHapticFeedback()
+                 vibrationManager.vibrateClick()
             }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) {
-                _uiState.update { it.copy(duration = player.duration.coerceAtLeast(0L)) }
+                val dur = player.duration.coerceAtLeast(0L)
+                _uiState.update { it.copy(duration = dur) }
+                _duration.value = dur
             }
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
             _uiState.update { it.copy(repeatMode = repeatMode) }
-            performHapticFeedback()
+            vibrationManager.vibrateClick()
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
-            performHapticFeedback()
+            vibrationManager.vibrateClick()
         }
         
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
             player.prepare()
+        }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            updateQueue()
+        }
+    }
+
+    private fun updateQueue() {
+        viewModelScope.launch(Dispatchers.Main) {
+            val p: Player = controller ?: player
+            val currentTracks = _uiState.value.tracks
+            if (currentTracks.isEmpty()) return@launch
+            
+            val trackMap = currentTracks.associateBy { it.uri }
+            val queueTracks = mutableListOf<MusicTrack>()
+            val uris = mutableListOf<String>()
+            
+            for (i in 0 until p.mediaItemCount) {
+                val mediaItem = p.getMediaItemAt(i)
+                uris.add(mediaItem.mediaId)
+                trackMap[mediaItem.mediaId]?.let {
+                    queueTracks.add(it)
+                }
+            }
+            
+            currentQueueUris = uris
+            _uiState.update { it.copy(queue = queueTracks) }
         }
     }
 
@@ -185,6 +218,12 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.performanceMode.collect { perf ->
+                _uiState.update { it.copy(performanceMode = perf) }
             }
         }
 
@@ -240,7 +279,7 @@ class MusicPlayerViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             val combinedFlow = combine(
                 repository.allTracks,
                 repository.allPlaylists,
@@ -268,20 +307,23 @@ class MusicPlayerViewModel @Inject constructor(
                     uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
                 }
 
-                _uiState.update { state ->
-                    state.copy(
-                        tracks = prioritizedTracks, 
-                        playlists = data.playlists, 
-                        favoriteTracks = data.favorites,
-                        recentlyPlayed = data.recent,
-                        mostPlayed = data.most,
-                        folders = folders,
-                        currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri) },
-                        isPlaying = player.isPlaying,
-                        duration = player.duration.coerceAtLeast(0L),
-                        isShuffleOn = player.shuffleModeEnabled,
-                        repeatMode = player.repeatMode
-                    ) 
+                withContext(Dispatchers.Main) {
+                    _uiState.update { state ->
+                        state.copy(
+                            tracks = prioritizedTracks, 
+                            playlists = data.playlists.sortedByDescending { it.createdAt }, 
+                            favoriteTracks = data.favorites,
+                            recentlyPlayed = data.recent,
+                            mostPlayed = data.most,
+                            folders = folders,
+                            currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri) },
+                            isPlaying = player.isPlaying,
+                            isShuffleOn = player.shuffleModeEnabled,
+                            repeatMode = player.repeatMode,
+                            duration = player.duration.coerceAtLeast(0L)
+                        ) 
+                    }
+                    _duration.value = player.duration.coerceAtLeast(0L)
                 }
             }.collect()
         }
@@ -298,34 +340,22 @@ class MusicPlayerViewModel @Inject constructor(
             try {
                 controller = controllerFuture?.get()
                 controller?.addListener(playerListener)
+                val dur = controller?.duration?.coerceAtLeast(0L) ?: 0L
                 _uiState.update { it.copy(
                     isPlaying = controller?.isPlaying ?: false,
                     isShuffleOn = controller?.shuffleModeEnabled ?: false,
                     repeatMode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF,
                     currentTrack = _uiState.value.tracks.find { t -> t.uri == controller?.currentMediaItem?.mediaId },
-                    duration = controller?.duration?.coerceAtLeast(0L) ?: 0L
+                    duration = dur
                 )}
+                _duration.value = dur
+                updateQueue()
                 pendingAction?.invoke()
                 pendingAction = null
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }, MoreExecutors.directExecutor())
-    }
-
-    private fun performHapticFeedback() {
-        viewModelScope.launch {
-            if (uiState.value.hapticEnabled) {
-                val intensityValue = uiState.value.hapticIntensity
-                val amplitude = (intensityValue * 255).toInt().coerceIn(1, 255)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(20, amplitude))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(20)
-                }
-            }
-        }
     }
 
     private fun startShakeDetection() {
@@ -409,9 +439,13 @@ class MusicPlayerViewModel @Inject constructor(
             while (true) {
                 if (_sliderPosition.value == null) {
                     val p: Player = controller ?: player
-                    _uiState.update { it.copy(playbackPosition = p.currentPosition) }
+                    val currentPos = p.currentPosition
+                    _uiState.update { it.copy(playbackPosition = currentPos) }
+                    if (_playbackPosition.value != currentPos) {
+                        _playbackPosition.value = currentPos
+                    }
                 }
-                delay(100)
+                delay(if (_uiState.value.performanceMode) 1000 else 500)
             }
         }
     }
@@ -429,6 +463,8 @@ class MusicPlayerViewModel @Inject constructor(
             val p: Player = controller ?: player
             p.seekTo(pos)
             _uiState.update { it.copy(playbackPosition = pos) }
+            _playbackPosition.value = pos
+            vibrationManager.vibrateClick()
         }
         _sliderPosition.value = null
     }
@@ -438,6 +474,7 @@ class MusicPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
             repository.scanDeviceForMusic()
             _uiState.update { it.copy(isLoading = false) }
+            vibrationManager.vibrateSuccess()
         }
     }
 
@@ -446,6 +483,7 @@ class MusicPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
             repository.scanCustomFolder(uri)
             _uiState.update { it.copy(isLoading = false) }
+            vibrationManager.vibrateSuccess()
         }
     }
 
@@ -461,10 +499,12 @@ class MusicPlayerViewModel @Inject constructor(
                 isSelectionMode = newSelection.isNotEmpty()
             )
         }
+        vibrationManager.vibrateClick()
     }
 
     fun clearSelection() {
         _uiState.update { it.copy(selectedTracks = emptySet(), isSelectionMode = false) }
+        vibrationManager.vibrateClick()
     }
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
@@ -476,45 +516,77 @@ class MusicPlayerViewModel @Inject constructor(
             return
         }
 
-        val mediaItems = tracks.map { t ->
-            val metadata = MediaMetadata.Builder()
-                .setTitle(t.title)
-                .setArtist(t.artist ?: "Unknown Artist")
-                .setAlbumTitle(t.album ?: "Unknown Album")
-                .setDisplayTitle(t.title)
-                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setIsPlayable(true)
-                .setArtworkUri(t.thumbnailUri?.toUri())
-                .build()
+        vibrationManager.vibrateClick()
+        
+        viewModelScope.launch(Dispatchers.Default) {
+            val trackUris = tracks.map { it.uri }
+            val isSameQueue = trackUris == currentQueueUris
+            
+            withContext(Dispatchers.Main) {
+                val p: Player = controller ?: player
+                if (isSameQueue) {
+                    val index = trackUris.indexOf(track.uri)
+                    if (index != -1) {
+                        p.seekTo(index, 0L)
+                        p.play()
+                        return@withContext
+                    }
+                }
 
-            MediaItem.Builder()
-                .setMediaId(t.uri)
-                .setUri(t.uri.toUri())
-                .setMediaMetadata(metadata)
-                .build()
-        }
-        
-        val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-        
-        controller?.let { c ->
-            c.stop()
-            c.clearMediaItems()
-            c.setMediaItems(mediaItems, startIndex, 0L)
-            c.prepare()
-            c.play()
-        } ?: run {
-            player.stop()
-            player.clearMediaItems()
-            player.setMediaItems(mediaItems, startIndex, 0L)
-            player.prepare()
-            player.play()
+                val mediaItems = tracks.map { t -> t.toMediaItem() }
+                val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+                
+                p.stop()
+                p.setMediaItems(mediaItems, startIndex, 0L)
+                p.prepare()
+                p.play()
+            }
         }
     }
 
+    fun addToQueue(track: MusicTrack) {
+        val p: Player = controller ?: player
+        p.addMediaItem(track.toMediaItem())
+        vibrationManager.vibrateClick()
+    }
+
+    fun playNext(track: MusicTrack) {
+        val p: Player = controller ?: player
+        val nextIndex = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
+        p.addMediaItem(nextIndex, track.toMediaItem())
+        vibrationManager.vibrateClick()
+    }
+
+    private fun MusicTrack.toMediaItem(): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist ?: "Unknown Artist")
+            .setAlbumTitle(album ?: "Unknown Album")
+            .setDisplayTitle(title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setArtworkUri(thumbnailUri?.toUri())
+            .build()
+
+        return MediaItem.Builder()
+            .setMediaId(uri)
+            .setUri(uri.toUri())
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
     fun playPlaylist(playlist: Playlist) {
-        val tracks = _uiState.value.tracks.filter { it.uri in playlist.trackUris }
+        val tracks = playlist.trackUris.mapNotNull { uri -> 
+            _uiState.value.tracks.find { it.uri == uri }
+        }
         if (tracks.isEmpty()) return
-        playTrack(tracks.first(), tracks)
+        
+        val p: Player = controller ?: player
+        if (p.shuffleModeEnabled) {
+            playTrack(tracks.random(), tracks)
+        } else {
+            playTrack(tracks.first(), tracks)
+        }
     }
 
     fun togglePlayPause() {
@@ -525,35 +597,52 @@ class MusicPlayerViewModel @Inject constructor(
         } else {
             p.play()
         }
+        vibrationManager.vibrateClick()
     }
 
     fun stop() {
         val p: Player = controller ?: player
         p.stop()
         p.clearMediaItems()
-        _uiState.update { it.copy(currentTrack = null, isPlaying = false, playbackPosition = 0L) }
+        _uiState.update { it.copy(currentTrack = null, isPlaying = false, playbackPosition = 0L, duration = 0L) }
+        _playbackPosition.value = 0L
+        _duration.value = 0L
+        vibrationManager.vibrateClick()
     }
 
     fun seekTo(position: Long) {
         val p: Player = controller ?: player
         p.seekTo(position)
         _uiState.update { it.copy(playbackPosition = position) }
+        _playbackPosition.value = position
+        vibrationManager.vibrateClick()
     }
 
     fun skipNext() {
         val p: Player = controller ?: player
-        p.seekToNext()
+        if (p.hasNextMediaItem()) {
+            p.seekToNext()
+        } else if (p.repeatMode == Player.REPEAT_MODE_ALL) {
+            p.seekTo(0, 0)
+        }
+        vibrationManager.vibrateClick()
     }
     
     fun skipPrevious() {
         val p: Player = controller ?: player
-        p.seekToPrevious()
+        if (p.currentPosition > 3000) {
+            p.seekTo(0)
+        } else if (p.hasPreviousMediaItem()) {
+            p.seekToPrevious()
+        }
+        vibrationManager.vibrateClick()
     }
 
     fun toggleShuffle() {
         val p: Player = controller ?: player
         p.shuffleModeEnabled = !p.shuffleModeEnabled
         _uiState.update { it.copy(isShuffleOn = p.shuffleModeEnabled) }
+        vibrationManager.vibrateClick()
     }
 
     fun toggleRepeat() {
@@ -565,10 +654,12 @@ class MusicPlayerViewModel @Inject constructor(
         }
         p.repeatMode = newMode
         _uiState.update { it.copy(repeatMode = newMode) }
+        vibrationManager.vibrateClick()
     }
 
     fun setSortOrder(order: SortOrder) {
         _uiState.update { it.copy(sortOrder = order) }
+        vibrationManager.vibrateClick()
     }
 
     fun setSleepTimer(minutes: Int?) {
@@ -590,10 +681,12 @@ class MusicPlayerViewModel @Inject constructor(
                 fadeOutAndStop()
             }
         }
+        vibrationManager.vibrateClick()
     }
 
     fun toggleSleepTimerDialog() {
         _showSleepTimer.update { !it }
+        vibrationManager.vibrateClick()
     }
 
     private suspend fun fadeOutAndStop() {
@@ -607,29 +700,34 @@ class MusicPlayerViewModel @Inject constructor(
         p.pause()
         player.volume = 1.0f
         _uiState.update { it.copy(sleepTimerMinutes = null, sleepTimerActive = false, sleepTimerRemaining = null) }
+        vibrationManager.vibrateLongClick()
     }
 
     fun setArtShape(shape: String) {
         viewModelScope.launch {
             settingsRepository.setMusicArtShape(shape)
+            vibrationManager.vibrateClick()
         }
     }
 
     fun toggleRotation() {
         viewModelScope.launch {
             settingsRepository.setMusicRotationEnabled(!_uiState.value.rotationEnabled)
+            vibrationManager.vibrateClick()
         }
     }
     
     fun togglePipEnabled() {
         viewModelScope.launch {
             settingsRepository.setMusicPipEnabled(!_uiState.value.pipEnabled)
+            vibrationManager.vibrateClick()
         }
     }
 
     fun createPlaylist(name: String, thumbnailUri: String? = null) {
         viewModelScope.launch {
             repository.createPlaylist(Playlist(name = name, thumbnailUri = thumbnailUri))
+            vibrationManager.vibrateSuccess()
         }
     }
 
@@ -637,6 +735,7 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val newList = (playlist.trackUris + track.uri).distinct()
             repository.updatePlaylist(playlist.copy(trackUris = newList))
+            vibrationManager.vibrateClick()
         }
     }
 
@@ -645,6 +744,7 @@ class MusicPlayerViewModel @Inject constructor(
             val newList = (playlist.trackUris + _uiState.value.selectedTracks).distinct()
             repository.updatePlaylist(playlist.copy(trackUris = newList))
             clearSelection()
+            vibrationManager.vibrateSuccess()
         }
     }
 
@@ -652,36 +752,42 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val newList = playlist.trackUris - trackUri
             repository.updatePlaylist(playlist.copy(trackUris = newList))
+            vibrationManager.vibrateClick()
         }
     }
     
     fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
         viewModelScope.launch {
             repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString()))
+            vibrationManager.vibrateClick()
         }
     }
 
     fun createPlaylistWithTracks(name: String, trackUris: List<String>) {
         viewModelScope.launch {
             repository.createPlaylist(Playlist(name = name, trackUris = trackUris))
+            vibrationManager.vibrateSuccess()
         }
     }
 
     fun deletePlaylist(playlist: Playlist) {
         viewModelScope.launch {
             repository.deletePlaylist(playlist)
+            vibrationManager.vibrateClick()
         }
     }
 
     fun deleteTrack(track: MusicTrack) {
         viewModelScope.launch {
             repository.deleteTrack(track)
+            vibrationManager.vibrateClick()
         }
     }
     
     fun toggleFavorite(track: MusicTrack) {
         viewModelScope.launch {
             repository.toggleFavorite(track)
+            vibrationManager.vibrateClick()
         }
     }
 

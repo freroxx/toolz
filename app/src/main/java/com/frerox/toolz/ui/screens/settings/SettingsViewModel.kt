@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.VibrationManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,7 +12,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val repository: SettingsRepository
+    private val repository: SettingsRepository,
+    val vibrationManager: VibrationManager
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -29,8 +31,11 @@ class SettingsViewModel @Inject constructor(
     val worldClockZones = repository.worldClockZones
     
     val dashboardView = repository.dashboardView
+    val showRecentTools = repository.showRecentTools
+    val showQuickNotes = repository.showQuickNotes
 
     val notificationsEnabled = repository.notificationsEnabled
+    val notificationVaultEnabled = repository.notificationVaultEnabled
     val stepNotifications = repository.stepNotifications
     val timerNotifications = repository.timerNotifications
     val voiceRecordNotifications = repository.voiceRecordNotifications
@@ -47,6 +52,8 @@ class SettingsViewModel @Inject constructor(
     val showQibla = repository.showQibla
     val stepCounterEnabled = repository.stepCounterEnabled
     val showToolzPill = repository.showToolzPill
+    val pillTodoEnabled = repository.pillTodoEnabled
+    val pillFocusEnabled = repository.pillFocusEnabled
     val userName = repository.userName
     val autoUpdateEnabled = repository.autoUpdateEnabled
 
@@ -56,6 +63,8 @@ class SettingsViewModel @Inject constructor(
     val musicEqualizerPreset = repository.musicEqualizerPreset
     val showMusicVisualizer = repository.showMusicVisualizer
 
+    val performanceMode = repository.performanceMode
+
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { repository.setDynamicColor(enabled) }
@@ -63,8 +72,11 @@ class SettingsViewModel @Inject constructor(
     fun setCustomSecondaryColor(color: Int?) = viewModelScope.launch { repository.setCustomSecondaryColor(color) }
     
     fun setDashboardView(view: String) = viewModelScope.launch { repository.setDashboardView(view) }
+    fun setShowRecentTools(enabled: Boolean) = viewModelScope.launch { repository.setShowRecentTools(enabled) }
+    fun setShowQuickNotes(enabled: Boolean) = viewModelScope.launch { repository.setShowQuickNotes(enabled) }
 
     fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationsEnabled(enabled) }
+    fun setNotificationVaultEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationVaultEnabled(enabled) }
     fun setStepNotifications(enabled: Boolean) = viewModelScope.launch { repository.setStepNotifications(enabled) }
     fun setTimerNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTimerNotifications(enabled) }
     fun setVoiceRecordNotifications(enabled: Boolean) = viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) }
@@ -81,6 +93,8 @@ class SettingsViewModel @Inject constructor(
     fun setShowQibla(enabled: Boolean) = viewModelScope.launch { repository.setShowQibla(enabled) }
     fun setStepCounterEnabled(enabled: Boolean) = viewModelScope.launch { repository.setStepCounterEnabled(enabled) }
     fun setShowToolzPill(enabled: Boolean) = viewModelScope.launch { repository.setShowToolzPill(enabled) }
+    fun setPillTodoEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillTodoEnabled(enabled) }
+    fun setPillFocusEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillFocusEnabled(enabled) }
     fun setUserName(name: String) = viewModelScope.launch { repository.setUserName(name) }
     fun setAutoUpdateEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
 
@@ -88,6 +102,8 @@ class SettingsViewModel @Inject constructor(
     fun setMusicShakeToSkip(enabled: Boolean) = viewModelScope.launch { repository.setMusicShakeToSkip(enabled) }
     fun setMusicPlaybackSpeed(speed: Float) = viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) }
     fun setShowMusicVisualizer(enabled: Boolean) = viewModelScope.launch { repository.setShowMusicVisualizer(enabled) }
+
+    fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
 
     fun resetOnboarding() = viewModelScope.launch {
         repository.setOnboardingCompleted(false)

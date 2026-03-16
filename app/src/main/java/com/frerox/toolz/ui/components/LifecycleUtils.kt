@@ -1,9 +1,9 @@
 package com.frerox.toolz.ui.components
 
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
 fun rememberLifecycleEvent(): Lifecycle.Event {

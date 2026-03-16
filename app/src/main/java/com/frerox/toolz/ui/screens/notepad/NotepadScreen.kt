@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +67,8 @@ import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -80,6 +84,10 @@ fun NotepadScreen(
 ) {
     val notes by viewModel.notes.collectAsStateWithLifecycle()
     val musicState by musicViewModel.uiState.collectAsState()
+    val hapticEnabled = LocalHapticEnabled.current
+    val performanceMode = LocalPerformanceMode.current
+    val view = LocalView.current
+    
     var showEditor by remember { mutableStateOf(false) }
     var noteToEdit by remember { mutableStateOf<Note?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -153,6 +161,7 @@ fun NotepadScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { 
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     noteToEdit = null
                     showEditor = true 
                 },
@@ -171,7 +180,7 @@ fun NotepadScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(top = padding.calculateTopPadding())
-            .fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 20.dp)
+            .then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 20.dp))
         ) {
             if (filteredNotes.isEmpty()) {
                 val isSearching = searchQuery.isNotEmpty()
@@ -194,6 +203,7 @@ fun NotepadScreen(
                             )
                         }
                         Spacer(Modifier.height(32.dp))
+                        @Suppress("DEPRECATION")
                         Text(
                             text = if (isSearching) "NO MATCHES" else "VOID DETECTED", 
                             style = MaterialTheme.typography.labelSmall, 
@@ -221,19 +231,18 @@ fun NotepadScreen(
                     verticalItemSpacing = 16.dp
                 ) {
                     itemsIndexed(filteredNotes, key = { _, note -> note.id }) { _, note ->
-                        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                         ImprovedNoteItem(
                             note = note, 
                             isDark = isDark,
                             isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
                             currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                             onClick = { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 noteToEdit = note
                                 showEditor = false
                             },
                             onDelete = { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                 viewModel.deleteNote(note)
                                 scope.launch {
                                     val result = snackbarHostState.showSnackbar(
@@ -247,15 +256,15 @@ fun NotepadScreen(
                                 }
                             },
                             onTogglePin = { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 viewModel.togglePin(note) 
                             },
                             onPlayAudio = { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 note.attachedAudioUri?.let { onPlayAudio(it) } 
                             },
                             onViewPdf = { 
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                 note.attachedPdfUri?.let { onViewPdf(it) } 
                             }
                         )
@@ -334,6 +343,8 @@ fun NoteViewerDialog(
     onPlayAudio: (String) -> Unit,
     onViewPdf: (String) -> Unit
 ) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     val noteColor = Color(note.color)
     val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
 
@@ -359,6 +370,7 @@ fun NoteViewerDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                @Suppress("DEPRECATION")
                 Text(
                     text = SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date(note.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
@@ -369,7 +381,10 @@ fun NoteViewerDialog(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(
-                        onClick = { viewModel.togglePin(note) },
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.togglePin(note) 
+                        },
                         modifier = Modifier.size(44.dp).background(onNoteColor.copy(alpha = 0.15f), CircleShape)
                     ) {
                         Icon(
@@ -380,13 +395,17 @@ fun NoteViewerDialog(
                         )
                     }
                     IconButton(
-                        onClick = onEdit,
+                        onClick = {
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onEdit()
+                        },
                         modifier = Modifier.size(44.dp).background(onNoteColor.copy(alpha = 0.15f), CircleShape)
                     ) {
                         Icon(Icons.Rounded.Edit, "Edit", tint = onNoteColor, modifier = Modifier.size(20.dp))
                     }
                     IconButton(
                         onClick = {
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             viewModel.deleteNote(note)
                             onDismiss()
                         },
@@ -423,13 +442,19 @@ fun NoteViewerDialog(
                                 thumbnail = currentTrackThumbnail,
                                 containerColor = onNoteColor.copy(alpha = 0.15f),
                                 contentColor = onNoteColor,
-                                onClick = { onPlayAudio(note.attachedAudioUri) },
+                                onClick = { 
+                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    onPlayAudio(note.attachedAudioUri) 
+                                },
                                 modifier = Modifier.widthIn(max = 280.dp)
                             )
                         }
                         if (note.attachedPdfUri != null) {
                             Surface(
-                                onClick = { onViewPdf(note.attachedPdfUri) },
+                                onClick = { 
+                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    onViewPdf(note.attachedPdfUri) 
+                                },
                                 color = onNoteColor.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(28.dp),
                                 border = BorderStroke(1.dp, onNoteColor.copy(alpha = 0.1f))
@@ -453,7 +478,10 @@ fun NoteViewerDialog(
                         modifier = Modifier
                             .padding(bottom = 28.dp)
                             .height(200.dp)
-                            .clickable { onViewPdf(note.attachedPdfUri) }
+                            .clickable { 
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onViewPdf(note.attachedPdfUri) 
+                            }
                     )
                 }
 
@@ -492,6 +520,7 @@ fun ImprovedNoteItem(
 ) {
     val noteColor = Color(note.color)
     val onNoteColor = if (isDark(noteColor)) Color.White else Color.Black
+    val performanceMode = LocalPerformanceMode.current
 
     Surface(
         modifier = Modifier
@@ -499,7 +528,7 @@ fun ImprovedNoteItem(
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(40.dp),
         color = noteColor.copy(alpha = 0.95f),
-        shadowElevation = 8.dp,
+        shadowElevation = if (performanceMode) 0.dp else 8.dp,
         border = BorderStroke(1.5.dp, onNoteColor.copy(alpha = 0.1f))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
@@ -579,6 +608,7 @@ fun ImprovedNoteItem(
                             ) {
                                 Icon(Icons.Rounded.Description, null, modifier = Modifier.size(18.dp), tint = onNoteColor)
                                 Spacer(Modifier.width(8.dp))
+                                @Suppress("DEPRECATION")
                                 Text("PDF", style = MaterialTheme.typography.labelSmall, color = onNoteColor, fontWeight = FontWeight.Black)
                             }
                         }
@@ -593,6 +623,7 @@ fun ImprovedNoteItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                @Suppress("DEPRECATION")
                 Text(
                     text = SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(note.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
@@ -627,6 +658,7 @@ fun ImprovedNoteItem(
 @Composable
 fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val performanceMode = LocalPerformanceMode.current
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(uri) {
@@ -652,7 +684,7 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .shadow(12.dp, RoundedCornerShape(24.dp)),
+            .then(if (performanceMode) Modifier else Modifier.shadow(12.dp, RoundedCornerShape(24.dp))),
         color = Color.White
     ) {
         if (bitmap != null) {
@@ -681,6 +713,7 @@ fun PdfPreview(uri: String, modifier: Modifier = Modifier) {
                     ) {
                         Icon(Icons.Rounded.PictureAsPdf, null, tint = Color(0xFFD32F2F), modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
+                        @Suppress("DEPRECATION")
                         Text("PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color.Black)
                     }
                 }
@@ -705,8 +738,12 @@ fun MusicPill(
     compact: Boolean = false,
     musicViewModel: MusicPlayerViewModel = hiltViewModel()
 ) {
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
+    
     val infiniteTransition = rememberInfiniteTransition(label = "rotation")
-    val rotation by infiniteTransition.animateFloat(
+    val rotation by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -721,7 +758,10 @@ fun MusicPill(
         color = containerColor,
         shape = RoundedCornerShape(if (compact) 28.dp else 36.dp),
         border = if (isPlaying) BorderStroke(2.dp, contentColor.copy(alpha = 0.4f)) else BorderStroke(1.dp, contentColor.copy(alpha = 0.15f)),
-        onClick = onClick
+        onClick = {
+            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            onClick()
+        }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = if (compact) 12.dp else 16.dp, vertical = if (compact) 10.dp else 14.dp),
@@ -770,6 +810,7 @@ fun MusicPill(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                @Suppress("DEPRECATION")
                 Text(
                     text = if (isPlaying) "Active Payload" else "Audio Interface",
                     style = MaterialTheme.typography.labelSmall,
@@ -781,7 +822,10 @@ fun MusicPill(
 
             if (!compact) {
                 IconButton(
-                    onClick = { musicViewModel.togglePlayPause() },
+                    onClick = { 
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        musicViewModel.togglePlayPause() 
+                    },
                     modifier = Modifier.size(44.dp).background(contentColor.copy(alpha = 0.15f), CircleShape)
                 ) {
                     Icon(
@@ -791,7 +835,7 @@ fun MusicPill(
                         tint = contentColor
                     )
                 }
-            } else if (isPlaying) {
+            } else if (isPlaying && !performanceMode) {
                 Row(
                     modifier = Modifier.height(16.dp).padding(end = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.5.dp),
@@ -829,6 +873,8 @@ fun NoteEditorDialog(
     onDismiss: () -> Unit,
     onSave: (String, String, Int, String, Float, Boolean, Boolean, String?, String?, String?) -> Unit
 ) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     var title by remember { mutableStateOf(note?.title ?: "") }
     var content by remember { mutableStateOf(note?.content ?: "") }
     var selectedColor by remember { mutableStateOf(note?.color ?: Color(0xFFFFF9C4).toArgb()) }
@@ -867,19 +913,31 @@ fun NoteEditorDialog(
             
             Column(modifier = Modifier.statusBarsPadding()) {
                 CenterAlignedTopAppBar(
-                    title = { Text(if (note == null) "NEW ENTRY" else "MODIFY ENTRY", color = onBgColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp) },
+                    title = { 
+                        @Suppress("DEPRECATION")
+                        Text(if (note == null) "NEW ENTRY" else "MODIFY ENTRY", color = onBgColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp) 
+                    },
                     navigationIcon = {
-                        IconButton(onClick = onDismiss) {
+                        IconButton(onClick = {
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onDismiss()
+                        }) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = onBgColor)
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showAttachmentMenu = true }) {
+                        IconButton(onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            showAttachmentMenu = true 
+                        }) {
                             Icon(Icons.Rounded.AttachFile, null, tint = onBgColor)
                         }
                         
                         TextButton(
-                            onClick = { onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName) },
+                            onClick = { 
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName) 
+                            },
                             modifier = Modifier.padding(end = 12.dp)
                         ) {
                             Surface(
@@ -919,7 +977,11 @@ fun NoteEditorDialog(
                                 AttachmentChip(
                                     label = attachedAudioName ?: "Audio Payload",
                                     icon = Icons.Rounded.MusicNote,
-                                    onDelete = { attachedAudioUri = null; attachedAudioName = null },
+                                    onDelete = { 
+                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        attachedAudioUri = null
+                                        attachedAudioName = null 
+                                    },
                                     color = onBgColor
                                 )
                             }
@@ -927,7 +989,10 @@ fun NoteEditorDialog(
                                 AttachmentChip(
                                     label = "PDF Document",
                                     icon = Icons.Rounded.Description,
-                                    onDelete = { attachedPdfUri = null },
+                                    onDelete = { 
+                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        attachedPdfUri = null 
+                                    },
                                     color = onBgColor
                                 )
                             }
@@ -945,10 +1010,16 @@ fun NoteEditorDialog(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = { isBold = !isBold }, modifier = Modifier.size(40.dp)) {
+                            IconButton(onClick = { 
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                isBold = !isBold 
+                            }, modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Rounded.FormatBold, contentDescription = "Bold", tint = if (isBold) MaterialTheme.colorScheme.primary else onBgColor, modifier = Modifier.size(24.dp))
                             }
-                            IconButton(onClick = { isItalic = !isItalic }, modifier = Modifier.size(40.dp)) {
+                            IconButton(onClick = { 
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                isItalic = !isItalic 
+                            }, modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Rounded.FormatItalic, contentDescription = "Italic", tint = if (isItalic) MaterialTheme.colorScheme.primary else onBgColor, modifier = Modifier.size(24.dp))
                             }
                             
@@ -957,7 +1028,10 @@ fun NoteEditorDialog(
                             Box {
                                 var showFontMenu by remember { mutableStateOf(false) }
                                 Row(
-                                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { showFontMenu = true }.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { 
+                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        showFontMenu = true 
+                                    }.padding(horizontal = 10.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(fontStyle, color = onBgColor, fontWeight = FontWeight.Black, fontSize = 13.sp)
@@ -968,7 +1042,11 @@ fun NoteEditorDialog(
                                     fonts.forEach { font ->
                                         DropdownMenuItem(
                                             text = { Text(font, fontWeight = FontWeight.Bold) },
-                                            onClick = { fontStyle = font; showFontMenu = false }
+                                            onClick = { 
+                                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                fontStyle = font
+                                                showFontMenu = false 
+                                            }
                                         )
                                     }
                                 }
@@ -1012,7 +1090,10 @@ fun NoteEditorDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
-                            onClick = { showCustomColorDialog = true },
+                            onClick = { 
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                showCustomColorDialog = true 
+                            },
                             modifier = Modifier.size(40.dp).clip(CircleShape).background(onBgColor.copy(alpha = 0.1f))
                         ) {
                             Icon(Icons.Rounded.Palette, null, tint = onBgColor, modifier = Modifier.size(22.dp))
@@ -1025,7 +1106,10 @@ fun NoteEditorDialog(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(color)
-                                    .clickable { selectedColor = argb }
+                                    .clickable { 
+                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        selectedColor = argb 
+                                    }
                                     .border(
                                         width = if (selectedColor == argb) 3.5.dp else 1.dp,
                                         color = if (selectedColor == argb) onBgColor else onBgColor.copy(alpha = 0.15f),
@@ -1078,6 +1162,7 @@ fun NoteEditorDialog(
                 shape = RoundedCornerShape(topStart = 64.dp, topEnd = 64.dp)
             ) {
                 Column(modifier = Modifier.padding(28.dp).padding(bottom = 40.dp)) {
+                    @Suppress("DEPRECATION")
                     Text("ATTACHMENT ENGINE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                     Spacer(Modifier.height(24.dp))
                     AttachmentTypeItem(
@@ -1086,6 +1171,7 @@ fun NoteEditorDialog(
                         icon = Icons.Rounded.MusicNote,
                         color = Color(0xFFFF4081),
                         onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             showTrackPicker = true
                             showAttachmentMenu = false
                         }
@@ -1097,6 +1183,7 @@ fun NoteEditorDialog(
                         icon = Icons.Rounded.Description,
                         color = Color(0xFF2196F3),
                         onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             showPdfPicker = true
                             showAttachmentMenu = false
                         }
@@ -1111,6 +1198,7 @@ fun NoteEditorDialog(
                 items = availableTracks.map { it.title to it.uri },
                 onDismiss = { showTrackPicker = false },
                 onSelect = { name, uri ->
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     attachedAudioUri = uri
                     attachedAudioName = name
                     showTrackPicker = false
@@ -1124,6 +1212,7 @@ fun NoteEditorDialog(
                 items = availablePdfs.map { it.name to it.uri.toString() },
                 onDismiss = { showPdfPicker = false },
                 onSelect = { _, uri ->
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     attachedPdfUri = uri
                     showPdfPicker = false
                 }
@@ -1135,6 +1224,7 @@ fun NoteEditorDialog(
                 initialColor = selectedColor,
                 onDismiss = { showCustomColorDialog = false },
                 onColorSelected = { 
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     selectedColor = it
                     showCustomColorDialog = false
                 }
@@ -1150,10 +1240,15 @@ fun CustomColorDialog(
     onColorSelected: (Int) -> Unit
 ) {
     var hexInput by remember { mutableStateOf(String.format("%06X", (0xFFFFFF and initialColor))) }
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("CHROMA ENGINE", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp, style = MaterialTheme.typography.labelMedium) },
+        title = { 
+            @Suppress("DEPRECATION")
+            Text("CHROMA ENGINE", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp, style = MaterialTheme.typography.labelMedium) 
+        },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
@@ -1184,13 +1279,17 @@ fun CustomColorDialog(
         confirmButton = {
             Button(
                 onClick = { 
+                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     try { onColorSelected(android.graphics.Color.parseColor("#$hexInput")) } catch(e: Exception) {}
                 },
                 shape = RoundedCornerShape(16.dp)
             ) { Text("CALIBRATE", fontWeight = FontWeight.Black) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+            TextButton(onClick = {
+                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                onDismiss()
+            }) { Text("CANCEL", fontWeight = FontWeight.Bold) }
         },
         shape = RoundedCornerShape(48.dp)
     )
@@ -1215,6 +1314,7 @@ fun AttachmentTypeItem(title: String, desc: String, icon: ImageVector, color: Co
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                @Suppress("DEPRECATION")
                 Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black)
             }
         }
@@ -1234,6 +1334,7 @@ fun AttachmentChip(label: String, icon: ImageVector, onDelete: () -> Unit, color
         ) {
             Icon(icon, null, modifier = Modifier.size(18.dp), tint = color)
             Spacer(Modifier.width(10.dp))
+            @Suppress("DEPRECATION")
             Text(label.take(15), style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Black)
             Spacer(Modifier.width(6.dp))
             IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
@@ -1250,6 +1351,8 @@ fun AttachmentPickerDialog(
     onDismiss: () -> Unit,
     onSelect: (String, String) -> Unit
 ) {
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1262,6 +1365,7 @@ fun AttachmentPickerDialog(
             border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
         ) {
             Column(modifier = Modifier.padding(28.dp)) {
+                @Suppress("DEPRECATION")
                 Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                 Spacer(Modifier.height(24.dp))
                 LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1296,7 +1400,10 @@ fun AttachmentPickerDialog(
                 }
                 Spacer(Modifier.height(24.dp))
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(onClick = {
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        onDismiss()
+                    }) {
                         Text("CANCEL", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
                 }

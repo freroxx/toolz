@@ -9,12 +9,20 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.frerox.toolz.util.VibrationManager
+
+val LocalPerformanceMode = staticCompositionLocalOf { false }
+val LocalHapticEnabled = staticCompositionLocalOf { true }
+val LocalHapticIntensity = staticCompositionLocalOf { 0.5f }
+val LocalVibrationManager = staticCompositionLocalOf<VibrationManager?> { null }
 
 private val DarkColorScheme = darkColorScheme(
     primary = PrimaryDark,
@@ -72,6 +80,10 @@ fun ToolzTheme(
     dynamicColor: Boolean = true,
     customPrimary: Color? = null,
     customSecondary: Color? = null,
+    performanceMode: Boolean = false,
+    hapticEnabled: Boolean = true,
+    hapticIntensity: Float = 0.5f,
+    vibrationManager: VibrationManager? = null,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
@@ -127,9 +139,16 @@ fun ToolzTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(
+        LocalPerformanceMode provides performanceMode,
+        LocalHapticEnabled provides hapticEnabled,
+        LocalHapticIntensity provides hapticIntensity,
+        LocalVibrationManager provides vibrationManager
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

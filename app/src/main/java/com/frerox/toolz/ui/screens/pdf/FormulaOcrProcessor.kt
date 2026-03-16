@@ -19,11 +19,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 enum class OcrLanguage(val displayName: String) {
-    LATIN("English/Latin"), // Latin handles English, French, Spanish, German, etc.
-    CHINESE("Chinese"),
+    LATIN("English/Latin/European"), 
+    CHINESE("Chinese (Simplified/Traditional)"),
     JAPANESE("Japanese"),
     KOREAN("Korean"),
-    DEVANAGARI("Devanagari")
+    DEVANAGARI("Devanagari (Hindi/Sanskrit)")
 }
 
 @Singleton
@@ -47,7 +47,6 @@ class FormulaOcrProcessor @Inject constructor(
 
     suspend fun processImage(bitmap: Bitmap, language: OcrLanguage = OcrLanguage.LATIN, region: Rect? = null): Text = withContext(Dispatchers.Default) {
         val targetBitmap = if (region != null) {
-            // Ensure region is within bounds
             val safeRegion = Rect(
                 region.left.coerceIn(0, bitmap.width),
                 region.top.coerceIn(0, bitmap.height),
@@ -63,6 +62,7 @@ class FormulaOcrProcessor @Inject constructor(
             bitmap
         }
 
+        // Adaptive preprocessing for better accuracy across different paper types/lighting
         val processedBitmap = preprocessForOcr(targetBitmap)
         val image = InputImage.fromBitmap(processedBitmap, 0)
         
@@ -83,11 +83,11 @@ class FormulaOcrProcessor @Inject constructor(
         val canvas = Canvas(output)
         val paint = Paint()
         
-        // ML Kit works best with high contrast
+        // Advanced color matrix for text sharpening and noise reduction
         val cm = ColorMatrix(floatArrayOf(
-            1.8f, 0f, 0f, 0f, -50f,
-            0f, 1.8f, 0f, 0f, -50f,
-            0f, 0f, 1.8f, 0f, -50f,
+            2.0f, 0f, 0f, 0f, -80f,
+            0f, 2.0f, 0f, 0f, -80f,
+            0f, 0f, 2.0f, 0f, -80f,
             0f, 0f, 0f, 1f, 0f
         ))
         
@@ -97,16 +97,26 @@ class FormulaOcrProcessor @Inject constructor(
         
         paint.colorFilter = ColorMatrixColorFilter(cm)
         canvas.drawBitmap(bitmap, 0f, 0f, paint)
+        
+        // Optional: Apply a slight blur and then threshold to remove small noise artifacts
+        // (Skipped for now to keep it lightweight, but can be added if accuracy is still low)
+        
         return output
     }
 
     fun getStructuredText(result: Text): String {
         // Sort blocks by top coordinate, then left (handles multi-column better)
+        // Also group by lines to preserve document flow
         val blocks = result.textBlocks.sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
         
         val sb = StringBuilder()
         blocks.forEach { block ->
             if (block.text.isNotBlank()) {
+                // Heuristic: if block is significantly indented, maybe it's a list item or sub-header
+                val left = block.boundingBox?.left ?: 0
+                if (left > 100) { // arbitrary threshold
+                    sb.append("  ") 
+                }
                 sb.append(block.text).append("\n\n")
             }
         }
@@ -114,8 +124,10 @@ class FormulaOcrProcessor @Inject constructor(
     }
 
     fun fromRecognizedText(rawText: String): FormulaOcrResult {
+        // Enhanced formula normalization
         val normalized = rawText
             .replace("×", "*")
+            .replace("·", "*")
             .replace("÷", "/")
             .replace("−", "-")
             .replace("—", "-")
@@ -128,19 +140,25 @@ class FormulaOcrProcessor @Inject constructor(
             .replace("≤", "<=")
             .replace("≥", ">=")
             .replace("≠", "!=")
+            .replace("±", "+-")
             .replace(Regex("\\s+"), " ")
             .trim()
 
         var latex = normalized
+            // Basic superscript/subscript detection
             .replace(Regex("([a-zA-Z0-9])\\^([a-zA-Z0-9]+)"), "$1^{$2}")
             .replace(Regex("([a-zA-Z0-9])_([a-zA-Z0-9]+)"), "$1_{$2}")
+            // Basic fraction detection
             .replace(Regex("([a-zA-Z0-9]+)/([a-zA-Z0-9]+)"), "\\\\frac{$1}{$2}")
             
         val symbolMap = mapOf(
             "alpha" to "\\alpha", "beta" to "\\beta", "gamma" to "\\gamma", 
-            "delta" to "\\delta", "epsilon" to "\\epsilon",
+            "delta" to "\\delta", "epsilon" to "\\epsilon", "zeta" to "\\zeta",
+            "eta" to "\\eta", "theta" to "\\theta", "lambda" to "\\lambda",
+            "mu" to "\\mu", "sigma" to "\\sigma", "phi" to "\\phi",
+            "psi" to "\\psi", "omega" to "\\omega",
             "pi" to "\\pi", "sum" to "\\sum", "int" to "\\int", 
-            "sqrt" to "\\sqrt", "theta" to "\\theta", "omega" to "\\omega"
+            "sqrt" to "\\sqrt"
         )
         symbolMap.forEach { (key, value) -> latex = latex.replace(key, value, ignoreCase = true) }
 

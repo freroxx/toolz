@@ -20,6 +20,7 @@ import kotlin.math.*
 
 data class CompassState(
     val azimuth: Float = 0f,
+    val displayAzimuth: Float = 0f, // Normalized 0-360 for UI text
     val qiblaAngle: Float? = null,
     val showQibla: Boolean = false,
     val latitude: Double? = null,
@@ -50,8 +51,7 @@ class CompassViewModel @Inject constructor(
     private var lastAccelerometerSet = false
     private var lastMagnetometerSet = false
     
-    private val alpha = 0.95f
-    private var filteredAzimuth = 0f
+    private var currentAzimuth = 0f
 
     init {
         viewModelScope.launch {
@@ -143,14 +143,17 @@ class CompassViewModel @Inject constructor(
             }
         }
 
+        // Fix: Smooth rotation without 360-degree jump
         val targetAzimuth = (azimuthInDegrees + 360) % 360
-        filteredAzimuth = normalizeAngle(filteredAzimuth + shortestAngleDist(filteredAzimuth, targetAzimuth) * (1 - alpha))
+        val delta = shortestAngleDist(currentAzimuth % 360, targetAzimuth)
+        currentAzimuth += delta
         
         _uiState.update { it.copy(
-            azimuth = filteredAzimuth,
+            azimuth = currentAzimuth,
+            displayAzimuth = targetAzimuth,
             pitch = pitch,
             roll = roll,
-            isLevel = abs(pitch) < 5 && abs(roll) < 5 // Polished: Sharper threshold
+            isLevel = abs(pitch) < 5 && abs(roll) < 5
         ) }
     }
     
@@ -159,13 +162,6 @@ class CompassViewModel @Inject constructor(
         while (d < -180) d += 360
         while (d > 180) d -= 360
         return d
-    }
-
-    private fun normalizeAngle(a: Float): Float {
-        var ang = a
-        while (ang < 0) ang += 360
-        while (ang >= 360) ang -= 360
-        return ang
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {

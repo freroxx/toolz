@@ -24,9 +24,14 @@ class SettingsRepository @Inject constructor(
     
     // Dashboard View
     private val DASHBOARD_VIEW = stringPreferencesKey("dashboard_view") // "DEFAULT", "LIST"
+    private val PINNED_TOOLS = stringSetPreferencesKey("pinned_tools")
+    private val RECENT_TOOLS = stringSetPreferencesKey("recent_tools") // Stored as "timestamp:route"
+    private val SHOW_RECENT_TOOLS = booleanPreferencesKey("show_recent_tools")
+    private val SHOW_QUICK_NOTES = booleanPreferencesKey("show_quick_notes")
 
     // Notifications
     private val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
+    private val NOTIFICATION_VAULT_ENABLED = booleanPreferencesKey("notification_vault_enabled")
     private val STEP_NOTIFICATIONS = booleanPreferencesKey("step_notifications")
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
@@ -58,11 +63,16 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_ROTATION_ENABLED = booleanPreferencesKey("music_rotation_enabled")
     private val MUSIC_PIP_ENABLED = booleanPreferencesKey("music_pip_enabled")
 
+    // Performance Mode
+    private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
+
     // Step Counter Toggle
     private val STEP_COUNTER_ENABLED = booleanPreferencesKey("step_counter_enabled")
 
     // Universal Pill
     private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
+    private val PILL_TODO_ENABLED = booleanPreferencesKey("pill_todo_enabled")
+    private val PILL_FOCUS_ENABLED = booleanPreferencesKey("pill_focus_enabled")
 
     // Onboarding
     private val USER_NAME = stringPreferencesKey("user_name")
@@ -99,9 +109,24 @@ class SettingsRepository @Inject constructor(
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
     
     val dashboardView: Flow<String> = dataStore.data.map { it[DASHBOARD_VIEW] ?: "DEFAULT" }
+    val pinnedTools: Flow<Set<String>> = dataStore.data.map { it[PINNED_TOOLS] ?: emptySet() }
+    val recentTools: Flow<List<String>> = dataStore.data.map { pref ->
+        val current = pref[RECENT_TOOLS] ?: emptySet()
+        current.asSequence()
+            .map { it.split(":", limit = 2) }
+            .filter { it.size == 2 }
+            .sortedByDescending { it[0].toLongOrNull() ?: 0L }
+            .map { it[1] }
+            .distinct()
+            .take(5)
+            .toList()
+    }
+    val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
+    val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
+    val notificationVaultEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATION_VAULT_ENABLED] ?: true }
     val stepNotifications: Flow<Boolean> = dataStore.data.map { it[STEP_NOTIFICATIONS] ?: true }
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
@@ -143,9 +168,14 @@ class SettingsRepository @Inject constructor(
     val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
 
-    val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: true }
+    val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
+
+    val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
+    val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
+    val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: true }
+
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
 
@@ -179,9 +209,28 @@ class SettingsRepository @Inject constructor(
     suspend fun removeWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) - zone } }
     
     suspend fun setDashboardView(view: String) { dataStore.edit { it[DASHBOARD_VIEW] = view } }
+    suspend fun togglePinnedTool(route: String) {
+        dataStore.edit { pref ->
+            val current = pref[PINNED_TOOLS] ?: emptySet()
+            pref[PINNED_TOOLS] = if (current.contains(route)) current - route else current + route
+        }
+    }
+
+    suspend fun addRecentTool(route: String) {
+        dataStore.edit { pref ->
+            val current = pref[RECENT_TOOLS] ?: emptySet()
+            val timestamp = System.currentTimeMillis()
+            val filtered = current.filterNot { it.endsWith(":$route") }.toSet()
+            pref[RECENT_TOOLS] = filtered + "$timestamp:$route"
+        }
+    }
+    
+    suspend fun setShowRecentTools(enabled: Boolean) { dataStore.edit { it[SHOW_RECENT_TOOLS] = enabled } }
+    suspend fun setShowQuickNotes(enabled: Boolean) { dataStore.edit { it[SHOW_QUICK_NOTES] = enabled } }
 
     // Notification setters
     suspend fun setNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setNotificationVaultEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATION_VAULT_ENABLED] = enabled } }
     suspend fun setStepNotifications(enabled: Boolean) { dataStore.edit { it[STEP_NOTIFICATIONS] = enabled } }
     suspend fun setTimerNotifications(enabled: Boolean) { dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
@@ -226,9 +275,14 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicRotationEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_ROTATION_ENABLED] = enabled } }
     suspend fun setMusicPipEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_PIP_ENABLED] = enabled } }
 
+    suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
+
     suspend fun setStepCounterEnabled(enabled: Boolean) { dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
 
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
+    suspend fun setPillTodoEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TODO_ENABLED] = enabled } }
+    suspend fun setPillFocusEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FOCUS_ENABLED] = enabled } }
+
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
 
@@ -248,10 +302,10 @@ class SettingsRepository @Inject constructor(
     suspend fun setAutoUpdateEnabled(enabled: Boolean) { dataStore.edit { it[AUTO_UPDATE_ENABLED] = enabled } }
     
     suspend fun setAvailableUpdate(version: String?, changelog: String?, apkUrl: String?) {
-        dataStore.edit {
-            if (version == null) it.remove(UPDATE_AVAILABLE_VERSION) else it[UPDATE_AVAILABLE_VERSION] = version
-            if (changelog == null) it.remove(UPDATE_CHANGELOG) else it[UPDATE_CHANGELOG] = changelog
-            if (apkUrl == null) it.remove(UPDATE_APK_URL) else it[UPDATE_APK_URL] = apkUrl
+        dataStore.edit { pref ->
+            version?.let { pref[UPDATE_AVAILABLE_VERSION] = it } ?: pref.remove(UPDATE_AVAILABLE_VERSION)
+            changelog?.let { pref[UPDATE_CHANGELOG] = it } ?: pref.remove(UPDATE_CHANGELOG)
+            apkUrl?.let { pref[UPDATE_APK_URL] = it } ?: pref.remove(UPDATE_APK_URL)
         }
     }
 

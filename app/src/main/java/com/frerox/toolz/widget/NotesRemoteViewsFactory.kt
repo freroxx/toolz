@@ -27,7 +27,7 @@ class NotesRemoteViewsFactory(private val context: Context) : RemoteViewsService
                     AppDatabase::class.java,
                     "toolz_db"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(true)
                 .build()
                 notes = db.noteDao().getAllNotes().first().take(10)
                 db.close()

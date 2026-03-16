@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,13 +45,14 @@ fun TimerScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    val hapticEnabled by viewModel.hapticEnabled.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
     val view = LocalView.current
     val haptic = LocalHapticFeedback.current
 
     val animatedProgress by animateFloatAsState(
         targetValue = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f,
-        animationSpec = tween(durationMillis = 500, easing = LinearOutSlowInEasing),
+        animationSpec = if (performanceMode) snap() else tween(durationMillis = 500, easing = LinearOutSlowInEasing),
         label = "Timer Progress"
     )
 
@@ -69,7 +72,7 @@ fun TimerScreen(
                         onClick = onBack,
                         modifier = Modifier
                             .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -103,14 +106,13 @@ fun TimerScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(top = padding.calculateTopPadding())
-            .fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)
+            .then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp))
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(32.dp)
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (state.initialTime == 0L || (state.isFinished && !state.isRunning)) {
                     // SELECTION UI
@@ -129,6 +131,8 @@ fun TimerScreen(
                             letterSpacing = 2.sp
                         )
                     }
+
+                    Spacer(Modifier.weight(0.5f))
 
                     Row(
                         modifier = Modifier
@@ -167,6 +171,8 @@ fun TimerScreen(
                             label = "SECONDS"
                         )
                     }
+
+                    Spacer(Modifier.weight(0.5f))
 
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -219,7 +225,7 @@ fun TimerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(72.dp)
-                            .padding(bottom = 8.dp),
+                            .padding(bottom = 24.dp),
                         shape = RoundedCornerShape(28.dp),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
                     ) {
@@ -229,15 +235,15 @@ fun TimerScreen(
                     }
                 } else {
                     // ACTIVE UI
+                    Spacer(Modifier.weight(0.5f))
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .weight(1f)
                             .fillMaxWidth()
                             .aspectRatio(1f)
                     ) {
                         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                        val glowAlpha by infiniteTransition.animateFloat(
+                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.06f) } else infiniteTransition.animateFloat(
                             initialValue = 0.04f,
                             targetValue = 0.1f,
                             animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
@@ -288,8 +294,8 @@ fun TimerScreen(
                             
                             AnimatedVisibility(
                                 visible = state.isPaused,
-                                enter = fadeIn() + expandVertically(),
-                                exit = fadeOut() + shrinkVertically()
+                                enter = if (performanceMode) fadeIn() else (fadeIn() + expandVertically()),
+                                exit = if (performanceMode) fadeOut() else (fadeOut() + shrinkVertically())
                             ) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
@@ -307,6 +313,8 @@ fun TimerScreen(
                             }
                         }
                     }
+
+                    Spacer(Modifier.weight(0.2f))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -373,7 +381,7 @@ fun TimerScreen(
                                 .bouncyClick {},
                             shape = CircleShape,
                             color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                            shadowElevation = 16.dp
+                            shadowElevation = if (performanceMode) 0.dp else 16.dp
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -404,8 +412,8 @@ fun TimerScreen(
             // Finished Overlay
             AnimatedVisibility(
                 visible = state.isFinished,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
+                enter = if (performanceMode) fadeIn() else (fadeIn() + scaleIn()),
+                exit = if (performanceMode) fadeOut() else (fadeOut() + scaleOut())
             ) {
                 TimerFinishedOverlay(
                     onDismiss = {
@@ -425,13 +433,14 @@ fun ModernTimePicker(
     label: String
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
+    val performanceMode = LocalPerformanceMode.current
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
             modifier = Modifier
                 .width(130.dp)
                 .height(190.dp)
-                .shadow(24.dp, RoundedCornerShape(40.dp), spotColor = primaryColor.copy(alpha = 0.25f)),
+                .then(if (performanceMode) Modifier else Modifier.shadow(24.dp, RoundedCornerShape(40.dp), spotColor = primaryColor.copy(alpha = 0.25f))),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
             shape = RoundedCornerShape(40.dp),
             border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
@@ -495,6 +504,7 @@ fun ModernTimePicker(
 
 @Composable
 fun TimerFinishedOverlay(onDismiss: () -> Unit) {
+    val performanceMode = LocalPerformanceMode.current
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -504,7 +514,7 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val pulseScale by infiniteTransition.animateFloat(
+            val pulseScale by if (performanceMode) remember { mutableFloatStateOf(1f) } else infiniteTransition.animateFloat(
                 initialValue = 1f,
                 targetValue = 1.15f,
                 animationSpec = infiniteRepeatable(
@@ -520,7 +530,7 @@ fun TimerFinishedOverlay(onDismiss: () -> Unit) {
                     .scale(pulseScale),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.error,
-                shadowElevation = 32.dp,
+                shadowElevation = if (performanceMode) 0.dp else 32.dp,
                 border = BorderStroke(4.dp, Color.White.copy(alpha = 0.2f))
             ) {
                 Box(contentAlignment = Alignment.Center) {

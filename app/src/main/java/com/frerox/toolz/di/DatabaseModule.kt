@@ -12,6 +12,7 @@ import com.frerox.toolz.data.pdf.PdfMetadataDao
 import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimitDao
 import com.frerox.toolz.data.clipboard.ClipboardDao
+import com.frerox.toolz.data.todo.TaskDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -31,7 +32,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "toolz_db"
         )
-        .fallbackToDestructiveMigration(false)
+        .fallbackToDestructiveMigration(true)
         .build()
     }
 
@@ -78,5 +79,10 @@ object DatabaseModule {
     @Provides
     fun provideClipboardDao(database: AppDatabase): ClipboardDao {
         return database.clipboardDao()
+    }
+
+    @Provides
+    fun provideTaskDao(database: AppDatabase): TaskDao {
+        return database.taskDao()
     }
 }

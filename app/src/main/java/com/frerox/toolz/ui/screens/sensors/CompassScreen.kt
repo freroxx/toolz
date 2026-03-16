@@ -1,6 +1,5 @@
 package com.frerox.toolz.ui.screens.sensors
 
-import android.Manifest
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -23,18 +22,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -46,20 +42,23 @@ fun CompassScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
     val view = LocalView.current
 
+    // Fixed: Use continuous azimuth for smooth rotation without jumps at 360/0
     val animatedAzimuth by animateFloatAsState(
         targetValue = state.azimuth,
-        animationSpec = spring(
-            stiffness = Spring.StiffnessLow,
-            dampingRatio = Spring.DampingRatioLowBouncy
+        animationSpec = if (performanceMode) snap() else spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioNoBouncy
         ),
         label = "Azimuth"
     )
 
-    LaunchedEffect(state.azimuth.toInt()) {
-        if (state.azimuth.toInt() == 0 || state.azimuth.toInt() == 360) {
-            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+    LaunchedEffect(state.displayAzimuth.toInt()) {
+        if (hapticEnabled && state.displayAzimuth.toInt() % 90 == 0) {
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
         }
     }
 
@@ -111,7 +110,7 @@ fun CompassScreen(
                 modifier = Modifier.padding(bottom = 40.dp)
             ) {
                 Text(
-                    text = "${state.azimuth.toInt()}°",
+                    text = "${state.displayAzimuth.toInt()}°",
                     style = MaterialTheme.typography.displayLarge.copy(fontSize = 100.sp, letterSpacing = (-4).sp),
                     fontWeight = FontWeight.Black,
                     color = onSurface
@@ -123,7 +122,7 @@ fun CompassScreen(
                     border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
                 ) {
                     Text(
-                        text = getDirectionLabel(state.azimuth).uppercase(),
+                        text = getDirectionLabel(state.displayAzimuth).uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = primaryColor,
@@ -198,8 +197,8 @@ fun CompassScreen(
                         tint = primaryColor
                     )
                     
-                    val bubbleX by animateFloatAsState(targetValue = (state.roll / 45f) * 45f, label = "levelX")
-                    val bubbleY by animateFloatAsState(targetValue = (state.pitch / 45f) * 45f, label = "levelY")
+                    val bubbleX by animateFloatAsState(targetValue = (state.roll.coerceIn(-45f, 45f)), label = "levelX")
+                    val bubbleY by animateFloatAsState(targetValue = (state.pitch.coerceIn(-45f, 45f)), label = "levelY")
                     
                     Box(
                         modifier = Modifier
@@ -220,7 +219,7 @@ fun CompassScreen(
                                 .offset(bubbleX.dp, bubbleY.dp)
                                 .clip(CircleShape)
                                 .background(if (state.isLevel) Color(0xFF4CAF50) else primaryColor)
-                                .shadow(4.dp, CircleShape)
+                                .then(if (performanceMode) Modifier else Modifier.shadow(4.dp, CircleShape))
                         )
                     }
                 }
@@ -268,6 +267,7 @@ fun CompassScreen(
 @Composable
 fun StatusItem(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        @Suppress("DEPRECATION")
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,

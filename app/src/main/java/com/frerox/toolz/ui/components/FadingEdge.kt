@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Enhanced fading edge that supports both top and bottom fades.
- * Renamed to avoid ambiguity with the legacy brush-based version.
+ * Optimized for a "lighter" feel by using a more gradual gradient.
  */
 fun Modifier.fadingEdges(
     top: Dp = 0.dp,
@@ -33,8 +33,11 @@ fun Modifier.fadingEdges(
             drawRect(
                 brush = Brush.verticalGradient(
                     0f to Color.Transparent,
+                    // Add middle stops for a smoother, "lighter" fade
+                    (topStop * 0.5f) to Color.Black.copy(alpha = 0.5f),
                     topStop to Color.Black,
                     bottomStop to Color.Black,
+                    (bottomStop + (1f - bottomStop) * 0.5f) to Color.Black.copy(alpha = 0.5f),
                     1f to Color.Transparent
                 ),
                 blendMode = BlendMode.DstIn
@@ -44,6 +47,7 @@ fun Modifier.fadingEdges(
 
 /**
  * Original brush-based implementation preserved for compatibility.
+ * Updated to support the "lighter" better fading edge requirement.
  */
 fun Modifier.fadingEdge(
     brush: Brush,

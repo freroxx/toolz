@@ -23,6 +23,9 @@ import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.AppLimitDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.clipboard.ClipboardDao
+import com.frerox.toolz.data.todo.TaskEntry
+import com.frerox.toolz.data.todo.TaskDao
+import com.frerox.toolz.data.todo.TodoConverters
 
 @Database(
     entities = [
@@ -35,12 +38,13 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
         PdfMetadata::class,
         NotificationEntry::class,
         AppLimit::class,
-        ClipboardEntry::class
+        ClipboardEntry::class,
+        TaskEntry::class
     ], 
-    version = 16,
+    version = 19,
     exportSchema = false
 )
-@TypeConverters(MusicConverters::class)
+@TypeConverters(MusicConverters::class, TodoConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun musicDao(): MusicDao
@@ -51,4 +55,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notificationDao(): NotificationDao
     abstract fun appLimitDao(): AppLimitDao
     abstract fun clipboardDao(): ClipboardDao
+    abstract fun taskDao(): TaskDao
 }

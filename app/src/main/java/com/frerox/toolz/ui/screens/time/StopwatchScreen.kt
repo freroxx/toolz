@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.time
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -28,12 +29,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +47,9 @@ fun StopwatchScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
 
     Scaffold(
         topBar = {
@@ -68,7 +75,10 @@ fun StopwatchScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.reset() },
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.reset() 
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -98,7 +108,7 @@ fun StopwatchScreen(
                 contentAlignment = Alignment.Center
             ) {
                 val infiniteTransition = rememberInfiniteTransition(label = "StopwatchRing")
-                val rotation by infiniteTransition.animateFloat(
+                val rotation by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
                     initialValue = 0f,
                     targetValue = 360f,
                     animationSpec = infiniteRepeatable(
@@ -116,7 +126,7 @@ fun StopwatchScreen(
                         style = Stroke(width = 16.dp.toPx())
                     )
                     
-                    if (state.isRunning) {
+                    if (state.isRunning && !performanceMode) {
                         drawArc(
                             color = primaryColor,
                             startAngle = rotation - 90f,
@@ -166,7 +176,10 @@ fun StopwatchScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { viewModel.reset() },
+                    onClick = { 
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        viewModel.reset() 
+                    },
                     modifier = Modifier
                         .size(64.dp)
                         .clip(RoundedCornerShape(24.dp))
@@ -176,13 +189,16 @@ fun StopwatchScreen(
                 }
                 
                 Surface(
-                    onClick = { viewModel.toggleStartStop() },
+                    onClick = { 
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        viewModel.toggleStartStop() 
+                    },
                     modifier = Modifier
                         .size(100.dp)
                         .bouncyClick {},
                     shape = CircleShape,
                     color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                    shadowElevation = 12.dp
+                    shadowElevation = if (performanceMode) 0.dp else 12.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -195,7 +211,10 @@ fun StopwatchScreen(
                 }
                 
                 IconButton(
-                    onClick = { if (state.isRunning) viewModel.lap() },
+                    onClick = { 
+                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (state.isRunning) viewModel.lap() 
+                    },
                     modifier = Modifier
                         .size(64.dp)
                         .clip(RoundedCornerShape(24.dp))
@@ -226,6 +245,7 @@ fun StopwatchScreen(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             "RECORDS INDEX", 
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -236,6 +256,7 @@ fun StopwatchScreen(
                         )
                     }
                     if (state.laps.isNotEmpty()) {
+                        @Suppress("DEPRECATION")
                         Text(
                             "${state.laps.size} DATA POINTS",
                             style = MaterialTheme.typography.labelSmall,
@@ -256,7 +277,7 @@ fun StopwatchScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize().fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp),
+                        modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         contentPadding = PaddingValues(bottom = 40.dp)
                     ) {

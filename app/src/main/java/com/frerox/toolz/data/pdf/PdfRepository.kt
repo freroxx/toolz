@@ -71,8 +71,8 @@ class PdfRepository @Inject constructor(
                             val width = (page.width * scale).toInt()
                             val height = (page.height * scale).toInt()
                             val bitmap = Bitmap.createBitmap(
-                                width,
-                                height,
+                                width.coerceAtLeast(1),
+                                height.coerceAtLeast(1),
                                 Bitmap.Config.ARGB_8888
                             )
                             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -84,6 +84,18 @@ class PdfRepository @Inject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        }
+    }
+
+    suspend fun getPageCount(uri: Uri): Int = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    renderer.pageCount
+                }
+            } ?: 0
+        } catch (e: Exception) {
+            0
         }
     }
 

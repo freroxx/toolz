@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.time
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -23,12 +24,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,11 +42,14 @@ fun PomodoroScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val view = LocalView.current
 
     val totalTime = state.mode.minutes * 60 * 1000L
     val animatedProgress by animateFloatAsState(
         targetValue = if (totalTime > 0) state.remainingTime.toFloat() / totalTime else 0f,
-        animationSpec = tween(durationMillis = 1000, easing = LinearEasing),
+        animationSpec = if (performanceMode) snap() else tween(durationMillis = 1000, easing = LinearEasing),
         label = "Pomodoro Progress"
     )
 
@@ -75,7 +82,7 @@ fun PomodoroScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(top = padding.calculateTopPadding())
-            .fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)
+            .then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp))
         ) {
             Column(
                 modifier = Modifier
@@ -128,6 +135,7 @@ fun PomodoroScreen(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(12.dp)
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             text = "SESSION #${state.sessionsCompleted + 1}",
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -148,7 +156,7 @@ fun PomodoroScreen(
                     val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
                     
                     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                    val glowAlpha by infiniteTransition.animateFloat(
+                    val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.1f) } else infiniteTransition.animateFloat(
                         initialValue = 0.05f,
                         targetValue = 0.15f,
                         animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
@@ -191,11 +199,14 @@ fun PomodoroScreen(
                         
                         AnimatedVisibility(
                             visible = state.isFinished && !state.isRunning,
-                            enter = fadeIn() + scaleIn(),
-                            exit = fadeOut() + scaleOut()
+                            enter = if (performanceMode) fadeIn() else (fadeIn() + scaleIn()),
+                            exit = if (performanceMode) fadeOut() else (fadeOut() + scaleOut())
                         ) {
                             IconButton(
-                                onClick = { viewModel.stopRingtone() },
+                                onClick = { 
+                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    viewModel.stopRingtone() 
+                                },
                                 modifier = Modifier
                                     .padding(top = 16.dp)
                                     .size(64.dp)
@@ -218,7 +229,10 @@ fun PomodoroScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { viewModel.reset() },
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.reset() 
+                        },
                         modifier = Modifier
                             .size(64.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -229,13 +243,14 @@ fun PomodoroScreen(
 
                     Surface(
                         onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             if (state.isFinished) viewModel.stopRingtone()
                             viewModel.toggleStartStop() 
                         },
                         modifier = Modifier.size(100.dp).bouncyClick {},
                         shape = CircleShape,
                         color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                        shadowElevation = 16.dp
+                        shadowElevation = if (performanceMode) 0.dp else 16.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -248,7 +263,10 @@ fun PomodoroScreen(
                     }
 
                     IconButton(
-                        onClick = { viewModel.skip() },
+                        onClick = { 
+                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            viewModel.skip() 
+                        },
                         modifier = Modifier
                             .size(64.dp)
                             .clip(RoundedCornerShape(20.dp))

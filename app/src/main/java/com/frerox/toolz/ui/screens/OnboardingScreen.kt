@@ -145,7 +145,7 @@ fun WelcomeStep(onNext: () -> Unit) {
                 )
             }
         }
-        
+
         Spacer(Modifier.height(48.dp))
         
         Text(
@@ -284,9 +284,9 @@ fun PermissionsStep(onNext: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             fontWeight = FontWeight.Medium
         )
-        
+
         Spacer(Modifier.height(36.dp))
-        
+
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -301,7 +301,7 @@ fun PermissionsStep(onNext: () -> Unit) {
                     onClick = { permissionsState.launchMultiplePermissionRequest() }
                 )
             }
-            
+
             item {
                 PermissionCard(
                     title = "Telemetry & Focus",
@@ -342,17 +342,17 @@ fun PermissionsStep(onNext: () -> Unit) {
                     .bouncyClick {},
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (permissionsState.allPermissionsGranted) 
+                    containerColor = if (permissionsState.allPermissionsGranted)
                         MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (permissionsState.allPermissionsGranted) 
+                    contentColor = if (permissionsState.allPermissionsGranted)
                         MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             ) {
                 Text("NEXT STEP", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
-            
+
             TextButton(
-                onClick = onNext, 
+                onClick = onNext,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
@@ -376,11 +376,11 @@ fun PermissionCard(
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
         shape = RoundedCornerShape(32.dp),
-        color = if (granted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) 
+        color = if (granted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(
-            1.5.dp, 
-            if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) 
+            1.5.dp,
+            if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         )
     ) {
@@ -402,9 +402,9 @@ fun PermissionCard(
                     )
                 }
             }
-            
+
             Spacer(Modifier.width(20.dp))
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                 Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), lineHeight = 16.sp, fontWeight = FontWeight.Black)
@@ -471,9 +471,9 @@ fun NameStep(
                 Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
-        
+
         Spacer(Modifier.height(48.dp))
-        
+
         Text(
             text = "Who are you?",
             style = MaterialTheme.typography.displaySmall,
@@ -481,18 +481,18 @@ fun NameStep(
             textAlign = TextAlign.Center,
             letterSpacing = (-1).sp
         )
-        
+
         Spacer(Modifier.height(12.dp))
-        
+
         Text(
             text = "Personalize your Toolz workspace.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             fontWeight = FontWeight.Black
         )
-        
+
         Spacer(Modifier.height(56.dp))
-        
+
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
@@ -518,17 +518,17 @@ fun NameStep(
                 Icon(Icons.Rounded.Fingerprint, null, tint = MaterialTheme.colorScheme.primary)
             }
         )
-        
+
         Spacer(Modifier.height(24.dp))
-        
+
         AnimatedVisibility(visible = name.isBlank()) {
             TextButton(onClick = onComplete) {
                 Text("BYPASS CONFIGURATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline, letterSpacing = 1.sp)
             }
         }
-        
+
         Spacer(Modifier.height(48.dp))
-        
+
         Button(
             onClick = onComplete,
             enabled = name.isNotBlank(),

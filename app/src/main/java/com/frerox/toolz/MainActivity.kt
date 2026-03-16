@@ -1,7 +1,10 @@
 package com.frerox.toolz
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
@@ -57,12 +61,14 @@ import com.frerox.toolz.ui.screens.sensors.*
 import com.frerox.toolz.ui.screens.settings.SettingsScreen
 import com.frerox.toolz.ui.screens.settings.UpdateScreen
 import com.frerox.toolz.ui.screens.time.*
+import com.frerox.toolz.ui.screens.todo.TodoScreen
 import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
 import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.service.StepCounterService
+import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
@@ -77,6 +83,9 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var vibrationManager: VibrationManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -89,6 +98,9 @@ class MainActivity : AppCompatActivity() {
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
             val customPrimary by settingsRepository.customPrimaryColor.collectAsState(initial = null)
             val customSecondary by settingsRepository.customSecondaryColor.collectAsState(initial = null)
+            val performanceMode by settingsRepository.performanceMode.collectAsState(initial = false)
+            val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
+            val hapticIntensity by settingsRepository.hapticIntensity.collectAsState(initial = 0.5f)
 
             val isDark = when (themeMode) {
                 "LIGHT" -> false
@@ -100,7 +112,11 @@ class MainActivity : AppCompatActivity() {
                 darkTheme = isDark,
                 dynamicColor = dynamicColor,
                 customPrimary = customPrimary?.let { Color(it) },
-                customSecondary = customSecondary?.let { Color(it) }
+                customSecondary = customSecondary?.let { Color(it) },
+                performanceMode = performanceMode,
+                hapticEnabled = hapticEnabled,
+                hapticIntensity = hapticIntensity,
+                vibrationManager = vibrationManager
             ) {
                 val surface = MaterialTheme.colorScheme.surface
 
@@ -108,7 +124,7 @@ class MainActivity : AppCompatActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            if (!dynamicColor) {
+                            if (!dynamicColor && !performanceMode) {
                                 Brush.verticalGradient(
                                     colors = if (isDark) {
                                         listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), surface)
@@ -143,17 +159,34 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         ToolzNavHost(navController, settingsRepository, pdfViewModel)
-                        
+
                         UpdateOverlay(settingsRepository)
                     }
                 }
             }
         }
-        
+
         lifecycleScope.launch {
             settingsRepository.stepCounterEnabled.collect { enabled ->
-                if (enabled) startStepService() else stopStepService()
+                if (enabled) {
+                    if (hasActivityRecognitionPermission()) {
+                        startStepService()
+                    }
+                } else {
+                    stopStepService()
+                }
             }
+        }
+    }
+
+    private fun hasActivityRecognitionPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACTIVITY_RECOGNITION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
         }
     }
 
@@ -198,7 +231,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun startStepService() {
         val intent = Intent(this, StepCounterService::class.java)
-        startForegroundService(intent)
+        try {
+            startForegroundService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun stopStepService() {
@@ -212,15 +249,15 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
     val availableVersion by settingsRepository.updateAvailableVersion.collectAsState(initial = null)
     val changelog by settingsRepository.updateChangelog.collectAsState(initial = null)
     val apkUrl by settingsRepository.updateApkUrl.collectAsState(initial = null)
-    
+
     var showDialog by remember { mutableStateOf(false) }
-    
+
     LaunchedEffect(availableVersion) {
         if (availableVersion != null) {
             showDialog = true
         }
     }
-    
+
     if (showDialog && availableVersion != null) {
         Dialog(
             onDismissRequest = { showDialog = false },
@@ -230,6 +267,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                 modifier = Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.surface
             ) {
+                val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -252,9 +290,9 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
-                    
+
                     Spacer(Modifier.height(32.dp))
-                    
+
                     Text(
                         "ENGINE UPGRADE READY",
                         style = MaterialTheme.typography.labelSmall,
@@ -262,23 +300,23 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                         color = MaterialTheme.colorScheme.primary,
                         letterSpacing = 3.sp
                     )
-                    
+
                     Text(
                         "New Version Available",
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center
                     )
-                    
+
                     Text(
                         "v$availableVersion",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    
+
                     Spacer(Modifier.height(40.dp))
-                    
+
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
@@ -299,14 +337,15 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                             )
                         }
                     }
-                    
+
                     Spacer(Modifier.height(48.dp))
-                    
+
                     val context = LocalContext.current
                     val scope = rememberCoroutineScope()
-                    
+
                     Button(
                         onClick = {
+                            vibrationManager?.vibrateClick()
                             apkUrl?.let { url ->
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                 context.startActivity(intent)
@@ -321,11 +360,12 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                         Spacer(Modifier.width(12.dp))
                         Text("UPDATE NOW", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
-                    
+
                     Spacer(Modifier.height(12.dp))
-                    
+
                     TextButton(
-                        onClick = { 
+                        onClick = {
+                            vibrationManager?.vibrateClick()
                             showDialog = false
                             scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
                         },
@@ -400,14 +440,15 @@ fun ToolzNavHost(
         }
 
         composable(Screen.Update.route) {
-            val context = androidx.compose.ui.platform.LocalContext.current
+            val context = LocalContext.current
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
             UpdateScreen(
                 onBack = { navController.popBackStack() },
                 currentVersionName = packageInfo.versionName ?: "1.0.0",
-                currentVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     packageInfo.longVersionCode
                 } else {
+                    @Suppress("DEPRECATION")
                     packageInfo.versionCode.toLong()
                 }
             )
@@ -428,6 +469,9 @@ fun ToolzNavHost(
         }
         composable(Screen.FocusFlow.route) {
             FocusFlowScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.Todo.route) {
+            TodoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
 
         // Media & Documents
@@ -510,7 +554,7 @@ fun ToolzNavHost(
             NotepadScreen(
                 viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
-                onPlayAudio = { uri -> 
+                onPlayAudio = { uri ->
                     val track = musicViewModel.uiState.value.tracks.find { it.uri == uri }
                     track?.let { musicViewModel.playTrack(it) }
                 },
@@ -523,6 +567,9 @@ fun ToolzNavHost(
         }
         composable(Screen.BatteryInfo.route) {
             BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.DeviceInfo.route) {
+            DeviceInfoScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.FlipCoin.route) {
             FlipCoinScreen(onBack = { navController.popBackStack() })
