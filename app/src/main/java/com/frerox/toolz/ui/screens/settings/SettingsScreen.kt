@@ -559,8 +559,8 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
-            Text("TOOLZ PRO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            Text("ENGINE V1.0.0 (BETA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
+            Text("TOOLZ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text("V1.0.1 (BETA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
             
             Spacer(modifier = Modifier.height(24.dp))
             
