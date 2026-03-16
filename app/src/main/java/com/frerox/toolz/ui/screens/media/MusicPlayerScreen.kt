@@ -69,7 +69,7 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -307,15 +307,7 @@ fun MusicPlayerScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.05f to Color.Black,
-                    0.95f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 24.dp
-            )
+            .fadingEdges(top = 16.dp, bottom = 16.dp)
         ) {
             if (!musicPermission.status.isGranted || !isManageStorageGranted) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -960,14 +952,24 @@ fun FullPlayerView(
                         Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Close", modifier = Modifier.padding(10.dp).size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
                     }
 
-                    Text(
-                        text = "PLAYING NOW",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        modifier = Modifier.align(Alignment.Center),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "PLAYING NOW",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (state.sleepTimerActive && state.sleepTimerRemaining != null) {
+                            Text(
+                                text = "⏳ SLEEP IN ${formatDuration(state.sleepTimerRemaining)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                    }
 
                     Box(modifier = Modifier.align(Alignment.CenterEnd)) {
                         Surface(

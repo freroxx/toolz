@@ -42,48 +42,46 @@ fun TipCalculatorScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("TIP CALCULATOR", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("GRATUITY ENGINE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(top = padding.calculateTopPadding())
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .fadingEdge(
-                        brush = Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.02f to Color.Black,
-                            0.98f to Color.Black,
-                            1f to Color.Transparent
-                        ),
+                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
                         length = 24.dp
                     )
                     .verticalScroll(scrollState)
                     .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 // Main Result Card
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(40.dp),
+                    shape = RoundedCornerShape(48.dp),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shadowElevation = 12.dp,
+                    shadowElevation = 16.dp,
                     border = BorderStroke(2.dp, Color.White.copy(alpha = 0.1f))
                 ) {
                     Column(
@@ -118,16 +116,16 @@ fun TipCalculatorScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Input Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(32.dp),
+                    shape = RoundedCornerShape(40.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(28.dp)) {
                         Surface(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(8.dp)
@@ -197,15 +195,16 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             listOf(10f, 15f, 20f, 25f).forEach { pct ->
+                                val isSelected = state.tipPercentage == pct
                                 Surface(
                                     onClick = { viewModel.onTipChange(pct) },
                                     modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (state.tipPercentage == pct) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                                    contentColor = if (state.tipPercentage == pct) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text("${pct.toInt()}%", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                                        Text("${pct.toInt()}%", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }

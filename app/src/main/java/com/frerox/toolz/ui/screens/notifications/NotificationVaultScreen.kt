@@ -58,7 +58,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -105,7 +105,7 @@ fun NotificationVaultScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -113,7 +113,7 @@ fun NotificationVaultScreen(
                 actions = {
                     IconButton(
                         onClick = { showVaultSettings = true },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = "Vault Settings")
                     }
@@ -150,15 +150,7 @@ fun NotificationVaultScreen(
                     Box(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize()
-                                .fadingEdge(
-                                    brush = Brush.verticalGradient(
-                                        0f to Color.Transparent,
-                                        0.02f to Color.Black,
-                                        0.98f to Color.Black,
-                                        1f to Color.Transparent
-                                    ),
-                                    length = 24.dp
-                                ),
+                                .fadingEdges(top = 16.dp, bottom = 16.dp),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
@@ -192,7 +184,7 @@ fun NotificationVaultScreen(
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
                                 containerColor = MaterialTheme.colorScheme.errorContainer,
                                 contentColor = MaterialTheme.colorScheme.error,
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(20.dp)
                             ) {
                                 Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
                             }
@@ -214,7 +206,7 @@ fun NotificationVaultScreen(
                             showDeleteDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Text("PURGE ALL", fontWeight = FontWeight.Black)
                     }
@@ -224,7 +216,7 @@ fun NotificationVaultScreen(
                         Text("CANCEL", fontWeight = FontWeight.Bold)
                     }
                 },
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(32.dp),
                 containerColor = MaterialTheme.colorScheme.surface
             )
         }
@@ -233,23 +225,24 @@ fun NotificationVaultScreen(
             val notification = showNotificationMenu!!
             ModalBottomSheet(
                 onDismissRequest = { showNotificationMenu = null },
-                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp),
                 containerColor = MaterialTheme.colorScheme.surface
             ) {
                 Column(modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             modifier = Modifier.size(56.dp),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         ) {
+                            val iconPainter = rememberAsyncImagePainter(
+                                model = ImageRequest.Builder(context)
+                                    .data(try { context.packageManager.getApplicationIcon(notification.packageName) } catch(e: Exception) { null })
+                                    .crossfade(true)
+                                    .build()
+                            )
                             Image(
-                                painter = rememberAsyncImagePainter(
-                                    model = ImageRequest.Builder(context)
-                                        .data(try { context.packageManager.getApplicationIcon(notification.packageName) } catch(e: Exception) { null })
-                                        .crossfade(true)
-                                        .build()
-                                ),
+                                painter = iconPainter,
                                 contentDescription = null,
                                 modifier = Modifier.padding(10.dp),
                                 contentScale = ContentScale.Fit
@@ -299,7 +292,7 @@ fun NotificationVaultScreen(
                                 onClick = { action() },
                                 modifier = Modifier.fillMaxWidth().height(60.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -336,7 +329,7 @@ fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(32.dp),
+            shape = RoundedCornerShape(40.dp),
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth(),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
@@ -345,13 +338,17 @@ fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(64.dp),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
+                        val iconPainter = rememberAsyncImagePainter(
+                            model = ImageRequest.Builder(context)
+                                .data(try { context.packageManager.getApplicationIcon(details.packageName) } catch(e: Exception) { null })
+                                .crossfade(true)
+                                .build()
+                        )
                         Image(
-                            painter = rememberAsyncImagePainter(
-                                try { context.packageManager.getApplicationIcon(details.packageName) } catch(e: Exception) { null }
-                            ),
+                            painter = iconPainter,
                             contentDescription = null,
                             modifier = Modifier.padding(12.dp)
                         )
@@ -374,7 +371,7 @@ fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Text("CLOSE", fontWeight = FontWeight.Black)
                 }
@@ -443,7 +440,7 @@ fun VaultSettingsDialog(
                 categories.forEach { category ->
                     Surface(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
@@ -465,7 +462,7 @@ fun VaultSettingsDialog(
                         onValueChange = { newCategoryName = it },
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("New Section Name") },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
@@ -481,7 +478,7 @@ fun VaultSettingsDialog(
                                 newCategoryName = ""
                             }
                         },
-                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
                     ) {
                         Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onPrimary)
                     }
@@ -508,14 +505,20 @@ fun VaultSettingsDialog(
                     Surface(
                         onClick = { selectedPackageToMap = pkg },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                     ) {
                         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+                            Surface(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface) {
+                                val iconPainter = rememberAsyncImagePainter(
+                                    model = ImageRequest.Builder(context)
+                                        .data(try { context.packageManager.getApplicationIcon(pkg) } catch(e: Exception) { null })
+                                        .crossfade(true)
+                                        .build()
+                                )
                                 Image(
-                                    painter = rememberAsyncImagePainter(try { context.packageManager.getApplicationIcon(pkg) } catch(e: Exception) { null }),
+                                    painter = iconPainter,
                                     contentDescription = null,
                                     modifier = Modifier.padding(6.dp)
                                 )
@@ -552,7 +555,7 @@ fun VaultSettingsDialog(
                     hiddenApps.forEach { pkg ->
                         Surface(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(20.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -581,7 +584,7 @@ fun VaultSettingsDialog(
                                     selectedPackageToMap = null
                                 },
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 color = if ((appMappings[pkg] ?: "Auto") == cat || (cat == "Auto" && appMappings[pkg].isNullOrEmpty())) 
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
                                 border = if ((appMappings[pkg] ?: "Auto") == cat) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
@@ -592,7 +595,7 @@ fun VaultSettingsDialog(
                     }
                 },
                 confirmButton = {},
-                shape = RoundedCornerShape(32.dp)
+                shape = RoundedCornerShape(40.dp)
             )
         }
     }
@@ -616,7 +619,6 @@ fun SwipeToDeleteContainer(
         }
     )
 
-    // Simple, tight slide-to-delete animation
     SwipeToDismissBox(
         state = dismissState,
         modifier = modifier,
@@ -629,8 +631,11 @@ fun SwipeToDeleteContainer(
                 animationSpec = tween(300),
                 label = "color"
             )
+            
+            // Text only visible when swipe is deep enough
+            val isSwipingDeep = dismissState.progress > 0.6f && dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
             val alpha by animateFloatAsState(
-                if (dismissState.progress > 0.1f) 1f else 0f, 
+                if (isSwipingDeep) 1f else 0f, 
                 animationSpec = tween(200),
                 label = "alpha"
             )
@@ -638,17 +643,17 @@ fun SwipeToDeleteContainer(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(32.dp))
                     .background(color)
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.alpha(alpha)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         "DELETE", 
+                        modifier = Modifier.alpha(alpha),
                         style = MaterialTheme.typography.labelSmall, 
                         fontWeight = FontWeight.Black, 
                         color = Color.White,
@@ -686,7 +691,7 @@ fun VaultSearchBar(query: String, onQueryChange: (String) -> Unit) {
                 }
             }
         },
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(32.dp),
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
@@ -738,7 +743,7 @@ fun CategoryStrip(
                             onCategorySelect(category)
                         }
                     },
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = backgroundColor,
                 border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
@@ -786,7 +791,7 @@ fun NotificationVaultCard(
                 onClick = { isExpanded = !isExpanded },
                 onLongClick = { onLongClick() }
             ),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(32.dp),
         color = if (isExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         border = BorderStroke(
             1.dp, 
@@ -799,7 +804,7 @@ fun NotificationVaultCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
                     shadowElevation = 2.dp
@@ -882,7 +887,7 @@ fun NotificationVaultCard(
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, "Content copied to clipboard", Toast.LENGTH_SHORT).show()
                         },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                         modifier = Modifier.weight(1f).height(40.dp)
                     ) {
@@ -895,7 +900,7 @@ fun NotificationVaultCard(
                     
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
                     ) {
                         Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                     }
@@ -947,7 +952,7 @@ fun EmptyVaultState(isFiltering: Boolean) {
 
             Surface(
                 modifier = Modifier.size(110.dp),
-                shape = RoundedCornerShape(32.dp),
+                shape = RoundedCornerShape(40.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
             ) {

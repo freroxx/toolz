@@ -58,21 +58,26 @@ fun SoundMeterScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("SOUND METER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("SOUND METER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(top = padding.calculateTopPadding())
+        ) {
             if (permissionState.status.isGranted) {
                 Column(
                     modifier = Modifier
@@ -82,7 +87,7 @@ fun SoundMeterScreen(
                     verticalArrangement = Arrangement.Center
                 ) {
                     // Gauge Area
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(300.dp)) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(320.dp)) {
                         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                         val glowAlpha by infiniteTransition.animateFloat(
                             initialValue = 0.05f,
@@ -151,17 +156,17 @@ fun SoundMeterScreen(
                         onClick = {
                             if (isRecording) viewModel.stopRecording() else viewModel.startRecording()
                         },
-                        modifier = Modifier.size(90.dp).bouncyClick {},
+                        modifier = Modifier.size(100.dp).bouncyClick {},
                         shape = CircleShape,
                         color = if (isRecording) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                        shadowElevation = 8.dp,
+                        shadowElevation = 12.dp,
                         border = BorderStroke(4.dp, Color.White.copy(alpha = 0.2f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = if (isRecording) Icons.Rounded.MicOff else Icons.Rounded.Mic,
                                 contentDescription = null,
-                                modifier = Modifier.size(40.dp),
+                                modifier = Modifier.size(48.dp),
                                 tint = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
                             )
                         }
@@ -169,13 +174,19 @@ fun SoundMeterScreen(
                     
                     Spacer(modifier = Modifier.height(24.dp))
                     
-                    Text(
-                        text = if (isRecording) "MONITORING ACTIVE" else "READY TO MEASURE",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                        letterSpacing = 1.sp
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isRecording) "MONITORING ACTIVE" else "READY TO MEASURE",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.outline,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
             } else {
                 PermissionRequestState { permissionState.launchPermissionRequest() }
@@ -188,7 +199,7 @@ fun SoundMeterScreen(
 fun DecibelCircularGauge(db: Float, color: Color) {
     val progress = (db / 120f).coerceIn(0f, 1f)
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val strokeWidth = 14.dp.toPx()
+        val strokeWidth = 16.dp.toPx()
         drawArc(
             color = Color.LightGray.copy(alpha = 0.1f),
             startAngle = 135f,
@@ -234,8 +245,8 @@ fun PermissionRequestState(onRequest: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            modifier = Modifier.size(120.dp),
-            shape = RoundedCornerShape(40.dp),
+            modifier = Modifier.size(140.dp),
+            shape = RoundedCornerShape(48.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
             border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
         ) {
@@ -251,7 +262,7 @@ fun PermissionRequestState(onRequest: () -> Unit) {
         )
         Button(
             onClick = onRequest,
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth().height(64.dp)
         ) {
             Text("GRANT PERMISSION", fontWeight = FontWeight.Black)

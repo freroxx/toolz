@@ -45,11 +45,11 @@ fun FlashlightScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("FLASHLIGHT", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("FLASHLIGHT ENGINE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -57,22 +57,18 @@ fun FlashlightScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .padding(top = padding.calculateTopPadding())
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .fadingEdge(
-                        brush = Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.05f to Color.Black,
-                            0.95f to Color.Black,
-                            1f to Color.Transparent
-                        ),
+                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
                         length = 24.dp
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -109,7 +105,7 @@ fun FlashlightScreen(
                         Surface(
                             modifier = Modifier
                                 .size(180.dp)
-                                .shadow(if (state.isOn) 24.dp else 4.dp, CircleShape, spotColor = Color(0xFFFFEE58))
+                                .shadow(if (state.isOn) 32.dp else 4.dp, CircleShape, spotColor = Color(0xFFFFEE58))
                                 .bouncyClick { viewModel.toggleFlashlight() },
                             shape = CircleShape,
                             color = if (state.isOn) Color(0xFFFFEE58) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -135,7 +131,7 @@ fun FlashlightScreen(
                         Text(
                             text = if (state.isOn) "BEAM ACTIVE" else "STANDBY",
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelSmall,
                             letterSpacing = 2.sp,
                             fontWeight = FontWeight.Black,
                             color = if (state.isOn) Color(0xFFFBC02D) else MaterialTheme.colorScheme.outline
@@ -149,12 +145,12 @@ fun FlashlightScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(24.dp),
-                        shape = RoundedCornerShape(40.dp),
+                        shape = RoundedCornerShape(48.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
                         Column(
-                            modifier = Modifier.padding(24.dp),
+                            modifier = Modifier.padding(28.dp),
                             verticalArrangement = Arrangement.spacedBy(24.dp)
                         ) {
                             // Brightness Slider
@@ -197,14 +193,20 @@ fun FlashlightScreen(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(Modifier.height(12.dp))
-                                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                SingleChoiceSegmentedButtonRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
                                     FlashlightMode.entries.forEachIndexed { index, mode ->
                                         SegmentedButton(
                                             selected = state.mode == mode,
                                             onClick = { viewModel.setMode(mode) },
-                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = FlashlightMode.entries.size)
+                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = FlashlightMode.entries.size),
+                                            colors = SegmentedButtonDefaults.colors(
+                                                activeContainerColor = MaterialTheme.colorScheme.primary,
+                                                activeContentColor = MaterialTheme.colorScheme.onPrimary
+                                            )
                                         ) {
-                                            Text(mode.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                            Text(mode.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
                                         }
                                     }
                                 }
@@ -217,8 +219,8 @@ fun FlashlightScreen(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                             Surface(
-                                modifier = Modifier.size(120.dp),
-                                shape = RoundedCornerShape(40.dp),
+                                modifier = Modifier.size(140.dp),
+                                shape = RoundedCornerShape(48.dp),
                                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                             ) {
@@ -234,7 +236,7 @@ fun FlashlightScreen(
                             )
                             Button(
                                 onClick = { cameraPermissionState.launchPermissionRequest() },
-                                shape = RoundedCornerShape(20.dp),
+                                shape = RoundedCornerShape(24.dp),
                                 modifier = Modifier.fillMaxWidth().height(64.dp)
                             ) {
                                 Text("GRANT PERMISSION", fontWeight = FontWeight.Black)

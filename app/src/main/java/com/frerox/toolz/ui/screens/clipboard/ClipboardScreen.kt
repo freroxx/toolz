@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -48,7 +49,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,7 +71,11 @@ fun ClipboardScreen(
         if (searchQuery.isBlank()) entries
         else entries.filter { it.content.contains(searchQuery, ignoreCase = true) }
     }
-    val filteredGroups = remember(filteredEntries) { viewModel.groupedEntries(filteredEntries) }
+    // Note: Groups should probably be based on filteredEntries if search is active
+    val displayGroups = remember(filteredEntries, groups) {
+        if (searchQuery.isBlank()) groups
+        else viewModel.groupedEntries(filteredEntries)
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshClipboard()
@@ -98,7 +103,7 @@ fun ClipboardScreen(
                                 onClick = onBack,
                                 modifier = Modifier
                                     .padding(8.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -110,11 +115,11 @@ fun ClipboardScreen(
                                 onClick = { isSearchActive = !isSearchActive },
                                 modifier = Modifier
                                     .padding(4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(if (isSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Icon(
-                                    if (isSearchActive) Icons.Rounded.SearchOff else Icons.Rounded.Search, 
+                                    if (isSearchActive) Icons.Rounded.SearchOff else Icons.Rounded.Search,
                                     contentDescription = "Search",
                                     tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -125,7 +130,7 @@ fun ClipboardScreen(
                                 onClick = { viewModel.refreshClipboard() },
                                 modifier = Modifier
                                     .padding(4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Icon(Icons.Rounded.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
@@ -137,7 +142,7 @@ fun ClipboardScreen(
                                     onClick = { showClearAllConfirmation = true },
                                     modifier = Modifier
                                         .padding(4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .clip(RoundedCornerShape(16.dp))
                                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                 ) {
                                     Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
@@ -146,14 +151,14 @@ fun ClipboardScreen(
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                     )
-                    
+
                     if (isSearchActive) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 20.dp, vertical = 8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                         ) {
                             TextField(
@@ -205,12 +210,12 @@ fun ClipboardScreen(
                         Text("CANCEL")
                     }
                 },
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(32.dp),
                 containerColor = MaterialTheme.colorScheme.surface
             )
         }
 
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             if (entries.isEmpty()) {
                 EmptyClipboardState()
             } else {
@@ -218,19 +223,11 @@ fun ClipboardScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdge(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.03f to Color.Black,
-                                0.97f to Color.Black,
-                                1f to Color.Transparent
-                            ),
-                            length = 24.dp
-                        ),
+                        .fadingEdges(top = 16.dp, bottom = 16.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    groups.forEach { group ->
+                    displayGroups.forEach { group ->
                         item(key = "header_${group.label}") {
                             Spacer(Modifier.height(8.dp))
                             Text(
@@ -265,7 +262,7 @@ fun ClipboardScreen(
                             SquigglyDivider()
                         }
                     }
-                    
+
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
@@ -279,7 +276,7 @@ private fun EmptyClipboardState() {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
             Surface(
                 modifier = Modifier.size(120.dp),
-                shape = RoundedCornerShape(40.dp),
+                shape = RoundedCornerShape(48.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
             ) {
@@ -320,7 +317,7 @@ private fun LiquidStackCard(
     onAction: (String) -> Unit
 ) {
     val tiltDeg = remember(scrollOffset) { (scrollOffset % 5) * 0.3f }
-    
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -329,7 +326,7 @@ private fun LiquidStackCard(
                 shadowElevation = 12f
             }
             .bouncyClick(onClick = onCopy),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
         border = BorderStroke(
             1.dp,
@@ -403,7 +400,7 @@ private fun LiquidStackCard(
                         ActionChip("Call", Icons.Rounded.Call) { onAction("call") }
                         ActionChip("WhatsApp", Icons.Rounded.Chat) { onAction("whatsapp") }
                     }
-                    "URL" -> {
+                    "URL", "SOCIAL" -> {
                         ActionChip("Open", Icons.Rounded.OpenInBrowser) { onAction("open_url") }
                     }
                     "EMAIL" -> {
@@ -411,6 +408,9 @@ private fun LiquidStackCard(
                     }
                     "COLOR" -> {
                         ActionChip("Hex", Icons.Rounded.Palette) { onCopy() }
+                    }
+                    "CRYPTO" -> {
+                        ActionChip("Explorer", Icons.Rounded.AccountBalanceWallet) { onAction("open_url") }
                     }
                     else -> {
                         ActionChip("Share", Icons.Rounded.Share) { onAction("share") }
@@ -420,8 +420,9 @@ private fun LiquidStackCard(
 
             // Timestamp
             Spacer(Modifier.height(8.dp))
+            val timeString = remember(entry.timestamp) { formatTimestamp(entry.timestamp) }
             Text(
-                text = formatTimestamp(entry.timestamp),
+                text = timeString,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
             )
@@ -441,22 +442,13 @@ private fun TypeIcon(type: String, content: String) {
             }
             Surface(
                 modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = color,
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {}
         }
-        "URL" -> {
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1A73E8).copy(alpha = 0.15f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Link, null, tint = Color(0xFF1A73E8), modifier = Modifier.size(22.dp))
-                }
-            }
-        }
+        "URL" -> TypeIconBox(Icons.Rounded.Link, Color(0xFF1A73E8))
+        "SOCIAL" -> TypeIconBox(Icons.Rounded.Public, Color(0xFF0D47A1))
         "PHONE" -> TypeIconBox(Icons.Rounded.Phone, Color(0xFF34A853))
         "OTP" -> TypeIconBox(Icons.Rounded.Key, Color(0xFFFFA000))
         "EMAIL" -> TypeIconBox(Icons.Rounded.Email, Color(0xFFEA4335))
@@ -464,6 +456,7 @@ private fun TypeIcon(type: String, content: String) {
         "PERSONAL" -> TypeIconBox(Icons.Rounded.Favorite, Color(0xFFE91E63))
         "CODE" -> TypeIconBox(Icons.Rounded.Code, Color(0xFF00BCD4))
         "ADDRESS" -> TypeIconBox(Icons.Rounded.LocationOn, Color(0xFFFF5722))
+        "CRYPTO" -> TypeIconBox(Icons.Rounded.CurrencyBitcoin, Color(0xFFF7931A))
         else -> TypeIconBox(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary)
     }
 }
@@ -472,7 +465,7 @@ private fun TypeIcon(type: String, content: String) {
 private fun TypeIconBox(icon: ImageVector, color: Color) {
     Surface(
         modifier = Modifier.size(40.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = color.copy(alpha = 0.15f)
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -485,7 +478,7 @@ private fun TypeIconBox(icon: ImageVector, color: Color) {
 private fun ActionChip(label: String, icon: ImageVector, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
         modifier = Modifier.height(32.dp)
@@ -566,7 +559,16 @@ private fun handleContextualAction(context: Context, action: String, entry: Clip
         }
         "open_url" -> {
             try {
-                val url = if (entry.content.startsWith("http")) entry.content.trim() else "https://${entry.content.trim()}"
+                val content = entry.content.trim()
+                val url = if (content.startsWith("http")) content
+                          else if (content.startsWith("www.")) "https://$content"
+                          else if (entry.type == "SOCIAL") "https://$content"
+                          else if (entry.type == "CRYPTO") {
+                              if (content.startsWith("0x")) "https://etherscan.io/address/$content"
+                              else "https://www.blockchain.com/explorer/addresses/btc/$content"
+                          }
+                          else "https://www.google.com/search?q=$content"
+
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 context.startActivity(intent)
             } catch (e: Exception) {

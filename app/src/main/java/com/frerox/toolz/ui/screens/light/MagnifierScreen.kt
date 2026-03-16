@@ -127,7 +127,7 @@ fun MagnifierScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("MAGNIFIER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("MAGNIFIER ENGINE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -139,10 +139,13 @@ fun MagnifierScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = padding.calculateTopPadding()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (cameraPermissionState.status.isGranted) {
@@ -151,9 +154,9 @@ fun MagnifierScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(24.dp)
-                        .clip(RoundedCornerShape(40.dp))
+                        .clip(RoundedCornerShape(48.dp))
                         .background(Color.Black)
-                        .border(BorderStroke(2.dp, primaryColor.copy(alpha = 0.2f)), RoundedCornerShape(40.dp))
+                        .border(BorderStroke(2.dp, primaryColor.copy(alpha = 0.2f)), RoundedCornerShape(48.dp))
                 ) {
                     AndroidView(
                         factory = { ctx ->
@@ -211,30 +214,30 @@ fun MagnifierScreen(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
-                    shape = RoundedCornerShape(32.dp),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    shape = RoundedCornerShape(40.dp),
                     color = surfaceVariantColor.copy(alpha = 0.3f),
                     border = BorderStroke(1.dp, outlineVariantColor.copy(alpha = 0.2f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(28.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.ZoomIn, null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Rounded.ZoomIn, null, tint = primaryColor, modifier = Modifier.size(24.dp))
                             Spacer(Modifier.width(12.dp))
                             Text(
                                 "OPTICAL ZOOM", 
                                 style = MaterialTheme.typography.labelSmall, 
                                 fontWeight = FontWeight.Black,
                                 color = primaryColor,
-                                letterSpacing = 1.sp
+                                letterSpacing = 1.5.sp
                             )
                             Spacer(Modifier.weight(1f))
                             Text(
-                                "${String.format(Locale.US, "%.1f", 1.0 + zoomLevel * 9)}x", 
+                                "${String.format(Locale.US, "%.1f", 1.0 + zoomLevel * 9)}X", 
                                 style = MaterialTheme.typography.titleMedium, 
                                 fontWeight = FontWeight.Black
                             )
                         }
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         Slider(
                             value = zoomLevel,
                             onValueChange = {
@@ -255,8 +258,8 @@ fun MagnifierScreen(
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Surface(
-                            modifier = Modifier.size(120.dp),
-                            shape = RoundedCornerShape(40.dp),
+                            modifier = Modifier.size(140.dp),
+                            shape = RoundedCornerShape(48.dp),
                             color = primaryContainerColor.copy(alpha = 0.3f),
                             border = BorderStroke(2.dp, primaryColor.copy(alpha = 0.1f))
                         ) {
@@ -272,7 +275,7 @@ fun MagnifierScreen(
                         )
                         Button(
                             onClick = { cameraPermissionState.launchPermissionRequest() },
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.fillMaxWidth().height(64.dp)
                         ) {
                             Text("GRANT PERMISSION", fontWeight = FontWeight.Black)

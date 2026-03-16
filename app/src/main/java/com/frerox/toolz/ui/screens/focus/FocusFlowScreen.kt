@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -52,7 +53,7 @@ import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppUsageInfo
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.SquigglySlider
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.rememberLifecycleEvent
 import kotlin.math.sin
 
@@ -107,7 +108,7 @@ fun FocusFlowScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -115,7 +116,7 @@ fun FocusFlowScreen(
                 actions = {
                     IconButton(
                         onClick = { viewModel.refreshStats() },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                     }
@@ -125,18 +126,10 @@ fun FocusFlowScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(modifier = Modifier.padding(top = padding.calculateTopPadding()).fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize()
-                    .fadingEdge(
-                        brush = Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.05f to Color.Black,
-                            0.95f to Color.Black,
-                            1f to Color.Transparent
-                        ),
-                        length = 24.dp
-                    ),
+                    .fadingEdges(top = 16.dp, bottom = 16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -227,7 +220,7 @@ fun FocusFlowScreen(
                     ) {
                         Surface(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(32.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
@@ -244,7 +237,7 @@ fun FocusFlowScreen(
                         }
                         Surface(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(32.dp),
                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
                         ) {
@@ -270,11 +263,11 @@ fun FocusFlowScreen(
                     ) {
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 "ANALYTICS",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary,
@@ -395,7 +388,7 @@ fun FocusFlowScreen(
                         shape = RoundedCornerShape(16.dp)
                     )
                 },
-                shape = RoundedCornerShape(28.dp)
+                shape = RoundedCornerShape(32.dp)
             )
         }
     }
@@ -417,7 +410,7 @@ fun FocusAppSettingsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
@@ -427,7 +420,7 @@ fun FocusAppSettingsSheet(
             ) {
                 Surface(
                     modifier = Modifier.size(64.dp), 
-                    shape = RoundedCornerShape(18.dp), 
+                    shape = RoundedCornerShape(16.dp), 
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
@@ -457,7 +450,7 @@ fun FocusAppSettingsSheet(
                     Surface(
                         onClick = { onUpdateCategory(isProd) },
                         modifier = Modifier.weight(1f).height(60.dp).bouncyClick {},
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(24.dp),
                         color = if (isSelected) activeColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(
                             2.dp, 
@@ -499,13 +492,13 @@ fun FocusAppSettingsSheet(
                             selectedMins = mins % 60
                         },
                         modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = if (isSelected) activeColor else activeColor.copy(alpha = 0.1f),
                         border = if (isSelected) null else BorderStroke(1.dp, activeColor.copy(alpha = 0.2f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                if (mins < 60) "${mins}m" else "${mins / 60}h", 
+                                if (mins < 60) "${mins}m" else "${mins / 60}h" , 
                                 style = MaterialTheme.typography.labelSmall, 
                                 fontWeight = FontWeight.Black,
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else activeColor
@@ -520,7 +513,7 @@ fun FocusAppSettingsSheet(
                         selectedMins = 0
                     },
                     modifier = Modifier.weight(1f).height(36.dp).bouncyClick { },
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -539,7 +532,7 @@ fun FocusAppSettingsSheet(
             
             Surface(
                 modifier = Modifier.fillMaxWidth().height(160.dp),
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(32.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             ) {
@@ -607,11 +600,11 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>) {
     
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(40.dp),
         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
+        Column(modifier = Modifier.padding(28.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Timeline, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
@@ -688,10 +681,10 @@ fun EnhancedProductivityHeader(score: Int) {
             .fillMaxWidth()
             .shadow(
                 elevation = if (isElite) 24.dp else 16.dp, 
-                shape = RoundedCornerShape(40.dp), 
+                shape = RoundedCornerShape(48.dp), 
                 spotColor = if (isElite) primary else primary.copy(alpha = 0.3f)
             ),
-        shape = RoundedCornerShape(40.dp),
+        shape = RoundedCornerShape(48.dp),
         color = container.copy(alpha = 0.1f),
         border = BorderStroke(2.dp, Brush.verticalGradient(listOf(primary.copy(alpha = if (isElite) glowAlpha else 0.5f), Color.Transparent)))
     ) {
@@ -699,50 +692,78 @@ fun EnhancedProductivityHeader(score: Int) {
             modifier = Modifier.padding(vertical = 40.dp, horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (isElite) {
-                    Icon(Icons.Rounded.AutoAwesome, null, tint = primary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
+            Box(contentAlignment = Alignment.Center) {
+                val infiniteTransition = rememberInfiniteTransition(label = "arc")
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(tween(10000, easing = LinearEasing)),
+                    label = "rotation"
+                )
+
+                Canvas(modifier = Modifier.size(220.dp).rotate(rotation)) {
+                    drawArc(
+                        color = primary.copy(alpha = 0.1f),
+                        startAngle = 0f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    drawArc(
+                        color = primary,
+                        startAngle = -90f,
+                        sweepAngle = (score / 100f) * 360f,
+                        useCenter = false,
+                        style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                    )
                 }
-                Text(
-                    "FOCUS EFFICIENCY",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    color = primary,
-                    letterSpacing = 2.sp
-                )
-            }
-            
-            Row(verticalAlignment = Alignment.Bottom) {
-                val animatedScore by animateIntAsState(targetValue = score, animationSpec = tween(1500, easing = FastOutSlowInEasing), label = "")
-                Text(
-                    "$animatedScore",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 110.sp),
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.graphicsLayer {
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isElite) {
-                            val pulse = glowAlpha * 0.05f
-                            scaleX = 1f + pulse
-                            scaleY = 1f + pulse
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = primary, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
                         }
+                        Text(
+                            "FLOW STATE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = primary,
+                            letterSpacing = 2.sp
+                        )
                     }
-                )
-                Text(
-                    "%",
-                    modifier = Modifier.padding(bottom = 24.dp, start = 4.dp),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black,
-                    color = primary
-                )
+                    
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        val animatedScore by animateIntAsState(targetValue = score, animationSpec = tween(1500, easing = FastOutSlowInEasing), label = "")
+                        Text(
+                            "$animatedScore",
+                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 90.sp),
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.graphicsLayer {
+                                if (isElite) {
+                                    val pulse = glowAlpha * 0.05f
+                                    scaleX = 1f + pulse
+                                    scaleY = 1f + pulse
+                                }
+                            }
+                        )
+                        Text(
+                            "%",
+                            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            color = primary
+                        )
+                    }
+                }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
             
             SquigglySlider(
                 value = score.toFloat(),
                 onValueChange = {},
-                onValueChangeFinished = {},
                 valueRange = 0f..100f,
                 isPlaying = true
             )
@@ -751,7 +772,7 @@ fun EnhancedProductivityHeader(score: Int) {
             
             Surface(
                 color = (if (score > 50) primary else MaterialTheme.colorScheme.error).copy(alpha = 0.1f),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, (if (score > 50) primary else MaterialTheme.colorScheme.error).copy(alpha = 0.2f))
             ) {
                 Text(
@@ -804,14 +825,14 @@ fun EnhancedUsageItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         border = BorderStroke(
             1.dp, 
             if (isOverLimit) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) 
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
         ),
-        shadowElevation = 2.dp
+        shadowElevation = if (isOverLimit) 2.dp else 0.dp
     ) {
         Column {
             Row(
@@ -820,7 +841,7 @@ fun EnhancedUsageItem(
             ) {
                 Surface(
                     modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 2.dp
                 ) {
@@ -913,14 +934,14 @@ fun EnhancedUsageItem(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                        .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .fillMaxWidth(barProgress)
-                            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = if (barProgress >= 1f) 24.dp else 0.dp))
+                            .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = if (barProgress >= 1f) 32.dp else 0.dp))
                             .background(
                                 Brush.horizontalGradient(
                                     listOf(color.copy(alpha = 0.7f), color)

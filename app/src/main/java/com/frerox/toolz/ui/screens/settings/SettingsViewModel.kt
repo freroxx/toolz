@@ -48,6 +48,7 @@ class SettingsViewModel @Inject constructor(
     val stepCounterEnabled = repository.stepCounterEnabled
     val showToolzPill = repository.showToolzPill
     val userName = repository.userName
+    val autoUpdateEnabled = repository.autoUpdateEnabled
 
     val musicAudioFocus = repository.musicAudioFocus
     val musicShakeToSkip = repository.musicShakeToSkip
@@ -81,6 +82,7 @@ class SettingsViewModel @Inject constructor(
     fun setStepCounterEnabled(enabled: Boolean) = viewModelScope.launch { repository.setStepCounterEnabled(enabled) }
     fun setShowToolzPill(enabled: Boolean) = viewModelScope.launch { repository.setShowToolzPill(enabled) }
     fun setUserName(name: String) = viewModelScope.launch { repository.setUserName(name) }
+    fun setAutoUpdateEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
 
     fun setMusicAudioFocus(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocus(enabled) }
     fun setMusicShakeToSkip(enabled: Boolean) = viewModelScope.launch { repository.setMusicShakeToSkip(enabled) }

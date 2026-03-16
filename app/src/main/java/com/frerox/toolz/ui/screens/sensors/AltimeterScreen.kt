@@ -73,7 +73,7 @@ fun AltimeterScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -81,26 +81,28 @@ fun AltimeterScreen(
                 actions = {
                     IconButton(
                         onClick = { /* Settings */ },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Settings, null)
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .padding(top = padding.calculateTopPadding())
         ) {
             if (locationPermissionState.status.isGranted) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .fadingEdge(
-                            brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
+                            brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
                             length = 24.dp
                         )
                         .verticalScroll(rememberScrollState())
@@ -112,7 +114,7 @@ fun AltimeterScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(300.dp),
-                        shape = RoundedCornerShape(40.dp),
+                        shape = RoundedCornerShape(48.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
                         border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     ) {
@@ -135,6 +137,7 @@ fun AltimeterScreen(
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
+                                    @Suppress("DEPRECATION")
                                     Text(
                                         text = "VERTICAL POSITION",
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -194,11 +197,11 @@ fun AltimeterScreen(
                     // Info Section
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(32.dp),
+                        shape = RoundedCornerShape(40.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
-                        Column(modifier = Modifier.padding(24.dp)) {
+                        Column(modifier = Modifier.padding(28.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -214,6 +217,7 @@ fun AltimeterScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Rounded.LocationSearching, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(10.dp))
+                                    @Suppress("DEPRECATION")
                                     Text(
                                         "Signal Accuracy: ±${state.accuracy.toInt()} meters",
                                         style = MaterialTheme.typography.labelSmall,
@@ -238,18 +242,19 @@ fun AltimeterScreen(
 fun AltimeterStatCard(modifier: Modifier, label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(32.dp),
         color = color.copy(alpha = 0.1f),
         border = BorderStroke(1.5.dp, color.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = color.copy(alpha = 0.15f)) {
+            Surface(modifier = Modifier.size(44.dp), shape = RoundedCornerShape(12.dp), color = color.copy(alpha = 0.15f)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
+                    Icon(icon, null, modifier = Modifier.size(22.dp), tint = color)
                 }
             }
             Spacer(Modifier.height(16.dp))
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color, letterSpacing = 0.5.sp)
         }
     }
@@ -259,16 +264,17 @@ fun AltimeterStatCard(modifier: Modifier, label: String, value: String, icon: an
 private fun InfoItemInternal(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(
-            modifier = Modifier.size(44.dp),
-            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.size(48.dp),
+            shape = RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(icon, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
         Spacer(Modifier.width(14.dp))
         Column {
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
             Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
         }
@@ -280,8 +286,8 @@ private fun PermissionViewInternal(onClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(40.dp)) {
             Surface(
-                modifier = Modifier.size(120.dp), 
-                shape = RoundedCornerShape(40.dp), 
+                modifier = Modifier.size(140.dp), 
+                shape = RoundedCornerShape(48.dp), 
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
             ) {
@@ -300,7 +306,7 @@ private fun PermissionViewInternal(onClick: () -> Unit) {
             )
             Button(
                 onClick = onClick,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth().height(64.dp)
             ) {
                 Text("GRANT PERMISSION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)

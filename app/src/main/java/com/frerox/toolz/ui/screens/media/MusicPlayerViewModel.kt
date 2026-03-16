@@ -67,7 +67,8 @@ data class MusicUiState(
     val hapticEnabled: Boolean = true,
     val hapticIntensity: Float = 0.5f,
     val pipEnabled: Boolean = false,
-    val sleepTimerActive: Boolean = false
+    val sleepTimerActive: Boolean = false,
+    val sleepTimerRemaining: Long? = null
 )
 
 @HiltViewModel
@@ -572,10 +573,20 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun setSleepTimer(minutes: Int?) {
         sleepTimerJob?.cancel()
-        _uiState.update { it.copy(sleepTimerMinutes = minutes, sleepTimerActive = minutes != null) }
+        _uiState.update { it.copy(
+            sleepTimerMinutes = minutes, 
+            sleepTimerActive = minutes != null,
+            sleepTimerRemaining = minutes?.let { it * 60 * 1000L }
+        ) }
+        
         if (minutes != null) {
+            val endTime = System.currentTimeMillis() + (minutes * 60 * 1000L)
             sleepTimerJob = viewModelScope.launch {
-                delay(minutes * 60 * 1000L)
+                while (System.currentTimeMillis() < endTime) {
+                    val remaining = (endTime - System.currentTimeMillis()).coerceAtLeast(0)
+                    _uiState.update { it.copy(sleepTimerRemaining = remaining) }
+                    delay(1000)
+                }
                 fadeOutAndStop()
             }
         }
@@ -595,7 +606,7 @@ class MusicPlayerViewModel @Inject constructor(
         val p: Player = controller ?: player
         p.pause()
         player.volume = 1.0f
-        _uiState.update { it.copy(sleepTimerMinutes = null, sleepTimerActive = false) }
+        _uiState.update { it.copy(sleepTimerMinutes = null, sleepTimerActive = false, sleepTimerRemaining = null) }
     }
 
     fun setArtShape(shape: String) {

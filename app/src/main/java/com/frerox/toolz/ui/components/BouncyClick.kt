@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -16,12 +17,16 @@ enum class ButtonState { Pressed, Idle }
 
 fun Modifier.bouncyClick(
     enabled: Boolean = true,
+    scaleDown: Float = 0.92f,
     onClick: () -> Unit
 ) = composed {
     var buttonState by remember { mutableStateOf(ButtonState.Idle) }
     val scale by animateFloatAsState(
-        targetValue = if (buttonState == ButtonState.Pressed && enabled) 0.95f else 1f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 200f),
+        targetValue = if (buttonState == ButtonState.Pressed && enabled) scaleDown else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
         label = "BouncyClickScale"
     )
 
@@ -36,15 +41,14 @@ fun Modifier.bouncyClick(
             indication = null,
             onClick = onClick
         )
-        .pointerInput(buttonState, enabled) {
+        .pointerInput(enabled) {
             if (!enabled) return@pointerInput
             awaitPointerEventScope {
-                buttonState = if (buttonState == ButtonState.Pressed) {
-                    waitForUpOrCancellation()
-                    ButtonState.Idle
-                } else {
+                while (true) {
                     awaitFirstDown(false)
-                    ButtonState.Pressed
+                    buttonState = ButtonState.Pressed
+                    waitForUpOrCancellation()
+                    buttonState = ButtonState.Idle
                 }
             }
         }

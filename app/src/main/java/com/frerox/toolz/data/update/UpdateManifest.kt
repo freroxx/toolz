@@ -6,8 +6,8 @@ import com.squareup.moshi.JsonClass
 data class UpdateManifest(
     val versionCode: Int,
     val versionName: String,
-    val apkUrl: String,
-    val changelog: String,
-    val isCritical: Boolean,
-    val sha256: String
+    val apkUrl: String?,
+    val changelog: String?,
+    val isCritical: Boolean?,
+    val sha256: String?
 )

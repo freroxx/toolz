@@ -57,7 +57,6 @@ fun CompassScreen(
         label = "Azimuth"
     )
 
-    // Haptic feedback for North
     LaunchedEffect(state.azimuth.toInt()) {
         if (state.azimuth.toInt() == 0 || state.azimuth.toInt() == 360) {
             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -78,45 +77,49 @@ fun CompassScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("COMPASS", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("PRECISION COMPASS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         val config = LocalConfiguration.current
-        val dialSize = (config.screenWidthDp.dp * 0.9f).coerceAtMost(450.dp)
+        val dialSize = (config.screenWidthDp.dp * 0.92f).coerceAtMost(480.dp)
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(top = padding.calculateTopPadding()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Heading Info
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(bottom = 48.dp)
+                modifier = Modifier.padding(bottom = 40.dp)
             ) {
                 Text(
                     text = "${state.azimuth.toInt()}°",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 90.sp),
+                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 100.sp, letterSpacing = (-4).sp),
                     fontWeight = FontWeight.Black,
                     color = onSurface
                 )
                 
                 Surface(
-                    color = primaryColor.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(14.dp),
+                    color = primaryColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
                 ) {
                     Text(
@@ -124,28 +127,25 @@ fun CompassScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = primaryColor,
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                        letterSpacing = 2.sp
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
+                        letterSpacing = 2.5.sp
                     )
                 }
             }
 
-            // Minimalist Dial
             Box(
                 modifier = Modifier
                     .size(dialSize)
-                    .padding(24.dp),
+                    .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Outer Static Ring
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     drawCircle(
-                        color = onSurface.copy(alpha = 0.05f),
-                        style = Stroke(width = 1.dp.toPx())
+                        color = onSurface.copy(alpha = 0.08f),
+                        style = Stroke(width = 2.dp.toPx())
                     )
                 }
 
-                // Rotating Content
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
@@ -154,15 +154,14 @@ fun CompassScreen(
                     val center = Offset(size.width / 2, size.height / 2)
                     val radius = size.width / 2
 
-                    // Draw Ticks
                     for (i in 0 until 360 step 2) {
                         val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
                         val isMain = i % 30 == 0
                         val isCardinal = i % 90 == 0
                         
-                        val tickLength = if (isCardinal) 28.dp.toPx() else if (isMain) 18.dp.toPx() else 8.dp.toPx()
-                        val strokeWidth = if (isCardinal) 3.dp.toPx() else if (isMain) 2.dp.toPx() else 1.dp.toPx()
-                        val alpha = if (isMain) 0.8f else 0.3f
+                        val tickLength = if (isCardinal) 32.dp.toPx() else if (isMain) 20.dp.toPx() else 10.dp.toPx()
+                        val strokeWidth = if (isCardinal) 4.dp.toPx() else if (isMain) 2.5.dp.toPx() else 1.5.dp.toPx()
+                        val alpha = if (isMain) 0.9f else 0.35f
                         
                         val start = Offset(
                             center.x + (radius - tickLength) * cos(angleRad),
@@ -182,50 +181,46 @@ fun CompassScreen(
                         )
                     }
 
-                    // North Indicator (Elegant Needle)
                     val needlePath = Path().apply {
-                        moveTo(center.x, center.y - radius + 35.dp.toPx())
-                        lineTo(center.x - 12.dp.toPx(), center.y - radius + 65.dp.toPx())
-                        lineTo(center.x + 12.dp.toPx(), center.y - radius + 65.dp.toPx())
+                        moveTo(center.x, center.y - radius + 40.dp.toPx())
+                        lineTo(center.x - 14.dp.toPx(), center.y - radius + 75.dp.toPx())
+                        lineTo(center.x + 14.dp.toPx(), center.y - radius + 75.dp.toPx())
                         close()
                     }
                     drawPath(needlePath, Color.Red)
                 }
 
-                // Static Center UI
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Rounded.KeyboardArrowUp,
                         contentDescription = null,
-                        modifier = Modifier.size(32.dp).alpha(0.3f),
-                        tint = onSurface
+                        modifier = Modifier.size(36.dp).alpha(0.4f),
+                        tint = primaryColor
                     )
                     
-                    // Bubble Level Integrated
-                    val bubbleX by animateFloatAsState(targetValue = (state.roll / 45f) * 40f, label = "levelX")
-                    val bubbleY by animateFloatAsState(targetValue = (state.pitch / 45f) * 40f, label = "levelY")
+                    val bubbleX by animateFloatAsState(targetValue = (state.roll / 45f) * 45f, label = "levelX")
+                    val bubbleY by animateFloatAsState(targetValue = (state.pitch / 45f) * 45f, label = "levelY")
                     
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
+                            .size(90.dp)
                             .clip(CircleShape)
-                            .background(surfaceVariant.copy(alpha = 0.5f))
-                            .border(1.dp, onSurface.copy(alpha = 0.1f), CircleShape),
+                            .background(surfaceVariant.copy(alpha = 0.6f))
+                            .border(1.5.dp, onSurface.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Level Crosshair
                         Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawLine(onSurface.copy(0.1f), Offset(size.width/2, 0f), Offset(size.width/2, size.height), 1.dp.toPx())
-                            drawLine(onSurface.copy(0.1f), Offset(0f, size.height/2), Offset(size.width, size.height/2), 1.dp.toPx())
+                            drawLine(onSurface.copy(0.12f), Offset(size.width/2, 0f), Offset(size.width/2, size.height), 1.5.dp.toPx())
+                            drawLine(onSurface.copy(0.12f), Offset(0f, size.height/2), Offset(size.width, size.height/2), 1.5.dp.toPx())
                         }
                         
-                        // Floating Bubble
                         Box(
                             modifier = Modifier
-                                .size(12.dp)
+                                .size(14.dp)
                                 .offset(bubbleX.dp, bubbleY.dp)
                                 .clip(CircleShape)
                                 .background(if (state.isLevel) Color(0xFF4CAF50) else primaryColor)
+                                .shadow(4.dp, CircleShape)
                         )
                     }
                 }
@@ -233,30 +228,38 @@ fun CompassScreen(
 
             Spacer(Modifier.height(64.dp))
 
-            // Accuracy & Stats
-            Row(
-                modifier = Modifier.padding(horizontal = 32.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            Surface(
+                color = surfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(32.dp),
+                border = BorderStroke(1.dp, onSurface.copy(alpha = 0.1f)),
+                modifier = Modifier.padding(horizontal = 32.dp)
             ) {
-                StatusItem(
-                    label = "ACCURACY",
-                    value = when (state.accuracy) {
-                        3 -> "HIGH"
-                        2 -> "MEDIUM"
-                        else -> "LOW"
-                    },
-                    color = when (state.accuracy) {
-                        3 -> Color(0xFF4CAF50)
-                        2 -> Color(0xFFFF9800)
-                        else -> Color(0xFFF44336)
-                    }
-                )
-                
-                StatusItem(
-                    label = "LEVEL",
-                    value = if (state.isLevel) "FLAT" else "${abs(state.pitch).toInt()}°",
-                    color = if (state.isLevel) Color(0xFF4CAF50) else primaryColor
-                )
+                Row(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(40.dp)
+                ) {
+                    StatusItem(
+                        label = "ACCURACY",
+                        value = when (state.accuracy) {
+                            3 -> "HIGH"
+                            2 -> "MID"
+                            else -> "LOW"
+                        },
+                        color = when (state.accuracy) {
+                            3 -> Color(0xFF4CAF50)
+                            2 -> Color(0xFFFF9800)
+                            else -> Color(0xFFF44336)
+                        }
+                    )
+                    
+                    VerticalDivider(modifier = Modifier.height(40.dp), thickness = 1.dp, color = onSurface.copy(alpha = 0.1f))
+                    
+                    StatusItem(
+                        label = "STABILITY",
+                        value = if (state.isLevel) "FLAT" else "${abs(state.pitch).toInt()}°",
+                        color = if (state.isLevel) Color(0xFF4CAF50) else primaryColor
+                    )
+                }
             }
         }
     }
@@ -268,9 +271,9 @@ fun StatusItem(label: String, value: String, color: Color) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            letterSpacing = 1.sp
+            letterSpacing = 1.5.sp
         )
         Text(
             text = value,
