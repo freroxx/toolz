@@ -53,7 +53,7 @@ fun UpdateScreen(
             .statusBarsPadding()
     ) {
         TopAppBar(
-            title = { Text("CORE ENGINE PATCHES", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+            title = { Text("APP GITHUB UPDATER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
             navigationIcon = {
                 IconButton(
                     onClick = onBack,
