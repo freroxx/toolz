@@ -45,6 +45,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.work.*
+import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.LoadingScreen
@@ -66,6 +67,8 @@ import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
 import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
+import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
+import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.util.VibrationManager
@@ -85,6 +88,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var vibrationManager: VibrationManager
+
+    @Inject
+    lateinit var aiSettingsManager: AiSettingsManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -158,7 +164,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        ToolzNavHost(navController, settingsRepository, pdfViewModel)
+                        ToolzNavHost(navController, settingsRepository, aiSettingsManager, pdfViewModel)
 
                         UpdateOverlay(settingsRepository)
                     }
@@ -383,6 +389,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
 fun ToolzNavHost(
     navController: androidx.navigation.NavHostController,
     settingsRepository: SettingsRepository,
+    aiSettingsManager: AiSettingsManager,
     pdfViewModel: PdfViewModel
 ) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
@@ -409,6 +416,7 @@ fun ToolzNavHost(
         composable("onboarding") {
             OnboardingScreen(
                 settingsRepository = settingsRepository,
+                aiSettingsManager = aiSettingsManager,
                 onFinish = {
                     navController.navigate(Screen.Dashboard.route) {
                         popUpTo("onboarding") { inclusive = true }
@@ -453,6 +461,11 @@ fun ToolzNavHost(
                 }
             )
         }
+        
+        // AI
+        composable(Screen.AiAssistant.route) {
+            AiAssistantScreen(onBack = { navController.popBackStack() })
+        }
 
         // Time & Productivity
         composable(Screen.Timer.route) {
@@ -472,6 +485,9 @@ fun ToolzNavHost(
         }
         composable(Screen.Todo.route) {
             TodoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.Calendar.route) {
+            CalendarScreen(viewModel = hiltViewModel())
         }
 
         // Media & Documents

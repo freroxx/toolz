@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -256,14 +258,15 @@ fun VoiceRecorderScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
-                        items(uiState.recordings) { recording ->
+                        items(uiState.recordings, key = { it.absolutePath }) { recording ->
                             RecordingCard(
                                 file = recording,
                                 isPlaying = uiState.playingFile == recording && uiState.isPlaying,
                                 playbackPosition = if (uiState.playingFile == recording) uiState.playbackPosition else 0,
                                 playbackDuration = if (uiState.playingFile == recording) uiState.playbackDuration else 0,
                                 onTogglePlay = { viewModel.togglePlayback(recording) },
-                                onDelete = { viewModel.deleteRecording(recording) }
+                                onDelete = { viewModel.deleteRecording(recording) },
+                                onRename = { viewModel.renameRecording(recording, it) }
                             )
                         }
                     }
@@ -350,12 +353,20 @@ fun RecordingCard(
     playbackPosition: Int,
     playbackDuration: Int,
     onTogglePlay: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onRename: (String) -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf(file.nameWithoutExtension) }
 
     Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick { onTogglePlay() },
+        modifier = Modifier.fillMaxWidth().pointerInput(Unit) {
+            detectTapGestures(
+                onTap = { onTogglePlay() },
+                onLongPress = { showRenameDialog = true }
+            )
+        },
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         border = BorderStroke(
@@ -383,7 +394,7 @@ fun RecordingCard(
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        file.name.removeSuffix(".m4a").removeSuffix(".3gp"), 
+                        file.nameWithoutExtension, 
                         style = MaterialTheme.typography.bodyLarge, 
                         fontWeight = FontWeight.Black, 
                         maxLines = 1,
@@ -442,6 +453,40 @@ fun RecordingCard(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("CANCEL", fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(32.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("RENAME RECORDING", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRename(newName)
+                        showRenameDialog = false
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("SAVE", fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
                     Text("CANCEL", fontWeight = FontWeight.Bold)
                 }
             },

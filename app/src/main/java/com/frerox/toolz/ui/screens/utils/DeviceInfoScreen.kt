@@ -1,16 +1,13 @@
 package com.frerox.toolz.ui.screens.utils
 
-import android.app.ActivityManager
-import android.content.Context
-import android.os.Build
-import android.os.Environment
-import android.os.StatFs
-import android.util.DisplayMetrics
-import android.view.WindowManager
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,20 +20,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceInfoScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    viewModel: DeviceInfoViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
-    val deviceData = remember { getDeviceInfo(context) }
+    val deviceData by viewModel.deviceData.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val hapticEnabled = LocalHapticEnabled.current
+    val vibrationManager = LocalVibrationManager.current
 
     Scaffold(
         topBar = {
@@ -44,17 +48,28 @@ fun DeviceInfoScreen(
                 title = { Text("DEVICE INTELLIGENCE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { 
+                        vibrationManager?.vibrateClick()
+                        viewModel.refresh() 
+                    }) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
@@ -68,11 +83,82 @@ fun DeviceInfoScreen(
             // Hero Section
             DeviceHeroSection(deviceData)
 
-            // Dynamic Sections
-            InfoSection(title = "CORE ARCHITECTURE", icon = Icons.Rounded.Memory, items = deviceData.hardwareInfo)
-            InfoSection(title = "SOFTWARE ECOSYSTEM", icon = Icons.Rounded.Android, items = deviceData.softwareInfo)
-            InfoSection(title = "DISPLAY MATRIX", icon = Icons.Rounded.Screenshot, items = deviceData.displayInfo)
-            InfoSection(title = "MEMORY & STORAGE", icon = Icons.Rounded.Storage, items = deviceData.storageInfo)
+            // System Core
+            InfoSection(
+                title = "CORE ARCHITECTURE",
+                icon = Icons.Rounded.Memory,
+                items = listOf(
+                    "SoC" to deviceData.soc,
+                    "Processor" to deviceData.hardware,
+                    "CPU Cores" to "${deviceData.cpuCores} Cores",
+                    "Max Freq" to deviceData.cpuFreq,
+                    "Hardware" to deviceData.hardware,
+                    "Device" to deviceData.device
+                )
+            )
+
+            // Memory & Storage
+            InfoSection(
+                title = "MEMORY & STORAGE",
+                icon = Icons.Rounded.Storage,
+                items = listOf(
+                    "Total RAM" to formatSize(deviceData.totalRam),
+                    "Available RAM" to formatSize(deviceData.availRam),
+                    "Internal Storage" to formatSize(deviceData.totalInternal),
+                    "Available Storage" to formatSize(deviceData.availInternal)
+                )
+            )
+
+            // Display
+            InfoSection(
+                title = "DISPLAY MATRIX",
+                icon = Icons.Rounded.Screenshot,
+                items = listOf(
+                    "Resolution" to deviceData.screenRes,
+                    "Density" to deviceData.screenDensity,
+                    "Refresh Rate" to "${deviceData.refreshRate} Hz",
+                    "Screen Size" to "${String.format(Locale.getDefault(), "%.1f", deviceData.screenSize)}\""
+                )
+            )
+
+            // Battery
+            InfoSection(
+                title = "BATTERY STATUS",
+                icon = Icons.Rounded.BatteryChargingFull,
+                items = listOf(
+                    "Level" to "${deviceData.batteryLevel}%",
+                    "Capacity" to deviceData.batteryCapacity,
+                    "Health" to deviceData.batteryHealth,
+                    "Technology" to deviceData.batteryTech,
+                    "Voltage" to deviceData.batteryVoltage,
+                    "Temperature" to deviceData.batteryTemp
+                )
+            )
+
+            // Software
+            InfoSection(
+                title = "SOFTWARE ECOSYSTEM",
+                icon = Icons.Rounded.Android,
+                items = listOf(
+                    "Version" to deviceData.androidVersion,
+                    "API Level" to deviceData.apiLevel.toString(),
+                    "Security Patch" to deviceData.securityPatch,
+                    "Build ID" to deviceData.buildId,
+                    "Kernel" to deviceData.kernelVersion,
+                    "Root Access" to if (deviceData.isRooted) "Detected" else "No"
+                )
+            )
+
+            // Others
+            InfoSection(
+                title = "EXTRAS & NETWORK",
+                icon = Icons.Rounded.Hub,
+                items = listOf(
+                    "Cameras" to if (deviceData.cameras.isNotEmpty()) deviceData.cameras.joinToString(", ") else "None",
+                    "Total Sensors" to "${deviceData.sensorsCount} Sensors",
+                    "IP Address" to deviceData.wifiIp
+                )
+            )
 
             Spacer(Modifier.height(32.dp))
         }
@@ -80,7 +166,7 @@ fun DeviceInfoScreen(
 }
 
 @Composable
-fun DeviceHeroSection(data: DeviceData) {
+fun DeviceHeroSection(data: DetailedDeviceData) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(48.dp),
@@ -105,14 +191,15 @@ fun DeviceHeroSection(data: DeviceData) {
             Spacer(Modifier.height(24.dp))
 
             Text(
-                text = data.modelName.uppercase(Locale.getDefault()),
+                text = data.model.uppercase(Locale.getDefault()),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
             )
 
             Text(
-                text = data.brandName,
+                text = data.brand,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -193,82 +280,6 @@ fun InfoSection(title: String, icon: ImageVector, items: List<Pair<String, Strin
             }
         }
     }
-}
-
-data class DeviceData(
-    val brandName: String,
-    val modelName: String,
-    val androidVersion: String,
-    val apiLevel: Int,
-    val hardwareInfo: List<Pair<String, String>>,
-    val softwareInfo: List<Pair<String, String>>,
-    val displayInfo: List<Pair<String, String>>,
-    val storageInfo: List<Pair<String, String>>
-)
-
-private fun getDeviceInfo(context: Context): DeviceData {
-    val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    val metrics = DisplayMetrics()
-
-    // API 31+ handling
-    val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        context.display
-    } else {
-        @Suppress("DEPRECATION")
-        wm.defaultDisplay
-    }
-    @Suppress("DEPRECATION")
-    display?.getMetrics(metrics)
-
-    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    val memoryInfo = ActivityManager.MemoryInfo()
-    activityManager.getMemoryInfo(memoryInfo)
-
-    val internalStorage = StatFs(Environment.getDataDirectory().path)
-    val totalInternal = internalStorage.blockCountLong * internalStorage.blockSizeLong
-    val availableInternal = internalStorage.availableBlocksLong * internalStorage.blockSizeLong
-
-    return DeviceData(
-        brandName = Build.BRAND.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },
-        modelName = Build.MODEL,
-        androidVersion = "Android ${Build.VERSION.RELEASE}",
-        apiLevel = Build.VERSION.SDK_INT,
-        hardwareInfo = listOf(
-            "Processor" to Build.HARDWARE,
-            "Board" to Build.BOARD,
-            "Hardware" to Build.HARDWARE,
-            "Manufacturer" to Build.MANUFACTURER,
-            "Product" to Build.PRODUCT,
-            "Bootloader" to Build.BOOTLOADER,
-            "Supported ABIs" to Build.SUPPORTED_ABIS.joinToString(", ")
-        ),
-        softwareInfo = listOf(
-            "OS Version" to Build.VERSION.RELEASE,
-            "API Level" to Build.VERSION.SDK_INT.toString(),
-            "Build ID" to Build.ID,
-            "Security Patch" to (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Build.VERSION.SECURITY_PATCH else "N/A"),
-            "Kernel" to (System.getProperty("os.version")?.toString() ?: "N/A"),
-            "Language" to Locale.getDefault().displayName
-        ),
-        displayInfo = listOf(
-            "Resolution" to "${metrics.widthPixels} x ${metrics.heightPixels}",
-            "Density" to "${metrics.densityDpi} DPI",
-            "Refresh Rate" to (display?.mode?.refreshRate?.toInt()?.let { "$it Hz" } ?: "N/A"),
-            "Screen Size" to "${String.format(Locale.getDefault(), "%.1f", calculateScreenSize(metrics))}\""
-        ),
-        storageInfo = listOf(
-            "Total RAM" to formatSize(memoryInfo.totalMem),
-            "Available RAM" to formatSize(memoryInfo.availMem),
-            "Internal Storage" to formatSize(totalInternal),
-            "Available Storage" to formatSize(availableInternal)
-        )
-    )
-}
-
-private fun calculateScreenSize(metrics: DisplayMetrics): Double {
-    val x = (metrics.widthPixels.toDouble() / metrics.xdpi).let { it * it }
-    val y = (metrics.heightPixels.toDouble() / metrics.ydpi).let { it * it }
-    return Math.sqrt(x + y)
 }
 
 private fun formatSize(size: Long): String {

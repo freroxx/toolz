@@ -1,5 +1,5 @@
 package com.frerox.toolz.ui.screens.pdf
- 
+
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.LruCache
@@ -52,6 +52,15 @@ data class DocumentState(
     val isReady: Boolean = false
 )
 
+sealed class PdfUiState {
+    object Idle : PdfUiState()
+    object Loading : PdfUiState()
+    data class Success(val files: List<PdfFile>) : PdfUiState()
+    object Viewer : PdfUiState()
+    data class Error(val message: String) : PdfUiState()
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PdfViewModel @Inject constructor(
     private val repository: PdfRepository,
@@ -63,7 +72,7 @@ class PdfViewModel @Inject constructor(
     private val moshi: Moshi
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<PdfUiState>(PdfUiState.Idle)
+    private val _uiState = MutableStateFlow<PdfUiState>(PdfUiState.Loading)
     val uiState: StateFlow<PdfUiState> = _uiState.asStateFlow()
 
     private val _docState = MutableStateFlow(DocumentState())
@@ -104,20 +113,18 @@ class PdfViewModel @Inject constructor(
     private val _activeTabId = MutableStateFlow<String?>(null)
     val activeTabId = _activeTabId.asStateFlow()
 
-    private val _activeTab = combine(_openTabs, _activeTabId) { tabs, activeId ->
-        tabs.firstOrNull { it.id == activeId }
+    val activeTab = combine(_openTabs, _activeTabId) { tabs, id ->
+        tabs.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val ocrData = _activeTab.flatMapLatest { tab ->
+    private val _activeTab = activeTab
+
+    val ocrData: StateFlow<OcrDocumentData?> = activeTab.flatMapLatest { tab ->
         if (tab == null) flowOf(null)
         else metadataDao.getMetadataFlow(tab.uri.toString()).map { meta ->
-            meta?.structuredOcrData?.let { data ->
-                try {
-                    moshi.adapter(OcrDocumentData::class.java).fromJson(data)
-                } catch (e: Exception) {
-                    null
-                }
+            meta?.structuredOcrData?.let {
+                try { moshi.adapter(OcrDocumentData::class.java).fromJson(it) }
+                catch (e: Exception) { null }
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -126,165 +133,151 @@ class PdfViewModel @Inject constructor(
         loadPdfFiles()
     }
 
-    fun loadPdfFiles() {
+    private fun loadPdfFiles() {
         viewModelScope.launch {
             _uiState.value = PdfUiState.Loading
             try {
-                _rawPdfFiles.value = repository.getPdfFiles()
-                _uiState.value = PdfUiState.Idle
+                val files = repository.getPdfFiles()
+                _rawPdfFiles.value = files
+                _uiState.value = PdfUiState.Success(files)
             } catch (e: Exception) {
                 _uiState.value = PdfUiState.Error(e.message ?: "Failed to load PDFs")
             }
         }
     }
 
-    fun setSortOrder(order: PdfSortOrder) {
-        _sortOrder.value = order
+    // ── AI PDF summarisation ────────────────────────────────────────────────
+
+    private val _pdfSummary    = MutableStateFlow<String?>(null)
+    val pdfSummary: StateFlow<String?> = _pdfSummary.asStateFlow()
+
+    private val _isSummarizing = MutableStateFlow(false)
+    val isSummarizing: StateFlow<Boolean> = _isSummarizing.asStateFlow()
+
+    fun summarizePdf(text: String) {
+        viewModelScope.launch {
+            _isSummarizing.value = true
+            _pdfSummary.value    = ocrProcessor.summarizePdf(text)
+            _isSummarizing.value = false
+        }
     }
 
-    fun togglePin(file: PdfFile) {
+    fun clearSummary() { _pdfSummary.value = null }
+
+    // ── File management ─────────────────────────────────────────────────────
+
+    fun setPdfFiles(files: List<PdfFile>) {
+        _rawPdfFiles.value = files
+        _uiState.value = PdfUiState.Success(files)
+    }
+
+    fun setSortOrder(order: PdfSortOrder) { _sortOrder.value = order }
+
+    fun openDocument(uri: Uri, title: String) {
         viewModelScope.launch {
-            val current = metadataDao.getMetadata(file.uri.toString())
-            if (current == null) {
-                metadataDao.insertMetadata(PdfMetadata(file.uri.toString(), isPinned = true))
+            _uiState.value = PdfUiState.Loading
+            val existing = _openTabs.value.find { it.uri == uri }
+            if (existing != null) {
+                _activeTabId.value = existing.id
             } else {
-                metadataDao.updatePinned(file.uri.toString(), !current.isPinned)
+                val id = java.util.UUID.randomUUID().toString()
+                val keyPrefix = uri.hashCode()
+                val savedPage = dataStore.data.map { it[intPreferencesKey("pdf_page_$keyPrefix")] ?: 0 }.first()
+                val savedZoom = dataStore.data.map { it[floatPreferencesKey("pdf_zoom_$keyPrefix")] ?: 1f }.first()
+                val pageCount = repository.getPageCount(uri)
+                val newTab    = PdfWorkspaceTab(id, uri, title, page = savedPage, zoom = savedZoom, pageCount = pageCount)
+                _openTabs.value  = _openTabs.value + newTab
+                _activeTabId.value = id
+            }
+            _uiState.value = PdfUiState.Viewer
+            val tab = _activeTab.value
+            if (tab != null) {
+                _docState.value = DocumentState(totalPages = tab.pageCount, currentPageIndex = tab.page, isReady = true)
             }
         }
     }
 
-    fun openPdf(uri: Uri, title: String? = null) {
-        val finalTitle = title ?: uri.lastPathSegment ?: "PDF Document"
-        val existing = _openTabs.value.firstOrNull { it.uri == uri }
-        if (existing != null) {
-            _activeTabId.value = existing.id
-            _uiState.value = PdfUiState.Viewer(existing.uri)
-            return
-        }
+    fun openPdf(uri: Uri, title: String = "Document") = openDocument(uri, title)
 
-        viewModelScope.launch {
-            _uiState.value = PdfUiState.Loading
-            val restored = restoreSession(uri)
-            val pageCount = repository.getPageCount(uri)
-            
-            val tab = PdfWorkspaceTab(
-                id = uri.toString(),
-                uri = uri,
-                title = finalTitle,
-                page = restored.page.coerceIn(0, (pageCount - 1).coerceAtLeast(0)),
-                zoom = restored.zoom,
-                lastTool = restored.lastTool,
-                pageCount = pageCount
-            )
-            
-            _openTabs.value = _openTabs.value + tab
-            _activeTabId.value = tab.id
-            _uiState.value = PdfUiState.Viewer(uri)
-            
-            _docState.update { it.copy(
-                totalPages = tab.pageCount,
-                currentPageIndex = tab.page,
-                isReady = true
-            ) }
-        }
+    fun closeViewer() { _uiState.value = PdfUiState.Success(_rawPdfFiles.value) }
+
+    fun closeTab(id: String) {
+        _openTabs.value.find { it.id == id }?.let { persistTabSession(it) }
+        _openTabs.value = _openTabs.value.filter { it.id != id }
+        if (_activeTabId.value == id) _activeTabId.value = _openTabs.value.lastOrNull()?.id
     }
 
-    fun closeTab(tabId: String) {
-        val tabs = _openTabs.value
-        val removed = tabs.firstOrNull { it.id == tabId } ?: return
-        persistTabSession(removed)
-        val updated = tabs.filterNot { it.id == tabId }
-        _openTabs.value = updated
-        
-        if (updated.isEmpty()) {
-            _activeTabId.value = null
-            _uiState.value = PdfUiState.Idle
-            _docState.value = DocumentState()
-            bitmapCache.evictAll()
-        } else {
-            val nextTab = updated.last()
-            _activeTabId.value = nextTab.id
-            _uiState.value = PdfUiState.Viewer(nextTab.uri)
-            _docState.update { it.copy(
-                totalPages = nextTab.pageCount,
-                currentPageIndex = nextTab.page,
-                isReady = true
-            ) }
-        }
-    }
+    fun selectTab(id: String) { _activeTabId.value = id }
 
     fun updatePage(page: Int) {
-        val validPage = page.coerceIn(0, (_docState.value.totalPages - 1).coerceAtLeast(0))
-        if (_docState.value.currentPageIndex != validPage) {
-            _docState.update { it.copy(currentPageIndex = validPage) }
-            updateActiveTab { it.copy(page = validPage) }
-        }
+        updateActiveTab { it.copy(page = page) }
+        _docState.value = _docState.value.copy(currentPageIndex = page)
     }
 
-    fun updateZoom(zoom: Float) {
-        updateActiveTab { it.copy(zoom = zoom.coerceIn(0.5f, 5f)) }
-    }
+    fun updateZoom(zoom: Float) { updateActiveTab { it.copy(zoom = zoom) } }
 
-    fun updateLastTool(tool: PdfToolMode) {
+    fun setTool(tool: PdfToolMode) {
         val tab = _activeTab.value ?: return
         updateActiveTab { it.copy(lastTool = tool) }
-        if (tool == PdfToolMode.OCR) {
-            checkAndRunOcr(tab)
-        }
+        if (tool == PdfToolMode.OCR) checkAndRunOcr(tab)
     }
+
+    fun updateLastTool(tool: PdfToolMode) = setTool(tool)
 
     private fun checkAndRunOcr(tab: PdfWorkspaceTab) {
         viewModelScope.launch {
             val meta = metadataDao.getMetadata(tab.uri.toString())
-            if (meta?.ocrContent == null || meta.ocrContent.isEmpty()) {
-                runFullDocumentOcr(tab)
-            }
+            if (meta?.ocrContent == null || meta.ocrContent.isEmpty()) runFullDocumentOcr(tab)
         }
     }
 
     private fun runFullDocumentOcr(tab: PdfWorkspaceTab) {
         viewModelScope.launch {
             updateActiveTab { it.copy(isOcrActive = true, ocrProgress = 0f) }
-            val pageCount = tab.pageCount
-            val ocrResults = mutableListOf<String>()
+            val ocrResults   = mutableListOf<String>()
             val pageDataList = mutableListOf<OcrPageData>()
-            
-            for (i in 0 until pageCount) {
+
+            for (i in 0 until tab.pageCount) {
                 val bitmap = repository.getOcrBitmap(tab.uri, i)
                 if (bitmap != null) {
                     try {
-                        val result = ocrProcessor.processImage(bitmap, language = tab.ocrLanguage)
-                        val text = ocrProcessor.getStructuredText(result)
-                        ocrResults.add(text)
-                        
-                        val blocks = result.textBlocks.map { block ->
+                        val result = ocrProcessor.processImage(
+                            bitmap  = bitmap,
+                            options = OcrOptions(language = tab.ocrLanguage, enableAiCleaner = true),
+                        )
+                        ocrResults.add(result.rawText)
+                        val blocks = result.blocks.map { block ->
                             OcrBlockData(
-                                text = block.text,
-                                left = block.boundingBox?.left?.toFloat() ?: 0f,
-                                top = block.boundingBox?.top?.toFloat() ?: 0f,
-                                right = block.boundingBox?.right?.toFloat() ?: 0f,
-                                bottom = block.boundingBox?.bottom?.toFloat() ?: 0f,
-                                confidence = 1f
+                                text       = block.text,
+                                left       = block.left.toFloat(),
+                                top        = block.top.toFloat(),
+                                right      = block.right.toFloat(),
+                                bottom     = block.bottom.toFloat(),
+                                confidence = block.confidence,
+                                type       = block.type,
                             )
                         }
-                        pageDataList.add(OcrPageData(i, blocks))
+                        pageDataList.add(OcrPageData(i, blocks, result.rawText))
                     } catch (e: Exception) {
                         ocrResults.add("[OCR Error on page $i]")
                     } finally {
                         bitmap.recycle()
                     }
                 }
-                updateActiveTab { it.copy(ocrProgress = (i + 1).toFloat() / pageCount) }
+                updateActiveTab { it.copy(ocrProgress = (i + 1).toFloat() / tab.pageCount) }
             }
-            
-            val combinedOcr = ocrResults.joinToString("\n\n--- PAGE BREAK ---\n\n")
-            val structuredData = moshi.adapter(OcrDocumentData::class.java).toJson(OcrDocumentData(pageDataList))
-            
-            val currentMeta = metadataDao.getMetadata(tab.uri.toString())
-            if (currentMeta == null) {
-                metadataDao.insertMetadata(PdfMetadata(tab.uri.toString(), ocrContent = combinedOcr, structuredOcrData = structuredData))
+
+            val combined       = ocrResults.joinToString("\n\n--- PAGE BREAK ---\n\n")
+            val structuredData = moshi.adapter(OcrDocumentData::class.java)
+                .toJson(OcrDocumentData(pageDataList))
+
+            val current = metadataDao.getMetadata(tab.uri.toString())
+            if (current == null) {
+                metadataDao.insertMetadata(
+                    PdfMetadata(tab.uri.toString(), ocrContent = combined, structuredOcrData = structuredData)
+                )
             } else {
-                metadataDao.updateOcrContent(tab.uri.toString(), combinedOcr)
+                metadataDao.updateOcrContent(tab.uri.toString(), combined)
                 metadataDao.updateStructuredOcrData(tab.uri.toString(), structuredData)
             }
             updateActiveTab { it.copy(isOcrActive = false) }
@@ -292,80 +285,44 @@ class PdfViewModel @Inject constructor(
     }
 
     suspend fun getPageBitmap(pageIndex: Int): Bitmap? {
-        val tab = _activeTab.value ?: return null
+        val tab      = _activeTab.value ?: return null
         val cacheKey = "${tab.uri}_$pageIndex"
-        val cached = bitmapCache.get(cacheKey)
-        if (cached != null) return cached
-
-        val scale = if (performanceMode.value) 1.5f else 2.5f
+        bitmapCache.get(cacheKey)?.let { return it }
+        val scale  = if (performanceMode.value) 1.5f else 2.5f
         val bitmap = repository.getPageBitmap(tab.uri, pageIndex, scale)
-        if (bitmap != null) {
-            bitmapCache.put(cacheKey, bitmap)
-        }
+        if (bitmap != null) bitmapCache.put(cacheKey, bitmap)
         return bitmap
     }
 
     private fun updateActiveTab(transform: (PdfWorkspaceTab) -> PdfWorkspaceTab) {
-        val activeId = _activeTabId.value ?: return
+        val id = _activeTabId.value ?: return
         _openTabs.value = _openTabs.value.map { tab ->
-            if (tab.id == activeId) transform(tab.copy(lastOpenedAt = java.lang.System.currentTimeMillis())) else tab
+            if (tab.id == id) transform(tab.copy(lastOpenedAt = java.lang.System.currentTimeMillis())) else tab
         }
     }
 
     private fun persistTabSession(tab: PdfWorkspaceTab) {
         viewModelScope.launch {
-            val keyPrefix = tab.uri.hashCode()
+            val kp = tab.uri.hashCode()
             dataStore.edit { pref ->
-                pref[intPreferencesKey("pdf_page_$keyPrefix")] = tab.page
-                pref[floatPreferencesKey("pdf_zoom_$keyPrefix")] = tab.zoom
-                pref[stringPreferencesKey("pdf_tool_$keyPrefix")] = tab.lastTool.name
-                pref[booleanPreferencesKey("pdf_last_read")] = true
-                pref[stringPreferencesKey("pdf_last_uri")] = tab.uri.toString()
+                pref[intPreferencesKey("pdf_page_$kp")]  = tab.page
+                pref[floatPreferencesKey("pdf_zoom_$kp")] = tab.zoom
             }
         }
     }
 
-    private suspend fun restoreSession(uri: Uri): RestoredSession {
-        val keyPrefix = uri.hashCode()
-        val prefs = dataStore.data.first()
-        val toolName = prefs[stringPreferencesKey("pdf_tool_$keyPrefix")] ?: PdfToolMode.NAVIGATE.name
-        return RestoredSession(
-            page = prefs[intPreferencesKey("pdf_page_$keyPrefix")] ?: 0,
-            zoom = prefs[floatPreferencesKey("pdf_zoom_$keyPrefix")] ?: 1f,
-            lastTool = runCatching { PdfToolMode.valueOf(toolName) }.getOrDefault(PdfToolMode.NAVIGATE)
-        )
+    fun togglePin(uri: String) {
+        viewModelScope.launch {
+            val current = metadataDao.getMetadata(uri)
+            if (current == null) metadataDao.insertMetadata(PdfMetadata(uri, isPinned = true))
+            else metadataDao.updatePinned(uri, !current.isPinned)
+        }
     }
 
     fun deleteFile(file: PdfFile) {
         viewModelScope.launch {
-            if (repository.deletePdf(file.uri)) {
-                loadPdfFiles()
-                if (_activeTabId.value == file.uri.toString()) {
-                    closeViewer()
-                }
-                _openTabs.value = _openTabs.value.filterNot { it.id == file.uri.toString() }
-            }
+            repository.deletePdf(file.uri)
+            _rawPdfFiles.value = _rawPdfFiles.value.filter { it.uri != file.uri }
         }
-    }
-
-    fun closeViewer() {
-        _activeTab.value?.let { persistTabSession(it) }
-        _uiState.value = PdfUiState.Idle
-        _activeTabId.value = null
-        _docState.update { DocumentState() }
-        bitmapCache.evictAll()
-    }
-
-    private data class RestoredSession(
-        val page: Int,
-        val zoom: Float,
-        val lastTool: PdfToolMode
-    )
-
-    sealed class PdfUiState {
-        data object Idle : PdfUiState()
-        data object Loading : PdfUiState()
-        data class Viewer(val uri: Uri) : PdfUiState()
-        data class Error(val message: String) : PdfUiState()
     }
 }

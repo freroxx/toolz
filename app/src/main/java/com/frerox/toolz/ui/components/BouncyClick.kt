@@ -66,6 +66,9 @@ fun Modifier.bouncyClick(
             awaitPointerEventScope {
                 while (true) {
                     awaitFirstDown(false)
+                    if (haptic && hapticEnabled) {
+                        vibrationManager?.vibrateTick()
+                    }
                     buttonState = ButtonState.Pressed
                     waitForUpOrCancellation()
                     buttonState = ButtonState.Idle

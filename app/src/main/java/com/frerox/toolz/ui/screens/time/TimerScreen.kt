@@ -24,8 +24,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +34,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,8 +46,7 @@ fun TimerScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
-    val haptic = LocalHapticFeedback.current
+    val vibrationManager = LocalVibrationManager.current
 
     val animatedProgress by animateFloatAsState(
         targetValue = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f,
@@ -69,7 +67,10 @@ fun TimerScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(16.dp))
@@ -80,7 +81,10 @@ fun TimerScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.toggleHaptic() },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            viewModel.toggleHaptic() 
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -145,7 +149,7 @@ fun TimerScreen(
                             value = state.selectedMinutes,
                             onValueChange = { 
                                 viewModel.onTimeSelectedChange(it, state.selectedSeconds)
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                if (hapticEnabled) vibrationManager?.vibrateTick()
                             },
                             label = "MINUTES"
                         )
@@ -166,7 +170,7 @@ fun TimerScreen(
                             value = state.selectedSeconds,
                             onValueChange = { 
                                 viewModel.onTimeSelectedChange(state.selectedMinutes, it)
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                if (hapticEnabled) vibrationManager?.vibrateTick()
                             },
                             label = "SECONDS"
                         )
@@ -193,8 +197,8 @@ fun TimerScreen(
                             listOf(1, 5, 10, 15).forEach { min ->
                                 Surface(
                                     onClick = { 
+                                        vibrationManager?.vibrateClick()
                                         viewModel.onTimeSelectedChange(min, 0)
-                                        if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     },
                                     modifier = Modifier
                                         .weight(1f)
@@ -217,7 +221,7 @@ fun TimerScreen(
                     Button(
                         onClick = {
                             if (state.selectedMinutes > 0 || state.selectedSeconds > 0) {
-                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                vibrationManager?.vibrateLongClick()
                                 viewModel.setTimer(state.selectedMinutes, state.selectedSeconds)
                                 viewModel.toggleStartStop()
                             }
@@ -323,8 +327,8 @@ fun TimerScreen(
                         listOf(30, 60).forEach { sec ->
                             Surface(
                                 onClick = { 
+                                    vibrationManager?.vibrateTick()
                                     viewModel.addTime(sec * 1000L)
-                                    if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -359,7 +363,7 @@ fun TimerScreen(
                     ) {
                         IconButton(
                             onClick = { 
-                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                vibrationManager?.vibrateLongClick()
                                 viewModel.reset() 
                             },
                             modifier = Modifier
@@ -372,7 +376,7 @@ fun TimerScreen(
                         
                         Surface(
                             onClick = { 
-                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                vibrationManager?.vibrateClick()
                                 if (state.isFinished) viewModel.stopRingtone()
                                 viewModel.toggleStartStop() 
                             },
@@ -395,7 +399,7 @@ fun TimerScreen(
 
                         IconButton(
                             onClick = { 
-                                if (hapticEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                vibrationManager?.vibrateLongClick()
                                 viewModel.reset() 
                             },
                             modifier = Modifier
@@ -417,6 +421,7 @@ fun TimerScreen(
             ) {
                 TimerFinishedOverlay(
                     onDismiss = {
+                        vibrationManager?.vibrateClick()
                         viewModel.stopRingtone()
                         viewModel.reset()
                     }
@@ -434,6 +439,7 @@ fun ModernTimePicker(
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -461,7 +467,10 @@ fun ModernTimePicker(
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     IconButton(
-                        onClick = { onValueChange((value + 1) % 60) }, 
+                        onClick = { 
+                            vibrationManager?.vibrateTick()
+                            onValueChange((value + 1) % 60) 
+                        }, 
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(60.dp)
@@ -481,7 +490,10 @@ fun ModernTimePicker(
                     )
                     
                     IconButton(
-                        onClick = { onValueChange((value - 1 + 60) % 60) }, 
+                        onClick = { 
+                            vibrationManager?.vibrateTick()
+                            onValueChange((value - 1 + 60) % 60) 
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(60.dp)

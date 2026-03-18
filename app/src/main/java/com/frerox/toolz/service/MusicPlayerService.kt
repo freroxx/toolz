@@ -31,6 +31,7 @@ import com.frerox.toolz.widget.WidgetUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import kotlin.math.sqrt
@@ -48,7 +49,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var acceleration = 0f
     private var currentAcceleration = 0f
     private var lastAcceleration = 0f
-    private val SHAKE_THRESHOLD = 12f
+    private var shakeThreshold = 15f // Increased default
     private var lastShakeTime: Long = 0
     private var isShakeRegistered = false
 
@@ -113,7 +114,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private fun observeShakeSetting() {
         serviceScope.launch {
-            settingsRepository.musicShakeToSkip.collectLatest { enabled ->
+            combine(
+                settingsRepository.musicShakeToSkip,
+                settingsRepository.musicShakeSensitivity
+            ) { enabled, sensitivity ->
+                enabled to sensitivity
+            }.collectLatest { (enabled, sensitivity) ->
+                // Sensitivity 0.0 -> 35f (hard), 1.0 -> 8f (easy)
+                shakeThreshold = 35f - (sensitivity * 27f)
+                
                 if (enabled && player.isPlaying) {
                     registerShakeListener()
                 } else {
@@ -150,7 +159,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val delta = currentAcceleration - lastAcceleration
         acceleration = acceleration * 0.9f + delta
 
-        if (acceleration > SHAKE_THRESHOLD) {
+        if (acceleration > shakeThreshold) {
             val now = System.currentTimeMillis()
             if (now - lastShakeTime > 1000) {
                 lastShakeTime = now

@@ -1,89 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#E6000000"
+    android:background="#000000"
     android:clickable="true"
     android:focusable="true"
     android:keepScreenOn="true">
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@android:color/transparent" />
-
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
+        android:layout_height="match_parent"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="40dp">
 
-        <FrameLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content">
-            
-            <View
-                android:layout_width="160dp"
-                android:layout_height="160dp"
-                android:background="@android:drawable/btn_default"
-                android:backgroundTint="#1A6200EE"
-                android:layout_gravity="center" />
-                
-            <ImageView
-                android:layout_width="90dp"
-                android:layout_height="90dp"
-                android:src="@android:drawable/ic_lock_lock"
-                android:tint="#6200EE"
-                android:layout_gravity="center" />
-        </FrameLayout>
+        <ImageView
+            android:id="@+id/iv_lock_icon"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:src="@android:drawable/ic_lock_lock"
+            android:contentDescription="Locked"
+            android:tint="#D32F2F" />
 
         <TextView
             android:id="@+id/tv_lock_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="48dp"
-            android:text="TOOLZ • FOCUS PROTOCOL"
-            android:textColor="#6200EE"
-            android:textSize="12sp"
+            android:layout_marginTop="32dp"
+            android:text="FOCUS PROTOCOL"
+            android:textColor="#D32F2F"
+            android:textSize="14sp"
             android:textStyle="bold"
-            android:letterSpacing="0.4" />
+            android:letterSpacing="0.3" />
 
         <TextView
             android:id="@+id/tv_lock_message"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Flow state active"
+            android:layout_marginTop="12dp"
+            android:text="Time's up for this app."
             android:textAlignment="center"
             android:textColor="#FFFFFF"
-            android:textSize="32sp"
+            android:textSize="28sp"
             android:fontFamily="sans-serif-black" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Application restricted to maintain peak performance. Your focus is the priority."
+            android:text="You've reached your daily limit. Stay focused on what matters."
             android:textAlignment="center"
-            android:textColor="#BDBDBD"
-            android:textSize="16sp"
-            android:lineSpacingExtra="6dp" />
+            android:textColor="#9E9E9E"
+            android:textSize="16sp" />
 
         <Button
             android:id="@+id/btn_exit"
             android:layout_width="match_parent"
-            android:layout_height="72dp"
-            android:layout_marginTop="80dp"
+            android:layout_height="64dp"
+            android:layout_marginTop="64dp"
             android:backgroundTint="#FFFFFF"
             android:textColor="#000000"
-            android:text="RESUME CORE ENGINE"
+            android:text="RETURN TO DASHBOARD"
             android:textStyle="bold"
             android:textSize="14sp"
-            android:letterSpacing="0.2"
-            android:elevation="12dp" />
+            android:letterSpacing="0.1" />
 
     </LinearLayout>
 
-</RelativeLayout>
+</FrameLayout>

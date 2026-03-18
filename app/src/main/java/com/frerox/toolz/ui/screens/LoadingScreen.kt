@@ -45,7 +45,7 @@ fun LoadingScreen(
 
     LaunchedEffect(Unit) {
         // Simulate "caching" or pre-loading
-        delay(2000)
+        delay(500)
         onLoadingComplete()
     }
 

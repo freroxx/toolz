@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -81,6 +82,14 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.screens.calendar.EventAlarmActivity"
+            android:exported="false"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.Toolz" />
 
         <service
             android:name=".service.StepCounterService"
@@ -170,6 +179,10 @@
                 <action android:name="ACTION_DONE" />
             </intent-filter>
         </receiver>
+
+        <receiver android:name=".service.EventReminderReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <!-- Widgets -->
         <receiver android:name=".widget.FlashlightWidgetProvider"

@@ -6,6 +6,9 @@ sealed class Screen(val route: String) {
     object Settings : Screen("settings")
     object Update : Screen("update")
     
+    // AI
+    object AiAssistant : Screen("ai_assistant")
+    
     // Time & Productivity
     object Timer : Screen("timer")
     object Stopwatch : Screen("stopwatch")
@@ -13,6 +16,7 @@ sealed class Screen(val route: String) {
     object Pomodoro : Screen("pomodoro")
     object FocusFlow : Screen("focus_flow")
     object Todo : Screen("todo")
+    object Calendar : Screen("calendar")
     
     // Light & Optics
     object Flashlight : Screen("flashlight")

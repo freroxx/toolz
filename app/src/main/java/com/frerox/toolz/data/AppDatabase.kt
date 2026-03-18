@@ -26,6 +26,11 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.todo.TodoConverters
+import com.frerox.toolz.data.ai.AiChat
+import com.frerox.toolz.data.ai.AiMessage
+import com.frerox.toolz.data.ai.AiDao
+import com.frerox.toolz.data.calendar.EventEntry
+import com.frerox.toolz.data.calendar.EventDao
 
 @Database(
     entities = [
@@ -39,9 +44,12 @@ import com.frerox.toolz.data.todo.TodoConverters
         NotificationEntry::class,
         AppLimit::class,
         ClipboardEntry::class,
-        TaskEntry::class
+        TaskEntry::class,
+        AiChat::class,
+        AiMessage::class,
+        EventEntry::class
     ], 
-    version = 19,
+    version = 22,
     exportSchema = false
 )
 @TypeConverters(MusicConverters::class, TodoConverters::class)
@@ -56,4 +64,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun appLimitDao(): AppLimitDao
     abstract fun clipboardDao(): ClipboardDao
     abstract fun taskDao(): TaskDao
+    abstract fun aiDao(): AiDao
+    abstract fun eventDao(): EventDao
 }

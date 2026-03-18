@@ -40,7 +40,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
-import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,16 +50,14 @@ fun SettingsScreen(
     onNavigateToUpdate: () -> Unit,
     onResetOnboarding: () -> Unit
 ) {
-    val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
-    val view = LocalView.current
 
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
     val themeMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
     val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
-    
+
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
     val showRecentTools by viewModel.showRecentTools.collectAsState(initial = true)
     val showQuickNotes by viewModel.showQuickNotes.collectAsState(initial = true)
@@ -72,7 +69,7 @@ fun SettingsScreen(
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
-    
+
     val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
     val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
     val unitSystem by viewModel.unitSystem.collectAsState(initial = "METRIC")
@@ -85,6 +82,7 @@ fun SettingsScreen(
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
 
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
+    val musicShakeSensitivity by viewModel.musicShakeSensitivity.collectAsState(initial = 0.3f)
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState(initial = true)
 
     val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
@@ -103,7 +101,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        vibrationManager?.vibrateLongClick() ?: if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) else Unit
+                        vibrationManager?.vibrateLongClick()
                         viewModel.resetOnboarding()
                         showResetDialog = false
                         onResetOnboarding()
@@ -115,9 +113,9 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { 
-                    vibrationManager?.vibrateClick() ?: if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) else Unit
-                    showResetDialog = false 
+                TextButton(onClick = {
+                    vibrationManager?.vibrateClick()
+                    showResetDialog = false
                 }) {
                     Text("CANCEL", fontWeight = FontWeight.Bold)
                 }
@@ -143,11 +141,11 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("SETTINGS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+                title = { @Suppress("DEPRECATION") Text("SETTINGS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            vibrationManager?.vibrateClick() ?: if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) else Unit
+                            vibrationManager?.vibrateClick()
                             onBack()
                         },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -157,9 +155,9 @@ fun SettingsScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick() ?: if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) else Unit
-                            showResetDialog = true 
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            showResetDialog = true
                         },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f))
                     ) {
@@ -192,7 +190,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Spacer(Modifier.height(8.dp))
-                
+
                 // Section: SYSTEM
                 SettingsExpandableSection(
                     title = "SYSTEM & ENGINE",
@@ -241,7 +239,7 @@ fun SettingsScreen(
                             checked = showToolzPill,
                             onCheckedChange = { viewModel.setShowToolzPill(it) }
                         )
-                        
+
                         if (showToolzPill) {
                             SettingsToggleItem(
                                 title = "Show Task Progress",
@@ -259,7 +257,7 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    
+
                     if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "notes")) {
                         SettingsToggleItem(
                             title = "Show Recent Tools",
@@ -268,7 +266,7 @@ fun SettingsScreen(
                             checked = showRecentTools,
                             onCheckedChange = { viewModel.setShowRecentTools(it) }
                         )
-                        
+
                         SettingsToggleItem(
                             title = "Show Quick Notes",
                             subtitle = "Show pinned notes on dashboard",
@@ -289,9 +287,9 @@ fun SettingsScreen(
                                 listOf("DEFAULT", "LIST").forEach { viewStyle ->
                                     val isSelected = dashboardView == viewStyle
                                     Surface(
-                                        onClick = { 
+                                        onClick = {
                                             vibrationManager?.vibrateClick()
-                                            viewModel.setDashboardView(viewStyle) 
+                                            viewModel.setDashboardView(viewStyle)
                                         },
                                         modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
                                         shape = RoundedCornerShape(16.dp),
@@ -299,6 +297,7 @@ fun SettingsScreen(
                                         border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
+                                            @Suppress("DEPRECATION")
                                             Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
@@ -378,9 +377,9 @@ fun SettingsScreen(
                                 listOf("METRIC", "IMPERIAL").forEach { unit ->
                                     val isSelected = unitSystem == unit
                                     Surface(
-                                        onClick = { 
+                                        onClick = {
                                             vibrationManager?.vibrateClick()
-                                            viewModel.setUnitSystem(unit) 
+                                            viewModel.setUnitSystem(unit)
                                         },
                                         modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
                                         shape = RoundedCornerShape(16.dp),
@@ -388,6 +387,7 @@ fun SettingsScreen(
                                         border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
+                                            @Suppress("DEPRECATION")
                                             Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
@@ -395,7 +395,7 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    
+
                     if (matches(searchQuery, "vibration", "haptic", "intensity")) {
                         SettingsToggleItem(
                             title = "Haptic Feedback",
@@ -431,7 +431,7 @@ fun SettingsScreen(
                     isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
                     onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
                 ) {
-                    if (matches(searchQuery, "shake", "skip", "audio")) {
+                    if (matches(searchQuery, "shake", "skip", "audio", "sensitivity")) {
                         SettingsToggleItem(
                             title = "Shake to Skip",
                             subtitle = "Shake phone to play next song",
@@ -439,6 +439,30 @@ fun SettingsScreen(
                             checked = musicShakeToSkip,
                             onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
                         )
+                        
+                        if (musicShakeToSkip) {
+                            SettingsItem(
+                                title = "Shake Sensitivity",
+                                subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
+                                icon = Icons.Rounded.GraphicEq
+                            ) {
+                                Slider(
+                                    value = musicShakeSensitivity,
+                                    onValueChange = { viewModel.setMusicShakeSensitivity(it) },
+                                    valueRange = 0.1f..1f,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                )
+                                Text(
+                                    text = if (musicShakeSensitivity < 0.4f) "High force required" else if (musicShakeSensitivity < 0.7f) "Medium force" else "Light shake",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.End
+                                )
+                            }
+                        }
+
                         SettingsToggleItem(
                             title = "Smart Audio Focus",
                             subtitle = "Automatically pause for other apps",
@@ -464,7 +488,7 @@ fun SettingsScreen(
                             checked = notificationsEnabled,
                             onCheckedChange = { viewModel.setNotificationsEnabled(it) }
                         )
-                        
+
                         if (notificationsEnabled) {
                             SettingsToggleItem(
                                 title = "Notification History",
@@ -506,7 +530,7 @@ fun SettingsScreen(
                             checked = dynamicColor,
                             onCheckedChange = { viewModel.setDynamicColor(it) }
                         )
-                        
+
                         if (!dynamicColor) {
                             SettingsItem(
                                 title = "Custom Palette",
@@ -516,10 +540,11 @@ fun SettingsScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
                                     Column {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                            @Suppress("DEPRECATION")
                                             Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                                            IconButton(onClick = { 
+                                            IconButton(onClick = {
                                                 vibrationManager?.vibrateClick()
-                                                viewModel.setCustomPrimaryColor(null) 
+                                                viewModel.setCustomPrimaryColor(null)
                                             }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
                                                 Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                             }
@@ -527,19 +552,20 @@ fun SettingsScreen(
                                         Spacer(Modifier.height(8.dp))
                                         ColorPickerRow(
                                             selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                            onColorSelected = { 
+                                            onColorSelected = {
                                                 vibrationManager?.vibrateClick()
-                                                viewModel.setCustomPrimaryColor(it) 
+                                                viewModel.setCustomPrimaryColor(it)
                                             }
                                         )
                                     }
-                                    
+
                                     Column {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                            @Suppress("DEPRECATION")
                                             Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
-                                            IconButton(onClick = { 
+                                            IconButton(onClick = {
                                                 vibrationManager?.vibrateClick()
-                                                viewModel.setCustomSecondaryColor(null) 
+                                                viewModel.setCustomSecondaryColor(null)
                                             }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
                                                 Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
                                             }
@@ -547,17 +573,17 @@ fun SettingsScreen(
                                         Spacer(Modifier.height(8.dp))
                                         ColorPickerRow(
                                             selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-                                            onColorSelected = { 
+                                            onColorSelected = {
                                                 vibrationManager?.vibrateClick()
-                                                viewModel.setCustomSecondaryColor(it) 
+                                                viewModel.setCustomSecondaryColor(it)
                                             }
                                         )
                                     }
-                                    
+
                                     Button(
-                                        onClick = { 
+                                        onClick = {
                                             vibrationManager?.vibrateClick()
-                                            showAdvancedThemeDialog = true 
+                                            showAdvancedThemeDialog = true
                                         },
                                         modifier = Modifier.fillMaxWidth().height(48.dp),
                                         shape = RoundedCornerShape(16.dp),
@@ -568,13 +594,14 @@ fun SettingsScreen(
                                     ) {
                                         Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
+                                        @Suppress("DEPRECATION")
                                         Text("ADVANCED THEMING", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
                         }
                     }
-                    
+
                     if (matches(searchQuery, "dark", "light", "mode", "appearance")) {
                         SettingsItem(
                             title = "Appearance Mode",
@@ -588,9 +615,9 @@ fun SettingsScreen(
                                 listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
                                     val isSelected = themeMode == mode
                                     Surface(
-                                        onClick = { 
+                                        onClick = {
                                             vibrationManager?.vibrateClick()
-                                            viewModel.setThemeMode(mode) 
+                                            viewModel.setThemeMode(mode)
                                         },
                                         modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
                                         shape = RoundedCornerShape(16.dp),
@@ -598,6 +625,7 @@ fun SettingsScreen(
                                         border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
+                                            @Suppress("DEPRECATION")
                                             Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
@@ -623,9 +651,9 @@ fun SettingsScreen(
                             Column(modifier = Modifier.padding(top = 12.dp)) {
                                 ColorPickerRow(
                                     selectedColor = widgetBgColor,
-                                    onColorSelected = { 
+                                    onColorSelected = {
                                         vibrationManager?.vibrateClick()
-                                        viewModel.setWidgetBackgroundColor(it) 
+                                        viewModel.setWidgetBackgroundColor(it)
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -640,6 +668,7 @@ fun SettingsScreen(
                                         colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                                     )
                                     Spacer(Modifier.width(16.dp))
+                                    @Suppress("DEPRECATION")
                                     Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
                                 }
                             }
@@ -648,7 +677,7 @@ fun SettingsScreen(
                 }
 
                 AboutSection(onCheckUpdate = onNavigateToUpdate)
-                
+
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
@@ -664,7 +693,7 @@ fun AdvancedThemeDialog(
 ) {
     var primaryHex by remember { mutableStateOf(String.format("#%06X", 0xFFFFFF and currentPrimary)) }
     var secondaryHex by remember { mutableStateOf(String.format("#%06X", 0xFFFFFF and currentSecondary)) }
-    
+
     val vibrationManager = LocalVibrationManager.current
 
     Dialog(
@@ -694,14 +723,14 @@ fun AdvancedThemeDialog(
                 ) {
                     Icon(Icons.Rounded.Palette, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
                 }
-                
+
                 Text(
                     "ADVANCED THEME",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
                 )
-                
+
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ThemeHexInput(
                         label = "PRIMARY COLOR",
@@ -709,7 +738,7 @@ fun AdvancedThemeDialog(
                         onValueChange = { primaryHex = it },
                         accentColor = parseHexSafe(primaryHex, Color(currentPrimary))
                     )
-                    
+
                     ThemeHexInput(
                         label = "SECONDARY COLOR",
                         value = secondaryHex,
@@ -717,22 +746,22 @@ fun AdvancedThemeDialog(
                         accentColor = parseHexSafe(secondaryHex, Color(currentSecondary))
                     )
                 }
-                
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TextButton(
-                        onClick = { 
+                        onClick = {
                             vibrationManager?.vibrateClick()
-                            onDismiss() 
+                            onDismiss()
                         },
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text("CANCEL", fontWeight = FontWeight.Black)
                     }
-                    
+
                     Button(
                         onClick = {
                             vibrationManager?.vibrateSuccess()
@@ -760,6 +789,7 @@ fun ThemeHexInput(
     accentColor: Color
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        @Suppress("DEPRECATION")
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
@@ -775,11 +805,11 @@ fun ThemeHexInput(
                     .background(accentColor)
                     .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
             )
-            
+
             OutlinedTextField(
                 value = value,
-                onValueChange = { 
-                    if (it.length <= 7) onValueChange(it.uppercase()) 
+                onValueChange = {
+                    if (it.length <= 7) onValueChange(it.uppercase())
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -831,9 +861,9 @@ fun SettingsExpandableSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { 
-                        vibrationManager?.vibrate(10L)
-                        onExpandToggle() 
+                    .clickable {
+                        vibrationManager?.vibrateTick()
+                        onExpandToggle()
                     }
                     .padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -848,6 +878,7 @@ fun SettingsExpandableSection(
                     }
                 }
                 Spacer(Modifier.width(16.dp))
+                @Suppress("DEPRECATION")
                 Text(
                     text = title,
                     modifier = Modifier.weight(1f),
@@ -885,28 +916,28 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { 
+        placeholder = {
             Text(
-                "Search settings...", 
+                "Search settings...",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            ) 
+            )
         },
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 12.dp)
             .shadow(
-                elevation = 12.dp, 
-                shape = RoundedCornerShape(24.dp), 
+                elevation = 12.dp,
+                shape = RoundedCornerShape(24.dp),
                 spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             ),
-        leadingIcon = { 
+        leadingIcon = {
             Icon(
-                Icons.Rounded.Search, 
-                contentDescription = null, 
+                Icons.Rounded.Search,
+                contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(24.dp)
-            ) 
+            )
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
@@ -948,8 +979,8 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Rounded.Bolt, 
-                        contentDescription = null, 
+                        Icons.Rounded.Bolt,
+                        contentDescription = null,
                         modifier = Modifier.size(40.dp),
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
@@ -957,10 +988,11 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             }
             Spacer(modifier = Modifier.height(20.dp))
             Text("TOOLZ PRO", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            @Suppress("DEPRECATION")
             Text("V1.0.2 (ALPHA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
-            
+
             Spacer(modifier = Modifier.height(20.dp))
-            
+
             Text(
                 "A modular toolset for productivity and analytics. Built for high performance.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -968,7 +1000,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                 lineHeight = 22.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
-            
+
             Spacer(modifier = Modifier.height(28.dp))
 
             Button(
@@ -979,6 +1011,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(10.dp))
+                @Suppress("DEPRECATION")
                 Text("CHECK FOR UPDATES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
             }
         }
@@ -992,7 +1025,7 @@ fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         val colors = listOf(
-            Color(0xFF2962FF), Color(0xFF00BFA5), Color(0xFFFF6D00), 
+            Color(0xFF2962FF), Color(0xFF00BFA5), Color(0xFFFF6D00),
             Color(0xFFD50000), Color(0xFFAA00FF), Color(0xFF00C853),
             Color(0xFFE91E63), Color(0xFF673AB7), Color(0xFF03A9F4),
             Color.White, Color.Black
@@ -1013,8 +1046,8 @@ fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
             ) {
                 if (selectedColor == argb) {
                     Icon(
-                        Icons.Rounded.Check, 
-                        null, 
+                        Icons.Rounded.Check,
+                        null,
                         tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
                         modifier = Modifier.align(Alignment.Center).size(20.dp)
                     )
@@ -1060,6 +1093,7 @@ fun SettingsItem(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    @Suppress("DEPRECATION")
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black)
                 }
                 if (onClick != null) {
@@ -1107,11 +1141,12 @@ fun SettingsToggleItem(
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    @Suppress("DEPRECATION")
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black)
                 }
             }
             Switch(
-                checked = checked, 
+                checked = checked,
                 onCheckedChange = onCheckedChange,
                 modifier = Modifier.scale(0.8f),
                 colors = SwitchDefaults.colors(

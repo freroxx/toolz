@@ -83,7 +83,7 @@ class VoiceRecorderViewModel @Inject constructor(
     private fun loadRecordings() {
         val folder = context.getExternalFilesDir("recordings")
         val files = folder?.listFiles()?.toList() ?: emptyList()
-        _uiState.update { it.copy(recordings = files.filter { f -> f.extension == "m4a" }.sortedByDescending { f -> f.lastModified() }) }
+        _uiState.update { it.copy(recordings = files.filter { f -> f.extension == "m4a" || f.extension == "3gp" }.sortedByDescending { f -> f.lastModified() }) }
     }
 
     fun startRecording() {
@@ -173,6 +173,20 @@ class VoiceRecorderViewModel @Inject constructor(
         }
         if (file.exists()) {
             file.delete()
+            loadRecordings()
+        }
+    }
+
+    fun renameRecording(file: File, newName: String) {
+        if (newName.isBlank()) return
+        val extension = file.extension
+        val folder = file.parentFile ?: return
+        val newFile = File(folder, "$newName.$extension")
+        
+        if (file.renameTo(newFile)) {
+            if (_uiState.value.playingFile == file) {
+                _uiState.update { it.copy(playingFile = newFile) }
+            }
             loadRecordings()
         }
     }

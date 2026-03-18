@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
+import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +61,7 @@ import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -81,6 +84,7 @@ fun NotificationVaultScreen(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val vibrationManager = LocalVibrationManager.current
 
     Scaffold(
         topBar = {
@@ -104,7 +108,10 @@ fun NotificationVaultScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onNavigateBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onNavigateBack()
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -112,7 +119,10 @@ fun NotificationVaultScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { showVaultSettings = true },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            showVaultSettings = true 
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = "Vault Settings")
@@ -170,8 +180,14 @@ fun NotificationVaultScreen(
                                 ) {
                                     NotificationVaultCard(
                                         notification = notification,
-                                        onDelete = { viewModel.deleteNotification(notification.id) },
-                                        onLongClick = { showNotificationMenu = notification }
+                                        onDelete = { 
+                                            vibrationManager?.vibrateLongClick()
+                                            viewModel.deleteNotification(notification.id) 
+                                        },
+                                        onLongClick = { 
+                                            vibrationManager?.vibrateLongClick()
+                                            showNotificationMenu = notification 
+                                        }
                                     )
                                 }
                             }
@@ -180,7 +196,10 @@ fun NotificationVaultScreen(
                         
                         if (notifications.isNotEmpty() && searchQuery.isEmpty() && selectedCategory == "All") {
                             FloatingActionButton(
-                                onClick = { showDeleteDialog = true },
+                                onClick = { 
+                                    vibrationManager?.vibrateClick()
+                                    showDeleteDialog = true 
+                                },
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
                                 containerColor = MaterialTheme.colorScheme.errorContainer,
                                 contentColor = MaterialTheme.colorScheme.error,
@@ -202,6 +221,7 @@ fun NotificationVaultScreen(
                 confirmButton = {
                     Button(
                         onClick = {
+                            vibrationManager?.vibrateLongClick()
                             viewModel.clearAll()
                             showDeleteDialog = false
                         },
@@ -212,7 +232,10 @@ fun NotificationVaultScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteDialog = false }) {
+                    TextButton(onClick = { 
+                        vibrationManager?.vibrateClick()
+                        showDeleteDialog = false 
+                    }) {
                         Text("CANCEL", fontWeight = FontWeight.Bold)
                     }
                 },
@@ -261,17 +284,20 @@ fun NotificationVaultScreen(
                     
                     val menuItems = listOf(
                         Triple("Hide notifications from this app", Icons.Rounded.VisibilityOff, {
+                            vibrationManager?.vibrateClick()
                             viewModel.hideApp(notification.packageName)
                             showNotificationMenu = null
                             Toast.makeText(context, "App hidden from vault", Toast.LENGTH_SHORT).show()
                         }),
                         Triple("Analyze app footprint", Icons.Rounded.Analytics, {
+                            vibrationManager?.vibrateClick()
                             scope.launch {
                                 selectedAppDetails = viewModel.getAppDetails(notification.packageName)
                                 showNotificationMenu = null
                             }
                         }),
                         Triple("Launch application", Icons.AutoMirrored.Rounded.Launch, {
+                            vibrationManager?.vibrateClick()
                             try {
                                 val intent = context.packageManager.getLaunchIntentForPackage(notification.packageName)
                                 if (intent != null) {
@@ -323,6 +349,7 @@ fun NotificationVaultScreen(
 @Composable
 fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val vibrationManager = LocalVibrationManager.current
     val timeString = details.lastNotification?.let { 
         SimpleDateFormat("HH:mm, MMM dd", Locale.getDefault()).format(Date(it.timestamp))
     } ?: "N/A"
@@ -369,7 +396,10 @@ fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
                 
                 Spacer(Modifier.height(32.dp))
                 Button(
-                    onClick = onDismiss,
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        onDismiss()
+                    },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = RoundedCornerShape(20.dp)
                 ) {
@@ -402,6 +432,7 @@ fun VaultSettingsDialog(
     val categories by viewModel.categories.collectAsState()
     val appMappings by viewModel.appMappings.collectAsState()
     val distinctPackages by viewModel.distinctPackages.collectAsState()
+    val vibrationManager = LocalVibrationManager.current
     
     var newCategoryName by remember { mutableStateOf("") }
     var selectedPackageToMap by remember { mutableStateOf<String?>(null) }
@@ -414,7 +445,10 @@ fun VaultSettingsDialog(
                 CenterAlignedTopAppBar(
                     title = { Text("VAULT CONFIGURATION", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 1.sp) },
                     navigationIcon = {
-                        IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null) }
+                        IconButton(onClick = {
+                            vibrationManager?.vibrateClick()
+                            onDismiss()
+                        }) { Icon(Icons.Rounded.Close, null) }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background)
                 )
@@ -447,7 +481,10 @@ fun VaultSettingsDialog(
                         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(category, fontWeight = FontWeight.Black)
                             if (category != "All" && category != "General") {
-                                IconButton(onClick = { viewModel.removeCategory(category) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { 
+                                    vibrationManager?.vibrateTick()
+                                    viewModel.removeCategory(category) 
+                                }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Rounded.RemoveCircle, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                                 }
                             }
@@ -474,6 +511,7 @@ fun VaultSettingsDialog(
                     IconButton(
                         onClick = {
                             if (newCategoryName.isNotBlank()) {
+                                vibrationManager?.vibrateClick()
                                 viewModel.addCategory(newCategoryName)
                                 newCategoryName = ""
                             }
@@ -503,7 +541,10 @@ fun VaultSettingsDialog(
                 distinctPackages.forEach { pkg ->
                     val currentCat = appMappings[pkg] ?: "Auto"
                     Surface(
-                        onClick = { selectedPackageToMap = pkg },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            selectedPackageToMap = pkg 
+                        },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
@@ -560,7 +601,10 @@ fun VaultSettingsDialog(
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(pkg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                IconButton(onClick = { viewModel.unhideApp(pkg) }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { 
+                                    vibrationManager?.vibrateTick()
+                                    viewModel.unhideApp(pkg) 
+                                }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                 }
                             }
@@ -580,6 +624,7 @@ fun VaultSettingsDialog(
                         (listOf("Auto") + categories).forEach { cat ->
                             Surface(
                                 onClick = { 
+                                    vibrationManager?.vibrateTick()
                                     viewModel.mapAppToCategory(pkg, if (cat == "Auto") "" else cat)
                                     selectedPackageToMap = null
                                 },
@@ -608,11 +653,11 @@ fun SwipeToDeleteContainer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val vibrationManager = LocalVibrationManager.current
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = {
             if (it == SwipeToDismissBoxValue.EndToStart) {
-                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                vibrationManager?.vibrateLongClick()
                 onDelete()
                 true
             } else false
@@ -676,6 +721,7 @@ fun SwipeToDeleteContainer(
 
 @Composable
 fun VaultSearchBar(query: String, onQueryChange: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -686,7 +732,10 @@ fun VaultSearchBar(query: String, onQueryChange: (String) -> Unit) {
         leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
         trailingIcon = {
             if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
+                IconButton(onClick = { 
+                    vibrationManager?.vibrateClick()
+                    onQueryChange("") 
+                }) {
                     Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -708,7 +757,7 @@ fun CategoryStrip(
     selectedCategory: String,
     onCategorySelect: (String) -> Unit
 ) {
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val vibrationManager = LocalVibrationManager.current
     LazyRow(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -739,7 +788,7 @@ fun CategoryStrip(
                     }
                     .bouncyClick { 
                         if (!isSelected) {
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            vibrationManager?.vibrateTick()
                             onCategorySelect(category)
                         }
                     },
@@ -777,6 +826,7 @@ fun NotificationVaultCard(
     val timeString = remember(notification.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(notification.timestamp))
     }
+    val vibrationManager = LocalVibrationManager.current
 
     Surface(
         modifier = Modifier
@@ -788,7 +838,10 @@ fun NotificationVaultCard(
             }
             .animateContentSize()
             .combinedClickable(
-                onClick = { isExpanded = !isExpanded },
+                onClick = { 
+                    vibrationManager?.vibrateTick()
+                    isExpanded = !isExpanded 
+                },
                 onLongClick = { onLongClick() }
             ),
         shape = RoundedCornerShape(32.dp),
@@ -882,6 +935,7 @@ fun NotificationVaultCard(
                 ) {
                     Surface(
                         onClick = {
+                            vibrationManager?.vibrateClick()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = ClipData.newPlainText("Notification Text", notification.text ?: "")
                             clipboard.setPrimaryClip(clip)
@@ -899,7 +953,10 @@ fun NotificationVaultCard(
                     }
                     
                     IconButton(
-                        onClick = onDelete,
+                        onClick = {
+                            vibrationManager?.vibrateLongClick()
+                            onDelete()
+                        },
                         modifier = Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
                     ) {
                         Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
@@ -966,6 +1023,7 @@ fun EmptyVaultState(isFiltering: Boolean) {
         }
         
         Spacer(Modifier.height(48.dp))
+        @Suppress("DEPRECATION")
         Text(
             if (isFiltering) "NO SCAN MATCHES" else "VAULT IS SECURE",
             style = MaterialTheme.typography.labelSmall,

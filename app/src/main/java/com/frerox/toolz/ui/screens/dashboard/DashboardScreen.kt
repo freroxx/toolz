@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -69,6 +70,8 @@ import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.util.VibrationManager
+import com.frerox.toolz.util.ConnectivityObserver
+import com.frerox.toolz.util.NetworkConnectivityObserver
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
@@ -105,33 +108,9 @@ fun DashboardScreen(
     settingsRepository: SettingsRepository
 ) {
     val performanceMode = LocalPerformanceMode.current
-    val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
     val vibrationManager = LocalVibrationManager.current
     
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        if (performanceMode) {
-            visible = true
-        } else {
-            delay(100)
-            visible = true
-        }
-    }
-
-    val headerAlpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f, 
-        animationSpec = if (performanceMode) snap() else tween(800), 
-        label = ""
-    )
-    val headerOffset by animateDpAsState(
-        targetValue = if (visible) 0.dp else (-20).dp, 
-        animationSpec = if (performanceMode) snap() else spring(Spring.DampingRatioMediumBouncy), 
-        label = ""
-    )
-
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val activity = context as? ComponentActivity
 
     val musicViewModel: MusicPlayerViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
@@ -144,8 +123,6 @@ fun DashboardScreen(
     val todoViewModel: TodoViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val focusViewModel: FocusFlowViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
-    var searchQuery by remember { mutableStateOf("") }
-    val categories = remember { getCategories() }
     val musicState by musicViewModel.uiState.collectAsState()
     val timerState by timerViewModel.uiState.collectAsState()
     val stopwatchState by stopwatchViewModel.uiState.collectAsState()
@@ -168,6 +145,80 @@ fun DashboardScreen(
     val showRecentTools by settingsRepository.showRecentTools.collectAsState(initial = true)
     val showQuickNotes by settingsRepository.showQuickNotes.collectAsState(initial = true)
 
+    val connectivityObserver = remember { NetworkConnectivityObserver(context) }
+    val networkStatus by connectivityObserver.observe().collectAsState(initial = ConnectivityObserver.Status.Unavailable)
+    val isOnline = networkStatus == ConnectivityObserver.Status.Available
+
+    DashboardContent(
+        onNavigate = onNavigate,
+        settingsRepository = settingsRepository,
+        performanceMode = performanceMode,
+        vibrationManager = vibrationManager,
+        userName = userName,
+        dashboardView = dashboardView,
+        pinnedTools = pinnedTools,
+        recentTools = recentTools,
+        showRecentTools = showRecentTools,
+        showQuickNotes = showQuickNotes,
+        isOnline = isOnline,
+        musicState = musicState,
+        musicViewModel = musicViewModel,
+        timerState = timerState,
+        timerViewModel = timerViewModel,
+        stopwatchState = stopwatchState,
+        stopwatchViewModel = stopwatchViewModel,
+        pomodoroState = pomodoroState,
+        pomodoroViewModel = pomodoroViewModel,
+        stepState = stepState,
+        recorderState = recorderState,
+        recorderViewModel = recorderViewModel,
+        notes = notes,
+        todoState = todoState,
+        todoViewModel = todoViewModel,
+        productivityScore = productivityScore,
+        showPillSetting = showPillSetting,
+        pillTodoEnabled = pillTodoEnabled,
+        pillFocusEnabled = pillFocusEnabled
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DashboardContent(
+    onNavigate: (String) -> Unit,
+    settingsRepository: SettingsRepository,
+    performanceMode: Boolean,
+    vibrationManager: VibrationManager?,
+    userName: String,
+    dashboardView: String,
+    pinnedTools: Set<String>,
+    recentTools: List<String>,
+    showRecentTools: Boolean,
+    showQuickNotes: Boolean,
+    isOnline: Boolean,
+    musicState: MusicUiState,
+    musicViewModel: MusicPlayerViewModel,
+    timerState: com.frerox.toolz.ui.screens.time.TimerState,
+    timerViewModel: TimerViewModel,
+    stopwatchState: com.frerox.toolz.ui.screens.time.StopwatchState,
+    stopwatchViewModel: StopwatchViewModel,
+    pomodoroState: com.frerox.toolz.ui.screens.time.PomodoroState,
+    pomodoroViewModel: PomodoroViewModel,
+    stepState: com.frerox.toolz.ui.screens.sensors.StepState,
+    recorderState: RecordingState,
+    recorderViewModel: VoiceRecorderViewModel,
+    notes: List<Note>,
+    todoState: TodoUiState,
+    todoViewModel: TodoViewModel,
+    productivityScore: Int,
+    showPillSetting: Boolean,
+    pillTodoEnabled: Boolean,
+    pillFocusEnabled: Boolean
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val categories = remember { getCategories() }
+    val scope = rememberCoroutineScope()
+
     val filteredCategories = remember(searchQuery, categories) {
         categories.map { category ->
             category.copy(items = category.items.filter {
@@ -187,20 +238,8 @@ fun DashboardScreen(
         recentTools.mapNotNull { route -> allItems.find { it.route == route } }
     }
 
-    val performHaptic = { effect: Int ->
-        if (hapticEnabled) {
-            if (vibrationManager != null && effect == HapticFeedbackConstants.KEYBOARD_TAP) {
-                vibrationManager.vibrateClick()
-            } else if (vibrationManager != null && effect == HapticFeedbackConstants.LONG_PRESS) {
-                vibrationManager.vibrateLongClick()
-            } else {
-                view.performHapticFeedback(effect)
-            }
-        }
-    }
-
     val navigateWithRecent = { route: String ->
-        performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+        vibrationManager?.vibrateClick()
         scope.launch { settingsRepository.addRecentTool(route) }
         onNavigate(route)
     }
@@ -212,15 +251,11 @@ fun DashboardScreen(
                 modifier = Modifier
                     .statusBarsPadding()
                     .padding(horizontal = 24.dp)
-                    .graphicsLayer {
-                        alpha = headerAlpha
-                        translationY = headerOffset.toPx()
-                    }
             ) {
                 WelcomeHeader(
                     userName = userName,
                     onSettingsClick = { 
-                        performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         onNavigate(Screen.Settings.route) 
                     }
                 )
@@ -236,7 +271,7 @@ fun DashboardScreen(
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { 
-                                performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateClick()
                                 searchQuery = "" 
                             }) {
                                 Icon(Icons.Rounded.Close, contentDescription = "Clear")
@@ -282,6 +317,14 @@ fun DashboardScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (isOnline && searchQuery.isEmpty()) {
+                        item {
+                            AiAssistantCard(
+                                onClick = { navigateWithRecent(Screen.AiAssistant.route) }
+                            )
+                        }
+                    }
+
                     if (pinnedToolItems.isNotEmpty() && searchQuery.isEmpty()) {
                         item {
                             SectionHeader("PINNED INSTRUMENTS")
@@ -292,7 +335,7 @@ fun DashboardScreen(
                                 isPinned = true,
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
-                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     scope.launch { settingsRepository.togglePinnedTool(tool.route) }
                                 }
                             )
@@ -310,7 +353,7 @@ fun DashboardScreen(
                                 isPinned = pinnedTools.contains(tool.route),
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
-                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     scope.launch { settingsRepository.togglePinnedTool(tool.route) }
                                 }
                             )
@@ -324,7 +367,7 @@ fun DashboardScreen(
                             isPinned = pinnedTools.contains(tool.route),
                             onClick = { navigateWithRecent(tool.route) },
                             onLongClick = {
-                                performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                vibrationManager?.vibrateLongClick()
                                 scope.launch { settingsRepository.togglePinnedTool(tool.route) }
                             }
                         )
@@ -346,6 +389,14 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (isOnline && searchQuery.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            AiAssistantCard(
+                                onClick = { navigateWithRecent(Screen.AiAssistant.route) }
+                            )
+                        }
+                    }
+
                     if (pinnedToolItems.isNotEmpty() && searchQuery.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             SectionHeader("PINNED INSTRUMENTS", topPadding = 8.dp)
@@ -356,7 +407,7 @@ fun DashboardScreen(
                                 isPinned = true,
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
-                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     scope.launch { settingsRepository.togglePinnedTool(tool.route) }
                                 }
                             )
@@ -398,7 +449,7 @@ fun DashboardScreen(
                                 isPinned = pinnedTools.contains(tool.route),
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
-                                    performHaptic(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     scope.launch { settingsRepository.togglePinnedTool(tool.route) }
                                 }
                             )
@@ -446,7 +497,7 @@ fun DashboardScreen(
                         .height(115.dp)
                         .then(if (performanceMode) Modifier else Modifier.shadow(24.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)))
                         .bouncyClick {
-                            performHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             val currentRoute = when(activePages[pagerState.currentPage]) {
                                 PillPage.Music -> Screen.MusicPlayer.route
                                 PillPage.Timer -> Screen.Timer.route
@@ -502,6 +553,66 @@ fun DashboardScreen(
 }
 
 @Composable
+fun AiAssistantCard(onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .padding(bottom = 12.dp)
+            .bouncyClick(onClick = onClick),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "AI ASSISTANT",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    "Chat with AI agents",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "Fast and reliable answers",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+@Composable
 fun SectionHeader(title: String, topPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     Text(
         text = title.uppercase(),
@@ -552,8 +663,6 @@ fun RecentToolChip(tool: ToolItem, onClick: () -> Unit) {
 @Composable
 fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
     val performanceMode = LocalPerformanceMode.current
-    val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
     val vibrationManager = LocalVibrationManager.current
     val task = state.tasks.find { it.id == state.sessionTaskId } ?: return
     val doneSub = task.subTasks.count { it.isDone }
@@ -611,7 +720,7 @@ fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
                 IconButton(onClick = { 
-                    if (vibrationManager != null) vibrationManager.vibrateClick() else if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) else Unit
+                    vibrationManager?.vibrateClick()
                     viewModel.stopSession() 
                 }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error)
@@ -1382,10 +1491,79 @@ fun EmptySearchState(searchQuery: String) {
     }
 }
 
+@Composable
+private fun DashboardLoadingScreen() {
+    val infiniteTransition = rememberInfiniteTransition(label = "dashLoading")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(80.dp)) {
+                CircularProgressIndicator(
+                    modifier = Modifier.fillMaxSize().graphicsLayer { rotationZ = rotation },
+                    strokeWidth = 3.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(0.15f),
+                    trackColor = Color.Transparent,
+                    strokeCap = StrokeCap.Round
+                )
+                CircularProgressIndicator(
+                    progress = { 0.2f },
+                    modifier = Modifier.fillMaxSize(0.75f).graphicsLayer { rotationZ = -rotation * 2f },
+                    strokeWidth = 5.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeCap = StrokeCap.Round
+                )
+                Icon(
+                    Icons.Rounded.Bolt,
+                    null,
+                    modifier = Modifier.size(28.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "TOOLZ PRO",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 5.sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                "Initializing instruments",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
+            )
+        }
+    }
+}
+
 private fun getCategories() = listOf(
     ToolCategory(
         "FAVORITES & ESSENTIALS",
         listOf(
+            ToolItem("Ai Assistant", Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, "Gemini Flash AI"),
             ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Productivity insights"),
             ToolItem("Todo List", Icons.Rounded.TaskAlt, Screen.Todo.route, "Physics task flow"),
             ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
@@ -1407,6 +1585,7 @@ private fun getCategories() = listOf(
     ToolCategory(
         "TIME & PRODUCTIVITY",
         listOf(
+            ToolItem("Calendar", Icons.Rounded.CalendarMonth, Screen.Calendar.route, "Time-fluid agenda"),
             ToolItem("Timer", Icons.Rounded.Timer, Screen.Timer.route, "Countdown"),
             ToolItem("Pomodoro", Icons.Rounded.AvTimer, Screen.Pomodoro.route, "Deep focus"),
             ToolItem("Stopwatch", Icons.Rounded.History, Screen.Stopwatch.route, "Laps"),

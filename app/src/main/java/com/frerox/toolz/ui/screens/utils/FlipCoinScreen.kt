@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -40,7 +41,7 @@ fun FlipCoinScreen(
     var isFlipping by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(listOf<Boolean>()) }
     val scope = rememberCoroutineScope()
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
 
     val rotation = animateFloatAsState(
         targetValue = if (isFlipping) 2160f else 0f,
@@ -70,7 +71,7 @@ fun FlipCoinScreen(
     fun flipCoin() {
         if (isFlipping) return
         scope.launch {
-            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            vibrationManager?.vibrateLongClick()
             isFlipping = true
             val nextResult = Random.nextBoolean()
 
@@ -82,11 +83,7 @@ fun FlipCoinScreen(
             isFlipping = false
             history = (listOf(nextResult) + history).take(12)
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-            } else {
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-            }
+            vibrationManager?.vibrateSuccess()
         }
     }
 
@@ -104,7 +101,10 @@ fun FlipCoinScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -112,7 +112,10 @@ fun FlipCoinScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { history = emptyList() },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            history = emptyList() 
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Reset", tint = MaterialTheme.colorScheme.primary)
@@ -129,6 +132,7 @@ fun FlipCoinScreen(
         ) {
             // History Row
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                @Suppress("DEPRECATION")
                 Text(
                     "RECENT FLIPS",
                     style = MaterialTheme.typography.labelSmall,
@@ -146,7 +150,6 @@ fun FlipCoinScreen(
                         Text("No history", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     } else {
                         history.forEachIndexed { index, heads ->
-                            val itemScale by animateFloatAsState(1f)
                             Box(
                                 modifier = Modifier
                                     .padding(horizontal = 4.dp)

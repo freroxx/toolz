@@ -15,7 +15,8 @@ data class CalculatorState(
     val formula: String = "",
     val isScientific: Boolean = false,
     val error: String? = null,
-    val isDegreeMode: Boolean = true
+    val isDegreeMode: Boolean = true,
+    val history: List<Pair<String, String>> = emptyList()
 )
 
 @HiltViewModel
@@ -39,7 +40,6 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 currentDisplay == "0" && digit != "." -> digit
                 currentDisplay == "" && digit == "." -> "0."
                 digit == "." && currentDisplay.contains(".") -> {
-                    // Check if the last number already has a decimal
                     val lastNumber = currentDisplay.split(Regex("[+×÷\\-^()]")).last()
                     if (lastNumber.contains(".")) currentDisplay else currentDisplay + digit
                 }
@@ -55,7 +55,6 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
             isNewExpression = false
             val currentDisplay = it.display
             
-            // Allow negative sign at start or after operator
             if (op == "-" && (currentDisplay == "0" || currentDisplay.isEmpty() || currentDisplay.last() in "+×÷(^")) {
                  return@update it.copy(display = if (currentDisplay == "0") "-" else currentDisplay + "-")
             }
@@ -75,7 +74,7 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
     }
 
     fun onClear() {
-        _uiState.update { CalculatorState(isScientific = it.isScientific, isDegreeMode = it.isDegreeMode) }
+        _uiState.update { it.copy(display = "0", formula = "", error = null) }
         isNewExpression = true
     }
 
@@ -86,7 +85,6 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 isNewExpression = true
                 it.copy(display = "0")
             } else {
-                // Check if we are deleting a function
                 val functions = listOf("sin(", "cos(", "tan(", "log(", "ln(", "sqrt(", "abs(", "log10(", "exp(", "inv(", "acos(", "asin(", "atan(")
                 var newDisplay = it.display
                 for (func in functions) {
@@ -115,7 +113,12 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
         _uiState.update { state ->
             if (state.display == "0" && state.formula.isEmpty()) return@update state
             try {
-                var expressionStr = state.display
+                // Auto-close parentheses
+                val openParentheses = state.display.count { it == '(' }
+                val closeParentheses = state.display.count { it == ')' }
+                val balancedDisplay = state.display + ")".repeat((openParentheses - closeParentheses).coerceAtLeast(0))
+
+                var expressionStr = balancedDisplay
                     .replace("×", "*")
                     .replace("÷", "/")
                     .replace("π", "pi")
@@ -131,8 +134,15 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 
                 val formattedResult = formatResult(result)
                 
+                val newHistory = (listOf(state.display to formattedResult) + state.history).take(20)
+                
                 isNewExpression = true
-                state.copy(display = formattedResult, formula = state.display + " =", error = null)
+                state.copy(
+                    display = formattedResult, 
+                    formula = balancedDisplay + " =", 
+                    error = null,
+                    history = newHistory
+                )
             } catch (e: Exception) {
                 state.copy(error = "Invalid Expression")
             }
@@ -147,12 +157,15 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
         }
     }
 
+    fun clearHistory() {
+        _uiState.update { it.copy(history = emptyList()) }
+    }
+
     private fun formatResult(value: Double): String {
         return if (value.isInfinite()) "Infinity"
         else if (value.isNaN()) "NaN"
         else if (value % 1.0 == 0.0) value.toLong().toString()
         else {
-            // Use scientific notation for very small or very large numbers
             if (Math.abs(value) < 1E-10 || Math.abs(value) > 1E10) {
                 String.format(Locale.US, "%.6e", value)
             } else {
@@ -168,9 +181,9 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
             val pattern = Regex("$f\\(([^)]+)\\)")
             res = res.replace(pattern) { matchResult ->
                 val inner = matchResult.groupValues[1]
-                if (f.startsWith("a")) { // Inverse trig: result is in radians, convert to degrees
+                if (f.startsWith("a")) {
                     "($f($inner)*180/pi)"
-                } else { // Normal trig: input is in degrees, convert to radians
+                } else {
                     "$f(($inner)*pi/180)"
                 }
             }

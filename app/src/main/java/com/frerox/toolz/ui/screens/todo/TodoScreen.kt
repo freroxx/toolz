@@ -57,6 +57,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.sin
@@ -70,7 +71,7 @@ fun TodoScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     
     var showEditor by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskEntry?>(null) }
@@ -103,6 +104,7 @@ fun TodoScreen(
                 CenterAlignedTopAppBar(
                     title = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            @Suppress("DEPRECATION")
                             Text("TASK FLOW", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium)
                             if (state.isSessionActive) {
                                 AnimatedVisibility(
@@ -122,7 +124,10 @@ fun TodoScreen(
                     },
                     navigationIcon = {
                         IconButton(
-                            onClick = onBack,
+                            onClick = {
+                                vibrationManager?.vibrateClick()
+                                onBack()
+                            },
                             modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -131,7 +136,7 @@ fun TodoScreen(
                     actions = {
                         Box {
                             IconButton(onClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateClick()
                                 showSortMenu = true 
                             }) {
                                 Icon(Icons.AutoMirrored.Rounded.Sort, "Sort")
@@ -145,7 +150,7 @@ fun TodoScreen(
                                     DropdownMenuItem(
                                         text = { Text(order.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold) },
                                         onClick = {
-                                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            vibrationManager?.vibrateClick()
                                             viewModel.setSortOrder(order)
                                             showSortMenu = false
                                         },
@@ -156,7 +161,7 @@ fun TodoScreen(
                         }
                         if (state.isSessionActive) {
                             IconButton(onClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateClick()
                                 viewModel.stopSession() 
                             }) {
                                 Icon(Icons.Rounded.StopCircle, "Stop session", tint = MaterialTheme.colorScheme.error)
@@ -170,7 +175,7 @@ fun TodoScreen(
             floatingActionButton = {
                 ExtendedFloatingActionButton(
                     onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         editingTask = null
                         showEditor = true 
                     },
@@ -179,7 +184,7 @@ fun TodoScreen(
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onLongPress = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     showBrainDump = true 
                                 }
                             )
@@ -206,7 +211,7 @@ fun TodoScreen(
                     if (state.tasks.isEmpty() && state.completedToday.isEmpty()) {
                         item(span = StaggeredGridItemSpan.FullLine) {
                             EmptyTasksState(onAddClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateClick()
                                 showEditor = true 
                             })
                         }
@@ -218,24 +223,24 @@ fun TodoScreen(
                                 performanceMode = performanceMode,
                                 isExpanded = expandedTaskIds.contains(task.id),
                                 onToggle = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    if (hapticEnabled) vibrationManager?.vibrateSuccess()
                                     viewModel.toggleTaskCompletion(task) 
                                 },
                                 onClick = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    vibrationManager?.vibrateClick()
                                     viewingTaskId = task.id 
                                 },
                                 onLongClick = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    vibrationManager?.vibrateLongClick()
                                     editingTask = task
                                     showEditor = true 
                                 },
                                 onStartSession = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    vibrationManager?.vibrateClick()
                                     viewModel.startSession(task.id) 
                                 },
                                 onExpandToggle = {
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    vibrationManager?.vibrateTick()
                                     expandedTaskIds = if (expandedTaskIds.contains(task.id)) {
                                         expandedTaskIds - task.id
                                     } else {
@@ -243,7 +248,7 @@ fun TodoScreen(
                                     }
                                 },
                                 onToggleSubtask = { subId ->
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    vibrationManager?.vibrateTick()
                                     viewModel.toggleSubTask(task, subId)
                                 },
                                 modifier = Modifier.animateItem(
@@ -256,6 +261,7 @@ fun TodoScreen(
                         
                         if (state.completedToday.isNotEmpty()) {
                             item(span = StaggeredGridItemSpan.FullLine) {
+                                @Suppress("DEPRECATION")
                                 Text(
                                     "COMPLETED TODAY",
                                     style = MaterialTheme.typography.labelSmall,
@@ -272,11 +278,11 @@ fun TodoScreen(
                                     performanceMode = performanceMode,
                                     isExpanded = expandedTaskIds.contains(task.id),
                                     onToggle = { 
-                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        vibrationManager?.vibrateTick()
                                         viewModel.toggleTaskCompletion(task) 
                                     },
                                     onClick = { 
-                                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        vibrationManager?.vibrateClick()
                                         viewingTaskId = task.id 
                                     },
                                     onLongClick = { },
@@ -353,16 +359,16 @@ fun TodoScreen(
                     task = task,
                     onDismiss = { viewingTaskId = null },
                     onToggleSubtask = { subId -> 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateTick()
                         viewModel.toggleSubTask(task, subId) 
                     },
                     onToggleComplete = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        if (hapticEnabled) vibrationManager?.vibrateSuccess()
                         viewModel.toggleTaskCompletion(task)
                         viewingTaskId = null
                     },
                     onStartSession = {
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         viewModel.startSession(task.id)
                         viewingTaskId = null
                     }
@@ -374,7 +380,6 @@ fun TodoScreen(
 
 @Composable
 fun EmptyTasksState(onAddClick: () -> Unit) {
-    val performanceMode = LocalPerformanceMode.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -423,6 +428,7 @@ fun EmptyTasksState(onAddClick: () -> Unit) {
         ) {
             Icon(Icons.Rounded.Add, null)
             Spacer(Modifier.width(12.dp))
+            @Suppress("DEPRECATION")
             Text("CREATE TASK", fontWeight = FontWeight.Black)
         }
     }
@@ -612,6 +618,7 @@ fun TaskCard(
                                 ) {
                                     Icon(Icons.AutoMirrored.Rounded.PlaylistAddCheck, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(4.dp))
+                                    @Suppress("DEPRECATION")
                                     Text("$doneCount/${task.subTasks.size}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(4.dp))
                                     Icon(
@@ -628,6 +635,7 @@ fun TaskCard(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Schedule, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
                                 Spacer(Modifier.width(4.dp))
+                                @Suppress("DEPRECATION")
                                 Text(
                                     text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().lowercase(),
                                     style = MaterialTheme.typography.labelSmall,
@@ -721,8 +729,7 @@ fun TaskEditorSheet(
     onDelete: () -> Unit,
     onAddCategory: (String) -> Unit
 ) {
-    val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     var title by remember { mutableStateOf(task?.title ?: "") }
     var description by remember { mutableStateOf(task?.description ?: "") }
     var category by remember { mutableStateOf(task?.category ?: categories.firstOrNull() ?: "General") }
@@ -760,7 +767,7 @@ fun TaskEditorSheet(
                 if (task != null) {
                     IconButton(
                         onClick = {
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            vibrationManager?.vibrateLongClick()
                             onDelete() 
                         },
                         modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), CircleShape)
@@ -793,7 +800,7 @@ fun TaskEditorSheet(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(20.dp),
                 onClick = { 
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     showDatePicker = true 
                 }
             ) {
@@ -814,7 +821,7 @@ fun TaskEditorSheet(
                     }
                     if (dueDate != null) {
                         IconButton(onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateTick()
                             dueDate = null 
                         }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
@@ -829,7 +836,7 @@ fun TaskEditorSheet(
                     Text("CLASSIFICATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         showAddCategory = true 
                     }, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
@@ -841,7 +848,7 @@ fun TaskEditorSheet(
                         FilterChip(
                             selected = category == cat,
                             onClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateTick()
                                 category = cat 
                             },
                             label = { Text(cat.uppercase(), fontWeight = FontWeight.Black, fontSize = 10.sp) },
@@ -871,7 +878,7 @@ fun TaskEditorSheet(
                         }
                         Surface(
                             onClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateTick()
                                 priority = p 
                             },
                             modifier = Modifier.size(52.dp),
@@ -899,12 +906,12 @@ fun TaskEditorSheet(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
                             Checkbox(checked = sub.isDone, onCheckedChange = { isDone ->
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateTick()
                                 subTasks = subTasks.map { if (it.id == sub.id) it.copy(isDone = isDone) else it }
                             })
                             Text(sub.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                             IconButton(onClick = { 
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateTick()
                                 subTasks = subTasks.filter { it.id != sub.id } 
                             }) {
                                 Icon(Icons.Rounded.RemoveCircleOutline, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
@@ -923,7 +930,7 @@ fun TaskEditorSheet(
                     shape = RoundedCornerShape(16.dp),
                     trailingIcon = {
                         IconButton(onClick = {
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             if (newSubtaskTitle.isNotBlank()) {
                                 subTasks = subTasks + SubTask(UUID.randomUUID().toString(), newSubtaskTitle)
                                 newSubtaskTitle = ""
@@ -934,7 +941,7 @@ fun TaskEditorSheet(
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = {
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         if (newSubtaskTitle.isNotBlank()) {
                             subTasks = subTasks + SubTask(UUID.randomUUID().toString(), newSubtaskTitle)
                             newSubtaskTitle = ""
@@ -946,12 +953,13 @@ fun TaskEditorSheet(
 
             Button(
                 onClick = { 
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     if (title.isNotBlank()) onSave(title, description.takeIf { it.isNotBlank() }, category, priority, dueDate, subTasks) 
                 },
                 modifier = Modifier.fillMaxWidth().height(64.dp).padding(vertical = 4.dp),
                 shape = RoundedCornerShape(20.dp)
             ) {
+                @Suppress("DEPRECATION")
                 Text("DEPLOY OBJECTIVE", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
             }
             
@@ -965,16 +973,16 @@ fun TaskEditorSheet(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     dueDate = datePickerState.selectedDateMillis
                     showDatePicker = false
-                }) { Text("INDEX", fontWeight = FontWeight.Black) }
+                }) { @Suppress("DEPRECATION") Text("INDEX", fontWeight = FontWeight.Black) }
             },
             dismissButton = {
                 TextButton(onClick = { 
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     showDatePicker = false 
-                }) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+                }) { @Suppress("DEPRECATION") Text("CANCEL", fontWeight = FontWeight.Bold) }
             },
             shape = RoundedCornerShape(32.dp)
         ) {
@@ -985,7 +993,7 @@ fun TaskEditorSheet(
     if (showAddCategory) {
         AlertDialog(
             onDismissRequest = { showAddCategory = false },
-            title = { Text("NEW CLASSIFICATION", fontWeight = FontWeight.Black) },
+            title = { @Suppress("DEPRECATION") Text("NEW CLASSIFICATION", fontWeight = FontWeight.Black) },
             text = {
                 OutlinedTextField(
                     value = newCategoryName,
@@ -997,20 +1005,20 @@ fun TaskEditorSheet(
             },
             confirmButton = {
                 Button(onClick = {
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     if (newCategoryName.isNotBlank()) {
                         onAddCategory(newCategoryName)
                         category = newCategoryName
                         newCategoryName = ""
                         showAddCategory = false
                     }
-                }, shape = RoundedCornerShape(16.dp)) { Text("ADD", fontWeight = FontWeight.Black) }
+                }, shape = RoundedCornerShape(16.dp)) { @Suppress("DEPRECATION") Text("ADD", fontWeight = FontWeight.Black) }
             },
             dismissButton = {
                 TextButton(onClick = { 
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    vibrationManager?.vibrateClick()
                     showAddCategory = false 
-                }) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+                }) { @Suppress("DEPRECATION") Text("CANCEL", fontWeight = FontWeight.Bold) }
             },
             shape = RoundedCornerShape(32.dp)
         )
@@ -1026,7 +1034,7 @@ fun TaskDetailOverlay(
     onStartSession: () -> Unit
 ) {
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1053,7 +1061,7 @@ fun TaskDetailOverlay(
                     Spacer(Modifier.weight(1f))
                     IconButton(
                         onClick = {
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             onDismiss() 
                         },
                         modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
@@ -1118,7 +1126,7 @@ fun TaskDetailOverlay(
                         task.subTasks.forEach { sub ->
                             Surface(
                                 onClick = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    vibrationManager?.vibrateTick()
                                     onToggleSubtask(sub.id) 
                                 },
                                 shape = RoundedCornerShape(20.dp),
@@ -1155,7 +1163,7 @@ fun TaskDetailOverlay(
                     if (!task.isCompleted) {
                         Button(
                             onClick = {
-                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                vibrationManager?.vibrateClick()
                                 onStartSession() 
                             },
                             modifier = Modifier.weight(1f).height(60.dp),
@@ -1164,13 +1172,14 @@ fun TaskDetailOverlay(
                         ) {
                             Icon(Icons.Rounded.PlayArrow, null)
                             Spacer(Modifier.width(8.dp))
+                            @Suppress("DEPRECATION")
                             Text("ENGAGE", fontWeight = FontWeight.Black)
                         }
                     }
 
                     Button(
                         onClick = {
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            if (hapticEnabled) vibrationManager?.vibrateSuccess()
                             onToggleComplete() 
                         },
                         modifier = Modifier.weight(1.2f).height(60.dp),
@@ -1182,6 +1191,7 @@ fun TaskDetailOverlay(
                     ) {
                         Icon(if (task.isCompleted) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.Check, null)
                         Spacer(Modifier.width(8.dp))
+                        @Suppress("DEPRECATION")
                         Text(if (task.isCompleted) "RESTORE" else "RESOLVE", fontWeight = FontWeight.Black)
                     }
                 }
@@ -1196,8 +1206,7 @@ fun BrainDumpOverlay(
     performanceMode: Boolean,
     onConfirm: (String) -> Unit
 ) {
-    val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     var text by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
 
@@ -1233,7 +1242,7 @@ fun BrainDumpOverlay(
                     shape = RoundedCornerShape(20.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = {
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         if (text.isNotBlank()) onConfirm(text)
                         focusManager.clearFocus()
                     }),
@@ -1242,12 +1251,13 @@ fun BrainDumpOverlay(
 
                 Button(
                     onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         if (text.isNotBlank()) onConfirm(text) 
                     },
                     modifier = Modifier.fillMaxWidth().height(60.dp),
                     shape = RoundedCornerShape(20.dp)
                 ) {
+                    @Suppress("DEPRECATION")
                     Text("DEPLOY TASK", fontWeight = FontWeight.Black)
                 }
             }

@@ -22,4 +22,7 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun getTaskById(id: Int): TaskEntry?
+
+    @Query("SELECT * FROM tasks WHERE dueDate IS NOT NULL")
+    fun getTasksWithDueDate(): Flow<List<TaskEntry>>
 }
