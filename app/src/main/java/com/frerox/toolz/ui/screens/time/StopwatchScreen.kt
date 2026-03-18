@@ -38,6 +38,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,7 +50,7 @@ fun StopwatchScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
 
     Scaffold(
         topBar = {
@@ -64,7 +65,10 @@ fun StopwatchScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -76,7 +80,7 @@ fun StopwatchScreen(
                 actions = {
                     IconButton(
                         onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             viewModel.reset() 
                         },
                         modifier = Modifier
@@ -177,7 +181,7 @@ fun StopwatchScreen(
             ) {
                 IconButton(
                     onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateLongClick()
                         viewModel.reset() 
                     },
                     modifier = Modifier
@@ -190,7 +194,7 @@ fun StopwatchScreen(
                 
                 Surface(
                     onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateClick()
                         viewModel.toggleStartStop() 
                     },
                     modifier = Modifier
@@ -212,7 +216,7 @@ fun StopwatchScreen(
                 
                 IconButton(
                     onClick = { 
-                        if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        vibrationManager?.vibrateTick()
                         if (state.isRunning) viewModel.lap() 
                     },
                     modifier = Modifier

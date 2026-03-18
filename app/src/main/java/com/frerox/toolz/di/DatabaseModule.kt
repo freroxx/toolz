@@ -13,6 +13,8 @@ import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimitDao
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskDao
+import com.frerox.toolz.data.ai.AiDao
+import com.frerox.toolz.data.calendar.EventDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -84,5 +86,15 @@ object DatabaseModule {
     @Provides
     fun provideTaskDao(database: AppDatabase): TaskDao {
         return database.taskDao()
+    }
+
+    @Provides
+    fun provideAiDao(database: AppDatabase): AiDao {
+        return database.aiDao()
+    }
+
+    @Provides
+    fun provideEventDao(database: AppDatabase): EventDao {
+        return database.eventDao()
     }
 }

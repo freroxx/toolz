@@ -59,6 +59,7 @@ class SettingsViewModel @Inject constructor(
 
     val musicAudioFocus = repository.musicAudioFocus
     val musicShakeToSkip = repository.musicShakeToSkip
+    val musicShakeSensitivity = repository.musicShakeSensitivity
     val musicPlaybackSpeed = repository.musicPlaybackSpeed
     val musicEqualizerPreset = repository.musicEqualizerPreset
     val showMusicVisualizer = repository.showMusicVisualizer
@@ -100,6 +101,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setMusicAudioFocus(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocus(enabled) }
     fun setMusicShakeToSkip(enabled: Boolean) = viewModelScope.launch { repository.setMusicShakeToSkip(enabled) }
+    fun setMusicShakeSensitivity(sensitivity: Float) = viewModelScope.launch { repository.setMusicShakeSensitivity(sensitivity) }
     fun setMusicPlaybackSpeed(speed: Float) = viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) }
     fun setShowMusicVisualizer(enabled: Boolean) = viewModelScope.launch { repository.setShowMusicVisualizer(enabled) }
 

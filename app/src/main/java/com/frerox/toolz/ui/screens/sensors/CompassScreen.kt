@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -44,7 +45,7 @@ fun CompassScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
 
     // Fixed: Use continuous azimuth for smooth rotation without jumps at 360/0
     val animatedAzimuth by animateFloatAsState(
@@ -58,7 +59,7 @@ fun CompassScreen(
 
     LaunchedEffect(state.displayAzimuth.toInt()) {
         if (hapticEnabled && state.displayAzimuth.toInt() % 90 == 0) {
-            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            vibrationManager?.vibrateTick()
         }
     }
 

@@ -122,6 +122,12 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    
+    // Generative AI
+    implementation(libs.generativeai)
+
+    // Security Crypto
+    implementation(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

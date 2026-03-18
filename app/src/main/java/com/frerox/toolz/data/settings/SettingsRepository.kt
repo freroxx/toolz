@@ -56,6 +56,7 @@ class SettingsRepository @Inject constructor(
     // Music Player Settings
     private val MUSIC_AUDIO_FOCUS = booleanPreferencesKey("music_audio_focus")
     private val MUSIC_SHAKE_TO_SKIP = booleanPreferencesKey("music_shake_to_skip")
+    private val MUSIC_SHAKE_SENSITIVITY = floatPreferencesKey("music_shake_sensitivity")
     private val MUSIC_PLAYBACK_SPEED = floatPreferencesKey("music_playback_speed")
     private val MUSIC_EQUALIZER_PRESET = stringPreferencesKey("music_equalizer_preset")
     private val SHOW_MUSIC_VISUALIZER = booleanPreferencesKey("show_music_visualizer")
@@ -161,6 +162,7 @@ class SettingsRepository @Inject constructor(
     // Music Flows
     val musicAudioFocus: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
     val musicShakeToSkip: Flow<Boolean> = dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
+    val musicShakeSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_SHAKE_SENSITIVITY] ?: 0.3f }
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
     val musicEqualizerPreset: Flow<String> = dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
     val showMusicVisualizer: Flow<Boolean> = dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: true }
@@ -174,7 +176,7 @@ class SettingsRepository @Inject constructor(
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
-    val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: true }
+    val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: false }
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
@@ -268,6 +270,7 @@ class SettingsRepository @Inject constructor(
     // Music Setters
     suspend fun setMusicAudioFocus(enabled: Boolean) { dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
     suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
+    suspend fun setMusicShakeSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_SHAKE_SENSITIVITY] = sensitivity } }
     suspend fun setMusicPlaybackSpeed(speed: Float) { dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
     suspend fun setMusicEqualizerPreset(preset: String) { dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
     suspend fun setShowMusicVisualizer(enabled: Boolean) { dataStore.edit { it[SHOW_MUSIC_VISUALIZER] = enabled } }

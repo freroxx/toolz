@@ -11,8 +11,7 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -21,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -39,11 +39,15 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.frerox.toolz.data.ai.AiSettingsHelper
+import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.launch
@@ -51,11 +55,14 @@ import kotlinx.coroutines.launch
 @Composable
 fun OnboardingScreen(
     settingsRepository: SettingsRepository,
+    aiSettingsManager: AiSettingsManager? = null,
     onFinish: () -> Unit
 ) {
     var step by remember { mutableIntStateOf(1) }
     var name by remember { mutableStateOf("") }
+    var grokApiKey by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val vibrationManager = LocalVibrationManager.current
 
     val infiniteTransition = rememberInfiniteTransition(label = "bg")
     val color1 by infiniteTransition.animateColor(
@@ -88,14 +95,32 @@ fun OnboardingScreen(
             label = "steps"
         ) { currentStep ->
             when (currentStep) {
-                1 -> WelcomeStep(onNext = { step = 2 })
-                2 -> PermissionsStep(onNext = { step = 3 })
+                1 -> WelcomeStep(onNext = { 
+                    vibrationManager?.vibrateClick()
+                    step = 2 
+                })
+                2 -> PermissionsStep(onNext = { 
+                    vibrationManager?.vibrateClick()
+                    step = 3 
+                })
                 3 -> NameStep(
                     name = name,
                     onNameChange = { name = it },
                     onComplete = {
+                        vibrationManager?.vibrateClick()
+                        step = 4
+                    }
+                )
+                4 -> AiOnboardingStep(
+                    apiKey = grokApiKey,
+                    onApiKeyChange = { grokApiKey = it },
+                    onComplete = {
+                        vibrationManager?.vibrateSuccess()
                         scope.launch {
                             settingsRepository.setUserName(name)
+                            if (grokApiKey.isNotBlank()) {
+                                aiSettingsManager?.setApiKey(grokApiKey, "Groq")
+                            }
                             settingsRepository.setOnboardingCompleted(true)
                             onFinish()
                         }
@@ -163,7 +188,7 @@ fun WelcomeStep(onNext: () -> Unit) {
             text = "Your device, fully orchestrated.\n30+ precision instruments optimized for performance.",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(horizontal = 16.dp),
             lineHeight = 26.sp,
             fontWeight = FontWeight.Black
@@ -221,7 +246,7 @@ fun WelcomeFeature(icon: ImageVector, text: String, modifier: Modifier) {
         ) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
             Spacer(Modifier.height(10.dp))
-            Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+            Text(text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -231,6 +256,7 @@ fun WelcomeFeature(icon: ImageVector, text: String, modifier: Modifier) {
 fun PermissionsStep(onNext: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val vibrationManager = LocalVibrationManager.current
     
     var usageStatsGranted by remember { mutableStateOf(hasUsageStatsPermission(context)) }
     var notificationListenerGranted by remember { mutableStateOf(hasNotificationListenerPermission(context)) }
@@ -259,7 +285,9 @@ fun PermissionsStep(onNext: () -> Unit) {
             add(Manifest.permission.READ_MEDIA_AUDIO)
             add(Manifest.permission.READ_MEDIA_IMAGES)
         } else {
+            @Suppress("DEPRECATION")
             add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            @Suppress("DEPRECATION")
             add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
@@ -281,7 +309,7 @@ fun PermissionsStep(onNext: () -> Unit) {
         Text(
             text = "Enable the following modules to unlock the full potential of your device's hardware sensors and storage engines.",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
 
@@ -298,7 +326,10 @@ fun PermissionsStep(onNext: () -> Unit) {
                     desc = "Flashlight, GPS, Camera, and activity tracking engine.",
                     icon = Icons.Rounded.DeveloperBoard,
                     granted = permissionsState.allPermissionsGranted,
-                    onClick = { permissionsState.launchMultiplePermissionRequest() }
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        permissionsState.launchMultiplePermissionRequest() 
+                    }
                 )
             }
 
@@ -308,7 +339,10 @@ fun PermissionsStep(onNext: () -> Unit) {
                     desc = "Required for screen-time analytics and Focus Flow.",
                     icon = Icons.Rounded.Timeline,
                     granted = usageStatsGranted,
-                    onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) 
+                    }
                 )
             }
 
@@ -318,7 +352,10 @@ fun PermissionsStep(onNext: () -> Unit) {
                     desc = "Securely indexes system alerts for Notification Vault.",
                     icon = Icons.Rounded.Security,
                     granted = notificationListenerGranted,
-                    onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) 
+                    }
                 )
             }
 
@@ -328,7 +365,10 @@ fun PermissionsStep(onNext: () -> Unit) {
                     desc = "Accessibility layer for advanced hard-lock focus features.",
                     icon = Icons.Rounded.Hub,
                     granted = accessibilityGranted,
-                    onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) 
+                    }
                 )
             }
         }
@@ -352,7 +392,10 @@ fun PermissionsStep(onNext: () -> Unit) {
             }
 
             TextButton(
-                onClick = onNext,
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    onNext()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp)
@@ -407,7 +450,7 @@ fun PermissionCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), lineHeight = 16.sp, fontWeight = FontWeight.Black)
+                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp, fontWeight = FontWeight.Black)
             }
             
             if (!granted) {
@@ -487,7 +530,7 @@ fun NameStep(
         Text(
             text = "Personalize your Toolz workspace.",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Black
         )
 
@@ -531,7 +574,138 @@ fun NameStep(
 
         Button(
             onClick = onComplete,
-            enabled = name.isNotBlank(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .bouncyClick {},
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Text("NEXT", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.width(12.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+
+@Composable
+fun AiOnboardingStep(
+    apiKey: String,
+    onApiKeyChange: (String) -> Unit,
+    onComplete: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    var showTutorial by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "ai")
+    val floatAnim by infiniteTransition.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(tween(3000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "float"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .graphicsLayer { translationY = floatAnim },
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(40.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(40.dp))
+
+        Text(
+            text = "AI POWERED WORKSPACE",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            lineHeight = 36.sp
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Enable AI tools for advanced OCR, smart summaries, and assistant features.",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = onApiKeyChange,
+            placeholder = { Text("Enter Grok API Key") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            singleLine = true,
+            trailingIcon = {
+                IconButton(onClick = { 
+                    vibrationManager?.vibrateClick()
+                    showTutorial = true 
+                }) {
+                    Icon(Icons.AutoMirrored.Rounded.HelpOutline, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+            )
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        TextButton(
+            onClick = {
+                vibrationManager?.vibrateClick()
+                onApiKeyChange(AiSettingsHelper.getDefaultKey("Groq"))
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Rounded.Key, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("USE TEST API KEY", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
+
+        Spacer(Modifier.height(48.dp))
+
+        Button(
+            onClick = onComplete,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(72.dp)
@@ -541,6 +715,51 @@ fun NameStep(
             Text("LAUNCH DASHBOARD", fontWeight = FontWeight.Black, fontSize = 16.sp, letterSpacing = 1.sp)
             Spacer(Modifier.width(12.dp))
             Icon(Icons.Rounded.RocketLaunch, null, modifier = Modifier.size(24.dp))
+        }
+    }
+
+    if (showTutorial) {
+        TutorialDialog(onDismiss = { showTutorial = false })
+    }
+}
+
+@Composable
+fun TutorialDialog(onDismiss: () -> Unit) {
+    val tutorial = AiSettingsHelper.tutorials["Groq"] ?: listOf("No tutorial available")
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text("HOW TO GET GROK KEY", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Spacer(Modifier.height(20.dp))
+                tutorial.forEachIndexed { index, step ->
+                    Row(modifier = Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+                        Surface(
+                            modifier = Modifier.size(24.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("${index + 1}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(step, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+                Spacer(Modifier.height(32.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("I UNDERSTAND", fontWeight = FontWeight.Black)
+                }
+            }
         }
     }
 }

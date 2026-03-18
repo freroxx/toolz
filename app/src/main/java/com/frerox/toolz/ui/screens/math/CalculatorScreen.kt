@@ -6,9 +6,11 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,10 +34,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.rounded.Calculate
+import androidx.compose.material.icons.rounded.DeleteOutline
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +49,9 @@ fun CalculatorScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    var showHistory by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
 
     Scaffold(
         topBar = {
@@ -60,7 +67,10 @@ fun CalculatorScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -71,7 +81,22 @@ fun CalculatorScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.onToggleMode() },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            showHistory = true
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.History, contentDescription = "History")
+                    }
+                    IconButton(
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            viewModel.onToggleMode() 
+                        },
                         modifier = Modifier
                             .padding(8.dp)
                             .clip(RoundedCornerShape(20.dp))
@@ -185,7 +210,10 @@ fun CalculatorScreen(
                     )
                     
                     Surface(
-                        onClick = { viewModel.onToggleAngleMode() },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            viewModel.onToggleAngleMode() 
+                        },
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
@@ -226,13 +254,87 @@ fun CalculatorScreen(
             
             Spacer(modifier = Modifier.navigationBarsPadding())
         }
+
+        if (showHistory) {
+            ModalBottomSheet(
+                onDismissRequest = { showHistory = false },
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "HISTORY",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        IconButton(onClick = { viewModel.clearHistory() }) {
+                            Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    
+                    if (state.history.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No history yet", color = MaterialTheme.colorScheme.outline)
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(state.history) { item ->
+                                Column(modifier = Modifier.fillMaxWidth().bouncyClick {
+                                    viewModel.onClear()
+                                    // Optionally populate display with result
+                                    // viewModel.onDigit(item.second)
+                                    showHistory = false
+                                }) {
+                                    Text(
+                                        item.first,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.End
+                                    )
+                                    Text(
+                                        "= ${item.second}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.End
+                                    )
+                                    HorizontalDivider(modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 fun StandardKeypad(viewModel: CalculatorViewModel) {
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     val buttons = listOf(
         "C", "÷", "×", "DEL",
         "7", "8", "9", "-",
@@ -251,7 +353,7 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
         items(buttons) { btn ->
             when (btn) {
                 "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, {
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    if (hapticEnabled) vibrationManager?.vibrateTick()
                     viewModel.onBackspace() 
                 })
                 else -> {
@@ -259,8 +361,8 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
                         text = btn,
                         onClick = {
                             if (hapticEnabled) {
-                                if (btn == "=") view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                else view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                if (btn == "=") vibrationManager?.vibrateLongClick()
+                                else vibrationManager?.vibrateClick()
                             }
                             when (btn) {
                                 "C" -> viewModel.onClear()
@@ -283,7 +385,7 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 @Composable
 fun ScientificKeypad(viewModel: CalculatorViewModel) {
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
     val buttons = listOf(
         "sin", "cos", "tan", "inv",
         "asin", "acos", "atan", "exp",
@@ -305,14 +407,14 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
         items(buttons) { btn ->
             when (btn) {
                 "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, {
-                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    if (hapticEnabled) vibrationManager?.vibrateTick()
                     viewModel.onBackspace() 
                 }, isScientific = true)
                 "C" -> {
                     CalculatorButton(
                         text = "C",
                         onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            if (hapticEnabled) vibrationManager?.vibrateLongClick()
                             viewModel.onClear() 
                         },
                         isScientific = true,
@@ -324,8 +426,8 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
                         text = btn,
                         onClick = {
                             if (hapticEnabled) {
-                                if (btn == "=") view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                else view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                if (btn == "=") vibrationManager?.vibrateLongClick()
+                                else vibrationManager?.vibrateClick()
                             }
                             when (btn) {
                                 "=" -> viewModel.onEquals()

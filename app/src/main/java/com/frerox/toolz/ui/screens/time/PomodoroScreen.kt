@@ -33,6 +33,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +45,7 @@ fun PomodoroScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val hapticEnabled = LocalHapticEnabled.current
-    val view = LocalView.current
+    val vibrationManager = LocalVibrationManager.current
 
     val totalTime = state.mode.minutes * 60 * 1000L
     val animatedProgress by animateFloatAsState(
@@ -66,7 +67,10 @@ fun PomodoroScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -204,7 +208,7 @@ fun PomodoroScreen(
                         ) {
                             IconButton(
                                 onClick = { 
-                                    if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    vibrationManager?.vibrateClick()
                                     viewModel.stopRingtone() 
                                 },
                                 modifier = Modifier
@@ -230,7 +234,7 @@ fun PomodoroScreen(
                 ) {
                     IconButton(
                         onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateLongClick()
                             viewModel.reset() 
                         },
                         modifier = Modifier
@@ -243,7 +247,7 @@ fun PomodoroScreen(
 
                     Surface(
                         onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             if (state.isFinished) viewModel.stopRingtone()
                             viewModel.toggleStartStop() 
                         },
@@ -264,7 +268,7 @@ fun PomodoroScreen(
 
                     IconButton(
                         onClick = { 
-                            if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            vibrationManager?.vibrateClick()
                             viewModel.skip() 
                         },
                         modifier = Modifier

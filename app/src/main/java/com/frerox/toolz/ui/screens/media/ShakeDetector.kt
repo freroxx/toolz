@@ -5,20 +5,26 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import kotlin.math.sqrt
 
-class ShakeDetector(private val onShake: () -> Unit) : SensorEventListener {
+class ShakeDetector(
+    private var threshold: Double = 3500.0,
+    private val onShake: () -> Unit
+) : SensorEventListener {
 
     private var lastUpdate: Long = 0
     private var lastX = 0f
     private var lastY = 0f
     private var lastZ = 0f
     
-    // Threshold for heavy shakes (increased for reliability)
-    private val SHAKE_THRESHOLD = 3500.0
     // Counter for continuous shakes
     private var shakeCount = 0
     private var lastShakeTimestamp: Long = 0
-    private val MIN_CONTINUOUS_SHAKES = 5
+    private val MIN_CONTINUOUS_SHAKES = 3
     private val SHAKE_WINDOW_MS = 1200L
+
+    fun updateThreshold(sensitivity: Float) {
+        // sensitivity 0.0 -> 8000.0 (hard), 1.0 -> 2000.0 (easy)
+        threshold = 8000.0 - (sensitivity * 6000.0)
+    }
 
     override fun onSensorChanged(event: SensorEvent) {
         val curTime = System.currentTimeMillis()
@@ -37,7 +43,7 @@ class ShakeDetector(private val onShake: () -> Unit) : SensorEventListener {
             
             val speed = sqrt((deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ).toDouble()) / diffTime * 10000
 
-            if (speed > SHAKE_THRESHOLD) {
+            if (speed > threshold) {
                 // Check if this shake is part of a continuous sequence
                 if (curTime - lastShakeTimestamp < SHAKE_WINDOW_MS) {
                     shakeCount++
