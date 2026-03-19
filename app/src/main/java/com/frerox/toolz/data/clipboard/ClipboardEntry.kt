@@ -8,8 +8,9 @@ data class ClipboardEntry(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val type: String = "TEXT", // TEXT, URL, COLOR, PHONE, OTP, EMAIL, MATHS, PERSONAL, CODE, ADDRESS
+    var type: String = "TEXT", // TEXT, URL, COLOR, PHONE, OTP, EMAIL, MATHS, PERSONAL, CODE, ADDRESS
     val isPinned: Boolean = false,
     val previewUrl: String? = null,
-    val sourceApp: String? = null
+    val sourceApp: String? = null,
+    val summary: String? = null
 )

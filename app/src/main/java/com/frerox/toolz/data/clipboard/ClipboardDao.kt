@@ -10,7 +10,10 @@ interface ClipboardDao {
     fun getAllEntries(): Flow<List<ClipboardEntry>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(entry: ClipboardEntry)
+    suspend fun insert(entry: ClipboardEntry): Long
+
+    @Update
+    suspend fun update(entry: ClipboardEntry)
 
     @Delete
     suspend fun delete(entry: ClipboardEntry)
@@ -32,4 +35,10 @@ interface ClipboardDao {
 
     @Query("SELECT * FROM clipboard_entries ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLatestEntry(): ClipboardEntry?
+
+    @Query("SELECT * FROM clipboard_entries WHERE id = :id")
+    suspend fun getEntryById(id: Int): ClipboardEntry?
+
+    @Query("UPDATE clipboard_entries SET summary = :summary, type = :type WHERE id = :id")
+    suspend fun updateAiDetails(id: Int, summary: String, type: String)
 }

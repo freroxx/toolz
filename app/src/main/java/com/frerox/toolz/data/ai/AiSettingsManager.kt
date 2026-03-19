@@ -86,6 +86,7 @@ class AiSettingsManager @Inject constructor(
 
         private const val KEY_LAST_SYNC = "remote_keys_last_sync"
         private const val KEY_LEGACY_MIGRATION_DONE = "revoked_default_key_migration_v1"
+        private const val KEY_STORED_KEY_SCRUB_DONE = "revoked_default_key_scrub_v2"
         private const val KEY_SAVED_CONFIGS = "saved_configs"
 
         private fun userKey(provider: String) = "api_key_user_$provider"
@@ -107,6 +108,7 @@ class AiSettingsManager @Inject constructor(
 
     init {
         migrateLegacyKeysIfNeeded()
+        scrubStoredKeysIfNeeded()
     }
 
     private fun buildPrefs(): SharedPreferences = try {
@@ -179,7 +181,7 @@ class AiSettingsManager @Inject constructor(
 
     val hasRemoteKeys: Boolean
         get() = PROVIDERS.any { provider ->
-            prefs.getString(remoteKey(provider), null)?.isNotBlank() == true
+            getRemoteKey(provider).isNotBlank()
         }
 
     fun getAiProvider(): String =
@@ -189,14 +191,14 @@ class AiSettingsManager @Inject constructor(
         prefs.edit().putString("ai_provider", provider).apply()
 
     fun resolveApiKey(provider: String = getAiProvider()): ResolvedApiKey {
-        val user = prefs.getString(userKey(provider), null)
+        val user = sanitizeStoredKeyForAccess(userKey(provider))
         if (!user.isNullOrBlank()) {
-            return ResolvedApiKey(user.trim(), ApiKeySource.USER)
+            return ResolvedApiKey(user, ApiKeySource.USER)
         }
 
-        val remote = prefs.getString(remoteKey(provider), null)
+        val remote = sanitizeStoredKeyForAccess(remoteKey(provider))
         if (!remote.isNullOrBlank()) {
-            return ResolvedApiKey(remote.trim(), ApiKeySource.REMOTE)
+            return ResolvedApiKey(remote, ApiKeySource.REMOTE)
         }
 
         return ResolvedApiKey("", ApiKeySource.NONE)
@@ -206,16 +208,16 @@ class AiSettingsManager @Inject constructor(
         resolveApiKey(provider).value
 
     fun getRemoteKey(provider: String): String =
-        prefs.getString(remoteKey(provider), null)?.trim().orEmpty()
+        sanitizeStoredKeyForAccess(remoteKey(provider)).orEmpty()
 
     fun hasUserApiKey(provider: String = getAiProvider()): Boolean =
-        prefs.getString(userKey(provider), null)?.isNotBlank() == true
+        !sanitizeStoredKeyForAccess(userKey(provider)).isNullOrBlank()
 
     fun isUsingRemoteKey(provider: String = getAiProvider()): Boolean =
         resolveApiKey(provider).source == ApiKeySource.REMOTE
 
     fun getRawApiKey(provider: String = getAiProvider()): String =
-        prefs.getString(userKey(provider), null)?.trim().orEmpty()
+        sanitizeStoredKeyForAccess(userKey(provider)).orEmpty()
 
     fun setApiKey(key: String, provider: String = getAiProvider()) {
         val sanitized = sanitizeUserKey(key)
@@ -326,6 +328,18 @@ class AiSettingsManager @Inject constructor(
         editor.putBoolean(KEY_LEGACY_MIGRATION_DONE, true).apply()
     }
 
+    private fun scrubStoredKeysIfNeeded() {
+        if (prefs.getBoolean(KEY_STORED_KEY_SCRUB_DONE, false)) return
+
+        val editor = prefs.edit()
+        PROVIDERS.forEach { provider ->
+            scrubStoredKey(editor, userKey(provider), "user")
+            scrubStoredKey(editor, remoteKey(provider), "remote")
+            scrubStoredKey(editor, legacyKey(provider), "legacy")
+        }
+        editor.putBoolean(KEY_STORED_KEY_SCRUB_DONE, true).apply()
+    }
+
     private fun loadSavedConfigsInternal(): List<AiConfig> {
         val json = prefs.getString(KEY_SAVED_CONFIGS, null) ?: return emptyList()
         return try {
@@ -363,10 +377,11 @@ class AiSettingsManager @Inject constructor(
         provider: String,
         value: String,
     ) {
-        if (value.isBlank()) {
+        val sanitized = sanitizeKeyValue(value)
+        if (sanitized.isBlank()) {
             editor.remove(remoteKey(provider))
         } else {
-            editor.putString(remoteKey(provider), value)
+            editor.putString(remoteKey(provider), sanitized)
         }
     }
 
@@ -402,14 +417,43 @@ class AiSettingsManager @Inject constructor(
     }
 
     private fun sanitizeConfig(config: AiConfig): AiConfig {
-        val sanitizedKey = sanitizeUserKey(config.apiKey)
+        val sanitizedKey = sanitizeKeyValue(config.apiKey)
         return if (sanitizedKey == config.apiKey) config else config.copy(apiKey = sanitizedKey)
     }
 
-    private fun sanitizeUserKey(key: String): String {
+    private fun sanitizeUserKey(key: String): String =
+        sanitizeKeyValue(key)
+
+    private fun sanitizeKeyValue(key: String): String {
         val trimmed = key.trim()
         if (trimmed.isBlank()) return ""
         return if (isRevokedLegacyKey(trimmed)) "" else trimmed
+    }
+
+    private fun sanitizeStoredKeyForAccess(prefKey: String): String? {
+        val value = prefs.getString(prefKey, null)?.trim()
+        if (value.isNullOrBlank()) return null
+        if (!isRevokedLegacyKey(value)) return value
+
+        prefs.edit().remove(prefKey).apply()
+        Log.w(TAG, "Removed revoked stored key from $prefKey during access")
+        return null
+    }
+
+    private fun scrubStoredKey(
+        editor: SharedPreferences.Editor,
+        prefKey: String,
+        label: String,
+    ) {
+        val value = prefs.getString(prefKey, null)?.trim().orEmpty()
+        if (value.isBlank()) {
+            editor.remove(prefKey)
+            return
+        }
+        if (isRevokedLegacyKey(value)) {
+            Log.w(TAG, "Removing revoked $label key from $prefKey")
+            editor.remove(prefKey)
+        }
     }
 
     private fun isRevokedLegacyKey(key: String): Boolean =
