@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -55,6 +56,7 @@ fun ClipboardScreen(
     onConvertToTask: (String) -> Unit = {}
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val isSummarizingId by viewModel.isSummarizing.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val groups = remember(entries) { viewModel.groupedEntries(entries) }
@@ -237,6 +239,7 @@ fun ClipboardScreen(
                             val index = listState.firstVisibleItemIndex
                             LiquidStackCard(
                                 entry = entry,
+                                isSummarizing = isSummarizingId == entry.id,
                                 scrollOffset = index,
                                 onCopy = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -245,6 +248,7 @@ fun ClipboardScreen(
                                 },
                                 onDelete = { viewModel.deleteEntry(entry) },
                                 onPin = { viewModel.togglePin(entry.id) },
+                                onSummarize = { viewModel.summarizeEntry(entry) },
                                 onAction = { action -> 
                                     if (action == "convert_to_task") {
                                         onConvertToTask(entry.content)
@@ -306,10 +310,12 @@ private fun EmptyClipboardState() {
 @Composable
 private fun LiquidStackCard(
     entry: ClipboardEntry,
+    isSummarizing: Boolean,
     scrollOffset: Int,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
     onPin: () -> Unit,
+    onSummarize: () -> Unit,
     onAction: (String) -> Unit
 ) {
     val tiltDeg = remember(scrollOffset) { (scrollOffset % 5) * 0.3f }
@@ -373,19 +379,54 @@ private fun LiquidStackCard(
                     fontFamily = if (entry.type == "CODE") FontFamily.Monospace else FontFamily.Default,
                     lineHeight = 20.sp
                 ),
-                maxLines = 6,
+                maxLines = if (entry.summary != null) 3 else 6,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurface
             )
+
+            if (entry.summary != null) {
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(
+                            text = entry.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 ActionChip("Copy", Icons.Rounded.ContentCopy) { onCopy() }
+                
+                if (entry.summary == null) {
+                    ActionChip(
+                        label = if (isSummarizing) "Summarizing..." else "AI Summarize",
+                        icon = Icons.Rounded.AutoAwesome,
+                        isLoading = isSummarizing
+                    ) { onSummarize() }
+                }
+
                 ActionChip("Task", Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") }
+
+                Spacer(Modifier.weight(1f))
 
                 when (entry.type) {
                     "PHONE" -> {
@@ -396,9 +437,6 @@ private fun LiquidStackCard(
                     }
                     "EMAIL" -> {
                         ActionChip("Email", Icons.Rounded.Email) { onAction("email") }
-                    }
-                    else -> {
-                        ActionChip("Share", Icons.Rounded.Share) { onAction("share") }
                     }
                 }
             }
@@ -440,6 +478,7 @@ private fun TypeIcon(type: String, content: String) {
         "CODE" -> TypeIconBox(Icons.Rounded.Code, Color(0xFF00BCD4))
         "ADDRESS" -> TypeIconBox(Icons.Rounded.LocationOn, Color(0xFFFF5722))
         "CRYPTO" -> TypeIconBox(Icons.Rounded.CurrencyBitcoin, Color(0xFFF7931A))
+        "TODO" -> TypeIconBox(Icons.Rounded.Checklist, Color(0xFF4CAF50))
         else -> TypeIconBox(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary)
     }
 }
@@ -458,12 +497,19 @@ private fun TypeIconBox(icon: ImageVector, color: Color) {
 }
 
 @Composable
-private fun ActionChip(label: String, icon: ImageVector, onClick: () -> Unit) {
+private fun ActionChip(
+    label: String,
+    icon: ImageVector,
+    isLoading: Boolean = false,
+    onClick: () -> Unit
+) {
     Surface(
-        onClick = onClick,
+        onClick = if (isLoading) ({}) else onClick,
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+        color = if (label.contains("AI")) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f) 
+                else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, if (label.contains("AI")) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f) 
+                                   else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
         modifier = Modifier.height(32.dp)
     ) {
         Row(
@@ -471,12 +517,25 @@ private fun ActionChip(label: String, icon: ImageVector, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Icon(icon, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            } else {
+                Icon(
+                    icon, 
+                    null, 
+                    modifier = Modifier.size(14.dp), 
+                    tint = if (label.contains("AI")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                )
+            }
             Text(
                 label,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary
+                color = if (label.contains("AI")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
             )
         }
     }

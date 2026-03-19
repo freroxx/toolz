@@ -10,11 +10,13 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
@@ -24,6 +26,7 @@ class ClipboardService : Service() {
 
     @Inject lateinit var clipboardDao: ClipboardDao
     @Inject lateinit var classifier: ClipboardClassifier
+    @Inject lateinit var aiRepository: ChatRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var clipboardManager: ClipboardManager? = null
@@ -42,13 +45,17 @@ class ClipboardService : Service() {
                 if (latest?.content == text) return@launch
                 
                 Log.d(TAG, "New clipboard content detected")
-                val type = classifier.classify(text)
+                val initialType = classifier.classify(text)
+                
                 val entry = ClipboardEntry(
                     content   = text,
                     timestamp = System.currentTimeMillis(),
-                    type      = type
+                    type      = initialType
                 )
-                clipboardDao.insert(entry)
+                val id = clipboardDao.insert(entry).toInt()
+                
+                // Background AI processing for better category and optional summary if it's long
+                processWithAi(id, text, initialType)
                 
                 // Maintenance
                 val count = clipboardDao.getEntryCount()
@@ -60,6 +67,45 @@ class ClipboardService : Service() {
                 clipboardDao.deleteOlderThan(expiry)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing clipboard change", e)
+            }
+        }
+    }
+
+    private fun processWithAi(id: Int, text: String, currentType: String) {
+        serviceScope.launch {
+            try {
+                // If it's already a very specific type like COLOR or OTP, maybe skip AI categorization to save tokens
+                if (currentType == "COLOR" || currentType == "OTP") return@launch
+
+                val prompt = """
+                    Classify this clipboard content into one of these categories: 
+                    TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
+                    If the text is long (over 100 words), also provide a 1-sentence summary.
+                    
+                    Content: ${text.take(1000)}
+                    
+                    Respond in JSON format: {"category": "CATEGORY", "summary": "optional summary or null"}
+                """.trimIndent()
+
+                aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                    result.onSuccess { response ->
+                        // Simple JSON parsing from response
+                        val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
+                        val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1)
+                        
+                        if (summary != null && summary != "null") {
+                            clipboardDao.updateAiDetails(id, summary, category)
+                        } else {
+                            // Just update category if no summary
+                            val entry = clipboardDao.getEntryById(id)
+                            entry?.let {
+                                clipboardDao.update(it.copy(type = category))
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "AI Background processing failed", e)
             }
         }
     }

@@ -1,11 +1,11 @@
 package com.frerox.toolz.ui.screens.clipboard
 
 import android.app.Application
-import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
@@ -26,11 +26,15 @@ data class ClipboardGroup(
 class ClipboardViewModel @Inject constructor(
     private val application: Application,
     private val clipboardDao: ClipboardDao,
+    private val aiRepository: ChatRepository,
     val classifier: ClipboardClassifier
 ) : AndroidViewModel(application) {
 
     val entries: StateFlow<List<ClipboardEntry>> = clipboardDao.getAllEntries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _isSummarizing = MutableStateFlow<Int?>(null)
+    val isSummarizing = _isSummarizing.asStateFlow()
 
     init {
         // Always start the clipboard service automatically
@@ -72,6 +76,35 @@ class ClipboardViewModel @Inject constructor(
 
     fun clearAll() {
         viewModelScope.launch { clipboardDao.clearAllUnpinned() }
+    }
+
+    fun summarizeEntry(entry: ClipboardEntry) {
+        viewModelScope.launch {
+            _isSummarizing.value = entry.id
+            try {
+                val prompt = """
+                    Classify this clipboard content into one of these categories: 
+                    TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
+                    Also provide a very short, punchy 1-sentence summary (max 15 words).
+                    
+                    Content: ${entry.content.take(1500)}
+                    
+                    Respond in JSON format: {"category": "CATEGORY", "summary": "Short summary"}
+                """.trimIndent()
+
+                aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                    result.onSuccess { response ->
+                        val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type
+                        val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: ""
+                        clipboardDao.updateAiDetails(entry.id, summary, category)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isSummarizing.value = null
+            }
+        }
     }
 
     fun refreshClipboard() {
