@@ -175,6 +175,7 @@ fun AiAssistantScreen(
             onEditConfig   = viewModel::editConfig,
             onMoveConfig   = viewModel::moveConfig,
             onTest         = viewModel::testConnection,
+            onRefresh      = viewModel::refreshRemoteKeys,
         )
     }
 
@@ -1406,6 +1407,7 @@ fun AiSettingsDialog(
     onEditConfig: (AiConfig) -> Unit,
     @Suppress("UNUSED_PARAMETER") onMoveConfig: (Int, Int) -> Unit,
     onTest: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
     val context         = LocalContext.current
     var configName      by remember(state.editingConfig) { mutableStateOf(state.editingConfig?.name ?: "") }
@@ -1525,8 +1527,13 @@ fun AiSettingsDialog(
                                 supportingText = {
                                     if (!state.isKeyValid)
                                         Text("Invalid key format for ${state.provider}", color = MaterialTheme.colorScheme.error)
-                                    else if (state.apiKey.isEmpty())
-                                        Text("Using Toolz Default Key", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                    else if (state.apiKey.isEmpty()) {
+                                        if (state.isRemoteKeyAvailable) {
+                                            Text("Using Toolz Default Key", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        } else {
+                                            Text("No Toolz default key is available. Refresh keys or add your own.", color = MaterialTheme.colorScheme.outline)
+                                        }
+                                    }
                                 },
                                 trailingIcon  = {
                                     if (state.apiKey.isNotEmpty()) {
@@ -1595,6 +1602,13 @@ fun AiSettingsDialog(
                                 Icon(Icons.Rounded.Save, null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(if (state.editingConfig != null) "UPDATE" else "SAVE", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            }
+                            IconButton(
+                                onClick  = onRefresh,
+                                modifier = Modifier.size(46.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp)),
+                                enabled  = !state.isTesting
+                            ) {
+                                Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                             }
                         }
 

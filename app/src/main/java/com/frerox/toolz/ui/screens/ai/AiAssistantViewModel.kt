@@ -33,14 +33,15 @@ data class AiAssistantUiState(
 )
 
 data class AiSettingsUiState(
-    val provider: String        = "Groq",
-    val apiKey: String          = "",
-    val selectedModel: String   = "llama-3.3-70b-versatile",
-    val isTesting: Boolean      = false,
-    val testResult: String?     = null,
-    val isKeyValid: Boolean     = true,
-    val editingConfig: AiConfig? = null,
-    val selectedIcon: String    = "AUTO",
+    val provider: String               = "Groq",
+    val apiKey: String                 = "",
+    val selectedModel: String          = "llama-3.3-70b-versatile",
+    val isTesting: Boolean             = false,
+    val testResult: String?            = null,
+    val isKeyValid: Boolean            = true,
+    val isRemoteKeyAvailable: Boolean  = false,
+    val editingConfig: AiConfig?       = null,
+    val selectedIcon: String           = "AUTO",
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -83,9 +84,10 @@ class AiAssistantViewModel @Inject constructor(
         val provider = settingsManager.getAiProvider() ?: "Groq"
         _settingsUiState.update {
             it.copy(
-                provider      = provider,
-                apiKey        = settingsManager.getRawApiKey(provider),
-                selectedModel = settingsManager.getSelectedModel(),
+                provider             = provider,
+                apiKey               = settingsManager.getRawApiKey(provider),
+                selectedModel        = settingsManager.getSelectedModel(),
+                isRemoteKeyAvailable = settingsManager.getRemoteKey(provider).isNotBlank()
             )
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
@@ -99,7 +101,12 @@ class AiAssistantViewModel @Inject constructor(
         val model      = AiSettingsHelper.getRecommendedModel(provider)
         val existingKey = settingsManager.getRawApiKey(provider)
         _settingsUiState.update {
-            it.copy(provider = provider, apiKey = existingKey, selectedModel = model)
+            it.copy(
+                provider             = provider,
+                apiKey               = existingKey,
+                selectedModel        = model,
+                isRemoteKeyAvailable = settingsManager.getRemoteKey(provider).isNotBlank()
+            )
         }
         validateKey()
     }
@@ -130,6 +137,7 @@ class AiAssistantViewModel @Inject constructor(
             settingsManager.setSelectedModel(selectedModel)
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
+        loadSettings() // Refresh availability state
     }
 
     fun saveConfig(name: String) {
@@ -155,11 +163,12 @@ class AiAssistantViewModel @Inject constructor(
     fun editConfig(config: AiConfig) {
         _settingsUiState.update {
             it.copy(
-                provider      = config.provider,
-                apiKey        = config.apiKey,
-                selectedModel = config.model,
-                editingConfig = config,
-                selectedIcon  = config.iconRes,
+                provider             = config.provider,
+                apiKey               = config.apiKey,
+                selectedModel        = config.model,
+                editingConfig        = config,
+                selectedIcon         = config.iconRes,
+                isRemoteKeyAvailable = settingsManager.getRemoteKey(config.provider).isNotBlank()
             )
         }
     }
@@ -213,7 +222,15 @@ class AiAssistantViewModel @Inject constructor(
      */
     fun testConnection() {
         val state = _settingsUiState.value
-        val keyToTest = state.apiKey.ifBlank { AiSettingsHelper.getDefaultKey(state.provider) }
+        // Use the entered key, or fallback to the remote key if blank
+        val keyToTest = state.apiKey.ifBlank { settingsManager.getRemoteKey(state.provider) }
+
+        if (keyToTest.isBlank()) {
+            _settingsUiState.update {
+                it.copy(testResult = "No API key available for ${state.provider}. Refresh keys or add your own.")
+            }
+            return
+        }
 
         if (!AiSettingsHelper.validateApiKey(state.provider, keyToTest)) {
             _settingsUiState.update { it.copy(testResult = "Invalid key format for ${state.provider}") }
@@ -245,6 +262,22 @@ class AiAssistantViewModel @Inject constructor(
                             it.copy(isTesting = false, testResult = "✗ Failed: ${e.message}")
                         }
                     }
+            }
+        }
+    }
+
+    fun refreshRemoteKeys() {
+        viewModelScope.launch {
+            _settingsUiState.update { it.copy(isTesting = true, testResult = "Syncing keys...") }
+            val success = settingsManager.syncRemoteKeys(force = true)
+            val provider = _settingsUiState.value.provider
+            val remoteKeyAvailable = settingsManager.getRemoteKey(provider).isNotBlank()
+            _settingsUiState.update {
+                it.copy(
+                    isTesting = false,
+                    testResult = if (success) "✓ Keys refreshed" else "✗ Sync failed",
+                    isRemoteKeyAvailable = settingsManager.getRemoteKey(it.provider).isNotBlank()
+                )
             }
         }
     }
@@ -283,7 +316,7 @@ class AiAssistantViewModel @Inject constructor(
 
     /**
      * Cancels the currently running inference job.
-     * Safe to call when nothing is running.
+     * Safe to call when bandage is running.
      */
     fun cancelRequest() {
         activeInferenceJob?.cancel()

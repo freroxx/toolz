@@ -252,25 +252,28 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
         modelOverride: String?,
     ): Flow<Result<String>> = flow {
-        val provider  = settingsManager.getAiProvider()
-        val apiKey    = settingsManager.getApiKey(provider)
+        val provider = settingsManager.getAiProvider()
+        val keyState = settingsManager.resolveApiKey(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
-        emit(callProvider(provider, apiKey, modelName, prompt, history, image))
+        emit(callProvider(provider, keyState, modelName, prompt, history, image))
     }
 
     // ── testConnection ────────────────────────────────────────────────────
 
     override fun testConnection(config: AiConfig): Flow<Result<String>> = flow {
-        val key = config.apiKey.ifBlank { AiSettingsHelper.getDefaultKey(config.provider) }
+        val key = config.apiKey.trim()
         emit(
             try {
                 callProvider(
-                    provider  = config.provider,
-                    apiKey    = key,
+                    provider = config.provider,
+                    keyState = ResolvedApiKey(
+                        value = key,
+                        source = if (key.isBlank()) ApiKeySource.NONE else ApiKeySource.USER,
+                    ),
                     modelName = config.model,
-                    prompt    = "Reply with exactly: OK",
-                    history   = emptyList(),
-                    image     = null,
+                    prompt = "Reply with exactly: OK",
+                    history = emptyList(),
+                    image = null,
                 )
             } catch (e: Exception) {
                 Result.failure(e)
@@ -282,25 +285,79 @@ class AiRepositoryImpl @Inject constructor(
 
     private suspend fun callProvider(
         provider: String,
-        apiKey: String,
+        keyState: ResolvedApiKey,
         modelName: String,
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
     ): Result<String> = try {
-        when (provider) {
-            "Gemini"     -> callGemini(apiKey, modelName, prompt, history, image)
-            "ChatGPT",
-            "Groq",
-            "DeepSeek",
-            "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image)
-            "Claude"     -> callClaude(apiKey, modelName, prompt, history, image)
-            else         -> Result.failure(Exception("Unknown provider: $provider"))
+        if (keyState.value.isBlank()) {
+            Result.failure(Exception("No API key available for $provider. Please add one in settings or wait for sync."))
+        } else {
+            executeProviderCall(provider, keyState.value, modelName, prompt, history, image)
         }
     } catch (e: HttpException) {
-        Result.failure(Exception(httpErrorMessage(e, provider)))
+        if (e.code() == 401 && keyState.source == ApiKeySource.REMOTE) {
+            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image)
+        } else {
+            Result.failure(Exception(httpErrorMessage(e, provider, keyState.source)))
+        }
     } catch (e: Exception) {
         Result.failure(e)
+    }
+
+    private suspend fun executeProviderCall(
+        provider: String,
+        apiKey: String,
+        modelName: String,
+        prompt: String,
+        history: List<AiMessage>,
+        image: Bitmap?,
+    ): Result<String> = when (provider) {
+        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image)
+        "ChatGPT",
+        "Groq",
+        "DeepSeek",
+        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image)
+        "Claude" -> callClaude(apiKey, modelName, prompt, history, image)
+        else -> Result.failure(Exception("Unknown provider: $provider"))
+    }
+
+    private suspend fun refreshRemoteKeyAndRetry(
+        provider: String,
+        failedKey: String,
+        modelName: String,
+        prompt: String,
+        history: List<AiMessage>,
+        image: Bitmap?,
+    ): Result<String> {
+        settingsManager.invalidateRemoteKey(provider, failedKey)
+        val refreshed = settingsManager.syncRemoteKeys(force = true)
+        val refreshedKey = settingsManager.resolveApiKey(provider)
+
+        if (!refreshed || refreshedKey.source != ApiKeySource.REMOTE || refreshedKey.value.isBlank()) {
+            return Result.failure(
+                Exception("The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings.")
+            )
+        }
+
+        if (refreshedKey.value == failedKey) {
+            settingsManager.invalidateRemoteKey(provider, failedKey)
+            return Result.failure(
+                Exception("The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings.")
+            )
+        }
+
+        return try {
+            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image)
+        } catch (e: HttpException) {
+            if (e.code() == 401) {
+                settingsManager.invalidateRemoteKey(provider, refreshedKey.value)
+            }
+            Result.failure(Exception(httpErrorMessage(e, provider, refreshedKey.source)))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     // ── Gemini ────────────────────────────────────────────────────────────
@@ -467,10 +524,20 @@ class AiRepositoryImpl @Inject constructor(
             Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
         }
 
-    private fun httpErrorMessage(e: HttpException, provider: String): String {
+    private fun httpErrorMessage(
+        e: HttpException,
+        provider: String,
+        keySource: ApiKeySource,
+    ): String {
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         return when (e.code()) {
-            401  -> "Invalid API key for $provider. Please check your settings."
+            401  -> {
+                if (keySource == ApiKeySource.REMOTE) {
+                    "The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings."
+                } else {
+                    "Invalid API key for $provider. Please check your settings."
+                }
+            }
             403  -> "Access denied ($provider). Your key may lack the required permissions."
             429  -> "Rate limit or quota exceeded ($provider). Try again later or switch providers."
             400  -> "Bad request to $provider (400): ${body ?: e.message()}"
