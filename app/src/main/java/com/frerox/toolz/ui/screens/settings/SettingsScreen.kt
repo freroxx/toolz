@@ -987,14 +987,14 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
-            Text("TOOLZ PRO", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text("TOOLZ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             @Suppress("DEPRECATION")
-            Text("V1.0.2 (ALPHA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
+            Text("V1.0.3 (BETA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
 
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "A modular toolset for productivity and analytics. Built for high performance.",
+                "A modular toolset for productivity and analytics. Built for high performance by frerox.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,
