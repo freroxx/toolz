@@ -693,13 +693,13 @@ fun AiOnboardingStep(
         TextButton(
             onClick = {
                 vibrationManager?.vibrateClick()
-                onApiKeyChange(AiSettingsHelper.getDefaultKey("Groq"))
+                onApiKeyChange("")
             },
             modifier = Modifier.fillMaxWidth()
         ) {
             Icon(Icons.Rounded.Key, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("USE TEST API KEY", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text("USE TOOLZ DEFAULT KEY", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
 
         Spacer(Modifier.height(48.dp))

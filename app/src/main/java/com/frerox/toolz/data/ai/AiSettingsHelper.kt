@@ -12,9 +12,6 @@ package com.frerox.toolz.data.ai
  * They are now fetched at runtime from the secure Vercel endpoint
  * (toolz-apis.vercel.app/api/keys) and cached in EncryptedSharedPreferences
  * by [AiSettingsManager.syncRemoteKeys].
- *
- * [getDefaultKey] returns an empty string — callers fall back gracefully
- * until the first successful network sync.
  */
 object AiSettingsHelper {
 
@@ -72,18 +69,28 @@ object AiSettingsHelper {
         else         -> ""
     }
 
+    /**
+     * Relaxed validation to prevent "Invalid Key" errors.
+     * Only basic length check to ensure it's not a tiny fragment.
+     */
     fun validateApiKey(provider: String, key: String): Boolean {
         if (key.isBlank()) return true
-        val regex = when (provider) {
-            "Gemini"     -> Regex("^AIza[0-9A-Za-z\\-_]{35}$")
-            "ChatGPT"    -> Regex("^sk-[0-9A-Za-z\\-_]{32,}$")
-            "Groq"       -> Regex("^gsk_[0-9A-Za-z]{48,}$")
-            "Claude"     -> Regex("^sk-ant-api[0-9]{2}-[0-9A-Za-z\\-_]{80,}$")
-            "DeepSeek"   -> Regex("^sk-[0-9a-f]{32}$")
-            "OpenRouter" -> Regex("^sk-or-v1-[0-9a-f]{64}$")
-            else         -> Regex(".*")
+
+        // Very short keys are definitely invalid, but some experimental 
+        // keys can be short. 8 characters is a safe minimum.
+        if (key.length < 8) return false
+
+        // Relaxed prefix checks — many providers change their formats.
+        // We only check for common starting patterns but don't fail if they differ.
+        return when (provider) {
+            "Gemini"     -> key.startsWith("AIza") || key.length > 20
+            "ChatGPT"    -> key.startsWith("sk-")
+            "Groq"       -> key.startsWith("gsk_") || key.startsWith("sk-")
+            "Claude"     -> key.startsWith("sk-ant-") || key.startsWith("sk-")
+            "DeepSeek"   -> key.startsWith("sk-")
+            "OpenRouter" -> key.startsWith("sk-or-") || key.startsWith("sk-")
+            else         -> true
         }
-        return regex.matches(key)
     }
 
     /** No hardcoded defaults — returns empty string until synced from server. */

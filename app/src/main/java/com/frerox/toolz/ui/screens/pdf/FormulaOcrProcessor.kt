@@ -21,6 +21,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
@@ -321,10 +322,11 @@ class FormulaOcrProcessor @Inject constructor(
         val truncated = if (rawText.length > 10_000) rawText.take(10_000) + "…" else rawText
         return try {
             withContext(Dispatchers.IO) {
-                openAiService.getChatCompletion(
-                    url        = GROQ_URL,
-                    authHeader = "Bearer $key",
-                    request    = OpenAiRequest(
+                runGroqRequest(key) { requestKey ->
+                    openAiService.getChatCompletion(
+                        url        = GROQ_URL,
+                        authHeader = "Bearer $requestKey",
+                        request    = OpenAiRequest(
                         model     = GROQ_MODEL,
                         messages  = listOf(
                             OpenAiMessage("system", MessageContent.Text(
@@ -338,8 +340,9 @@ class FormulaOcrProcessor @Inject constructor(
                             OpenAiMessage("user", MessageContent.Text(truncated)),
                         ),
                         maxTokens = 4_096,
-                    ),
-                ).choices.firstOrNull()?.message?.content?.trim()
+                        ),
+                    ).choices.firstOrNull()?.message?.content?.trim()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "AI OCR cleaner failed: ${e.message}")
@@ -353,10 +356,11 @@ class FormulaOcrProcessor @Inject constructor(
         val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text
         return try {
             withContext(Dispatchers.IO) {
-                openAiService.getChatCompletion(
-                    url        = GROQ_URL,
-                    authHeader = "Bearer $key",
-                    request    = OpenAiRequest(
+                runGroqRequest(key) { requestKey ->
+                    openAiService.getChatCompletion(
+                        url        = GROQ_URL,
+                        authHeader = "Bearer $requestKey",
+                        request    = OpenAiRequest(
                         model     = GROQ_MODEL,
                         messages  = listOf(
                             OpenAiMessage("system", MessageContent.Text(
@@ -372,12 +376,36 @@ class FormulaOcrProcessor @Inject constructor(
                             )),
                         ),
                         maxTokens = 1_536,
-                    ),
-                ).choices.firstOrNull()?.message?.content?.trim()
+                        ),
+                    ).choices.firstOrNull()?.message?.content?.trim()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "PDF summarisation failed: ${e.message}")
             null
+        }
+    }
+
+    private suspend fun <T> runGroqRequest(
+        initialKey: String,
+        requestBlock: suspend (String) -> T,
+    ): T {
+        try {
+            return requestBlock(initialKey)
+        } catch (e: HttpException) {
+            if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
+                val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
+                if (refreshed.source == com.frerox.toolz.data.ai.ApiKeySource.REMOTE &&
+                    refreshed.value.isNotBlank() &&
+                    refreshed.value != initialKey
+                ) {
+                    return requestBlock(refreshed.value)
+                }
+                throw IllegalStateException(
+                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
+                )
+            }
+            throw e
         }
     }
 }

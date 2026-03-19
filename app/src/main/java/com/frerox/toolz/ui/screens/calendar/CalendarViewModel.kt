@@ -99,7 +99,7 @@ class CalendarViewModel @Inject constructor(
                 val configs         = aiSettingsManager.getSavedConfigs()
                 val currentProvider = aiSettingsManager.getAiProvider() ?: "Gemini"
                 val currentModel    = aiSettingsManager.getSelectedModel()
-                val currentKey      = aiSettingsManager.getApiKey()
+                val currentKey      = aiSettingsManager.getRawApiKey(currentProvider)
                 val matchedName     = configs.find {
                     it.provider == currentProvider &&
                             it.model == currentModel &&

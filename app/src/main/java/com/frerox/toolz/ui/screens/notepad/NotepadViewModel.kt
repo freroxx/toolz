@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
 import org.json.JSONObject
+import retrofit2.HttpException
 import javax.inject.Inject
 
 private const val TAG = "NotepadViewModel"
@@ -187,11 +188,13 @@ class NotepadViewModel @Inject constructor(
                 )
 
                 val response = withContext(Dispatchers.IO) {
-                    openAiService.getChatCompletion(
-                        url        = GROQ_URL,
-                        authHeader = "Bearer $key",
-                        request    = request,
-                    )
+                    runGroqRequest(key) { requestKey ->
+                        openAiService.getChatCompletion(
+                            url        = GROQ_URL,
+                            authHeader = "Bearer $requestKey",
+                            request    = request,
+                        )
+                    }
                 }
                 _aiSummary.value = response.choices.firstOrNull()?.message?.content
                     ?: "Could not generate a summary."
@@ -262,11 +265,13 @@ Examples:
                 )
 
                 val response = withContext(Dispatchers.IO) {
-                    openAiService.getChatCompletion(
-                        url        = GROQ_URL,
-                        authHeader = "Bearer $key",
-                        request    = request,
-                    )
+                    runGroqRequest(key) { requestKey ->
+                        openAiService.getChatCompletion(
+                            url        = GROQ_URL,
+                            authHeader = "Bearer $requestKey",
+                            request    = request,
+                        )
+                    }
                 }
 
                 val raw = response.choices.firstOrNull()?.message?.content ?: ""
@@ -285,6 +290,29 @@ Examples:
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
+
+    private suspend fun <T> runGroqRequest(
+        initialKey: String,
+        requestBlock: suspend (String) -> T,
+    ): T {
+        try {
+            return requestBlock(initialKey)
+        } catch (e: HttpException) {
+            if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
+                val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
+                if (refreshed.source == com.frerox.toolz.data.ai.ApiKeySource.REMOTE &&
+                    refreshed.value.isNotBlank() &&
+                    refreshed.value != initialKey
+                ) {
+                    return requestBlock(refreshed.value)
+                }
+                throw IllegalStateException(
+                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
+                )
+            }
+            throw e
+        }
+    }
 
     private fun parseAiStyle(raw: String): AiNoteStyle? {
         return try {

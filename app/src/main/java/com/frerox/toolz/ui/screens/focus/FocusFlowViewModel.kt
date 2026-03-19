@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import retrofit2.HttpException
 import java.util.*
 import javax.inject.Inject
 
@@ -372,11 +373,13 @@ class FocusFlowViewModel @Inject constructor(
                         maxTokens = 512,
                     )
 
-                    val raw = openAiService.getChatCompletion(
-                        url        = GROQ_URL,
-                        authHeader = "Bearer $groqKey",
-                        request    = request,
-                    ).choices.firstOrNull()?.message?.content ?: continue
+                    val raw = runGroqRequest(groqKey) { requestKey ->
+                        openAiService.getChatCompletion(
+                            url        = GROQ_URL,
+                            authHeader = "Bearer $requestKey",
+                            request    = request,
+                        ).choices.firstOrNull()?.message?.content
+                    } ?: continue
 
                     val parsed = parseClassificationResponse(raw, validPkgs)
                     if (parsed.isNotEmpty()) {
@@ -402,6 +405,29 @@ class FocusFlowViewModel @Inject constructor(
         appendLine("""Reply ONLY with JSON: {"pkg.name":"productive","pkg2":"distraction"}""")
         appendLine()
         apps.forEach { appendLine(""""${it.packageName}": "${it.appName}"""") }
+    }
+
+    private suspend fun <T> runGroqRequest(
+        initialKey: String,
+        requestBlock: suspend (String) -> T,
+    ): T {
+        try {
+            return requestBlock(initialKey)
+        } catch (e: HttpException) {
+            if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
+                val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
+                if (refreshed.source == com.frerox.toolz.data.ai.ApiKeySource.REMOTE &&
+                    refreshed.value.isNotBlank() &&
+                    refreshed.value != initialKey
+                ) {
+                    return requestBlock(refreshed.value)
+                }
+                throw IllegalStateException(
+                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
+                )
+            }
+            throw e
+        }
     }
 
     private fun parseClassificationResponse(
