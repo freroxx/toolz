@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Notes
@@ -50,6 +51,8 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.MarkdownSegment
+import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlin.math.roundToInt
 
@@ -374,7 +377,14 @@ fun OcrTextBottomSheet(
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
-                            Text(pdfSummary ?: "", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+                            
+                            val segments = remember(pdfSummary) { parseMarkdownToSegments(pdfSummary ?: "") }
+                            SelectionContainer {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    segments.forEach { seg -> MarkdownSegment(seg) }
+                                }
+                            }
+                            
                             Spacer(Modifier.height(10.dp))
                             Text("Groq · llama-3.3-70b-versatile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontWeight = FontWeight.Black)
                         }
@@ -445,15 +455,17 @@ fun OcrTextBottomSheet(
             ) {
                 LazyColumn(contentPadding = PaddingValues(20.dp), modifier = Modifier.fillMaxSize()) {
                     item {
-                        Text(
-                            text = allText,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = textSize.sp,
-                                lineHeight = (textSize * 1.55f).sp,
-                                fontWeight = FontWeight.Medium
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        SelectionContainer {
+                             Text(
+                                text = allText,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = textSize.sp,
+                                    lineHeight = (textSize * 1.55f).sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }

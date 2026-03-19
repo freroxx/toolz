@@ -95,9 +95,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
+
         scheduleCleanup()
         scheduleUpdateCheck()
+
+        // ── Fetch default API keys from Vercel on cold start ─────────────────
+        // syncRemoteKeys() is a no-op when the 24-hour cache is still fresh,
+        // so it only hits the network once per day at most.
+        lifecycleScope.launch {
+            aiSettingsManager.syncRemoteKeys()
+        }
 
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
@@ -461,7 +468,7 @@ fun ToolzNavHost(
                 }
             )
         }
-        
+
         // AI
         composable(Screen.AiAssistant.route) {
             AiAssistantScreen(onBack = { navController.popBackStack() })
@@ -595,7 +602,7 @@ fun ToolzNavHost(
         }
         composable(Screen.PdfReader.route) {
             ToolzPdfScreen(
-                viewModel = pdfViewModel, 
+                viewModel = pdfViewModel,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToNote = { noteId ->
                     navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId")
