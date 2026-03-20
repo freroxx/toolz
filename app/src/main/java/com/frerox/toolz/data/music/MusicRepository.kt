@@ -27,6 +27,27 @@ class MusicRepository @Inject constructor(
     val recentlyPlayed: Flow<List<MusicTrack>> = musicDao.getRecentlyPlayed()
     val mostPlayed: Flow<List<MusicTrack>> = musicDao.getMostPlayed()
 
+    suspend fun getTrackByUri(uri: String): MusicTrack? = withContext(Dispatchers.IO) {
+        musicDao.getTrackByUri(uri)
+    }
+
+    suspend fun updateTrackAiData(
+        uri: String,
+        lyrics: String? = null,
+        vitals: String? = null,
+        meaning: String? = null,
+        recommendationsJson: String? = null
+    ) = withContext(Dispatchers.IO) {
+        val track = musicDao.getTrackByUri(uri) ?: return@withContext
+        musicDao.updateTrack(track.copy(
+            aiLyrics = lyrics ?: track.aiLyrics,
+            aiArtistVitals = vitals ?: track.aiArtistVitals,
+            aiSongMeaning = meaning ?: track.aiSongMeaning,
+            aiRecommendationsJson = recommendationsJson ?: track.aiRecommendationsJson,
+            lastAiSync = System.currentTimeMillis()
+        ))
+    }
+
     suspend fun scanDeviceForMusic(): List<MusicTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<MusicTrack>()
         val projection = arrayOf(

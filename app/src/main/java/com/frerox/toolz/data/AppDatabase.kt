@@ -49,7 +49,7 @@ import com.frerox.toolz.data.calendar.EventDao
         AiMessage::class,
         EventEntry::class
     ], 
-    version = 23,
+    version = 25,
     exportSchema = false
 )
 @TypeConverters(MusicConverters::class, TodoConverters::class)

@@ -63,6 +63,8 @@ interface OpenAiService {
     suspend fun getChatCompletion(
         @Url url: String,
         @Header("Authorization") authHeader: String,
+        @Header("HTTP-Referer") referer: String? = null,
+        @Header("X-Title") title: String? = null,
         @Body request: OpenAiRequest,
     ): OpenAiResponse
 

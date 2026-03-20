@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -46,7 +47,8 @@ private val DarkColorScheme = darkColorScheme(
     surface = SurfaceDark,
     onSurface = OnSurfaceDark,
     outline = PrimaryDark.copy(alpha = 0.5f),
-    outlineVariant = SecondaryDark.copy(alpha = 0.3f)
+    outlineVariant = SecondaryDark.copy(alpha = 0.3f),
+    surfaceTint = PrimaryDark
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -71,8 +73,34 @@ private val LightColorScheme = lightColorScheme(
     surface = SurfaceLight,
     onSurface = OnSurfaceLight,
     outline = PrimaryLight.copy(alpha = 0.5f),
-    outlineVariant = SecondaryLight.copy(alpha = 0.3f)
+    outlineVariant = SecondaryLight.copy(alpha = 0.3f),
+    surfaceTint = PrimaryLight
 )
+
+fun toolzAppBackgroundBrush(
+    darkTheme: Boolean,
+    performanceMode: Boolean,
+): Brush {
+    val colors = if (darkTheme) {
+        listOf(
+            BackgroundDark,
+            PrimaryDark.withAlpha(if (performanceMode) 0.08f else 0.15f),
+            SecondaryDark.withAlpha(if (performanceMode) 0.05f else 0.12f),
+            SurfaceDark
+        )
+    } else {
+        listOf(
+            BackgroundLight,
+            PrimaryLight.withAlpha(if (performanceMode) 0.06f else 0.12f),
+            SecondaryLight.withAlpha(if (performanceMode) 0.04f else 0.08f),
+            SurfaceLight
+        )
+    }
+    return Brush.verticalGradient(colors)
+}
+
+// Extension to avoid repetitive copy(alpha = ...)
+private fun Color.withAlpha(alpha: Float): Color = this.copy(alpha = alpha)
 
 @Composable
 fun ToolzTheme(
@@ -103,6 +131,8 @@ fun ToolzTheme(
                 outlineVariant = secondary.copy(alpha = 0.3f),
                 surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f),
                 onSurface = if (darkTheme) Color(0xFFE6E1E5) else Color.Black,
+                background = if (darkTheme) BackgroundDark else BackgroundLight,
+                surface = if (darkTheme) SurfaceDark else SurfaceLight,
                 onBackground = if (darkTheme) Color(0xFFE6E1E5) else Color.Black,
                 onSurfaceVariant = if (darkTheme) Color(0xFFCAC4D0) else Color(0xFF49454F)
             )
@@ -111,6 +141,8 @@ fun ToolzTheme(
             val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             dynamic.copy(
                 onSurface = if (darkTheme) Color(0xFFE6E1E5) else dynamic.onSurface,
+                background = if (darkTheme) BackgroundDark else BackgroundLight,
+                surface = if (darkTheme) SurfaceDark else SurfaceLight,
                 onBackground = if (darkTheme) Color(0xFFE6E1E5) else dynamic.onBackground,
                 onSurfaceVariant = if (darkTheme) Color(0xFFCAC4D0) else dynamic.onSurfaceVariant
             )

@@ -39,6 +39,9 @@ interface ClipboardDao {
     @Query("SELECT * FROM clipboard_entries WHERE id = :id")
     suspend fun getEntryById(id: Int): ClipboardEntry?
 
-    @Query("UPDATE clipboard_entries SET summary = :summary, type = :type WHERE id = :id")
-    suspend fun updateAiDetails(id: Int, summary: String, type: String)
+    @Query("UPDATE clipboard_entries SET summary = :summary, type = :type, isAiProcessed = 1 WHERE id = :id")
+    suspend fun updateAiDetails(id: Int, summary: String?, type: String)
+
+    @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 ORDER BY timestamp DESC")
+    suspend fun getUnprocessedEntries(): List<ClipboardEntry>
 }

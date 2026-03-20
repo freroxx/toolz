@@ -12,5 +12,6 @@ data class ClipboardEntry(
     val isPinned: Boolean = false,
     val previewUrl: String? = null,
     val sourceApp: String? = null,
-    val summary: String? = null
+    val summary: String? = null,
+    val isAiProcessed: Boolean = false
 )

@@ -346,7 +346,7 @@ class FocusFlowViewModel @Inject constructor(
 
         if (toClassify.isEmpty()) return
 
-        val groqKey = aiSettingsManager.getApiKey("Groq")
+        val groqKey = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
         if (groqKey.isBlank()) {
             Log.d(TAG, "Groq key not configured; skipping AI categorization")
             return

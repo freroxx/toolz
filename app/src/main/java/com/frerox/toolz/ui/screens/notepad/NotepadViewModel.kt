@@ -157,7 +157,7 @@ class NotepadViewModel @Inject constructor(
             _isAiSummarizing.value = true
             _aiSummary.value       = null
 
-            val key = aiSettingsManager.getApiKey("Groq")
+            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
             if (key.isBlank()) {
                 _aiSummary.value = "⚠ Groq API key not configured. Go to AI Settings → Groq to add your key."
                 _isAiSummarizing.value = false
@@ -184,7 +184,7 @@ class NotepadViewModel @Inject constructor(
                         ),
                         OpenAiMessage("user", MessageContent.Text(noteBody)),
                     ),
-                    maxTokens = 256,
+                    maxTokens = 1000,
                 )
 
                 val response = withContext(Dispatchers.IO) {
@@ -225,7 +225,7 @@ class NotepadViewModel @Inject constructor(
             _isAiStyling.value = true
             _aiStyle.value     = null
 
-            val key = aiSettingsManager.getApiKey("Groq")
+            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
             if (key.isBlank()) {
                 _isAiStyling.value = false
                 return@launch
@@ -261,7 +261,7 @@ Examples:
                         OpenAiMessage("system", MessageContent.Text(systemPrompt)),
                         OpenAiMessage("user",   MessageContent.Text(noteBody)),
                     ),
-                    maxTokens = 150,
+                    maxTokens = 1000,
                 )
 
                 val response = withContext(Dispatchers.IO) {

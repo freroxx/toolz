@@ -15,38 +15,17 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import com.frerox.toolz.data.ai.OpenAiService
+import com.frerox.toolz.data.ai.LrcLibService
 
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    /**
-     * Provides the Moshi instance used by Retrofit for all JSON
-     * serialization and deserialization.
-     *
-     * ADAPTER REGISTRATION ORDER MATTERS:
-     *
-     * Custom adapters MUST be added before [KotlinJsonAdapterFactory].
-     * Moshi resolves adapters in registration order — if KotlinJsonAdapterFactory
-     * comes first, it claims every Kotlin class via reflection before the custom
-     * adapters get a chance to handle their specific types.
-     *
-     * [MessageContentAdapter] — handles [MessageContent] sealed class:
-     *   serializes as a plain JSON string for text turns, or a JSON array
-     *   of content blocks for vision turns.
-     *
-     * [ClaudeMessageAdapter] — handles [ClaudeMessage.content: Any]:
-     *   serializes as a plain string or a typed block array depending on
-     *   whether the turn includes an image.
-     *
-     * [KotlinJsonAdapterFactory] — handles all remaining Kotlin data classes
-     *   via reflection, respecting @Json field name annotations.
-     */
     @Provides
     @Singleton
     fun provideMoshi(): Moshi = Moshi.Builder()
-        .add(MessageContentAdapter())   // ← must be before KotlinJsonAdapterFactory
-        .add(ClaudeMessageAdapter())    // ← must be before KotlinJsonAdapterFactory
+        .add(MessageContentAdapter())
+        .add(ClaudeMessageAdapter())
         .add(KotlinJsonAdapterFactory())
         .build()
 
@@ -63,11 +42,6 @@ object NetworkModule {
         )
         .build()
 
-    /**
-     * The base URL here is a placeholder — all OpenAiService methods use
-     * Retrofit's @Url annotation to supply the full endpoint URL dynamically.
-     * Retrofit still requires a syntactically valid base URL at construction time.
-     */
     @Provides
     @Singleton
     fun provideRetrofit(moshi: Moshi, okHttpClient: OkHttpClient): Retrofit =
@@ -81,4 +55,14 @@ object NetworkModule {
     @Singleton
     fun provideOpenAiService(retrofit: Retrofit): OpenAiService =
         retrofit.create(OpenAiService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideLrcLibService(okHttpClient: OkHttpClient, moshi: Moshi): LrcLibService =
+        Retrofit.Builder()
+            .baseUrl("https://lrclib.net/api/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(LrcLibService::class.java)
 }
