@@ -18,6 +18,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "AiRepository"
+private const val MAX_HISTORY_MESSAGES = 24
+private const val OPEN_ROUTER_REFERER = "https://toolz.app"
+private const val OPEN_ROUTER_TITLE = "Toolz AI"
 
 // ─────────────────────────────────────────────────────────────
 //  OpenAI-compatible request models
@@ -241,8 +244,9 @@ class AiRepositoryImpl @Inject constructor(
 
     private val systemPrompt =
         "You are a helpful, concise, and accurate AI assistant inside the Toolz productivity app. " +
-                "Format code inside markdown fenced code blocks with the language tag. " +
-                "Use **bold** for emphasis and keep responses focused and practical."
+            "Format code inside markdown fenced code blocks with the language tag. " +
+            "Use **bold** for emphasis and keep responses focused and practical. " +
+            "When there is uncertainty, say so plainly instead of guessing."
 
     // ── getChatResponse ───────────────────────────────────────────────────
 
@@ -253,15 +257,17 @@ class AiRepositoryImpl @Inject constructor(
         modelOverride: String?,
     ): Flow<Result<String>> = flow {
         val provider = settingsManager.getAiProvider()
-        val keyState = settingsManager.resolveApiKey(provider)
+        val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
-        emit(callProvider(provider, keyState, modelName, prompt, history, image))
+        emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image))
     }
 
     // ── testConnection ────────────────────────────────────────────────────
 
     override fun testConnection(config: AiConfig): Flow<Result<String>> = flow {
-        val key = config.apiKey.trim()
+        val key = config.apiKey.trim().ifBlank {
+            settingsManager.resolveApiKeyWithRemoteSync(config.provider).value
+        }
         emit(
             try {
                 callProvider(
@@ -293,6 +299,8 @@ class AiRepositoryImpl @Inject constructor(
     ): Result<String> = try {
         if (keyState.value.isBlank()) {
             Result.failure(Exception("No API key available for $provider. Please add one in settings or wait for sync."))
+        } else if (image != null && !AiSettingsHelper.supportsVision(provider, modelName)) {
+            Result.failure(Exception("$provider model '$modelName' does not support image input. Choose a vision-capable model or remove the image."))
         } else {
             executeProviderCall(provider, keyState.value, modelName, prompt, history, image)
         }
@@ -370,19 +378,22 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
     ): Result<String> {
         val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey)
+        val effectivePrompt = prompt.ifBlank {
+            if (image != null) "Describe this image in detail and highlight anything important." else "Help me with this task."
+        }
         return if (image != null) {
             val inputContent = content {
                 image(image)
-                text(prompt.ifBlank { "Describe this image in detail." })
+                text(effectivePrompt)
             }
-            Result.success(generativeModel.generateContent(inputContent).text ?: "No response from Gemini")
+            Result.success(cleanResponseText(generativeModel.generateContent(inputContent).text ?: "No response from Gemini"))
         } else {
             val chat = generativeModel.startChat(
                 history.map { msg ->
                     content(role = if (msg.isUser) "user" else "model") { text(msg.text) }
                 }
             )
-            Result.success(chat.sendMessage(prompt).text ?: "No response from Gemini")
+            Result.success(cleanResponseText(chat.sendMessage(effectivePrompt).text ?: "No response from Gemini"))
         }
     }
 
@@ -396,12 +407,10 @@ class AiRepositoryImpl @Inject constructor(
         history: List<AiMessage>,
         image: Bitmap?,
     ): Result<String> {
-        val baseUrl = when (provider) {
-            "ChatGPT"    -> "https://api.openai.com/v1/"
-            "Groq"       -> "https://api.groq.com/openai/v1/"
-            "DeepSeek"   -> "https://api.deepseek.com/v1/"
-            "OpenRouter" -> "https://openrouter.ai/api/v1/"
-            else         -> "https://api.openai.com/v1/"
+        val completionUrl = AiSettingsHelper.getChatCompletionUrl(provider)
+            ?: return Result.failure(Exception("No chat completion URL configured for $provider"))
+        val effectivePrompt = prompt.ifBlank {
+            if (image != null) "Describe this image in detail and highlight anything important." else "Help me with this task."
         }
 
         val messages = mutableListOf<OpenAiMessage>()
@@ -418,22 +427,28 @@ class AiRepositoryImpl @Inject constructor(
             val base64 = bitmapToBase64(image)
             MessageContent.Blocks(
                 listOf(
-                    ContentBlock(type = "text",      text     = prompt.ifBlank { "Describe this image." }),
+                    ContentBlock(type = "text", text = effectivePrompt),
                     ContentBlock(type = "image_url", imageUrl = ImageUrl("data:image/jpeg;base64,$base64")),
                 )
             )
         } else {
-            MessageContent.Text(prompt)
+            MessageContent.Text(effectivePrompt)
         }
         messages += OpenAiMessage("user", userContent)
 
         val request = OpenAiRequest(
             model          = model,
             messages       = messages,
-            responseFormat = if (prompt.contains("JSON", ignoreCase = true)) ResponseFormat("json_object") else null,
+            responseFormat = if (effectivePrompt.contains("JSON", ignoreCase = true)) ResponseFormat("json_object") else null,
         )
-        val response = openAiService.getChatCompletion("${baseUrl}chat/completions", "Bearer $apiKey", request)
-        return Result.success(response.choices.firstOrNull()?.message?.content ?: "No response")
+        val response = openAiService.getChatCompletion(
+            url = completionUrl,
+            authHeader = "Bearer $apiKey",
+            referer = if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null,
+            title = if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null,
+            request = request,
+        )
+        return Result.success(cleanResponseText(response.choices.firstOrNull()?.message?.content ?: "No response"))
     }
 
     // ── Claude ────────────────────────────────────────────────────────────
@@ -446,6 +461,9 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
     ): Result<String> {
         val messages = mutableListOf<ClaudeMessage>()
+        val effectivePrompt = prompt.ifBlank {
+            if (image != null) "Describe this image in detail and highlight anything important." else "Help me with this task."
+        }
 
         // Build history — Claude requires strictly alternating user/assistant turns.
         // Consecutive same-role messages are merged.
@@ -467,7 +485,7 @@ class AiRepositoryImpl @Inject constructor(
             val base64 = bitmapToBase64(image)
             val blocks: List<Any> = buildList {
                 add(ClaudeImageContent(source = ClaudeImageSource(data = base64)))
-                add(ClaudeTextContent(text = prompt.ifBlank { "Describe this image in detail." }))
+                add(ClaudeTextContent(text = effectivePrompt))
             }
             val last = messages.lastOrNull()
             if (last != null && last.role == "user") {
@@ -483,10 +501,10 @@ class AiRepositoryImpl @Inject constructor(
         } else {
             val last = messages.lastOrNull()
             if (last != null && last.role == "user") {
-                val merged = (last.content as? String ?: "") + "\n\n" + prompt
+                val merged = (last.content as? String ?: "") + "\n\n" + effectivePrompt
                 messages[messages.size - 1] = last.copy(content = merged)
             } else {
-                messages += ClaudeMessage(role = "user", content = prompt)
+                messages += ClaudeMessage(role = "user", content = effectivePrompt)
             }
         }
 
@@ -507,7 +525,7 @@ class AiRepositoryImpl @Inject constructor(
             version = "2023-06-01",
             request = request,
         )
-        return Result.success(response.content.firstOrNull()?.text ?: "No response from Claude")
+        return Result.success(cleanResponseText(response.content.firstOrNull()?.text ?: "No response from Claude"))
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────
@@ -523,6 +541,9 @@ class AiRepositoryImpl @Inject constructor(
             bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bos)
             Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
         }
+
+    private fun cleanResponseText(text: String): String =
+        text.replace("\uFEFF", "").trim()
 
     private fun httpErrorMessage(
         e: HttpException,

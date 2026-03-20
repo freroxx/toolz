@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -55,25 +56,18 @@ fun ClipboardScreen(
     onBack: () -> Unit,
     onConvertToTask: (String) -> Unit = {}
 ) {
+    val filteredEntries by viewModel.filteredEntries.collectAsStateWithLifecycle()
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val isSummarizingId by viewModel.isSummarizing.collectAsStateWithLifecycle()
+    val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    
     val context = LocalContext.current
 
-    val groups = remember(entries) { viewModel.groupedEntries(entries) }
+    val groups = remember(filteredEntries) { viewModel.groupedEntries(filteredEntries) }
     val listState = rememberLazyListState()
     var showClearAllConfirmation by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
-
-    val filteredEntries = remember(entries, searchQuery) {
-        if (searchQuery.isBlank()) entries
-        else entries.filter { it.content.contains(searchQuery, ignoreCase = true) }
-    }
-    
-    val displayGroups = remember(filteredEntries, groups) {
-        if (searchQuery.isBlank()) groups
-        else viewModel.groupedEntries(filteredEntries)
-    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshClipboard()
@@ -109,7 +103,10 @@ fun ClipboardScreen(
                         },
                         actions = {
                             IconButton(
-                                onClick = { isSearchActive = !isSearchActive },
+                                onClick = { 
+                                    isSearchActive = !isSearchActive 
+                                    if (!isSearchActive) viewModel.onSearchQueryChanged("")
+                                },
                                 modifier = Modifier
                                     .padding(4.dp)
                                     .clip(RoundedCornerShape(16.dp))
@@ -158,13 +155,19 @@ fun ClipboardScreen(
                         ) {
                             TextField(
                                 value = searchQuery,
-                                onValueChange = { searchQuery = it },
+                                onValueChange = { viewModel.onSearchQueryChanged(it) },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search clipboard...", style = MaterialTheme.typography.bodyMedium) },
-                                leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(20.dp)) },
+                                placeholder = { Text("Search by subject or keyword...", style = MaterialTheme.typography.bodyMedium) },
+                                leadingIcon = { 
+                                    if (isAiSearching) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                },
                                 trailingIcon = {
                                     if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { searchQuery = "" }) {
+                                        IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
                                             Icon(Icons.Rounded.Close, null, modifier = Modifier.size(20.dp))
                                         }
                                     }
@@ -222,7 +225,7 @@ fun ClipboardScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    displayGroups.forEach { group ->
+                    groups.forEach { group ->
                         item(key = "header_${group.label}") {
                             Spacer(Modifier.height(8.dp))
                             Text(

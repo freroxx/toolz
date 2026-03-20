@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.notepad.Note
@@ -105,7 +106,8 @@ sealed class PillPage {
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
-    settingsRepository: SettingsRepository
+    settingsRepository: SettingsRepository,
+    viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
@@ -149,6 +151,10 @@ fun DashboardScreen(
     val networkStatus by connectivityObserver.observe().collectAsState(initial = ConnectivityObserver.Status.Unavailable)
     val isOnline = networkStatus == ConnectivityObserver.Status.Available
 
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
+    val aiSuggestedRoutes by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
+
     DashboardContent(
         onNavigate = onNavigate,
         settingsRepository = settingsRepository,
@@ -178,7 +184,11 @@ fun DashboardScreen(
         productivityScore = productivityScore,
         showPillSetting = showPillSetting,
         pillTodoEnabled = pillTodoEnabled,
-        pillFocusEnabled = pillFocusEnabled
+        pillFocusEnabled = pillFocusEnabled,
+        searchQuery = searchQuery,
+        onSearchQueryChanged = { viewModel.onSearchQueryChanged(it) },
+        isAiSearching = isAiSearching,
+        aiSuggestedRoutes = aiSuggestedRoutes
     )
 }
 
@@ -213,9 +223,12 @@ private fun DashboardContent(
     productivityScore: Int,
     showPillSetting: Boolean,
     pillTodoEnabled: Boolean,
-    pillFocusEnabled: Boolean
+    pillFocusEnabled: Boolean,
+    searchQuery: String,
+    onSearchQueryChanged: (String) -> Unit,
+    isAiSearching: Boolean,
+    aiSuggestedRoutes: List<String>
 ) {
-    var searchQuery by remember { mutableStateOf("") }
     val categories = remember { getCategories() }
     val scope = rememberCoroutineScope()
 
@@ -236,6 +249,11 @@ private fun DashboardContent(
     val recentToolItems = remember(recentTools, categories) {
         val allItems = categories.flatMap { it.items }
         recentTools.mapNotNull { route -> allItems.find { it.route == route } }
+    }
+
+    val aiSuggestedToolItems = remember(aiSuggestedRoutes, categories) {
+        val allItems = categories.flatMap { it.items }
+        aiSuggestedRoutes.mapNotNull { route -> allItems.find { it.route == route } }.distinctBy { it.route }
     }
 
     val navigateWithRecent = { route: String ->
@@ -262,17 +280,23 @@ private fun DashboardContent(
 
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search precision tools...") },
+                    onValueChange = { onSearchQueryChanged(it) },
+                    placeholder = { Text(if (isOnline) "Describe your need (e.g. \"save link\")" else "Search precision tools...") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    leadingIcon = { 
+                        if (isAiSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                        }
+                    },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 vibrationManager?.vibrateClick()
-                                searchQuery = "" 
+                                onSearchQueryChanged("")
                             }) {
                                 Icon(Icons.Rounded.Close, contentDescription = "Clear")
                             }
@@ -287,6 +311,70 @@ private fun DashboardContent(
                         focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                     )
                 )
+
+                AnimatedVisibility(
+                    visible = aiSuggestedToolItems.isNotEmpty() && searchQuery.isNotBlank(),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        Text(
+                            "AI RECOMMENDED",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
+                            letterSpacing = 2.sp
+                        )
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            itemsIndexed(aiSuggestedToolItems) { _, tool ->
+                                Surface(
+                                    modifier = Modifier
+                                        .width(180.dp)
+                                        .height(72.dp)
+                                        .bouncyClick { navigateWithRecent(tool.route) },
+                                    shape = RoundedCornerShape(24.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier.size(40.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(tool.icon, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                tool.title,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Black,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                "Match found",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -297,22 +385,22 @@ private fun DashboardContent(
                 .padding(top = padding.calculateTopPadding())
         ) {
             if (dashboardView == "LIST") {
-                val allTools = remember(categories) { 
-                    categories.flatMap { it.items }.distinctBy { it.route }.sortedBy { it.title } 
+                val allTools = remember(categories) {
+                    categories.flatMap { it.items }.distinctBy { it.route }.sortedBy { it.title }
                 }
                 val filteredTools = remember(searchQuery, allTools) {
-                    allTools.filter { 
-                        it.title.contains(searchQuery, ignoreCase = true) || 
-                        it.description.contains(searchQuery, ignoreCase = true) 
+                    allTools.filter {
+                        it.title.contains(searchQuery, ignoreCase = true) ||
+                        it.description.contains(searchQuery, ignoreCase = true)
                     }
                 }
-                
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(
-                        start = 24.dp, 
-                        end = 24.dp, 
-                        bottom = 140.dp + padding.calculateBottomPadding(), 
+                        start = 24.dp,
+                        end = 24.dp,
+                        bottom = 140.dp + padding.calculateBottomPadding(),
                         top = 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -331,7 +419,7 @@ private fun DashboardContent(
                         }
                         itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { _, tool ->
                             ToolListItem(
-                                tool = tool, 
+                                tool = tool,
                                 isPinned = true,
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
@@ -349,7 +437,7 @@ private fun DashboardContent(
                         }
                         itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { _, tool ->
                             ToolListItem(
-                                tool = tool, 
+                                tool = tool,
                                 isPinned = pinnedTools.contains(tool.route),
                                 onClick = { navigateWithRecent(tool.route) },
                                 onLongClick = {
@@ -363,7 +451,7 @@ private fun DashboardContent(
 
                     itemsIndexed(filteredTools, key = { _, tool -> tool.route }) { _, tool ->
                         ToolListItem(
-                            tool = tool, 
+                            tool = tool,
                             isPinned = pinnedTools.contains(tool.route),
                             onClick = { navigateWithRecent(tool.route) },
                             onLongClick = {
@@ -372,7 +460,7 @@ private fun DashboardContent(
                             }
                         )
                     }
-                    if (filteredTools.isEmpty()) {
+                    if (filteredTools.isEmpty() && !isAiSearching && aiSuggestedToolItems.isEmpty()) {
                         item { EmptySearchState(searchQuery) }
                     }
                 }
@@ -381,9 +469,9 @@ private fun DashboardContent(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(
-                        start = 20.dp, 
-                        end = 20.dp, 
-                        bottom = 140.dp + padding.calculateBottomPadding(), 
+                        start = 20.dp,
+                        end = 20.dp,
+                        bottom = 140.dp + padding.calculateBottomPadding(),
                         top = 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -456,7 +544,7 @@ private fun DashboardContent(
                         }
                     }
 
-                    if (filteredCategories.isEmpty()) {
+                    if (filteredCategories.isEmpty() && !isAiSearching && aiSuggestedToolItems.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             EmptySearchState(searchQuery)
                         }
@@ -668,9 +756,9 @@ fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
     val doneSub = task.subTasks.count { it.isDone }
     val totalSub = task.subTasks.size
     val progress = if (totalSub > 0) doneSub.toFloat() / totalSub else 0f
-    
+
     val animatedProgress by animateFloatAsState(
-        targetValue = progress, 
+        targetValue = progress,
         animationSpec = if (performanceMode) snap() else tween(500),
         label = "todoProgress"
     )
@@ -711,7 +799,7 @@ fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
                     Text("$doneSub/$totalSub MILESTONES", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
                 }
             }
-            
+
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     formatSessionTime(state.sessionTimeMillis),
@@ -719,9 +807,9 @@ fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
                     fontWeight = FontWeight.Black,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
-                IconButton(onClick = { 
+                IconButton(onClick = {
                     vibrationManager?.vibrateClick()
-                    viewModel.stopSession() 
+                    viewModel.stopSession()
                 }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error)
                 }
@@ -863,7 +951,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                 Text("VIEW ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
             }
         }
-        
+
         LazyRow(
             contentPadding = PaddingValues(horizontal = 0.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -912,7 +1000,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
 fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    
+
     Row(
         modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically
@@ -950,9 +1038,9 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
             )
         }
         IconButton(
-            onClick = { 
+            onClick = {
                 vibrationManager?.vibrateClick()
-                if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording() 
+                if (state.isPaused) viewModel.resumeRecording() else viewModel.pauseRecording()
             },
             modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.error, CircleShape)
         ) {
@@ -971,7 +1059,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
     val track = state.currentTrack ?: return
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    
+
     val duration by viewModel.duration.collectAsState()
     val playbackPosition by viewModel.playbackPosition.collectAsState()
 
@@ -1056,9 +1144,9 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
             }
 
             IconButton(
-                onClick = { 
+                onClick = {
                     vibrationManager?.vibrateClick()
-                    viewModel.togglePlayPause() 
+                    viewModel.togglePlayPause()
                 },
                 modifier = Modifier
                     .size(56.dp)
@@ -1087,7 +1175,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
 fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: TimerViewModel) {
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    
+
     val initialTime = if (state.initialTime > 0) state.initialTime else 1L
     val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
@@ -1129,9 +1217,9 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
                 )
             }
             IconButton(
-                onClick = { 
+                onClick = {
                     vibrationManager?.vibrateClick()
-                    viewModel.toggleStartStop() 
+                    viewModel.toggleStartStop()
                 },
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
             ) {
@@ -1182,9 +1270,9 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
             )
         }
         IconButton(
-            onClick = { 
+            onClick = {
                 vibrationManager?.vibrateClick()
-                viewModel.toggleStartStop() 
+                viewModel.toggleStartStop()
             },
             modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape)
         ) {
@@ -1202,7 +1290,7 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
 fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewModel: PomodoroViewModel) {
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    
+
     val initialTime = state.mode.minutes * 60 * 1000L
     val progress = ((initialTime - state.remainingTime).toFloat() / initialTime.toFloat()).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
@@ -1244,9 +1332,9 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
                 )
             }
             IconButton(
-                onClick = { 
+                onClick = {
                     vibrationManager?.vibrateClick()
-                    viewModel.toggleStartStop() 
+                    viewModel.toggleStartStop()
                 },
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.error, CircleShape)
             ) {
@@ -1428,7 +1516,7 @@ fun ImprovedToolCard(tool: ToolItem, isPinned: Boolean, onClick: () -> Unit, onL
                             )
                         }
                     }
-                    
+
                     if (isPinned) {
                         Icon(
                             Icons.Rounded.PushPin,
@@ -1559,7 +1647,7 @@ private fun DashboardLoadingScreen() {
     }
 }
 
-private fun getCategories() = listOf(
+fun getCategories() = listOf(
     ToolCategory(
         "FAVORITES & ESSENTIALS",
         listOf(

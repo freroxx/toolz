@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -84,6 +85,8 @@ fun SettingsScreen(
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
     val musicShakeSensitivity by viewModel.musicShakeSensitivity.collectAsState(initial = 0.3f)
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState(initial = true)
+    val musicAiEnabled by viewModel.musicAiEnabled.collectAsState(initial = true)
+    val musicKeepScreenOnLyrics by viewModel.musicKeepScreenOnLyrics.collectAsState(initial = true)
 
     val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
 
@@ -431,6 +434,26 @@ fun SettingsScreen(
                     isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
                     onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
                 ) {
+                    if (matches(searchQuery, "ai", "now playing", "lyrics", "meaning", "smart")) {
+                        SettingsToggleItem(
+                            title = "NOW PLAYING AI",
+                            subtitle = "Smart lyrics, meanings, and recommendations",
+                            icon = Icons.Rounded.AutoAwesome,
+                            checked = musicAiEnabled,
+                            onCheckedChange = { viewModel.setMusicAiEnabled(it) }
+                        )
+                    }
+
+                    if (matches(searchQuery, "lyrics", "screen", "sleep", "awake")) {
+                        SettingsToggleItem(
+                            title = "Lyrics Keep Screen Awake",
+                            subtitle = "Stop phone from sleeping in lyrics mode",
+                            icon = Icons.Rounded.Visibility,
+                            checked = musicKeepScreenOnLyrics,
+                            onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
+                        )
+                    }
+
                     if (matches(searchQuery, "shake", "skip", "audio", "sensitivity")) {
                         SettingsToggleItem(
                             title = "Shake to Skip",
@@ -989,12 +1012,12 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
             Text("TOOLZ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             @Suppress("DEPRECATION")
-            Text("V1.0.3 (BETA)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
+            Text("V${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
 
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "A modular toolset for productivity and analytics. Built for high performance by frerox.",
+                "A polished toolkit for utility, focus, media, and everyday problem solving.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,

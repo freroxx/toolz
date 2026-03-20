@@ -77,7 +77,7 @@ data class MusicUiState(
 class MusicPlayerViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val settingsRepository: SettingsRepository,
-    private val vibrationManager: VibrationManager,
+    val vibrationManager: VibrationManager,
     val player: ExoPlayer,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -445,7 +445,8 @@ class MusicPlayerViewModel @Inject constructor(
                         _playbackPosition.value = currentPos
                     }
                 }
-                delay(if (_uiState.value.performanceMode) 1000 else 500)
+                // Faster update for better sync (100ms)
+                delay(if (_uiState.value.performanceMode) 500 else 100)
             }
         }
     }
@@ -582,11 +583,12 @@ class MusicPlayerViewModel @Inject constructor(
         if (tracks.isEmpty()) return
         
         val p: Player = controller ?: player
-        if (p.shuffleModeEnabled) {
-            playTrack(tracks.random(), tracks)
-        } else {
-            playTrack(tracks.first(), tracks)
-        }
+        // Better Shuffle: Force shuffle ON when using "SHUFFLE PLAY"
+        p.shuffleModeEnabled = true
+        _uiState.update { it.copy(isShuffleOn = true) }
+        
+        playTrack(tracks.random(), tracks)
+        vibrationManager.vibrateSuccess()
     }
 
     fun togglePlayPause() {
@@ -640,9 +642,15 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun toggleShuffle() {
         val p: Player = controller ?: player
-        p.shuffleModeEnabled = !p.shuffleModeEnabled
-        _uiState.update { it.copy(isShuffleOn = p.shuffleModeEnabled) }
-        vibrationManager.vibrateClick()
+        val newState = !p.shuffleModeEnabled
+        p.shuffleModeEnabled = newState
+        _uiState.update { it.copy(isShuffleOn = newState) }
+        
+        if (newState) {
+            vibrationManager.vibrateSuccess()
+        } else {
+            vibrationManager.vibrateClick()
+        }
     }
 
     fun toggleRepeat() {
@@ -654,7 +662,12 @@ class MusicPlayerViewModel @Inject constructor(
         }
         p.repeatMode = newMode
         _uiState.update { it.copy(repeatMode = newMode) }
-        vibrationManager.vibrateClick()
+        
+        if (newMode != Player.REPEAT_MODE_OFF) {
+            vibrationManager.vibrateSuccess()
+        } else {
+            vibrationManager.vibrateClick()
+        }
     }
 
     fun setSortOrder(order: SortOrder) {

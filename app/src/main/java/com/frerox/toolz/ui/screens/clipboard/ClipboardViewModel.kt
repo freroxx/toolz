@@ -3,6 +3,8 @@ package com.frerox.toolz.ui.screens.clipboard
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.ai.ChatRepository
@@ -10,7 +12,10 @@ import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.service.ClipboardService
+import com.frerox.toolz.util.ConnectivityObserver
+import com.frerox.toolz.util.NetworkConnectivityObserver
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import android.content.ClipboardManager as AndroidClipboardManager
@@ -22,6 +27,7 @@ data class ClipboardGroup(
     val entries: List<ClipboardEntry>
 )
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class ClipboardViewModel @Inject constructor(
     private val application: Application,
@@ -30,15 +36,112 @@ class ClipboardViewModel @Inject constructor(
     val classifier: ClipboardClassifier
 ) : AndroidViewModel(application) {
 
+    private val connectivityObserver = NetworkConnectivityObserver(application)
+    private val networkStatus = connectivityObserver.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ConnectivityObserver.Status.Unavailable)
+
     val entries: StateFlow<List<ClipboardEntry>> = clipboardDao.getAllEntries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isSummarizing = MutableStateFlow<Int?>(null)
     val isSummarizing = _isSummarizing.asStateFlow()
 
+    private val _isAiSearching = MutableStateFlow(false)
+    val isAiSearching = _isAiSearching.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
+
+    private val _aiSearchResults = MutableStateFlow<List<Int>?>(null)
+    val aiSearchResults = _aiSearchResults.asStateFlow()
+
+    val filteredEntries = combine(entries, _searchQuery, _aiSearchResults) { allEntries, query, aiResults ->
+        if (query.isBlank()) {
+            allEntries
+        } else if (aiResults != null && aiResults.isNotEmpty()) {
+            val aiMapped = aiResults.mapNotNull { id -> allEntries.find { it.id == id } }
+            val remainingDirectMatches = allEntries.filter { 
+                it.id !in aiResults && (it.content.contains(query, ignoreCase = true) || it.summary?.contains(query, ignoreCase = true) == true)
+            }
+            aiMapped + remainingDirectMatches
+        } else {
+            allEntries.filter { it.content.contains(query, ignoreCase = true) || it.summary?.contains(query, ignoreCase = true) == true }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
-        // Always start the clipboard service automatically
         ensureServiceRunning()
+        setupSearchDebounce()
+    }
+
+    private fun setupSearchDebounce() {
+        viewModelScope.launch {
+            _searchQuery
+                .debounce(1000)
+                .filter { it.length > 2 }
+                .collect { query ->
+                    performAiSearch(query)
+                }
+        }
+    }
+
+    fun onSearchQueryChanged(query: String) {
+        _searchQuery.value = query
+        if (query.isBlank()) {
+            _aiSearchResults.value = null
+        }
+    }
+
+    private fun isWifiAvailable(): Boolean {
+        val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun performAiSearch(query: String) {
+        if (!isWifiAvailable()) return
+
+        viewModelScope.launch {
+            val currentEntries = entries.value
+            if (currentEntries.isEmpty()) return@launch
+
+            _isAiSearching.value = true
+            try {
+                // Semantic context: Include both summary and category for better matching
+                val contextData = currentEntries.take(40).joinToString("\n") { 
+                    "[ID:${it.id}] Category: ${it.type}, Content: ${it.summary ?: it.content.take(120)}" 
+                }
+                
+                val prompt = """
+                    You are a semantic clipboard search engine. 
+                    Given a user query and clipboard items, return the IDs of items that match the context or intent.
+                    Query: "$query"
+                    
+                    Items:
+                    $contextData
+                    
+                    Respond ONLY with a comma-separated list of IDs (max 8) that are most relevant. 
+                    If no good match, respond with "NONE".
+                """.trimIndent()
+
+                aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                    result.onSuccess { response ->
+                        if (response.trim().uppercase() != "NONE") {
+                            val ids = response.split(",")
+                                .mapNotNull { it.trim().filter { char -> char.isDigit() }.toIntOrNull() }
+                            _aiSearchResults.value = ids
+                        } else {
+                            _aiSearchResults.value = emptyList()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isAiSearching.value = false
+            }
+        }
     }
 
     fun groupedEntries(allEntries: List<ClipboardEntry>): List<ClipboardGroup> {
@@ -83,9 +186,9 @@ class ClipboardViewModel @Inject constructor(
             _isSummarizing.value = entry.id
             try {
                 val prompt = """
-                    Classify this clipboard content into one of these categories: 
-                    TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
-                    Also provide a very short, punchy 1-sentence summary (max 15 words).
+                    Classify this clipboard content and summarize it.
+                    Categories: TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
+                    Provide a punchy 1-sentence summary (max 15 words).
                     
                     Content: ${entry.content.take(1500)}
                     
@@ -121,7 +224,8 @@ class ClipboardViewModel @Inject constructor(
                             val entry = ClipboardEntry(
                                 content = text,
                                 timestamp = System.currentTimeMillis(),
-                                type = type
+                                type = type,
+                                isAiProcessed = false
                             )
                             clipboardDao.insert(entry)
                         }

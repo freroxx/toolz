@@ -26,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +69,7 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
+import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
@@ -131,24 +131,10 @@ class MainActivity : AppCompatActivity() {
                 hapticIntensity = hapticIntensity,
                 vibrationManager = vibrationManager
             ) {
-                val surface = MaterialTheme.colorScheme.surface
-
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            if (!dynamicColor && !performanceMode) {
-                                Brush.verticalGradient(
-                                    colors = if (isDark) {
-                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), surface)
-                                    } else {
-                                        listOf(surface, MaterialTheme.colorScheme.primary.copy(alpha = 0.03f), surface)
-                                    }
-                                )
-                            } else {
-                                Brush.verticalGradient(listOf(surface, surface))
-                            }
-                        )
+                        .background(toolzAppBackgroundBrush(darkTheme = isDark, performanceMode = performanceMode))
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),

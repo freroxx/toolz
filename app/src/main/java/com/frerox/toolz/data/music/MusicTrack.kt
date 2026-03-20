@@ -16,7 +16,13 @@ data class MusicTrack(
     val lastPlayed: Long = 0L,
     val playCount: Int = 0,
     val path: String? = null,
-    val dateAdded: Long = java.lang.System.currentTimeMillis()
+    val dateAdded: Long = java.lang.System.currentTimeMillis(),
+    // AI Cache Fields
+    val aiLyrics: String? = null,
+    val aiArtistVitals: String? = null,
+    val aiSongMeaning: String? = null,
+    val aiRecommendationsJson: String? = null, // Store list of recommendations as JSON string
+    val lastAiSync: Long = 0L
 )
 
 @Entity(tableName = "playlists")

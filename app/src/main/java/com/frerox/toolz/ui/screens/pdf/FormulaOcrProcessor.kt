@@ -317,7 +317,7 @@ class FormulaOcrProcessor @Inject constructor(
     }
 
     suspend fun runAiCleaner(rawText: String, language: OcrLanguage): String? {
-        val key = aiSettingsManager.getApiKey("Groq")
+        val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
         if (key.isBlank()) return null
         val truncated = if (rawText.length > 10_000) rawText.take(10_000) + "…" else rawText
         return try {
@@ -351,7 +351,7 @@ class FormulaOcrProcessor @Inject constructor(
     }
 
     suspend fun summarizePdf(text: String): String? {
-        val key = aiSettingsManager.getApiKey("Groq")
+        val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
         if (key.isBlank()) return null
         val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text
         return try {

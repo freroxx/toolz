@@ -32,10 +32,15 @@ class ClipboardService : Service() {
     private var clipboardManager: ClipboardManager? = null
     
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        checkClipboard()
+    }
+
+    private fun checkClipboard() {
         serviceScope.launch {
             try {
                 val clip = clipboardManager?.primaryClip ?: return@launch
                 if (clip.itemCount == 0) return@launch
+                
                 val item = clip.getItemAt(0)
                 val text = item?.coerceToText(this@ClipboardService)?.toString() ?: return@launch
                 if (text.isBlank()) return@launch
@@ -50,57 +55,58 @@ class ClipboardService : Service() {
                 val entry = ClipboardEntry(
                     content   = text,
                     timestamp = System.currentTimeMillis(),
-                    type      = initialType
+                    type      = initialType,
+                    isAiProcessed = false
                 )
                 val id = clipboardDao.insert(entry).toInt()
                 
-                // Background AI processing for better category and optional summary if it's long
+                // Background AI processing
                 processWithAi(id, text, initialType)
                 
-                // Maintenance
-                val count = clipboardDao.getEntryCount()
-                if (count > MAX_ENTRIES) {
-                    clipboardDao.deleteOldestUnpinned(count - MAX_ENTRIES)
-                }
-                
-                val expiry = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
-                clipboardDao.deleteOlderThan(expiry)
+                cleanupOldEntries()
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing clipboard change", e)
             }
         }
     }
 
+    private suspend fun cleanupOldEntries() {
+        val count = clipboardDao.getEntryCount()
+        if (count > MAX_ENTRIES) {
+            clipboardDao.deleteOldestUnpinned(count - MAX_ENTRIES)
+        }
+        val expiry = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
+        clipboardDao.deleteOlderThan(expiry)
+    }
+
     private fun processWithAi(id: Int, text: String, currentType: String) {
         serviceScope.launch {
             try {
-                // If it's already a very specific type like COLOR or OTP, maybe skip AI categorization to save tokens
-                if (currentType == "COLOR" || currentType == "OTP") return@launch
-
                 val prompt = """
                     Classify this clipboard content into one of these categories: 
                     TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
-                    If the text is long (over 100 words), also provide a 1-sentence summary.
+                    Current guess: $currentType
                     
-                    Content: ${text.take(1000)}
+                    If the text is long (over 40 words) or looks like an article/note/code, provide a punchy 1-sentence summary (max 15 words).
+                    If it's short, summary should be null.
                     
-                    Respond in JSON format: {"category": "CATEGORY", "summary": "optional summary or null"}
+                    Content: ${text.take(2000)}
+                    
+                    Respond ONLY in JSON format: {"category": "CATEGORY", "summary": "optional summary or null"}
                 """.trimIndent()
 
                 aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
                     result.onSuccess { response ->
-                        // Simple JSON parsing from response
-                        val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
-                        val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1)
-                        
-                        if (summary != null && summary != "null") {
+                        try {
+                            val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
+                            val rawSummary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1)
+                            val summary = if (rawSummary == "null" || rawSummary.isNullOrBlank()) null else rawSummary
+                            
                             clipboardDao.updateAiDetails(id, summary, category)
-                        } else {
-                            // Just update category if no summary
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing AI response", e)
                             val entry = clipboardDao.getEntryById(id)
-                            entry?.let {
-                                clipboardDao.update(it.copy(type = category))
-                            }
+                            entry?.let { clipboardDao.update(it.copy(isAiProcessed = true)) }
                         }
                     }
                 }
@@ -124,6 +130,28 @@ class ClipboardService : Service() {
         
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
+        
+        // Initial check and periodic safety poll
+        startPeriodicCheck()
+    }
+    
+    private fun startPeriodicCheck() {
+        serviceScope.launch {
+            while (isActive) {
+                checkClipboard() // Poll clipboard directly to fix missed elements
+                
+                try {
+                    val unprocessed = clipboardDao.getUnprocessedEntries()
+                    unprocessed.take(2).forEach { entry ->
+                        processWithAi(entry.id, entry.content, entry.type)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Periodic check background processing failed", e)
+                }
+                
+                delay(15000) // Poll every 15 seconds
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -165,8 +193,8 @@ class ClipboardService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Clipboard Active")
-            .setContentText("Smart history tracking is running")
+            .setContentTitle("Smart Clipboard Active")
+            .setContentText("AI is tracking and summarizing your clips")
             .setSmallIcon(android.R.drawable.ic_menu_recent_history)
             .setOngoing(true)
             .setContentIntent(pendingIntent)

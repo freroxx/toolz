@@ -63,6 +63,8 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_ART_SHAPE = stringPreferencesKey("music_art_shape") // "CIRCLE", "SQUARE"
     private val MUSIC_ROTATION_ENABLED = booleanPreferencesKey("music_rotation_enabled")
     private val MUSIC_PIP_ENABLED = booleanPreferencesKey("music_pip_enabled")
+    private val MUSIC_AI_ENABLED = booleanPreferencesKey("music_ai_enabled")
+    private val MUSIC_KEEP_SCREEN_ON_LYRICS = booleanPreferencesKey("music_keep_screen_on_lyrics")
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
@@ -169,6 +171,8 @@ class SettingsRepository @Inject constructor(
     val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
     val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
+    val musicAiEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true }
+    val musicKeepScreenOnLyrics: Flow<Boolean> = dataStore.data.map { it[MUSIC_KEEP_SCREEN_ON_LYRICS] ?: true }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
 
@@ -277,6 +281,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicArtShape(shape: String) { dataStore.edit { it[MUSIC_ART_SHAPE] = shape } }
     suspend fun setMusicRotationEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_ROTATION_ENABLED] = enabled } }
     suspend fun setMusicPipEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_PIP_ENABLED] = enabled } }
+    suspend fun setMusicAiEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_AI_ENABLED] = enabled } }
+    suspend fun setMusicKeepScreenOnLyrics(enabled: Boolean) { dataStore.edit { it[MUSIC_KEEP_SCREEN_ON_LYRICS] = enabled } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
 
