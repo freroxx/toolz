@@ -234,11 +234,12 @@ fun LyricsTab(
     viewModel: NowPlayingAiViewModel,
     vibrationManager: VibrationManager
 ) {
-    val view = LocalView.current
-    DisposableEffect(view) {
-        view.keepScreenOn = true
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val activity = context as? Activity
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
-            view.keepScreenOn = false
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
