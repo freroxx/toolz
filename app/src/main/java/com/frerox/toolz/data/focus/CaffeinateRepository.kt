@@ -38,7 +38,8 @@ class CaffeinateRepository @Inject constructor(
         val prompt = """
             Categorize the following list of Android apps into exactly one of these categories: 
             'Gaming', 'School', 'Work', 'Social Media', 'Reading', 'Utility', 'Other'.
-            Return ONLY a JSON array of objects with keys "name", "package", and "category".
+            Return ONLY a raw JSON array of objects with keys "name", "package", and "category".
+            Do not include any other text, markdown blocks, or explanations.
             Apps: $appNames
         """.trimIndent()
 
@@ -50,10 +51,18 @@ class CaffeinateRepository @Inject constructor(
         ).collect { result ->
             result.onSuccess { response ->
                 try {
-                    val jsonStart = response.indexOf("[")
-                    val jsonEnd = response.lastIndexOf("]") + 1
+                    // Clean-up response: some models wrap in markdown blocks
+                    val cleanedResponse = response.trim()
+                        .removePrefix("```json")
+                        .removePrefix("```")
+                        .removeSuffix("```")
+                        .trim()
+
+                    val jsonStart = cleanedResponse.indexOf("[")
+                    val jsonEnd = cleanedResponse.lastIndexOf("]") + 1
+                    
                     if (jsonStart != -1 && jsonEnd != -1) {
-                        val jsonString = response.substring(jsonStart, jsonEnd)
+                        val jsonString = cleanedResponse.substring(jsonStart, jsonEnd)
                         val type = Types.newParameterizedType(List::class.java, AppCategoryInfo::class.java)
                         val adapter = moshi.adapter<List<AppCategoryInfo>>(type)
                         val categorizedApps = adapter.fromJson(jsonString)

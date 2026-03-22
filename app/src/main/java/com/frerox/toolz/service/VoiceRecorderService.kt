@@ -33,6 +33,11 @@ class VoiceRecorderService : Service() {
     private val _durationMillis = MutableStateFlow(0L)
     val durationMillis: StateFlow<Long> = _durationMillis
 
+    private val _maxAmplitude = MutableStateFlow(0)
+    val maxAmplitude: StateFlow<Int> = _maxAmplitude
+
+    private var gainLevel: Float = 1.0f
+
     private var mediaRecorder: MediaRecorder? = null
     private var timerJob: Job? = null
     private var currentFile: File? = null
@@ -127,7 +132,8 @@ class VoiceRecorderService : Service() {
         timerJob = serviceScope.launch {
             while (_isRecording.value && !_isPaused.value) {
                 _durationMillis.value = SystemClock.elapsedRealtime() - startTime
-                delay(200)
+                _maxAmplitude.value = (mediaRecorder?.maxAmplitude ?: 0)
+                delay(100)
             }
         }
     }
@@ -150,8 +156,14 @@ class VoiceRecorderService : Service() {
         
         _isRecording.value = false
         _isPaused.value = false
+        _durationMillis.value = 0L
+        _maxAmplitude.value = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    fun setGainLevel(level: Float) {
+        this.gainLevel = level
     }
 
     private fun createNotificationChannel() {

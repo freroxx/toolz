@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +28,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +40,8 @@ fun BubbleLevelScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.bubbleState.collectAsState()
+    val haptic = LocalHapticFeedback.current
+    var wasLevel by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         viewModel.startListening()
@@ -45,8 +50,17 @@ fun BubbleLevelScreen(
         }
     }
 
-    val animX by animateFloatAsState(targetValue = state.x, animationSpec = spring(stiffness = 500f), label = "animX")
-    val animY by animateFloatAsState(targetValue = state.y, animationSpec = spring(stiffness = 500f), label = "animY")
+    val animX by animateFloatAsState(targetValue = state.x, animationSpec = spring(stiffness = 500f, dampingRatio = Spring.DampingRatioMediumBouncy), label = "animX")
+    val animY by animateFloatAsState(targetValue = state.y, animationSpec = spring(stiffness = 500f, dampingRatio = Spring.DampingRatioMediumBouncy), label = "animY")
+
+    val isLevel = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
+    
+    LaunchedEffect(isLevel) {
+        if (isLevel && !wasLevel) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+        wasLevel = isLevel
+    }
 
     Scaffold(
         topBar = {
@@ -69,6 +83,7 @@ fun BubbleLevelScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .fadingEdges(top = 24.dp, bottom = 24.dp)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -76,10 +91,10 @@ fun BubbleLevelScreen(
             val isLevel = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
             
             Surface(
-                color = if (isLevel) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                color = if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(32.dp),
                 modifier = Modifier.padding(bottom = 48.dp),
-                border = BorderStroke(1.5.dp, if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                border = BorderStroke(1.5.dp, if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
@@ -103,9 +118,10 @@ fun BubbleLevelScreen(
 
             Box(
                 modifier = Modifier
-                    .size(300.dp)
+                    .size(310.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
+                    .border(BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 val infiniteTransition = rememberInfiniteTransition(label = "glow")
@@ -130,17 +146,18 @@ fun BubbleLevelScreen(
                 }
 
                 // Background Grid
-                Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                val gridColor = if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                Canvas(modifier = Modifier.fillMaxSize().padding(32.dp)) {
                     val center = Offset(size.width / 2, size.height / 2)
-                    val primaryColor = Color.Gray.copy(alpha = 0.2f)
+                    val primaryColor = gridColor
                     
                     // Circles
-                    drawCircle(primaryColor, radius = 40.dp.toPx(), center = center, style = Stroke(2.dp.toPx()))
-                    drawCircle(primaryColor.copy(alpha = 0.1f), radius = 100.dp.toPx(), center = center, style = Stroke(1.dp.toPx()))
+                    drawCircle(primaryColor, radius = 45.dp.toPx(), center = center, style = Stroke(2.5.dp.toPx()))
+                    drawCircle(primaryColor.copy(alpha = 0.15f), radius = 110.dp.toPx(), center = center, style = Stroke(1.5.dp.toPx()))
                     
                     // Lines
-                    drawLine(primaryColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
-                    drawLine(primaryColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.dp.toPx())
+                    drawLine(primaryColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(primaryColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.5.dp.toPx(), cap = StrokeCap.Round)
                 }
 
                 // The Bubble
@@ -154,7 +171,7 @@ fun BubbleLevelScreen(
                         .shadow(if (isLevel) 16.dp else 4.dp, CircleShape, spotColor = if (isLevel) MaterialTheme.colorScheme.primary else Color.Black),
                     shape = CircleShape,
                     color = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                    border = BorderStroke(2.dp, Color.White.copy(alpha = 0.3f))
+                    border = BorderStroke(3.dp, Color.White.copy(alpha = if (isLevel) 0.5f else 0.2f))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         // Inner highlight for 3D effect

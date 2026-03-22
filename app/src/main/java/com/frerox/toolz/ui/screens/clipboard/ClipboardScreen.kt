@@ -69,9 +69,7 @@ fun ClipboardScreen(
     var showClearAllConfirmation by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        viewModel.refreshClipboard()
-    }
+    // Live refreshing is handled by the service and DAO flow
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -119,15 +117,7 @@ fun ClipboardScreen(
                                 )
                             }
 
-                            IconButton(
-                                onClick = { viewModel.refreshClipboard() },
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "Sync", tint = MaterialTheme.colorScheme.primary)
-                            }
+                            // Sync button removed as it's now live
 
                             if (entries.isNotEmpty()) {
                                 IconButton(
@@ -263,7 +253,11 @@ fun ClipboardScreen(
                         }
 
                         item(key = "divider_${group.label}") {
-                            SquigglyDivider()
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
                         }
                     }
 
@@ -331,13 +325,13 @@ private fun LiquidStackCard(
                 shadowElevation = 12f
             }
             .bouncyClick(onClick = onCopy),
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
         ),
-        tonalElevation = 4.dp
+        tonalElevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -355,21 +349,21 @@ private fun LiquidStackCard(
                         letterSpacing = 1.sp
                     )
                 }
-                IconButton(onClick = onPin, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onPin, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        Icons.Rounded.PushPin,
+                        if (entry.isPinned) Icons.Rounded.PushPin else Icons.Rounded.PushPin,
                         contentDescription = "Pin",
                         tint = if (entry.isPinned) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                        modifier = Modifier.size(16.dp)
+                               else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        modifier = Modifier.size(14.dp)
                     )
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        Icons.Rounded.Close,
+                        Icons.Rounded.DeleteOutline,
                         contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-                        modifier = Modifier.size(16.dp)
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        modifier = Modifier.size(14.dp)
                     )
                 }
             }
@@ -428,6 +422,7 @@ private fun LiquidStackCard(
                 }
 
                 ActionChip("Task", Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") }
+                ActionChip("Share", Icons.Rounded.Share) { onAction("share") }
 
                 Spacer(Modifier.weight(1f))
 
@@ -471,17 +466,21 @@ private fun TypeIcon(type: String, content: String) {
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {}
         }
-        "URL" -> TypeIconBox(Icons.Rounded.Link, Color(0xFF1A73E8))
+        "URL" -> TypeIconBox(Icons.Rounded.Language, Color(0xFF1A73E8))
         "SOCIAL" -> TypeIconBox(Icons.Rounded.Public, Color(0xFF0D47A1))
-        "PHONE" -> TypeIconBox(Icons.Rounded.Phone, Color(0xFF34A853))
-        "OTP" -> TypeIconBox(Icons.Rounded.Key, Color(0xFFFFA000))
-        "EMAIL" -> TypeIconBox(Icons.Rounded.Email, Color(0xFFEA4335))
-        "MATHS" -> TypeIconBox(Icons.Rounded.Calculate, Color(0xFF9C27B0))
-        "PERSONAL" -> TypeIconBox(Icons.Rounded.Favorite, Color(0xFFE91E63))
-        "CODE" -> TypeIconBox(Icons.Rounded.Code, Color(0xFF00BCD4))
-        "ADDRESS" -> TypeIconBox(Icons.Rounded.LocationOn, Color(0xFFFF5722))
+        "PHONE" -> TypeIconBox(Icons.Rounded.Call, Color(0xFF34A853))
+        "OTP" -> TypeIconBox(Icons.Rounded.Lock, Color(0xFFFFA000))
+        "EMAIL" -> TypeIconBox(Icons.Rounded.Mail, Color(0xFFEA4335))
+        "MATHS" -> TypeIconBox(Icons.Rounded.Functions, Color(0xFF9C27B0))
+        "PERSONAL" -> TypeIconBox(Icons.Rounded.AutoAwesome, Color(0xFFE91E63))
+        "CODE" -> TypeIconBox(Icons.Rounded.Terminal, Color(0xFF00BCD4))
+        "ADDRESS" -> TypeIconBox(Icons.Rounded.Place, Color(0xFFFF5722))
         "CRYPTO" -> TypeIconBox(Icons.Rounded.CurrencyBitcoin, Color(0xFFF7931A))
-        "TODO" -> TypeIconBox(Icons.Rounded.Checklist, Color(0xFF4CAF50))
+        "TODO" -> TypeIconBox(Icons.Rounded.AssignmentTurnedIn, Color(0xFF4CAF50))
+        "RECIPE" -> TypeIconBox(Icons.Rounded.Restaurant, Color(0xFFFF9800))
+        "FLIGHT" -> TypeIconBox(Icons.Rounded.Flight, Color(0xFF2196F3))
+        "EVENT" -> TypeIconBox(Icons.Rounded.Event, Color(0xFF9C27B0))
+        "QUOTE" -> TypeIconBox(Icons.Rounded.FormatQuote, Color(0xFF607D8B))
         else -> TypeIconBox(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary)
     }
 }

@@ -43,6 +43,9 @@ class CaffeinateTileService : TileService() {
         val tile = qsTile ?: return
         val isRunning = isServiceRunning(CaffeinateService::class.java)
         tile.state = if (isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            tile.subtitle = if (isRunning) "Active" else "Inactive"
+        }
         tile.updateTile()
     }
 

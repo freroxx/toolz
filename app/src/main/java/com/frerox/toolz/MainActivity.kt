@@ -65,9 +65,11 @@ import com.frerox.toolz.ui.screens.todo.TodoScreen
 import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
+import com.frerox.toolz.ui.screens.focus.CaffeinateScreen
 import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
+import com.frerox.toolz.ui.screens.cleaner.CleanerScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
 import com.frerox.toolz.service.StepCounterService
@@ -157,7 +159,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        ToolzNavHost(navController, settingsRepository, aiSettingsManager, pdfViewModel)
+                        ToolzNavHost(navController, settingsRepository, aiSettingsManager, pdfViewModel, performanceMode)
 
                         UpdateOverlay(settingsRepository)
                     }
@@ -383,17 +385,30 @@ fun ToolzNavHost(
     navController: androidx.navigation.NavHostController,
     settingsRepository: SettingsRepository,
     aiSettingsManager: AiSettingsManager,
-    pdfViewModel: PdfViewModel
+    pdfViewModel: PdfViewModel,
+    performanceMode: Boolean
 ) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
 
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
-        enterTransition = { fadeIn(animationSpec = tween(400)) + slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(400)) },
-        exitTransition = { fadeOut(animationSpec = tween(400)) + slideOutHorizontally(targetOffsetX = { -it }, animationSpec = tween(400)) },
-        popEnterTransition = { fadeIn(animationSpec = tween(400)) + slideInHorizontally(initialOffsetX = { -it }, animationSpec = tween(400)) },
-        popExitTransition = { fadeOut(animationSpec = tween(400)) + slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(400)) }
+        enterTransition = {
+            if (performanceMode) fadeIn(animationSpec = tween(100))
+            else fadeIn(animationSpec = tween(300))
+        },
+        exitTransition = {
+            if (performanceMode) fadeOut(animationSpec = tween(100))
+            else fadeOut(animationSpec = tween(300))
+        },
+        popEnterTransition = { 
+            if (performanceMode) fadeIn(animationSpec = tween(100))
+            else fadeIn(animationSpec = tween(300))
+        },
+        popExitTransition = { 
+            if (performanceMode) fadeOut(animationSpec = tween(100))
+            else fadeOut(animationSpec = tween(300))
+        }
     ) {
         composable(Screen.Loading.route) {
             LoadingScreen(
@@ -475,6 +490,9 @@ fun ToolzNavHost(
         }
         composable(Screen.FocusFlow.route) {
             FocusFlowScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.Caffeinate.route) {
+            CaffeinateScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.Todo.route) {
             TodoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -600,6 +618,9 @@ fun ToolzNavHost(
         }
         composable(Screen.Clipboard.route) {
             ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.FileCleaner.route) {
+            CleanerScreen(onBack = { navController.popBackStack() })
         }
     }
 }

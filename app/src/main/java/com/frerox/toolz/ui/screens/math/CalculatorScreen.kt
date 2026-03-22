@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.rounded.Calculate
@@ -55,67 +56,53 @@ fun CalculatorScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "MATH ENGINE",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            onBack()
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            showHistory = true
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.History, contentDescription = "History")
-                    }
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.onToggleMode() 
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (state.isScientific) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            )
-                    ) {
-                        Icon(
-                            imageVector = if (state.isScientific) Icons.Rounded.Science else Icons.Rounded.Calculate,
-                            contentDescription = "Toggle Mode",
-                            tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(24.dp)
+            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "MATH ENGINE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
-            )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                vibrationManager?.vibrateClick()
+                                onBack()
+                            },
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { 
+                                vibrationManager?.vibrateClick()
+                                showHistory = true
+                            },
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.Rounded.History, contentDescription = "History")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -130,124 +117,132 @@ fun CalculatorScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.2f)
-                    .padding(vertical = 12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(40.dp),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+                    .weight(1f)
+                    .padding(vertical = 8.dp),
+                color = Color.Transparent
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(28.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp)
+                        .bouncyClick { 
+                            vibrationManager?.vibrateLongClick()
+                            // Copy to clipboard logic could go here or via ViewModel
+                            viewModel.onCopyResult()
+                        },
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.Bottom
                 ) {
+                    // Formula / History line
                     AnimatedContent(
                         targetState = state.formula,
-                        transitionSpec = { 
-                            if (performanceMode) {
-                                fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
-                            } else {
-                                fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
-                            }
-                        }, label = "formula"
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "formula"
                     ) { formula ->
                         Text(
                             text = formula,
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                             textAlign = TextAlign.End,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(bottom = 12.dp)
+                            fontWeight = FontWeight.Bold
                         )
                     }
+
+                    Spacer(Modifier.height(8.dp))
                     
-                    Text(
-                        text = state.display,
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = if (state.display.length > 12) 40.sp else if (state.display.length > 8) 52.sp else 72.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = (-3).sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.End,
-                        maxLines = 2,
-                        lineHeight = if (state.display.length > 12) 48.sp else 76.sp
-                    )
+                    // Main Display
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        Text(
+                            text = state.display,
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontSize = if (state.display.length > 10) 48.sp else 72.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = (-2).sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Live Result
+                    AnimatedVisibility(
+                        visible = state.liveResult != null && state.liveResult != state.display,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Text(
+                            text = "= ${state.liveResult ?: ""}",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     
                     state.error?.let {
-                        Surface(
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.padding(top = 16.dp)
-                        ) {
-                            @Suppress("DEPRECATION")
-                            Text(
-                                text = it.uppercase(),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.5.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (state.isScientific) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "ADVANCED CALCULUS", 
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 2.sp
-                    )
-                    
-                    Surface(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.onToggleAngleMode() 
-                        },
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                    ) {
-                        @Suppress("DEPRECATION")
                         Text(
-                            if (state.isDegreeMode) "DEG" else "RAD",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.5.sp
+                            text = it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
                         )
                     }
                 }
             }
 
-            // Buttons Grid
-            Box(modifier = Modifier.weight(3.8f)) {
-                AnimatedContent(
-                    targetState = state.isScientific,
-                    transitionSpec = {
-                        if (performanceMode) {
-                            fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
-                        } else {
-                            (fadeIn(animationSpec = tween(500)) + scaleIn(initialScale = 0.95f))
-                                .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.95f))
+            Spacer(Modifier.height(16.dp))
+
+            // Keypad Area
+            Box(
+                modifier = Modifier
+                    .weight(3f)
+                    .fillMaxWidth()
+            ) {
+                Column {
+                    // Scientific Toggle Row (Compact)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Surface(
+                            onClick = { 
+                                vibrationManager?.vibrateClick()
+                                viewModel.onToggleMode() 
+                            },
+                            shape = CircleShape,
+                            color = if (state.isScientific) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (state.isScientific) Icons.Rounded.Science else Icons.Rounded.Calculate,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }, label = "keypad"
-                ) { isScientific ->
-                    if (isScientific) {
-                        ScientificKeypad(viewModel)
-                    } else {
-                        StandardKeypad(viewModel)
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AnimatedContent(
+                            targetState = state.isScientific,
+                            transitionSpec = {
+                                (fadeIn(tween(400)) + scaleIn(initialScale = 0.92f, animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow)))
+                                    .togetherWith(fadeOut(tween(300)) + scaleOut(targetScale = 0.92f))
+                            }, label = "keypad"
+                        ) { isScientific ->
+                            if (isScientific) {
+                                ScientificKeypad(viewModel)
+                            } else {
+                                StandardKeypad(viewModel)
+                            }
+                        }
                     }
                 }
             }
@@ -345,8 +340,8 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize(),
         userScrollEnabled = false
     ) {
@@ -387,21 +382,19 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
     val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
     val buttons = listOf(
-        "sin", "cos", "tan", "inv",
-        "asin", "acos", "atan", "exp",
-        "sqrt", "log10", "ln", "abs",
-        "π", "e", "^", "÷",
+        "2nd", "deg", "sin", "cos", "tan",
+        "xⁿ", "log", "ln", "(", ")",
+        "√", "AC", "DEL", "%", "÷",
         "7", "8", "9", "×",
         "4", "5", "6", "-",
         "1", "2", "3", "+",
-        "(", "0", ")", "=",
-        "C", "DEL"
+        "0", ".", "π", "e", "="
     )
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        columns = GridCells.Fixed(5),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxSize()
     ) {
         items(buttons) { btn ->
@@ -410,15 +403,25 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
                     if (hapticEnabled) vibrationManager?.vibrateTick()
                     viewModel.onBackspace() 
                 }, isScientific = true)
-                "C" -> {
+                "AC" -> {
                     CalculatorButton(
-                        text = "C",
+                        text = "AC",
                         onClick = { 
                             if (hapticEnabled) vibrationManager?.vibrateLongClick()
                             viewModel.onClear() 
                         },
                         isScientific = true,
                         isClear = true
+                    )
+                }
+                "deg" -> {
+                    CalculatorButton(
+                        text = if (viewModel.uiState.collectAsState().value.isDegreeMode) "DEG" else "RAD",
+                        onClick = { 
+                            if (hapticEnabled) vibrationManager?.vibrateClick()
+                            viewModel.onToggleAngleMode() 
+                        },
+                        isScientific = true
                     )
                 }
                 else -> {
@@ -431,8 +434,11 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
                             }
                             when (btn) {
                                 "=" -> viewModel.onEquals()
-                                "+", "-", "×", "÷", "^", "(", ")" -> viewModel.onOperator(btn)
-                                "sin", "cos", "tan", "log10", "ln", "sqrt", "abs", "exp", "inv", "asin", "acos", "atan" -> viewModel.onFunction(btn)
+                                "2nd" -> { /* Toggle 2nd functions */ }
+                                "xⁿ" -> viewModel.onOperator("^")
+                                "AC" -> viewModel.onClear()
+                                "+", "-", "×", "÷", "(", ")", "%" -> viewModel.onOperator(btn)
+                                "sin", "cos", "tan", "log", "ln", "√" -> viewModel.onFunction(btn)
                                 "π" -> viewModel.onDigit("π")
                                 "e" -> viewModel.onDigit("e")
                                 else -> viewModel.onDigit(btn)
@@ -453,46 +459,43 @@ fun CalculatorButton(
     isScientific: Boolean = false,
     isClear: Boolean = false
 ) {
-    val performanceMode = LocalPerformanceMode.current
     val isOperator = text in listOf("=", "+", "-", "×", "÷", "^", "(", ")")
     val isFunction = text in listOf("sin", "cos", "tan", "log10", "ln", "sqrt", "abs", "exp", "inv", "asin", "acos", "atan")
     
     val containerColor = when {
         text == "=" -> MaterialTheme.colorScheme.primary
-        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-        isFunction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+        isClear -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+        isFunction -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f)
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
     }
     
     val contentColor = when {
         text == "=" -> MaterialTheme.colorScheme.onPrimary
-        isOperator -> MaterialTheme.colorScheme.onPrimaryContainer
-        isClear -> MaterialTheme.colorScheme.onErrorContainer
-        isFunction -> MaterialTheme.colorScheme.onSecondaryContainer
+        isOperator -> MaterialTheme.colorScheme.primary
+        isClear -> MaterialTheme.colorScheme.error
+        isFunction -> MaterialTheme.colorScheme.secondary
         else -> MaterialTheme.colorScheme.onSurface
     }
 
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.45f else 1f)
+            .aspectRatio(if (isScientific) 1.5f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(if (isScientific) 20.dp else 32.dp),
+        shape = RoundedCornerShape(24.dp),
         color = containerColor,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-        shadowElevation = if (performanceMode) 0.dp else 2.dp
+        border = BorderStroke(if (text == "=") 0.dp else 1.dp, contentColor.copy(alpha = 0.1f))
     ) {
         Box(contentAlignment = Alignment.Center) {
-            @Suppress("DEPRECATION")
             Text(
                 text = text,
                 style = if (isScientific) {
                     if (text.length > 3) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleMedium
                 } else {
-                    MaterialTheme.typography.headlineSmall
+                    MaterialTheme.typography.headlineMedium
                 },
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.Bold,
                 color = contentColor,
                 maxLines = 1
             )
@@ -502,23 +505,21 @@ fun CalculatorButton(
 
 @Composable
 fun CalculatorIconButton(icon: ImageVector, onClick: () -> Unit, isScientific: Boolean = false) {
-    val performanceMode = LocalPerformanceMode.current
     Surface(
         modifier = Modifier
-            .aspectRatio(if (isScientific) 1.45f else 1f)
+            .aspectRatio(if (isScientific) 1.5f else 1f)
             .fillMaxWidth()
             .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(if (isScientific) 20.dp else 32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-        shadowElevation = if (performanceMode) 0.dp else 2.dp
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon, 
                 contentDescription = null, 
                 tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(if (isScientific) 24.dp else 32.dp)
+                modifier = Modifier.size(if (isScientific) 20.dp else 28.dp)
             )
         }
     }

@@ -13,6 +13,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -23,11 +25,16 @@ data class RecordingState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val durationMillis: Long = 0L,
+    val maxAmplitude: Int = 0,
     val recordings: List<File> = emptyList(),
     val playingFile: File? = null,
     val isPlaying: Boolean = false,
     val playbackPosition: Int = 0,
-    val playbackDuration: Int = 0
+    val playbackDuration: Int = 0,
+    val gainLevel: Float = 1.0f,
+    val isBackgroundEnabled: Boolean = true,
+    val availableDevices: List<String> = emptyList(),
+    val selectedDevice: String = "Default"
 )
 
 @HiltViewModel
@@ -65,6 +72,11 @@ class VoiceRecorderViewModel @Inject constructor(
                     _uiState.update { it.copy(durationMillis = duration) }
                 }
             }
+            viewModelScope.launch {
+                recorderService?.maxAmplitude?.collect { amplitude ->
+                    _uiState.update { it.copy(maxAmplitude = (amplitude * _uiState.value.gainLevel).toInt()) }
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -78,6 +90,30 @@ class VoiceRecorderViewModel @Inject constructor(
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
         loadRecordings()
+        discoverDevices()
+    }
+
+    private fun discoverDevices() {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val devices = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).map { it.productName.toString() }
+        } else {
+            listOf("Default Microphone")
+        }
+        _uiState.update { it.copy(availableDevices = devices.distinct()) }
+    }
+
+    fun setGainLevel(level: Float) {
+        _uiState.update { it.copy(gainLevel = level) }
+        recorderService?.setGainLevel(level)
+    }
+
+    fun setBackgroundEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isBackgroundEnabled = enabled) }
+    }
+
+    fun setSelectedDevice(device: String) {
+        _uiState.update { it.copy(selectedDevice = device) }
     }
 
     private fun loadRecordings() {

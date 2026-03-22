@@ -118,13 +118,6 @@ class MusicPlayerViewModel @Inject constructor(
                 startPlayerService()
                 initEqualizer()
                 vibrationManager.vibrateClick()
-                
-                val currentUri = player.currentMediaItem?.mediaId
-                if (currentUri != null) {
-                    viewModelScope.launch {
-                        repository.incrementPlayCount(currentUri)
-                    }
-                }
             } else {
                 stopProgressUpdate()
                 vibrationManager.vibrateClick()
@@ -137,6 +130,13 @@ class MusicPlayerViewModel @Inject constructor(
             val dur = player.duration.coerceAtLeast(0L)
             _uiState.update { it.copy(currentTrack = track, duration = dur) }
             _duration.value = dur
+            
+            val currentUri = player.currentMediaItem?.mediaId
+            if (currentUri != null) {
+                viewModelScope.launch {
+                    repository.incrementPlayCount(currentUri)
+                }
+            }
             
             updateQueue()
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
@@ -523,6 +523,10 @@ class MusicPlayerViewModel @Inject constructor(
             val trackUris = tracks.map { it.uri }
             val isSameQueue = trackUris == currentQueueUris
             
+            // Map models to MediaItem on Default Dispatcher
+            val mediaItems = tracks.map { t -> t.toMediaItem() }
+            val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+            
             withContext(Dispatchers.Main) {
                 val p: Player = controller ?: player
                 if (isSameQueue) {
@@ -533,9 +537,6 @@ class MusicPlayerViewModel @Inject constructor(
                         return@withContext
                     }
                 }
-
-                val mediaItems = tracks.map { t -> t.toMediaItem() }
-                val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
                 
                 p.stop()
                 p.setMediaItems(mediaItems, startIndex, 0L)

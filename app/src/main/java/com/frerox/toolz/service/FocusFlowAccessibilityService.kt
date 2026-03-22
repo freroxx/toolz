@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.TextView
 import com.frerox.toolz.R
 import com.frerox.toolz.data.focus.AppLimitRepository
+import com.frerox.toolz.data.focus.CaffeinateRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import java.util.*
@@ -26,12 +27,17 @@ import javax.inject.Inject
  * FocusFlowAccessibilityService provides app locking functionality by monitoring
  * window state changes and usage stats. It overlays a lock screen when an app's
  * daily limit is reached.
+ *
+ * It also handles 'Caffeinate' auto-enable logic when a designated app is launched.
  */
 @AndroidEntryPoint
 class FocusFlowAccessibilityService : AccessibilityService() {
 
     @Inject
     lateinit var appLimitRepository: AppLimitRepository
+    
+    @Inject
+    lateinit var caffeinateRepository: CaffeinateRepository
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
@@ -70,7 +76,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val className = event.className?.toString() ?: ""
 
         // 1. Stability: Ignore events from the overlay itself to prevent flicker loops.
-        // The overlay root is a FrameLayout, not an Activity.
         if (packageName == TOOLZ_PACKAGE && !className.contains("Activity") && !className.contains("MainActivity")) {
             return
         }
@@ -85,8 +90,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
 
         // 3. Handle System UI (Notifications, Recents, Dialogs).
-        // We do NOT hide the overlay here to prevent exposing a locked app "behind" the system UI.
-        // We also do NOT update currentPackage so the periodic job continues to monitor the app underneath.
         if (SYSTEM_UI_PACKAGES.contains(packageName)) {
             return
         }
@@ -94,6 +97,19 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         // 4. It's a standard app. Update currentPackage and run validation.
         currentPackage = packageName
         validateAndLock(packageName)
+        checkCaffeinate(packageName)
+        triggerClipboardCheck()
+    }
+
+    private fun triggerClipboardCheck() {
+        val intent = Intent(this, ClipboardService::class.java).apply {
+            action = ClipboardService.ACTION_CHECK_CLIPBOARD
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 
     private fun refreshHomePackage() {
@@ -107,10 +123,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         return cachedHomePackage
     }
 
-    /**
-     * Periodic validation ensures the lock is re-applied even if missed by an event,
-     * and handles usage stats updates while the app is in foreground.
-     */
     private fun startPeriodicValidation() {
         validationJob?.cancel()
         validationJob = serviceScope.launch {
@@ -130,7 +142,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 appLimitRepository.getLimitForApp(packageName)
             }
             
-            // Re-verify that the user is still in this package after the async DB call
             if (currentPackage != packageName) return@launch
 
             val shouldLock = if (limit != null && limit.isEnabled) {
@@ -144,8 +155,25 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 if (shouldLock) {
                     showOverlay(packageName)
                 } else if (overlayShowingForPackage == packageName) {
-                    // Only hide if the overlay was specifically for this package
                     hideOverlay()
+                }
+            }
+        }
+    }
+
+    private fun checkCaffeinate(packageName: String) {
+        serviceScope.launch {
+            val autoEnabledPackages = withContext(Dispatchers.IO) {
+                caffeinateRepository.getAutoEnabledPackages()
+            }
+            if (autoEnabledPackages.contains(packageName)) {
+                val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
+                    action = CaffeinateService.ACTION_START
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
                 }
             }
         }
@@ -171,12 +199,10 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun showOverlay(packageName: String) {
-        // Prevent Flickering: Do not re-add if already showing for this package.
         if (isOverlayShowing && overlayShowingForPackage == packageName) return
         
         Log.d(TAG, "Showing lock screen for: $packageName")
 
-        // If switching from one locked app to another, clear the old one first.
         if (isOverlayShowing) {
             removeOverlayInternal()
         }
@@ -202,7 +228,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val inflater = LayoutInflater.from(this)
         val view = inflater.inflate(R.layout.layout_focus_lock, null)
         
-        // Setup locked app info
         val appName = try {
             val ai = packageManager.getApplicationInfo(packageName, 0)
             packageManager.getApplicationLabel(ai).toString()
@@ -211,7 +236,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
         view.findViewById<TextView>(R.id.tv_lock_message)?.text = "Time's up for $appName."
         
-        // Ensure the overlay is interactive and blocks back button bypass
         view.isClickable = true
         view.isFocusable = true
         view.isFocusableInTouchMode = true
@@ -231,7 +255,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             startActivity(intent)
-            // hideOverlay() will be triggered by onAccessibilityEvent when Home opens.
         }
 
         try {

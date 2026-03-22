@@ -1,7 +1,9 @@
 package com.frerox.toolz.ui.screens.math
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +15,7 @@ import javax.inject.Inject
 data class CalculatorState(
     val display: String = "0",
     val formula: String = "",
+    val liveResult: String? = null,
     val isScientific: Boolean = false,
     val error: String? = null,
     val isDegreeMode: Boolean = true,
@@ -20,7 +23,9 @@ data class CalculatorState(
 )
 
 @HiltViewModel
-class CalculatorViewModel @Inject constructor() : ViewModel() {
+class CalculatorViewModel @Inject constructor(
+    @ApplicationContext private val context: Context
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorState())
     val uiState: StateFlow<CalculatorState> = _uiState.asStateFlow()
@@ -45,7 +50,8 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 }
                 else -> currentDisplay + digit
             }
-            it.copy(display = newDisplay)
+            val nextState = it.copy(display = newDisplay)
+            nextState.copy(liveResult = calculateLive(nextState))
         }
     }
 
@@ -69,12 +75,13 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
             } else {
                 currentDisplay + op
             }
-            it.copy(display = newDisplay, error = null)
+            val nextState = it.copy(display = newDisplay, error = null)
+            nextState.copy(liveResult = calculateLive(nextState))
         }
     }
 
     fun onClear() {
-        _uiState.update { it.copy(display = "0", formula = "", error = null) }
+        _uiState.update { it.copy(display = "0", formula = "", liveResult = null, error = null) }
         isNewExpression = true
     }
 
@@ -96,7 +103,8 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 if (newDisplay == it.display) {
                     newDisplay = it.display.dropLast(1)
                 }
-                it.copy(display = if (newDisplay.isEmpty()) "0" else newDisplay)
+                val nextState = it.copy(display = if (newDisplay.isEmpty()) "0" else newDisplay)
+                nextState.copy(liveResult = calculateLive(nextState))
             }
         }
     }
@@ -140,6 +148,7 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
                 state.copy(
                     display = formattedResult, 
                     formula = balancedDisplay + " =", 
+                    liveResult = null,
                     error = null,
                     history = newHistory
                 )
@@ -153,8 +162,21 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
         _uiState.update {
             val currentDisplay = if (isNewExpression || it.display == "0") "" else it.display
             isNewExpression = false
-            it.copy(display = currentDisplay + "$func(", error = null)
+            val functionCall = when(func) {
+                "√" -> "sqrt("
+                "log" -> "log10("
+                else -> "$func("
+            }
+            val nextState = it.copy(display = currentDisplay + functionCall, error = null)
+            nextState.copy(liveResult = calculateLive(nextState))
         }
+    }
+
+    fun onCopyResult() {
+        val textToCopy = _uiState.value.display
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("Calculator Result", textToCopy)
+        cm.setPrimaryClip(clip)
     }
 
     fun clearHistory() {
@@ -189,5 +211,37 @@ class CalculatorViewModel @Inject constructor() : ViewModel() {
             }
         }
         return res
+    }
+
+    private fun calculateLive(state: CalculatorState): String? {
+        if (state.display == "0" || state.display.isEmpty()) return null
+        
+        // Don't calculate if ends with operator
+        if (state.display.last() in "+×÷-^(") return null
+        
+        return try {
+            val openParentheses = state.display.count { it == '(' }
+            val closeParentheses = state.display.count { it == ')' }
+            val balancedDisplay = state.display + ")".repeat((openParentheses - closeParentheses).coerceAtLeast(0))
+
+            var expressionStr = balancedDisplay
+                .replace("×", "*")
+                .replace("÷", "/")
+                .replace("π", "pi")
+                .replace("ln(", "log(")
+                .replace("inv(", "1/(")
+            
+            if (state.isDegreeMode) {
+                expressionStr = transformTrig(expressionStr)
+            }
+            
+            val expression = ExpressionBuilder(expressionStr).build()
+            val result = expression.evaluate()
+            
+            if (result.isNaN() || result.isInfinite()) null 
+            else formatResult(result)
+        } catch (e: Exception) {
+            null
+        }
     }
 }

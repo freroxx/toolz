@@ -11,7 +11,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
@@ -45,6 +47,12 @@ fun Modifier.bouncyClick(
         .graphicsLayer {
             scaleX = scale
             scaleY = scale
+        }
+        .drawWithContent {
+            drawContent()
+            if (buttonState == ButtonState.Pressed && enabled && !performanceMode) {
+                drawRect(color = Color.White.copy(alpha = 0.05f))
+            }
         }
         .clickable(
             enabled = enabled,

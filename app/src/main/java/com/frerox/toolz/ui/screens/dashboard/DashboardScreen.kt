@@ -100,6 +100,7 @@ sealed class PillPage {
     object Recorder : PillPage()
     object Todo : PillPage()
     object Focus : PillPage()
+    object Caffeinate : PillPage()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,6 +125,7 @@ fun DashboardScreen(
     val notepadViewModel: NotepadViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val todoViewModel: TodoViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
     val focusViewModel: FocusFlowViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
+    val caffeinateViewModel: com.frerox.toolz.ui.screens.focus.CaffeinateViewModel = if (activity != null) hiltViewModel(activity) else hiltViewModel()
 
     val musicState by musicViewModel.uiState.collectAsState()
     val timerState by timerViewModel.uiState.collectAsState()
@@ -134,6 +136,7 @@ fun DashboardScreen(
     val notes by notepadViewModel.notes.collectAsState()
     val todoState by todoViewModel.uiState.collectAsState()
     val productivityScore by focusViewModel.productivityScore.collectAsState()
+    val isCaffeinateActive by caffeinateViewModel.isServiceRunning.collectAsState()
 
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
     val pillTodoEnabled by settingsRepository.pillTodoEnabled.collectAsState(initial = true)
@@ -188,7 +191,9 @@ fun DashboardScreen(
         searchQuery = searchQuery,
         onSearchQueryChanged = { viewModel.onSearchQueryChanged(it) },
         isAiSearching = isAiSearching,
-        aiSuggestedRoutes = aiSuggestedRoutes
+        aiSuggestedRoutes = aiSuggestedRoutes,
+        isCaffeinateActive = isCaffeinateActive,
+        caffeinateViewModel = caffeinateViewModel
     )
 }
 
@@ -227,7 +232,9 @@ private fun DashboardContent(
     searchQuery: String,
     onSearchQueryChanged: (String) -> Unit,
     isAiSearching: Boolean,
-    aiSuggestedRoutes: List<String>
+    aiSuggestedRoutes: List<String>,
+    isCaffeinateActive: Boolean,
+    caffeinateViewModel: com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
 ) {
     val categories = remember { getCategories() }
     val scope = rememberCoroutineScope()
@@ -281,7 +288,7 @@ private fun DashboardContent(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { onSearchQueryChanged(it) },
-                    placeholder = { Text(if (isOnline) "Describe your need (e.g. \"save link\")" else "Search precision tools...") },
+                    placeholder = { Text(if (isOnline) "Describe your need" else "Search tools...") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp),
@@ -417,16 +424,26 @@ private fun DashboardContent(
                         item {
                             SectionHeader("PINNED INSTRUMENTS")
                         }
-                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { _, tool ->
-                            ToolListItem(
-                                tool = tool,
-                                isPinned = true,
-                                onClick = { navigateWithRecent(tool.route) },
-                                onLongClick = {
-                                    vibrationManager?.vibrateLongClick()
-                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                }
-                            )
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { index, tool ->
+                            val visible = remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                delay(index * 40L)
+                                visible.value = true
+                            }
+                            AnimatedVisibility(
+                                visible = visible.value,
+                                enter = fadeIn(tween(400)) + slideInVertically(initialOffsetY = { 20 })
+                            ) {
+                                ToolListItem(
+                                    tool = tool,
+                                    isPinned = true,
+                                    onClick = { navigateWithRecent(tool.route) },
+                                    onLongClick = {
+                                        vibrationManager?.vibrateLongClick()
+                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                    }
+                                )
+                            }
                         }
                         item { Spacer(Modifier.height(16.dp)) }
                     }
@@ -435,16 +452,26 @@ private fun DashboardContent(
                         item {
                             SectionHeader("RECENTLY USED")
                         }
-                        itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { _, tool ->
-                            ToolListItem(
-                                tool = tool,
-                                isPinned = pinnedTools.contains(tool.route),
-                                onClick = { navigateWithRecent(tool.route) },
-                                onLongClick = {
-                                    vibrationManager?.vibrateLongClick()
-                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                }
-                            )
+                        itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { index, tool ->
+                            val visible = remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                delay((pinnedToolItems.size + index) * 40L)
+                                visible.value = true
+                            }
+                            AnimatedVisibility(
+                                visible = visible.value,
+                                enter = fadeIn(tween(400)) + slideInVertically(initialOffsetY = { 20 })
+                            ) {
+                                ToolListItem(
+                                    tool = tool,
+                                    isPinned = pinnedTools.contains(tool.route),
+                                    onClick = { navigateWithRecent(tool.route) },
+                                    onLongClick = {
+                                        vibrationManager?.vibrateLongClick()
+                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                    }
+                                )
+                            }
                         }
                         item { Spacer(Modifier.height(16.dp)) }
                     }
@@ -489,16 +516,26 @@ private fun DashboardContent(
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             SectionHeader("PINNED INSTRUMENTS", topPadding = 8.dp)
                         }
-                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_grid_${tool.route}" }) { _, tool ->
-                            ImprovedToolCard(
-                                tool = tool,
-                                isPinned = true,
-                                onClick = { navigateWithRecent(tool.route) },
-                                onLongClick = {
-                                    vibrationManager?.vibrateLongClick()
-                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                }
-                            )
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_grid_${tool.route}" }) { index, tool ->
+                            val visible = remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                delay(index * 40L)
+                                visible.value = true
+                            }
+                            AnimatedVisibility(
+                                visible = visible.value,
+                                enter = if (performanceMode) fadeIn() else (fadeIn(tween(500)) + scaleIn(initialScale = 0.92f))
+                            ) {
+                                ImprovedToolCard(
+                                    tool = tool,
+                                    isPinned = true,
+                                    onClick = { navigateWithRecent(tool.route) },
+                                    onLongClick = {
+                                        vibrationManager?.vibrateLongClick()
+                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -531,16 +568,28 @@ private fun DashboardContent(
                         item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
                             SectionHeader(category.title, topPadding = 24.dp)
                         }
-                        itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { _, tool ->
-                            ImprovedToolCard(
-                                tool = tool,
-                                isPinned = pinnedTools.contains(tool.route),
-                                onClick = { navigateWithRecent(tool.route) },
-                                onLongClick = {
-                                    vibrationManager?.vibrateLongClick()
-                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                }
-                            )
+                        itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { index, tool ->
+                            val visible = remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                // Add offset for pinned/recent tools
+                                val baseDelay = (pinnedToolItems.size + (if (showRecentTools) 1 else 0)).coerceAtMost(10)
+                                delay((baseDelay + index) * 40L)
+                                visible.value = true
+                            }
+                            AnimatedVisibility(
+                                visible = visible.value,
+                                enter = if (performanceMode) fadeIn() else (fadeIn(tween(500)) + scaleIn(initialScale = 0.92f))
+                            ) {
+                                ImprovedToolCard(
+                                    tool = tool,
+                                    isPinned = pinnedTools.contains(tool.route),
+                                    onClick = { navigateWithRecent(tool.route) },
+                                    onLongClick = {
+                                        vibrationManager?.vibrateLongClick()
+                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -564,13 +613,14 @@ private fun DashboardContent(
                 if (stepState.isEnabledInSettings) pages.add(PillPage.Steps)
                 if (pillTodoEnabled && todoState.isSessionActive) pages.add(PillPage.Todo)
                 if (pillFocusEnabled) pages.add(PillPage.Focus)
+                if (isCaffeinateActive) pages.add(PillPage.Caffeinate)
                 pages
             }
 
             AnimatedVisibility(
                 visible = activePages.isNotEmpty(),
-                enter = if (performanceMode) fadeIn() else (slideInVertically(initialOffsetY = { it }) + fadeIn() + scaleIn(initialScale = 0.9f)),
-                exit = if (performanceMode) fadeOut() else (slideOutVertically(targetOffsetY = { it }) + fadeOut() + scaleOut(targetScale = 0.9f)),
+                enter = if (performanceMode) fadeIn() else (slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(tween(600)) + scaleIn(initialScale = 0.85f, animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow))),
+                exit = if (performanceMode) fadeOut() else (slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut(tween(400)) + scaleOut(targetScale = 0.85f)),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp + padding.calculateBottomPadding())
@@ -583,7 +633,7 @@ private fun DashboardContent(
                         .padding(horizontal = 20.dp)
                         .fillMaxWidth()
                         .height(115.dp)
-                        .then(if (performanceMode) Modifier else Modifier.shadow(24.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)))
+                        .then(if (performanceMode) Modifier else Modifier.shadow(32.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)))
                         .bouncyClick {
                             vibrationManager?.vibrateClick()
                             val currentRoute = when(activePages[pagerState.currentPage]) {
@@ -595,18 +645,20 @@ private fun DashboardContent(
                                 PillPage.Recorder -> Screen.VoiceRecorder.route
                                 PillPage.Todo -> Screen.Todo.route
                                 PillPage.Focus -> Screen.FocusFlow.route
+                                PillPage.Caffeinate -> Screen.Caffeinate.route
                             }
                             onNavigate(currentRoute)
                         },
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = if (performanceMode) 1f else 0.95f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = if (performanceMode) 1f else 0.98f),
                     shape = CircleShape,
-                    tonalElevation = 8.dp,
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                    tonalElevation = 12.dp,
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
                 ) {
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
-                        userScrollEnabled = true
+                        userScrollEnabled = true,
+                        beyondViewportPageCount = 1
                     ) { pageIndex ->
                         Box(
                             modifier = Modifier
@@ -617,8 +669,10 @@ private fun DashboardContent(
                                             (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
                                         ).absoluteValue
 
-                                        alpha = lerp(0.3f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                        scaleX = lerp(0.95f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                        alpha = lerp(0.4f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                        val scale = lerp(0.9f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                                        scaleX = scale
+                                        scaleY = scale
                                     }
                                 }
                         ) {
@@ -631,6 +685,7 @@ private fun DashboardContent(
                                 PillPage.Recorder -> RecorderPill(recorderState, recorderViewModel)
                                 PillPage.Todo -> TodoPill(todoState, todoViewModel)
                                 PillPage.Focus -> FocusPill(productivityScore)
+                                PillPage.Caffeinate -> CaffeinatePill(caffeinateViewModel)
                             }
                         }
                     }
@@ -859,6 +914,56 @@ fun FocusPill(score: Int) {
             tint = if (score > 70) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
             modifier = Modifier.size(32.dp)
         )
+    }
+}
+
+@Composable
+fun CaffeinatePill(viewModel: com.frerox.toolz.ui.screens.focus.CaffeinateViewModel) {
+    val isRunning by viewModel.isServiceRunning.collectAsState()
+    val vibrationManager = LocalVibrationManager.current
+    
+    Row(
+        modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(64.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.Coffee, 
+                    null, 
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer, 
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("CAFFEINATE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+            Text(
+                "ON DRAIN: ACTIVE",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        IconButton(
+            onClick = {
+                vibrationManager?.vibrateClick()
+                viewModel.toggleService()
+            },
+            modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
+        ) {
+            Icon(
+                if (isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(32.dp)
+            )
+        }
     }
 }
 
@@ -1656,7 +1761,8 @@ fun getCategories() = listOf(
             ToolItem("Todo List", Icons.Rounded.TaskAlt, Screen.Todo.route, "Physics task flow"),
             ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
             ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
-            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker")
+            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker"),
+            ToolItem("Caffeinate", Icons.Rounded.Coffee, Screen.Caffeinate.route, "Screen wake tool")
         )
     ),
     ToolCategory(
@@ -1704,6 +1810,7 @@ fun getCategories() = listOf(
     ToolCategory(
         "SYSTEM & HEALTH",
         listOf(
+            ToolItem("File Cleaner", Icons.Rounded.CleaningServices, Screen.FileCleaner.route, "Deep clean"),
             ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
             ToolItem("Device Info", Icons.Rounded.Info, Screen.DeviceInfo.route, "Intelligence"),
             ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health"),

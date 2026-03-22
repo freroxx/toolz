@@ -25,7 +25,8 @@ data class RandomGeneratorState(
     val diceResults: List<Int> = emptyList(),
     val totalDiceSum: Int = 0,
     val wordCount: Float = 1f,
-    val generatedWords: String = ""
+    val generatedWords: String = "",
+    val passwordStrength: Float = 0f // 0 to 1
 )
 
 @HiltViewModel
@@ -108,7 +109,22 @@ class RandomGeneratorViewModel @Inject constructor() : ViewModel() {
         pwdChars.shuffle(secureRandom)
         
         val pwd = pwdChars.joinToString("")
-        _uiState.update { it.copy(password = pwd) }
+        val strength = calculateStrength(pwd, length)
+        _uiState.update { it.copy(password = pwd, passwordStrength = strength) }
+    }
+
+    private fun calculateStrength(password: String, length: Int): Float {
+        if (password.isEmpty()) return 0f
+        var score = 0f
+        if (length >= 12) score += 0.3f
+        if (length >= 20) score += 0.2f
+        
+        if (password.any { it.isDigit() }) score += 0.15f
+        if (password.any { it.isUpperCase() }) score += 0.15f
+        if (password.any { it.isLowerCase() }) score += 0.1f
+        if (password.any { "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(it) }) score += 0.1f
+        
+        return score.coerceIn(0f, 1f)
     }
 
     // Dice

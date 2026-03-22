@@ -21,6 +21,8 @@ import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.AppLimitDao
+import com.frerox.toolz.data.focus.CaffeinateApp
+import com.frerox.toolz.data.focus.CaffeinateDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskEntry
@@ -43,13 +45,14 @@ import com.frerox.toolz.data.calendar.EventDao
         PdfMetadata::class,
         NotificationEntry::class,
         AppLimit::class,
+        CaffeinateApp::class,
         ClipboardEntry::class,
         TaskEntry::class,
         AiChat::class,
         AiMessage::class,
         EventEntry::class
     ], 
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 @TypeConverters(MusicConverters::class, TodoConverters::class)
@@ -62,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pdfMetadataDao(): PdfMetadataDao
     abstract fun notificationDao(): NotificationDao
     abstract fun appLimitDao(): AppLimitDao
+    abstract fun caffeinateDao(): CaffeinateDao
     abstract fun clipboardDao(): ClipboardDao
     abstract fun taskDao(): TaskDao
     abstract fun aiDao(): AiDao

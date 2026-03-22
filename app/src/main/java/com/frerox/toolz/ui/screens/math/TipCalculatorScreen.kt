@@ -27,8 +27,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import java.util.*
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +39,8 @@ fun TipCalculatorScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+
+    var showCurrencySheet by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -49,6 +52,18 @@ fun TipCalculatorScreen(
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { showCurrencySheet = true },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        if (state.isAiDetecting) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                        } else {
+                            Text(state.currencySymbol, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -66,10 +81,7 @@ fun TipCalculatorScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .fadingEdge(
-                        brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
-                        length = 24.dp
-                    )
+                    .fadingEdges(top = 16.dp, bottom = 16.dp)
                     .verticalScroll(scrollState)
                     .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -97,7 +109,7 @@ fun TipCalculatorScreen(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            text = String.format(Locale.getDefault(), "$%.2f", state.totalPerPerson),
+                            text = String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, state.totalPerPerson),
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontWeight = FontWeight.Black,
                                 fontSize = 60.sp,
@@ -109,9 +121,9 @@ fun TipCalculatorScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            ResultSubItem("BILL + TIP", String.format(Locale.getDefault(), "$%.2f", (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
+                            ResultSubItem("BILL + TIP", String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
                             VerticalDivider(modifier = Modifier.height(40.dp), color = Color.White.copy(alpha = 0.2f))
-                            ResultSubItem("TOTAL TIP", String.format(Locale.getDefault(), "$%.2f", state.totalTip))
+                            ResultSubItem("TOTAL TIP", String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, state.totalTip))
                         }
                     }
                 }
@@ -145,10 +157,10 @@ fun TipCalculatorScreen(
                             value = state.billAmount,
                             onValueChange = { viewModel.onBillChange(it) },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Bill Amount") },
+                            label = { Text("Bill Amount (${state.currencyCode})") },
                             placeholder = { Text("0.00") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            prefix = { Text("$ ", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
+                            prefix = { Text("${state.currencySymbol} ", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
                             shape = RoundedCornerShape(20.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -185,8 +197,7 @@ fun TipCalculatorScreen(
                         Slider(
                             value = state.tipPercentage,
                             onValueChange = { viewModel.onTipChange(it) },
-                            valueRange = 0f..50f,
-                            steps = 9,
+                            valueRange = 0f..100f,
                             modifier = Modifier.padding(vertical = 12.dp)
                         )
 
@@ -195,7 +206,7 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             listOf(10f, 15f, 20f, 25f).forEach { pct ->
-                                val isSelected = state.tipPercentage == pct
+                                val isSelected = state.tipPercentage == pct && state.customTip.isEmpty()
                                 Surface(
                                     onClick = { viewModel.onTipChange(pct) },
                                     modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
@@ -209,6 +220,27 @@ fun TipCalculatorScreen(
                                 }
                             }
                         }
+
+                        Spacer(Modifier.height(24.dp))
+
+                        // Custom Tip Percentage
+                        OutlinedTextField(
+                            value = state.customTip,
+                            onValueChange = { viewModel.onCustomTipChange(it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Custom Tip %") },
+                            placeholder = { Text("Enter percentage") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            suffix = { Text("%", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
+                            shape = RoundedCornerShape(16.dp),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                            )
+                        )
 
                         Spacer(Modifier.height(36.dp))
 
@@ -256,6 +288,76 @@ fun TipCalculatorScreen(
                 }
                 
                 Spacer(Modifier.height(48.dp))
+            }
+        }
+
+        if (showCurrencySheet) {
+            CurrencySelectorSheet(
+                onDismiss = { showCurrencySheet = false },
+                onSelect = { code, symbol ->
+                    viewModel.onCurrencyChange(code, symbol)
+                    showCurrencySheet = false
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CurrencySelectorSheet(onDismiss: () -> Unit, onSelect: (String, String) -> Unit) {
+    val currencies = remember {
+        listOf(
+            "USD" to "$", "EUR" to "€", "GBP" to "£", "JPY" to "¥", "INR" to "₹",
+            "AUD" to "A$", "CAD" to "C$", "CHF" to "Fr", "CNY" to "¥", "HKD" to "HK$",
+            "NZD" to "NZ$", "SEK" to "kr", "KRW" to "₩", "SGD" to "S$", "NOK" to "kr",
+            "MXN" to "$", "RUB" to "₽", "ZAR" to "R", "TRY" to "₺", "BRL" to "R$",
+            "TWD" to "NT$", "DKK" to "kr", "PLN" to "zł", "THB" to "฿", "IDR" to "Rp",
+            "HUF" to "Ft", "CZK" to "Kč", "ILS" to "₪", "CLP" to "$", "PHP" to "₱",
+            "AED" to "د.إ", "COP" to "$", "SAR" to "﷼", "MYR" to "RM", "RON" to "lei"
+        ).sortedBy { it.first }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                "SELECT CURRENCY",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp
+            )
+            
+            Box(modifier = Modifier.heightIn(max = 400.dp)) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    currencies.forEach { (code, symbol) ->
+                        ListItem(
+                            headlineContent = { Text(code, fontWeight = FontWeight.Bold) },
+                            supportingContent = { Text(symbol) },
+                            leadingContent = {
+                                Surface(
+                                    modifier = Modifier.size(40.dp),
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(symbol, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.bouncyClick { onSelect(code, symbol) }
+                        )
+                    }
+                }
             }
         }
     }

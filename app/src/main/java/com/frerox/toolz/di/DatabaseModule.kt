@@ -11,6 +11,7 @@ import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import com.frerox.toolz.data.pdf.PdfMetadataDao
 import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimitDao
+import com.frerox.toolz.data.focus.CaffeinateDao
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.ai.AiDao
@@ -76,6 +77,11 @@ object DatabaseModule {
     @Provides
     fun provideAppLimitDao(database: AppDatabase): AppLimitDao {
         return database.appLimitDao()
+    }
+
+    @Provides
+    fun provideCaffeinateDao(database: AppDatabase): CaffeinateDao {
+        return database.caffeinateDao()
     }
 
     @Provides

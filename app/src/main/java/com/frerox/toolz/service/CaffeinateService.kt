@@ -3,6 +3,7 @@ package com.frerox.toolz.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.*
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -10,7 +11,10 @@ import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+import android.service.quicksettings.TileService
+import android.content.ComponentName
 
 @AndroidEntryPoint
 class CaffeinateService : Service() {
@@ -22,6 +26,7 @@ class CaffeinateService : Service() {
     private var startTimeMillis: Long = 0
     private var reminderIntervalMinutes: Int = 30
     private var isInfinite: Boolean = false
+    private var themeColor: Int = android.graphics.Color.BLUE
 
     companion object {
         private const val TAG = "CaffeinateService"
@@ -34,6 +39,7 @@ class CaffeinateService : Service() {
         
         const val EXTRA_INTERVAL = "EXTRA_INTERVAL"
         const val EXTRA_INFINITE = "EXTRA_INFINITE"
+        const val EXTRA_COLOR = "EXTRA_COLOR"
     }
 
     override fun onCreate() {
@@ -46,6 +52,7 @@ class CaffeinateService : Service() {
             ACTION_START -> {
                 reminderIntervalMinutes = intent.getIntExtra(EXTRA_INTERVAL, 30)
                 isInfinite = intent.getBooleanExtra(EXTRA_INFINITE, false)
+                themeColor = intent.getIntExtra(EXTRA_COLOR, android.graphics.Color.BLUE)
                 startCaffeinate()
             }
             ACTION_STOP -> stopCaffeinate()
@@ -57,21 +64,29 @@ class CaffeinateService : Service() {
     private fun startCaffeinate() {
         acquireWakeLock()
         startTimeMillis = System.currentTimeMillis()
-        startForeground(NOTIFICATION_ID, createNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
         startReminderTimer()
         updateNotificationLoop()
+        requestTileUpdate()
     }
 
     private fun stopCaffeinate() {
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
+        requestTileUpdate()
         stopSelf()
     }
 
     private fun acquireWakeLock() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        @Suppress("DEPRECATION")
         wakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "Toolz:CaffeinateWakeLock")
-        wakeLock?.acquire()
+        // Acquire for a long time but not forever to be safe, e.g., 24 hours
+        wakeLock?.acquire(24 * 60 * 60 * 1000L)
         Log.d(TAG, "WakeLock acquired")
     }
 
@@ -93,15 +108,19 @@ class CaffeinateService : Service() {
         val mainPendingIntent = PendingIntent.getActivity(this, 2, mainIntent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Caffeinate Active")
+            .setContentTitle("Caffeinate is Active")
             .setContentText(contentText)
-            .setSmallIcon(android.R.drawable.ic_lock_power_off)
+            .setSmallIcon(R.drawable.ic_coffee)
             .setOngoing(true)
+            .setSilent(true)
+            .setColor(themeColor)
+            .setColorized(true)
             .setContentIntent(mainPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
             .addAction(android.R.drawable.ic_menu_add, "Keep Going", keepGoingPendingIntent)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setForegroundServiceType(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -113,7 +132,7 @@ class CaffeinateService : Service() {
                 val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsed) % 60
                 val seconds = TimeUnit.MILLISECONDS.toSeconds(elapsed) % 60
                 
-                val timeStr = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+                val timeStr = String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
                 val notification = createNotification("Active for: $timeStr")
                 val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.notify(NOTIFICATION_ID, notification)
@@ -135,17 +154,18 @@ class CaffeinateService : Service() {
 
     private fun resetReminder() {
         startReminderTimer()
-        // Optional: Vibrate or sound to confirm reset
+        // Cancel the reminder notification if it's showing
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(NOTIFICATION_ID + 1)
     }
 
     private fun showReminderAlert() {
-        // In a real app, this might show a high-priority notification or a dialog if the app is in foreground
-        // For now, we'll update the notification to be more "urgent"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val alertNotification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Caffeinate Reminder")
             .setContentText("Still using the screen? Tap 'Keep Going' to continue.")
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_coffee)
+            .setColor(themeColor)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
@@ -159,10 +179,16 @@ class CaffeinateService : Service() {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Caffeinate Service Channel",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    private fun requestTileUpdate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            TileService.requestListeningState(this, ComponentName(this, CaffeinateTileService::class.java))
         }
     }
 
