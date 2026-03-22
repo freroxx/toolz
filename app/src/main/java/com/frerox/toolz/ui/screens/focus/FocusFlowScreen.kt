@@ -28,6 +28,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -79,6 +81,7 @@ fun FocusFlowScreen(
     val performanceMode   = LocalPerformanceMode.current
     val vibrationManager  = LocalVibrationManager.current
     val context           = LocalContext.current
+    val scope             = rememberCoroutineScope()
 
     val canDrawOverlays         = remember { Settings.canDrawOverlays(context) }
     var isAccessibilityEnabled  by remember { mutableStateOf(false) }
@@ -186,7 +189,14 @@ fun FocusFlowScreen(
 
                         // Usage stats refresh
                         IconButton(
-                            onClick  = { vibrationManager?.vibrateClick(); viewModel.refreshStats() },
+                            onClick  = { 
+                                vibrationManager?.vibrateClick()
+                                scope.launch {
+                                    viewModel.refreshStats()
+                                    delay(500)
+                                    vibrationManager?.vibrateSuccess()
+                                }
+                            },
                             modifier = Modifier
                                 .padding(8.dp)
                                 .clip(RoundedCornerShape(16.dp))
@@ -448,17 +458,19 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
                     if (!canDrawOverlays)
                         "Needed to block distracting apps"
                     else
-                        "Needed for the focus engine",
+                        "Accessibility service helps the flow engine",
                     style      = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Black,
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "Tap to open settings →",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    fontWeight = FontWeight.Bold,
-                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onResolveClick,
+                    modifier = Modifier.height(36.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("AUTHORIZE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }

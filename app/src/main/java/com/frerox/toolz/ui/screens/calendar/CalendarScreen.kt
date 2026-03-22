@@ -1900,7 +1900,7 @@ fun AiVisionSheetContent(
             value       = aiPrompt,
             onValueChange = onPromptChange,
             modifier    = Modifier.fillMaxWidth(),
-            placeholder = { Text("e.g. Exam on Jan 20 at 9am or Deadline Friday 5pm") },
+            placeholder = { Text("Describe your event") },
             shape       = RoundedCornerShape(RadiusLarge),
             leadingIcon = {
                 IconButton(onClick = onAttachClick) {

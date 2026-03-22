@@ -17,6 +17,7 @@ sealed class Screen(val route: String) {
     object FocusFlow : Screen("focus_flow")
     object Todo : Screen("todo")
     object Calendar : Screen("calendar")
+    object Caffeinate : Screen("caffeinate")
     
     // Light & Optics
     object Flashlight : Screen("flashlight")
@@ -56,4 +57,7 @@ sealed class Screen(val route: String) {
     
     // Media
     object MusicPlayer : Screen("music_player")
+
+    // System
+    object FileCleaner : Screen("file_cleaner")
 }

@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 enum class ConversionType {
-    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY
+    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY, FORCE, PRESSURE, POWER
 }
 
 data class UnitConverterState(
@@ -36,7 +36,10 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
         ConversionType.SPEED to listOf("Meters/sec", "Km/h", "Miles/h", "Knot", "Mach"),
         ConversionType.TIME to listOf("Second", "Minute", "Hour", "Day", "Week", "Month", "Year"),
         ConversionType.DIGITAL_STORAGE to listOf("Bit", "Byte", "Kilobyte", "Megabyte", "Gigabyte", "Terabyte", "Petabyte"),
-        ConversionType.ENERGY to listOf("Joule", "Kilojoule", "Calorie", "Kilocalorie", "Watt-hour", "Kilowatt-hour", "Electronvolt")
+        ConversionType.ENERGY to listOf("Joule", "Kilojoule", "Calorie", "Kilocalorie", "Watt-hour", "Kilowatt-hour", "Electronvolt"),
+        ConversionType.FORCE to listOf("Newton", "Kilonewton", "Dyne", "Pound-force", "Gram-force", "Kilogram-force"),
+        ConversionType.PRESSURE to listOf("Pascal", "Kilopascal", "Bar", "Millibar", "PSI", "Atmosphere", "Torr"),
+        ConversionType.POWER to listOf("Watt", "Kilowatt", "Megawatt", "Horsepower", "Foot-pound/min", "BTU/hour")
     )
 
     init {
@@ -84,6 +87,9 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             ConversionType.TIME -> convertTime(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.DIGITAL_STORAGE -> convertDigital(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.ENERGY -> convertEnergy(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.FORCE -> convertForce(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.PRESSURE -> convertPressure(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.POWER -> convertPower(input, _uiState.value.fromUnit, _uiState.value.toUnit)
         }
         _uiState.update { 
             it.copy(outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'))
@@ -168,5 +174,29 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             "Electronvolt" to 1.602176634e-19
         )
         return value * (toJoule[from] ?: 1.0) / (toJoule[to] ?: 1.0)
+    }
+
+    private fun convertForce(value: Double, from: String, to: String): Double {
+        val toNewton = mapOf(
+            "Newton" to 1.0, "Kilonewton" to 1000.0, "Dyne" to 1e-5,
+            "Pound-force" to 4.44822, "Gram-force" to 0.00980665, "Kilogram-force" to 9.80665
+        )
+        return value * (toNewton[from] ?: 1.0) / (toNewton[to] ?: 1.0)
+    }
+
+    private fun convertPressure(value: Double, from: String, to: String): Double {
+        val toPascal = mapOf(
+            "Pascal" to 1.0, "Kilopascal" to 1000.0, "Bar" to 100000.0,
+            "Millibar" to 100.0, "PSI" to 6894.76, "Atmosphere" to 101325.0, "Torr" to 133.322
+        )
+        return value * (toPascal[from] ?: 1.0) / (toPascal[to] ?: 1.0)
+    }
+
+    private fun convertPower(value: Double, from: String, to: String): Double {
+        val toWatt = mapOf(
+            "Watt" to 1.0, "Kilowatt" to 1000.0, "Megawatt" to 1000000.0,
+            "Horsepower" to 745.7, "Foot-pound/min" to 0.022597, "BTU/hour" to 0.293071
+        )
+        return value * (toWatt[from] ?: 1.0) / (toWatt[to] ?: 1.0)
     }
 }

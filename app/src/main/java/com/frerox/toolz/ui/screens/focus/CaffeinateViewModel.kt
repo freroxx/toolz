@@ -1,9 +1,11 @@
 package com.frerox.toolz.ui.screens.focus
 
-import android.app.ActivityManager
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.focus.CaffeinateApp
@@ -35,15 +37,40 @@ class CaffeinateViewModel @Inject constructor(
     private val _isCategorizing = MutableStateFlow(false)
     val isCategorizing: StateFlow<Boolean> = _isCategorizing.asStateFlow()
 
+    private val _aiStatus = MutableStateFlow("")
+    val aiStatus: StateFlow<String> = _aiStatus.asStateFlow()
+
+    private val _hasNotificationPermission = MutableStateFlow(true)
+    val hasNotificationPermission: StateFlow<Boolean> = _hasNotificationPermission.asStateFlow()
+
     init {
         checkServiceStatus()
+        viewModelScope.launch {
+            allApps.collect { apps ->
+                if (apps.isEmpty()) {
+                    repository.refreshAppsWithAi()
+                }
+            }
+        }
     }
 
     fun checkServiceStatus() {
         _isServiceRunning.value = isServiceRunning(CaffeinateService::class.java)
+        checkNotificationPermission()
     }
 
-    fun toggleService() {
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            _hasNotificationPermission.value = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            _hasNotificationPermission.value = true
+        }
+    }
+
+    fun toggleService(themeColor: Int = android.graphics.Color.BLUE) {
         if (_isServiceRunning.value) {
             val intent = Intent(context, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_STOP
@@ -54,6 +81,7 @@ class CaffeinateViewModel @Inject constructor(
                 action = CaffeinateService.ACTION_START
                 putExtra(CaffeinateService.EXTRA_INTERVAL, _reminderInterval.value)
                 putExtra(CaffeinateService.EXTRA_INFINITE, _isInfinite.value)
+                putExtra(CaffeinateService.EXTRA_COLOR, themeColor)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -79,8 +107,12 @@ class CaffeinateViewModel @Inject constructor(
     fun refreshAppCategories() {
         viewModelScope.launch {
             _isCategorizing.value = true
+            _aiStatus.value = "Analyzing installed apps..."
             repository.refreshAppsWithAi()
+            _aiStatus.value = "Categorization complete!"
             _isCategorizing.value = false
+            kotlinx.coroutines.delay(2000)
+            _aiStatus.value = ""
         }
     }
 
@@ -91,7 +123,7 @@ class CaffeinateViewModel @Inject constructor(
     }
 
     private fun isServiceRunning(serviceClass: Class<*>): Boolean {
-        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         @Suppress("DEPRECATION")
         for (service in manager.getRunningServices(Int.MAX_VALUE)) {
             if (serviceClass.name == service.service.className) {

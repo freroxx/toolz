@@ -33,14 +33,27 @@ class NotificationVaultService : NotificationListenerService() {
             if (hiddenApps.contains(packageName)) return@launch
 
             // Hide system and own app notifications
-            if (packageName == "com.frerox.toolz" || 
-                packageName == "com.android.systemui" || 
-                packageName == "android" ||
-                packageName == "com.android.vending" ||
-                packageName.contains("system", ignoreCase = true) ||
-                packageName.contains("overlay", ignoreCase = true) ||
-                sbn.isOngoing
-            ) return@launch
+            if (packageName == "com.frerox.toolz") return@launch
+            
+            val isSystemApp = try {
+                val ai = packageManager.getApplicationInfo(packageName, 0)
+                (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+            } catch (e: Exception) { false }
+
+            if (isSystemApp && !packageName.contains("messaging") && !packageName.contains("phone") && !packageName.contains("contacts")) {
+                // Keep system messaging/phone apps, but filter others
+                if (packageName == "com.android.systemui" || 
+                    packageName == "android" ||
+                    packageName == "com.android.vending" ||
+                    packageName.contains("system", ignoreCase = true) ||
+                    packageName.contains("overlay", ignoreCase = true)
+                ) return@launch
+            }
+
+            if (sbn.isOngoing && !packageName.contains("music") && !packageName.contains("player") && !packageName.contains("spotify")) {
+                // Filter ongoing unless it's music
+                return@launch
+            }
 
             val notification = sbn.notification
             val extras = notification.extras

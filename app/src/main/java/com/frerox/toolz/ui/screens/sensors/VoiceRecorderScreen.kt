@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -48,28 +48,51 @@ fun VoiceRecorderScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    var showSettingsSheet by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("VOICE RECORDER", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp) },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { /* Settings */ },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-            )
+            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "VOICE RECORDER",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showSettingsSheet = true },
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.Rounded.Tune, contentDescription = "Settings")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
@@ -111,6 +134,8 @@ fun VoiceRecorderScreen(
                         )
 
                         if (uiState.isRecording) {
+                            WaveformAnimation(amplitude = uiState.maxAmplitude)
+                        } else {
                             RecordingRippleAnimation()
                         }
                         
@@ -251,10 +276,7 @@ fun VoiceRecorderScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize().fadingEdge(
-                            brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
-                            length = 24.dp
-                        ),
+                        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 100.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
@@ -270,6 +292,163 @@ fun VoiceRecorderScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        if (showSettingsSheet) {
+            VoiceRecorderSettingsSheet(
+                state = uiState,
+                onDismiss = { showSettingsSheet = false },
+                onGainChange = { viewModel.setGainLevel(it) },
+                onDeviceSelect = { viewModel.setSelectedDevice(it) },
+                onBackgroundToggle = { viewModel.setBackgroundEnabled(it) }
+            )
+        }
+    }
+}
+
+@Composable
+fun WaveformAnimation(amplitude: Int) {
+    val barCount = 14
+    val heights = remember { List(barCount) { mutableStateOf(0.1f) } }
+    
+    LaunchedEffect(amplitude) {
+        val norm = (amplitude.toFloat() / 32767f).coerceIn(0.1f, 1f)
+        heights.forEach { h ->
+            h.value = norm * (0.3f + Math.random().toFloat() * 0.7f)
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().height(120.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        heights.forEach { h ->
+            val animatedHeight by animateFloatAsState(
+                targetValue = h.value * 120f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                label = "bar"
+            )
+            Box(
+                modifier = Modifier
+                    .width(8.dp)
+                    .height(animatedHeight.dp.coerceAtLeast(6.dp))
+                    .padding(horizontal = 2.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                        )
+                    )
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VoiceRecorderSettingsSheet(
+    state: RecordingState,
+    onDismiss: () -> Unit,
+    onGainChange: (Float) -> Unit,
+    onDeviceSelect: (String) -> Unit,
+    onBackgroundToggle: (Boolean) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 40.dp)
+        ) {
+            Text(
+                "AUDIO CONFIGURATION",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+
+            // Gain Control
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("SENSITIVITY (GAIN)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text("${String.format("%.1f", state.gainLevel)}x", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Slider(
+                        value = state.gainLevel,
+                        onValueChange = onGainChange,
+                        valueRange = 0.5f..3.0f,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+
+            // Input Device
+            if (state.availableDevices.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text("INPUT SOURCE", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(12.dp))
+                        state.availableDevices.forEach { device ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .bouncyClick { onDeviceSelect(device) }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp)
+                            ) {
+                                RadioButton(
+                                    selected = state.selectedDevice == device,
+                                    onClick = { onDeviceSelect(device) }
+                                )
+                                Text(device, style = MaterialTheme.typography.bodyMedium, fontWeight = if (state.selectedDevice == device) FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Background Toggle
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("PERSISTENT RECORDING", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text("Allow capture while app is in background", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = state.isBackgroundEnabled,
+                        onCheckedChange = onBackgroundToggle
+                    )
                 }
             }
         }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -28,7 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.frerox.toolz.ui.components.SquigglySlider
+import com.frerox.toolz.ui.components.fadingEdges
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,8 +42,6 @@ fun UpdateScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     
-    var downloadProgress by remember { mutableFloatStateOf(0f) }
-    var isDownloading by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
 
@@ -103,7 +102,7 @@ fun UpdateScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = "ACTIVE BUILD: $currentVersionCode",
+                    text = "BUILD $currentVersionCode",
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
@@ -115,55 +114,56 @@ fun UpdateScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             AnimatedContent(
-                targetState = Triple(uiState, isDownloading, uiState is UpdateUiState.Error),
+                targetState = uiState,
                 transitionSpec = {
                     fadeIn() + scaleIn() togetherWith fadeOut() + scaleOut()
                 },
                 label = "update_state"
-            ) { (state, downloading, isError) ->
-                when {
-                    downloading -> {
+            ) { state ->
+                when (state) {
+                    is UpdateUiState.Downloading -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                "DOWNLOADING PATCH DATA...",
+                                "INTEGRATING PATCH...",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.primary,
                                 letterSpacing = 1.sp
                             )
                             Spacer(Modifier.height(16.dp))
-                            SquigglySlider(
-                                value = downloadProgress,
-                                onValueChange = {},
-                                valueRange = 0f..100f,
-                                activeColor = MaterialTheme.colorScheme.primary,
-                                isPlaying = true
+                            LinearProgressIndicator(
+                                progress = { state.progress / 100f },
+                                modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
                             )
+                            Spacer(Modifier.height(8.dp))
                             Text(
-                                "${downloadProgress.toInt()}%",
+                                "${state.progress.toInt()}%",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Black
                             )
                         }
                     }
-                    state is UpdateUiState.Checking -> {
+                    is UpdateUiState.Checking -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CircularProgressIndicator(modifier = Modifier.size(48.dp), strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
                             Spacer(Modifier.height(20.dp))
                             Text(
-                                "QUERYING REPOSITORY...",
+                                "SYNCHRONIZING REPOSITORY...",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 1.sp
                             )
                         }
                     }
-                    isError -> {
+                    is UpdateUiState.Error -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(56.dp))
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                (state as UpdateUiState.Error).message, 
+                                state.message, 
                                 color = MaterialTheme.colorScheme.error, 
                                 textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.bodySmall,
@@ -181,7 +181,7 @@ fun UpdateScreen(
                     else -> {
                         Button(
                             onClick = { viewModel.checkForUpdates() },
-                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 40.dp),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Text("CHECK FOR ENGINE UPDATES", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
@@ -197,7 +197,10 @@ fun UpdateScreen(
             is UpdateUiState.Success -> Triple(
                 state.release.tagName.removePrefix("v"), 
                 state.release.body ?: "No changelog.", 
-                state.release.assets.find { it.name.endsWith(".apk") }?.downloadUrl ?: ""
+                state.release.assets.find { 
+                    val n = it.name.lowercase()
+                    n.endsWith(".apk") && (n.contains("release") || n.contains("universal") || n.contains("toolz"))
+                }?.downloadUrl ?: state.release.assets.firstOrNull { it.name.endsWith(".apk") }?.downloadUrl ?: ""
             )
             is UpdateUiState.ManifestSuccess -> Triple(
                 state.manifest.versionName, 
@@ -263,7 +266,7 @@ fun UpdateScreen(
                         shape = RoundedCornerShape(24.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                     ) {
-                        LazyColumn(modifier = Modifier.padding(16.dp)) {
+                        LazyColumn(modifier = Modifier.padding(16.dp).fadingEdges(top = 12.dp, bottom = 12.dp)) {
                             item {
                                 Text(changelog, style = MaterialTheme.typography.bodyMedium)
                             }
@@ -273,14 +276,7 @@ fun UpdateScreen(
                     Button(
                         onClick = {
                             if (apkUrl.isNotEmpty()) {
-                                isDownloading = true
-                                viewModel.resetState()
-                                startDownload(context, apkUrl) { progress ->
-                                    downloadProgress = progress
-                                    if (progress >= 100f) {
-                                        isDownloading = false
-                                    }
-                                }
+                                viewModel.startDownload(apkUrl)
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(64.dp),

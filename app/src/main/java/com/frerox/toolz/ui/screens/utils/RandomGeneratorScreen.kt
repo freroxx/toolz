@@ -3,15 +3,16 @@ package com.frerox.toolz.ui.screens.utils
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Casino
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,9 +31,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun RandomGeneratorScreen(
     viewModel: RandomGeneratorViewModel,
@@ -63,27 +64,24 @@ fun RandomGeneratorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
-                .fadingEdge(
-                    brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
-                    length = 24.dp
-                )
+                .fadingEdges(top = 16.dp, bottom = 32.dp)
                 .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(28.dp)
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Spacer(Modifier.height(8.dp))
             
             // --- Number Generator Section ---
             SectionHeader(title = "NUMERIC ENTROPY", icon = Icons.Rounded.Casino)
             Surface(
-                shape = RoundedCornerShape(40.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
             ) {
-                Column(modifier = Modifier.padding(28.dp)) {
+                Column(modifier = Modifier.padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         OutlinedTextField(
                             value = state.min,
@@ -91,11 +89,7 @@ fun RandomGeneratorScreen(
                             label = { Text("MIN") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                                focusedContainerColor = MaterialTheme.colorScheme.surface
-                            )
+                            singleLine = true
                         )
                         OutlinedTextField(
                             value = state.max,
@@ -103,31 +97,34 @@ fun RandomGeneratorScreen(
                             label = { Text("MAX") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                                focusedContainerColor = MaterialTheme.colorScheme.surface
-                            )
+                            singleLine = true
                         )
                     }
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
                     Button(
                         onClick = { viewModel.generateNumber() },
-                        modifier = Modifier.fillMaxWidth().height(60.dp).bouncyClick { viewModel.generateNumber() },
-                        shape = RoundedCornerShape(20.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { viewModel.generateNumber() },
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("GENERATE DIGITS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text("GENERATE DIGITS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
-                    if (state.randomNumber.isNotEmpty()) {
-                        Text(
-                            text = state.randomNumber,
-                            modifier = Modifier.fillMaxWidth().padding(top = 28.dp),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = (-2).sp
-                        )
+                    
+                    AnimatedContent(
+                        targetState = state.randomNumber,
+                        transitionSpec = {
+                            (fadeIn() + scaleIn(initialScale = 0.8f)) togetherWith (fadeOut() + scaleOut(targetScale = 0.8f))
+                        }, label = "num_result"
+                    ) { number ->
+                        if (number.isNotEmpty()) {
+                            Text(
+                                text = number,
+                                modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.displayLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -135,109 +132,108 @@ fun RandomGeneratorScreen(
             // --- Password Generator Section ---
             SectionHeader(title = "SECURE KEYGEN", icon = Icons.Rounded.Lock)
             Surface(
-                shape = RoundedCornerShape(40.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
             ) {
-                Column(modifier = Modifier.padding(28.dp)) {
+                Column(modifier = Modifier.padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("LENGTH", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
-                            Text(
-                                text = state.passwordLength.toInt().toString(),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                        Text("LENGTH", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = state.passwordLength.toInt().toString(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                     Slider(
                         value = state.passwordLength,
                         onValueChange = { viewModel.onPasswordLengthChange(it) },
                         valueRange = 4f..64f,
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        modifier = Modifier.padding(vertical = 8.dp)
                     )
                     
                     Spacer(modifier = Modifier.height(12.dp))
                     
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ConfigurationToggle(
-                            label = "Lowercase Letters",
-                            checked = state.includeLower,
-                            onCheckedChange = { viewModel.onToggleLower(it) }
-                        )
-                        ConfigurationToggle(
-                            label = "Uppercase Letters",
-                            checked = state.includeUpper,
-                            onCheckedChange = { viewModel.onToggleUpper(it) }
-                        )
-                        ConfigurationToggle(
-                            label = "Include Numbers",
-                            checked = state.includeNumbers,
-                            onCheckedChange = { viewModel.onToggleNumbers(it) }
-                        )
-                        ConfigurationToggle(
-                            label = "Special Symbols",
-                            checked = state.includeSymbols,
-                            onCheckedChange = { viewModel.onToggleSymbols(it) }
-                        )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        maxItemsInEachRow = 2,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SmallToggle("Lowercase", state.includeLower) { viewModel.onToggleLower(it) }
+                        SmallToggle("Uppercase", state.includeUpper) { viewModel.onToggleUpper(it) }
+                        SmallToggle("Numbers", state.includeNumbers) { viewModel.onToggleNumbers(it) }
+                        SmallToggle("Symbols", state.includeSymbols) { viewModel.onToggleSymbols(it) }
                     }
                     
-                    if (state.includeSymbols) {
-                        Spacer(modifier = Modifier.height(16.dp))
+                    AnimatedVisibility(visible = state.includeSymbols) {
                         OutlinedTextField(
                             value = state.customSymbols,
                             onValueChange = { viewModel.onCustomSymbolsChange(it) },
                             label = { Text("CUSTOM SYMBOLS") },
-                            placeholder = { Text("!@#$%^&*") },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                                focusedContainerColor = MaterialTheme.colorScheme.surface
-                            )
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
                         )
                     }
                     
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                     
                     Button(
                         onClick = { viewModel.generatePassword() },
-                        modifier = Modifier.fillMaxWidth().height(60.dp).bouncyClick { viewModel.generatePassword() },
-                        shape = RoundedCornerShape(20.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { viewModel.generatePassword() },
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("DEPLOY KEY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text("DEPLOY KEY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                     
-                    if (state.password.isNotEmpty()) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(top = 28.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    AnimatedContent(
+                        targetState = state.password,
+                        transitionSpec = {
+                            (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
+                        }, label = "pwd_result"
+                    ) { pwd ->
+                        if (pwd.isNotEmpty()) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(16.dp)
                             ) {
-                                Text(
-                                    text = state.password,
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                IconButton(
-                                    onClick = { clipboardManager.setText(AnnotatedString(state.password)) },
-                                    colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = pwd,
+                                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        // Strength Bar
+                                        LinearProgressIndicator(
+                                            progress = { state.passwordStrength },
+                                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                            color = when {
+                                                state.passwordStrength < 0.4f -> Color.Red
+                                                state.passwordStrength < 0.7f -> Color.Yellow
+                                                else -> Color.Green
+                                            },
+                                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { clipboardManager.setText(AnnotatedString(pwd)) },
+                                        modifier = Modifier.scale(0.9f)
+                                    ) {
+                                        Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         }
@@ -248,89 +244,81 @@ fun RandomGeneratorScreen(
             // --- Dice Section ---
             SectionHeader(title = "DICE QUANTUM", icon = Icons.Rounded.Casino)
             Surface(
-                shape = RoundedCornerShape(40.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
             ) {
-                Column(modifier = Modifier.padding(28.dp)) {
+                Column(modifier = Modifier.padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("DICE COUNT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
-                            Text(
-                                text = state.diceCount.toInt().toString(),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                        Text("DICE COUNT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(state.diceCount.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                     }
                     Slider(
                         value = state.diceCount,
                         onValueChange = { viewModel.onDiceCountChange(it) },
                         valueRange = 1f..10f,
                         steps = 8,
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("SIDES (D?)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
-                            Text(
-                                text = state.diceSides.toInt().toString(),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                        Text("SIDES (D?)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(state.diceSides.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
                     }
                     Slider(
                         value = state.diceSides,
                         onValueChange = { viewModel.onDiceSidesChange(it) },
                         valueRange = 2f..100f,
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                     
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
                     
                     Button(
                         onClick = { viewModel.rollDice() },
-                        modifier = Modifier.fillMaxWidth().height(60.dp).bouncyClick { viewModel.rollDice() },
-                        shape = RoundedCornerShape(20.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { viewModel.rollDice() },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                     ) {
-                        Text("ROLL PROBABILITY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text("ROLL PROBABILITY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                     
-                    if (state.diceResults.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 28.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = state.diceResults.joinToString("  "),
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            if (state.diceResults.size > 1) {
+                    AnimatedContent(
+                        targetState = state.diceResults,
+                        transitionSpec = {
+                            (scaleIn() + fadeIn()).togetherWith(scaleOut() + fadeOut())
+                        }, label = "dice_result"
+                    ) { results ->
+                        if (results.isNotEmpty()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
                                 Text(
-                                    text = "TOTAL: ${state.totalDiceSum}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = results.joinToString("  "),
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.secondary
                                 )
+                                if (results.size > 1) {
+                                    Text(
+                                        text = "SUM: ${state.totalDiceSum}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -340,51 +328,48 @@ fun RandomGeneratorScreen(
             // --- Random Words Section ---
             SectionHeader(title = "LEXICAL ANALYTICS", icon = Icons.Rounded.TextFields)
             Surface(
-                shape = RoundedCornerShape(40.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
             ) {
-                Column(modifier = Modifier.padding(28.dp)) {
+                Column(modifier = Modifier.padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("WORD COUNT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp)) {
-                            Text(
-                                text = state.wordCount.toInt().toString(),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                        Text("WORD COUNT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(state.wordCount.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
                     }
                     Slider(
                         value = state.wordCount,
                         onValueChange = { viewModel.onWordCountChange(it) },
                         valueRange = 1f..10f,
                         steps = 8,
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                     
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
                     
                     Button(
                         onClick = { viewModel.generateWords() },
-                        modifier = Modifier.fillMaxWidth().height(60.dp).bouncyClick { viewModel.generateWords() },
-                        shape = RoundedCornerShape(20.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { viewModel.generateWords() },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                     ) {
-                        Text("EXTRACT WORDS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text("EXTRACT WORDS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }
                     
-                    if (state.generatedWords.isNotEmpty()) {
+                    AnimatedVisibility(
+                        visible = state.generatedWords.isNotEmpty(),
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().padding(top = 28.dp),
-                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f))
+                            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.05f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f))
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
@@ -394,14 +379,14 @@ fun RandomGeneratorScreen(
                                     text = state.generatedWords,
                                     modifier = Modifier.weight(1f),
                                     style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Black,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 IconButton(
                                     onClick = { clipboardManager.setText(AnnotatedString(state.generatedWords)) },
-                                    colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.secondary)
+                                    modifier = Modifier.scale(0.9f)
                                 ) {
-                                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.tertiary)
                                 }
                             }
                         }
@@ -415,27 +400,28 @@ fun RandomGeneratorScreen(
 }
 
 @Composable
-fun ConfigurationToggle(
+fun SmallToggle(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Surface(
         onClick = { onCheckedChange(!checked) },
-        modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { onCheckedChange(!checked) },
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f),
-        shape = RoundedCornerShape(12.dp)
+        modifier = Modifier.width(140.dp).height(44.dp).bouncyClick { onCheckedChange(!checked) },
+        color = if (checked) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(12.dp),
+        border = if (checked) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)) else null
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             Switch(
                 checked = checked, 
                 onCheckedChange = onCheckedChange,
-                modifier = Modifier.scale(0.8f)
+                modifier = Modifier.scale(0.6f)
             )
         }
     }
@@ -447,22 +433,24 @@ fun SectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.Image
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(horizontal = 4.dp)
     ) {
-        Surface(
-            modifier = Modifier.size(40.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(
+                    brush = Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)),
+                    shape = RoundedCornerShape(10.dp)
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-            }
+            Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
         }
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             title, 
-            style = MaterialTheme.typography.labelSmall, 
+            style = MaterialTheme.typography.labelMedium, 
             fontWeight = FontWeight.Black,
-            letterSpacing = 2.sp,
-            color = MaterialTheme.colorScheme.primary
+            letterSpacing = 1.5.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
         )
     }
 }

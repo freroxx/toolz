@@ -669,7 +669,7 @@ fun AiOnboardingStep(
         OutlinedTextField(
             value = apiKey,
             onValueChange = onApiKeyChange,
-            placeholder = { Text("Enter Grok API Key") },
+            placeholder = { Text("Enter Groq API Key") },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
             singleLine = true,
@@ -734,7 +734,7 @@ fun TutorialDialog(onDismiss: () -> Unit) {
             color = MaterialTheme.colorScheme.surface
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                Text("HOW TO GET GROK KEY", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text("HOW TO GET GROQ KEY", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 Spacer(Modifier.height(20.dp))
                 tutorial.forEachIndexed { index, step ->
                     Row(modifier = Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {

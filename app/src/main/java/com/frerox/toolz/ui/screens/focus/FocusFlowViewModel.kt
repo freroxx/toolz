@@ -203,7 +203,7 @@ class FocusFlowViewModel @Inject constructor(
         viewModelScope.launch {
             _performanceMode.collectLatest { perfMode ->
                 while (true) {
-                    kotlinx.coroutines.delay(if (perfMode) 120_000L else 60_000L)
+                    kotlinx.coroutines.delay(if (perfMode) 60_000L else 30_000L)
                     refreshStats()
                 }
             }
@@ -299,6 +299,9 @@ class FocusFlowViewModel @Inject constructor(
             }
 
             _rawStats.value = usageList
+            if (usageList.isEmpty()) {
+                Log.d(TAG, "No usage stats found. Check permissions or app usage today.")
+            }
         }
     }
 

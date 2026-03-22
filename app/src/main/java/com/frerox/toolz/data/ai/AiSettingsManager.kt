@@ -20,7 +20,7 @@ import javax.inject.Singleton
 
 private const val TAG              = "AiSettingsManager"
 private const val PREFS_NAME       = "ai_settings"
-private const val REMOTE_KEYS_URL  = "https://toolz-apis.vercel.app/api/keys"
+private const val REMOTE_KEYS_URL  = "https://toolz-app.vercel.app/api/keys"
 
 
 private const val CACHE_TTL_MS         = 24L * 60L * 60L * 1_000L
@@ -272,7 +272,13 @@ class AiSettingsManager @Inject constructor(
     }
 
     private fun sanitizeConfig(c: AiConfig): AiConfig { val k = sanitizeKeyValue(c.apiKey); return if (k == c.apiKey) c else c.copy(apiKey = k) }
-    private fun sanitizeKeyValue(key: String): String { val t = key.trim(); return if (t.isBlank() || isRevokedKey(t)) "" else t }
+    private fun sanitizeKeyValue(key: String): String {
+        val t = key.trim()
+        if (t.isBlank() || isRevokedKey(t)) return ""
+        val errorPatterns = listOf("Unavailable", "Error", "Disabled", "Invalid", "None", "Null")
+        if (errorPatterns.any { t.contains(it, ignoreCase = true) }) return ""
+        return t
+    }
     private fun sanitizeStoredKeyForAccess(pk: String): String? {
         val v = prefs.getString(pk, null)?.trim(); if (v.isNullOrBlank()) return null
         if (!isRevokedKey(v)) return v; prefs.edit().remove(pk).apply(); return null

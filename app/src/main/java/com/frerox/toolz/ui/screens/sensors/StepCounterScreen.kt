@@ -28,10 +28,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -54,35 +56,47 @@ fun StepCounterScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "FITNESS TRACKER",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { /* History action */ },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.History, contentDescription = "History")
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
-            )
+            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "FITNESS TRACKER",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { /* History action */ },
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            Icon(Icons.Rounded.History, contentDescription = "History")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -165,50 +179,76 @@ fun DisabledInSettingsState(onEnable: () -> Unit) {
 
 @Composable
 fun StepContent(state: StepState) {
+    val performanceMode = LocalPerformanceMode.current
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .fadingEdge(
-                brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
-                length = 24.dp
-            ),
+            .fadingEdges(top = 24.dp, bottom = 24.dp),
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            StepProgressCard(state.steps, state.goal)
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            AnimatedVisibility(
+                visible = visible, 
+                enter = if (performanceMode) fadeIn() else (fadeIn() + expandVertically())
             ) {
-                StatCard(
-                    modifier = Modifier.weight(1f),
-                    title = "CALORIES",
-                    value = "${(state.steps * 0.04).toInt()}",
-                    unit = "KCAL",
-                    icon = Icons.Rounded.Whatshot,
-                    color = Color(0xFFFF5722)
-                )
-                StatCard(
-                    modifier = Modifier.weight(1f),
-                    title = "DISTANCE",
-                    value = String.format("%.2f", state.steps * 0.000762),
-                    unit = "KM",
-                    icon = Icons.Rounded.Route,
-                    color = Color(0xFF2196F3)
-                )
+                StepProgressCard(state.steps, state.goal)
             }
         }
 
         item {
-            WeeklyHistoryCard(state.weeklyHistory, state.goal)
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(100); visible = true }
+            AnimatedVisibility(
+                visible = visible, 
+                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        title = "CALORIES",
+                        value = "${(state.steps * 0.04).toInt()}",
+                        unit = "KCAL",
+                        icon = Icons.Rounded.Whatshot,
+                        color = Color(0xFFFF5722)
+                    )
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        title = "DISTANCE",
+                        value = String.format("%.2f", state.steps * 0.000762),
+                        unit = "KM",
+                        icon = Icons.Rounded.Route,
+                        color = Color(0xFF2196F3)
+                    )
+                }
+            }
+        }
+
+        item {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(200); visible = true }
+            AnimatedVisibility(
+                visible = visible, 
+                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
+            ) {
+                WeeklyHistoryCard(state.weeklyHistory, state.goal)
+            }
         }
         
         item {
-            DailyGoalSection(state.goal)
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(300); visible = true }
+            AnimatedVisibility(
+                visible = visible, 
+                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
+            ) {
+                DailyGoalSection(state.goal)
+            }
         }
         
         item {
@@ -341,54 +381,83 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(40.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
-            Text(
-                "WEEKLY ACTIVITY",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                letterSpacing = 2.sp
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "WEEKLY ACTIVITY",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 2.sp
+                )
+                Icon(
+                    Icons.Rounded.BarChart,
+                    null,
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(32.dp))
             
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(140.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                    .height(160.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
+                val calendar = Calendar.getInstance()
                 val days = (0..6).map { i ->
                     val cal = Calendar.getInstance()
                     cal.add(Calendar.DAY_OF_YEAR, -i)
                     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
                 }.reversed()
 
-                days.forEach { dateStr ->
+                days.forEachIndexed { index, dateStr ->
                     val entry = history.find { dateStr == it.date }
                     val steps = entry?.steps ?: 0
-                    val barHeight = (steps.toFloat() / goal.toFloat()).coerceIn(0.05f, 1f)
+                    val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0.05f, 1f)
                     
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val animatedHeight by animateFloatAsState(
+                        targetValue = progress,
+                        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
+                        label = "BarHeight"
+                    )
+
+                    val dayName = try {
+                        val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateStr)
+                        SimpleDateFormat("EEE", Locale.getDefault()).format(date!!).uppercase()
+                    } catch (e: Exception) {
+                        dateStr.takeLast(2)
+                    }
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .width(16.dp)
-                                .fillMaxHeight(barHeight)
-                                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                .width(12.dp)
+                                .fillMaxHeight(animatedHeight)
+                                .clip(CircleShape)
                                 .background(
                                     if (steps >= goal) MaterialTheme.colorScheme.primary 
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                                 )
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = dateStr.takeLast(2),
+                            text = dayName.first().toString(),
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = FontWeight.Black,
+                            color = if (index == 6) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                     }
                 }

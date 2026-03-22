@@ -19,9 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,7 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import kotlin.math.abs
 
 // ─────────────────────────────────────────────────────────────
@@ -129,10 +132,7 @@ fun BmiScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
-                .fadingEdge(
-                    brush  = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
-                    length = 20.dp,
-                )
+                .fadingEdges(top = 20.dp, bottom = 20.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -223,25 +223,51 @@ fun ResultCard(
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier         = Modifier.size(190.dp),
+                modifier         = Modifier.size(220.dp).padding(10.dp),
             ) {
                 // Background track
-                CircularProgressIndicator(
-                    progress    = { 1f },
-                    modifier    = Modifier.fillMaxSize(),
-                    strokeWidth = 16.dp,
-                    color       = color.copy(alpha = 0.08f),
-                    strokeCap   = StrokeCap.Round,
-                )
-                // Progress arc (BMI / 40 = full scale)
-                CircularProgressIndicator(
-                    progress    = { (animatedBmi / 40f).coerceIn(0f, 1f) },
-                    modifier    = Modifier.fillMaxSize(),
-                    strokeWidth = 16.dp,
-                    color       = color,
-                    trackColor  = Color.Transparent,
-                    strokeCap   = StrokeCap.Round,
-                )
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawArc(
+                        color = color.copy(alpha = 0.1f),
+                        startAngle = 140f,
+                        sweepAngle = 260f,
+                        useCenter = false,
+                        style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+                
+                // Progress arc
+                val sweep = ((animatedBmi - 10f) / 30f).coerceIn(0f, 1f) * 260f
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawArc(
+                        color = color,
+                        startAngle = 140f,
+                        sweepAngle = sweep,
+                        useCenter = false,
+                        style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    
+                    // Needle/Marker effect
+                    val angle = 140f + sweep
+                    val centerX = size.width / 2f
+                    val centerY = size.height / 2f
+                    val radius = centerX - 8.dp.toPx()
+                    val x = centerX + radius * kotlin.math.cos(Math.toRadians(angle.toDouble())).toFloat()
+                    val y = centerY + radius * kotlin.math.sin(Math.toRadians(angle.toDouble())).toFloat()
+                    
+                    drawCircle(
+                        color = Color.White,
+                        radius = 6.dp.toPx(),
+                        center = Offset(x, y),
+                        style = Stroke(3.dp.toPx())
+                    )
+                    drawCircle(
+                        color = color,
+                        radius = 4.dp.toPx(),
+                        center = Offset(x, y)
+                    )
+                }
+
                 // Inner content
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
@@ -254,11 +280,11 @@ fun ResultCard(
                         color     = color,
                     )
                     Text(
-                        "BMI",
+                        "BMI SCORE",
                         style         = MaterialTheme.typography.labelSmall,
                         fontWeight    = FontWeight.Black,
                         color         = color.copy(alpha = 0.7f),
-                        letterSpacing = 3.sp,
+                        letterSpacing = 2.sp,
                     )
                 }
             }
@@ -345,8 +371,8 @@ fun GoalCard(difference: Float, unit: String) {
     Surface(
         modifier = Modifier.fillMaxWidth().bouncyClick { },
         shape    = RoundedCornerShape(20.dp),
-        color    = color.copy(alpha = 0.08f),
-        border   = BorderStroke(1.dp, color.copy(alpha = 0.2f)),
+        color    = color.copy(alpha = 0.12f),
+        border   = BorderStroke(1.5.dp, color.copy(alpha = 0.3f)),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

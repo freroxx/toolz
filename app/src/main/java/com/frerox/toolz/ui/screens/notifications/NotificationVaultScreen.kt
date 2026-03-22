@@ -81,10 +81,17 @@ fun NotificationVaultScreen(
     var selectedAppDetails by remember { mutableStateOf<AppDetails?>(null) }
     var showNotificationMenu by remember { mutableStateOf<NotificationEntry?>(null) }
     var showVaultSettings by remember { mutableStateOf(false) }
+    
+    var isPermissionGranted by remember { mutableStateOf(true) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val vibrationManager = LocalVibrationManager.current
+
+    LaunchedEffect(Unit) {
+        val flat = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        isPermissionGranted = flat != null && flat.contains(context.packageName)
+    }
 
     Scaffold(
         topBar = {
@@ -144,6 +151,29 @@ fun NotificationVaultScreen(
                 selectedCategory = selectedCategory,
                 onCategorySelect = { viewModel.setCategory(it) }
             )
+
+            if (!isPermissionGranted) {
+                Surface(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                    },
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().bouncyClick { },
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.SecurityUpdateWarning, null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("LISTENER DISABLED", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                            Text("Notifications cannot be archived without permission.", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
 
             AnimatedContent(
                 targetState = notifications.isEmpty(),

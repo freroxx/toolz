@@ -26,7 +26,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import kotlin.math.max
 import kotlin.math.min
 
@@ -45,12 +45,14 @@ fun LightMeterScreen(
     }
 
     val (statusLabel, statusColor, statusDesc) = when {
-        luxValue < 10 -> Triple("Pitch Dark", Color(0xFF424242), "Minimal visibility environment")
-        luxValue < 50 -> Triple("Dimly Lit", Color(0xFF757575), "Suitable for resting")
-        luxValue < 200 -> Triple("Cozy Indoor", Color(0xFF4CAF50), "Comfortable home lighting")
-        luxValue < 500 -> Triple("Productive", Color(0xFFFFC107), "Optimal for office work")
-        luxValue < 1000 -> Triple("Industrial", Color(0xFFFF9800), "Detailed precision tasks")
-        else -> Triple("High Intensity", Color(0xFFFF5722), "Direct solar or studio light")
+        luxValue < 5 -> Triple("Pitch Black", MaterialTheme.colorScheme.outline, "Absolute void of light")
+        luxValue < 20 -> Triple("Very Dim", MaterialTheme.colorScheme.secondary, "Shadowy environment")
+        luxValue < 100 -> Triple("Mood Lighting", MaterialTheme.colorScheme.primary, "Relaxed atmosphere")
+        luxValue < 250 -> Triple("Residential", MaterialTheme.colorScheme.tertiary, "Comfortable interior")
+        luxValue < 500 -> Triple("Office Standard", MaterialTheme.colorScheme.primary, "Optimal workspace")
+        luxValue < 1000 -> Triple("Detailed Task", MaterialTheme.colorScheme.secondary, "Precision work environment")
+        luxValue < 5000 -> Triple("Overcast Day", MaterialTheme.colorScheme.primary, "Bright natural ambient")
+        else -> Triple("Direct Sunlight", MaterialTheme.colorScheme.primary, "Extreme light intensity")
     }
 
     val animatedLux by animateFloatAsState(
@@ -58,7 +60,11 @@ fun LightMeterScreen(
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "LuxValue"
     )
-    val animatedColor by animateColorAsState(targetValue = statusColor, label = "StatusColor")
+    val animatedColor by animateColorAsState(
+        targetValue = statusColor,
+        animationSpec = tween(500),
+        label = "StatusColor"
+    )
 
     Scaffold(
         topBar = {
@@ -98,15 +104,7 @@ fun LightMeterScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdge(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.05f to Color.Black,
-                                0.95f to Color.Black,
-                                1f to Color.Transparent
-                            ),
-                            length = 24.dp
-                        )
+                        .fadingEdges(top = 16.dp, bottom = 16.dp)
                         .padding(horizontal = 24.dp)
                 ) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -293,7 +291,7 @@ fun LuxGauge(value: Float, color: Color) {
         // Progress track
         drawArc(
             brush = Brush.sweepGradient(
-                0f to color.copy(alpha = 0.5f),
+                0f to color.copy(alpha = 0.2f),
                 0.5f to color,
                 1f to color
             ),

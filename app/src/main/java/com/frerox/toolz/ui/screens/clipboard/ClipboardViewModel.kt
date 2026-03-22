@@ -186,16 +186,17 @@ class ClipboardViewModel @Inject constructor(
             _isSummarizing.value = entry.id
             try {
                 val prompt = """
-                    Classify this clipboard content and summarize it.
-                    Categories: TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
-                    Provide a punchy 1-sentence summary (max 15 words).
+                    Classify this clipboard content and provide a punchy 1-sentence summary (max 15 words).
+                    You can use standard categories (TEXT, URL, PHONE, EMAIL, MATHS, CODE, ADDRESS, CRYPO, TODO) 
+                    or CREATE A NEW ONE if it fits better (e.g., RECIPE, FLIGHT, PROMPT, QUOTE, etc.).
+                    Keep category names uppercase and single-word.
                     
                     Content: ${entry.content.take(1500)}
                     
-                    Respond in JSON format: {"category": "CATEGORY", "summary": "Short summary"}
+                    Respond in JSON format: {"category": "CATEGORY_NAME", "summary": "Short summary"}
                 """.trimIndent()
 
-                aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
                     result.onSuccess { response ->
                         val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type
                         val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: ""

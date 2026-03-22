@@ -130,27 +130,27 @@ fun ToolzTheme(
                 outline = primary.copy(alpha = 0.5f),
                 outlineVariant = secondary.copy(alpha = 0.3f),
                 surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f),
-                onSurface = if (darkTheme) Color(0xFFE6E1E5) else Color.Black,
+                onSurface = if (darkTheme) Color(0xFFF5F0F5) else Color(0xFF1A1A1A),
                 background = if (darkTheme) BackgroundDark else BackgroundLight,
                 surface = if (darkTheme) SurfaceDark else SurfaceLight,
-                onBackground = if (darkTheme) Color(0xFFE6E1E5) else Color.Black,
-                onSurfaceVariant = if (darkTheme) Color(0xFFCAC4D0) else Color(0xFF49454F)
+                onBackground = if (darkTheme) Color(0xFFF5F0F5) else Color(0xFF1A1A1A),
+                onSurfaceVariant = if (darkTheme) Color(0xFFD0CBD5) else Color(0xFF313131)
             )
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             dynamic.copy(
-                onSurface = if (darkTheme) Color(0xFFE6E1E5) else dynamic.onSurface,
+                onSurface = if (darkTheme) Color(0xFFF5F0F5) else dynamic.onSurface,
                 background = if (darkTheme) BackgroundDark else BackgroundLight,
                 surface = if (darkTheme) SurfaceDark else SurfaceLight,
-                onBackground = if (darkTheme) Color(0xFFE6E1E5) else dynamic.onBackground,
-                onSurfaceVariant = if (darkTheme) Color(0xFFCAC4D0) else dynamic.onSurfaceVariant
+                onBackground = if (darkTheme) Color(0xFFF5F0F5) else dynamic.onBackground,
+                onSurfaceVariant = if (darkTheme) Color(0xFFD0CBD5) else dynamic.onSurfaceVariant
             )
         }
         darkTheme -> DarkColorScheme.copy(
-            onSurface = Color(0xFFE6E1E5), 
-            onBackground = Color(0xFFE6E1E5),
-            onSurfaceVariant = Color(0xFFCAC4D0)
+            onSurface = Color(0xFFF5F0F5), 
+            onBackground = Color(0xFFF5F0F5),
+            onSurfaceVariant = Color(0xFFD0CBD5)
         )
         else -> LightColorScheme
     }

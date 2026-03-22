@@ -83,19 +83,22 @@ class ClipboardService : Service() {
         serviceScope.launch {
             try {
                 val prompt = """
-                    Classify this clipboard content into one of these categories: 
-                    TEXT, URL, PHONE, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO.
+                    Classify this clipboard content. Be smart and specific. 
+                    You can use standard categories (TEXT, URL, PHONE, EMAIL, MATHS, CODE, ADDRESS, CRYPTO, TODO) 
+                    or CREATE A NEW ONE if it fits better (e.g., RECIPE, FLIGHT, PACKAGE, EVENT, QUOTE, etc.).
+                    Keep category names uppercase and single-word if possible.
+                    
                     Current guess: $currentType
                     
-                    If the text is long (over 40 words) or looks like an article/note/code, provide a punchy 1-sentence summary (max 15 words).
+                    If the text is over 30 words or contains complex info, provide a punchy 1-sentence summary (max 15 words).
                     If it's short, summary should be null.
                     
                     Content: ${text.take(2000)}
                     
-                    Respond ONLY in JSON format: {"category": "CATEGORY", "summary": "optional summary or null"}
+                    Respond ONLY in JSON format: {"category": "CATEGORY_NAME", "summary": "optional summary string or null"}
                 """.trimIndent()
 
-                aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
                     result.onSuccess { response ->
                         try {
                             val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
@@ -155,6 +158,9 @@ class ClipboardService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CHECK_CLIPBOARD) {
+            checkClipboard()
+        }
         return START_STICKY
     }
 
@@ -209,5 +215,6 @@ class ClipboardService : Service() {
         const val CHANNEL_ID = "clipboard_service_channel"
         const val NOTIFICATION_ID = 3001
         const val MAX_ENTRIES = 150
+        const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.ACTION_CHECK_CLIPBOARD"
     }
 }

@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,10 +36,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UnitConverterScreen(
     viewModel: UnitConverterViewModel,
@@ -74,7 +76,7 @@ fun UnitConverterScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
-                .fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)
+                .fadingEdges(top = 24.dp, bottom = 24.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -85,60 +87,64 @@ fun UnitConverterScreen(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
             ) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp)
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    userScrollEnabled = false
-                ) {
-                    itemsIndexed(ConversionType.entries) { index, type ->
-                        val isSelected = state.type == type
-                        var itemVisible by remember { mutableStateOf(false) }
-                        LaunchedEffect(Unit) {
-                            delay(index * 15L)
-                            itemVisible = true
-                        }
-                        
-                        val scale by animateFloatAsState(if (itemVisible) 1f else 0.85f)
-                        val alpha by animateFloatAsState(if (itemVisible) 1f else 0f)
-
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                    this.alpha = alpha
-                                }
-                                .bouncyClick { viewModel.onTypeChange(type) },
-                            shape = RoundedCornerShape(24.dp),
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)) else null
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
+                val scrollState = rememberScrollState()
+                Box(modifier = Modifier.height(280.dp).fadingEdges(top = 16.dp, bottom = 16.dp).padding(16.dp).verticalScroll(scrollState)) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        maxItemsInEachRow = 3
+                    ) {
+                        ConversionType.entries.forEachIndexed { index, type ->
+                            val isSelected = state.type == type
+                            var itemVisible by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) {
+                                delay(index * 20L)
+                                itemVisible = true
+                            }
+                            
+                            val scale by animateFloatAsState(
+                                targetValue = if (itemVisible) 1f else 0.7f,
+                                animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow)
+                            )
+                            val alpha by animateFloatAsState(if (itemVisible) 1f else 0f)
+    
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(72.dp)
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                        this.alpha = alpha
+                                    }
+                                    .bouncyClick { viewModel.onTypeChange(type) },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)) else null
                             ) {
-                                Icon(
-                                    imageVector = getIconForType(type),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = type.name.lowercase().replaceFirstChar { it.uppercase() }.replace("_", " "),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    letterSpacing = 0.5.sp
-                                )
+                                Column(
+                                    modifier = Modifier.padding(4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = getIconForType(type),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = type.name.lowercase().replaceFirstChar { it.uppercase() }.replace("_", " "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        fontSize = 9.sp,
+                                        letterSpacing = 0.2.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -392,5 +398,8 @@ private fun getIconForType(type: ConversionType): androidx.compose.ui.graphics.v
         ConversionType.TIME -> Icons.Rounded.Schedule
         ConversionType.DIGITAL_STORAGE -> Icons.Rounded.SdCard
         ConversionType.ENERGY -> Icons.Rounded.Bolt
+        ConversionType.FORCE -> Icons.Rounded.FitnessCenter
+        ConversionType.PRESSURE -> Icons.Rounded.TireRepair
+        ConversionType.POWER -> Icons.Rounded.ElectricBolt
     }
 }
