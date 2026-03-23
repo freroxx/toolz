@@ -31,32 +31,51 @@ class UpdateCheckWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
+            // Try GitHub API first (more dynamic)
             val response = updateService.getLatestRelease(UpdateConstants.GITHUB_OWNER, UpdateConstants.GITHUB_REPO)
+            
             if (response.isSuccessful) {
-                val release = response.body() ?: return Result.failure()
-                
-                val currentVersionName = applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "0.0.0"
-                
-                // Compare versions (simple string comparison or semantic versioning)
-                // GitHub tags are often "v1.7.6", while versionName is "1.7.6"
-                val latestVersion = release.tagName.removePrefix("v")
-                
-                if (isNewerVersion(currentVersionName, latestVersion)) {
-                    val apkAsset = release.assets.find { it.name.endsWith(".apk") }
-                    val apkUrl = apkAsset?.downloadUrl ?: ""
+                val release = response.body()
+                if (release != null) {
+                    val currentVersionName = getCurrentVersionName()
+                    val latestVersion = release.tagName.removePrefix("v")
                     
-                    if (apkUrl.isNotEmpty()) {
-                        settingsRepository.setAvailableUpdate(latestVersion, release.body, apkUrl)
+                    if (isNewerVersion(currentVersionName, latestVersion)) {
+                        val apkAsset = release.assets.find { it.name.endsWith(".apk") }
+                        val apkUrl = apkAsset?.downloadUrl ?: ""
                         
-                        val autoUpdate = settingsRepository.autoUpdateEnabled.first()
-                        if (autoUpdate) {
-                            downloadApkInBackground(latestVersion, apkUrl)
-                        } else {
-                            showUpdateNotification(latestVersion)
+                        if (apkUrl.isNotEmpty()) {
+                            settingsRepository.setAvailableUpdate(latestVersion, release.body, apkUrl)
+                            handleUpdateAvailability(latestVersion, apkUrl)
+                            return Result.success()
                         }
                     }
                 }
+            }
+            
+            // Fallback to manifest if API fails or no release found
+            android.util.Log.d("UpdateCheck", "GitHub API failed or no release, trying manifest fallback")
+            tryManifestFallback()
+        } catch (e: Exception) {
+            android.util.Log.e("UpdateCheck", "Update check failed", e)
+            tryManifestFallback()
+        }
+    }
+
+    private suspend fun tryManifestFallback(): Result {
+        return try {
+            val manifestResponse = updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
+            if (manifestResponse.isSuccessful) {
+                val manifest = manifestResponse.body() ?: return Result.failure()
+                val currentVersionName = getCurrentVersionName()
                 
+                if (isNewerVersion(currentVersionName, manifest.versionName)) {
+                    val apkUrl = manifest.apkUrl ?: ""
+                    if (apkUrl.isNotEmpty()) {
+                        settingsRepository.setAvailableUpdate(manifest.versionName, manifest.changelog ?: "", apkUrl)
+                        handleUpdateAvailability(manifest.versionName, apkUrl)
+                    }
+                }
                 settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
                 Result.success()
             } else {
@@ -67,23 +86,45 @@ class UpdateCheckWorker @AssistedInject constructor(
         }
     }
 
+    private suspend fun handleUpdateAvailability(version: String, url: String) {
+        val autoUpdate = settingsRepository.autoUpdateEnabled.first()
+        if (autoUpdate) {
+            downloadApkInBackground(version, url)
+        } else {
+            showUpdateNotification(version)
+        }
+        settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
+    }
+
+    private fun getCurrentVersionName(): String {
+        return try {
+            applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "0.0.0"
+        } catch (e: Exception) {
+            "0.0.0"
+        }
+    }
+
     private fun isNewerVersion(current: String, latest: String): Boolean {
+        if (current == latest) return false
         val currentParts = current.split(".").mapNotNull { it.toIntOrNull() }
         val latestParts = latest.split(".").mapNotNull { it.toIntOrNull() }
         
-        for (i in 0 until minOf(currentParts.size, latestParts.size)) {
-            if (latestParts[i] > currentParts[i]) return true
-            if (latestParts[i] < currentParts[i]) return false
+        val maxLength = maxOf(currentParts.size, latestParts.size)
+        for (i in 0 until maxLength) {
+            val curr = currentParts.getOrElse(i) { 0 }
+            val lat = latestParts.getOrElse(i) { 0 }
+            if (lat > curr) return true
+            if (lat < curr) return false
         }
-        return latestParts.size > currentParts.size
+        return false
     }
 
     private fun downloadApkInBackground(version: String, url: String) {
         val downloadManager = applicationContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Toolz System Update")
-            .setDescription("Preparing latest version $version")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN)
+            .setDescription("Downloading version $version")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(applicationContext, Environment.DIRECTORY_DOWNLOADS, "toolz_update_$version.apk")
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
@@ -109,8 +150,8 @@ class UpdateCheckWorker @AssistedInject constructor(
 
         val notification = NotificationCompat.Builder(applicationContext, channelId)
             .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Engine Patch: $version")
-            .setContentText("A new performance update is available for deployment.")
+            .setContentTitle("Update Available: $version")
+            .setContentText("A new performance patch is ready for deployment.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

@@ -1,5 +1,6 @@
 package com.frerox.toolz.di
 
+import com.frerox.toolz.data.update.UpdateConstants
 import com.frerox.toolz.data.update.UpdateService
 import dagger.Module
 import dagger.Provides
@@ -19,7 +20,7 @@ object UpdateModule {
     @Singleton
     fun provideUpdateService(okHttpClient: OkHttpClient, moshi: Moshi): UpdateService {
         return Retrofit.Builder()
-            .baseUrl("https://raw.githubusercontent.com/") // Placeholder, required by Retrofit
+            .baseUrl(UpdateConstants.GITHUB_API_BASE_URL)
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
