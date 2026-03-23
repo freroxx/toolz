@@ -1,4 +1,4 @@
-package com.frerox.toolz
+﻿package com.frerox.toolz
 
 import android.Manifest
 import android.content.Intent
@@ -35,12 +35,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.work.*
@@ -77,7 +77,6 @@ import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -85,6 +84,11 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_NAVIGATE_TO = "navigate_to"
+        const val EXTRA_SHOW_UPDATE = "show_update"
+        const val EXTRA_SHOW_UPDATE_DIALOG = "show_update_dialog"
+    }
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
@@ -94,14 +98,19 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var aiSettingsManager: AiSettingsManager
 
+    private val currentIntentState = mutableStateOf<Intent?>(null)
+    private val currentIntentVersion = mutableStateOf(0L)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        currentIntentState.value = intent
+        currentIntentVersion.value += 1
 
         scheduleCleanup()
         scheduleUpdateCheck()
 
-        // ── Fetch default API keys from Vercel on cold start ─────────────────
+        // â”€â”€ Fetch default API keys from Vercel on cold start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // syncRemoteKeys() is a no-op when the 24-hour cache is still fresh,
         // so it only hits the network once per day at most.
         lifecycleScope.launch {
@@ -144,22 +153,18 @@ class MainActivity : AppCompatActivity() {
                     ) {
                         val navController = rememberNavController()
                         val pdfViewModel: PdfViewModel = hiltViewModel()
+                        val incomingIntent = currentIntentState.value
+                        val incomingIntentVersion = currentIntentVersion.value
 
-                        // Centralized Intent Handler
-                        LaunchedEffect(intent) {
-                            if (intent?.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
-                                intent.data?.let { uri ->
-                                    pdfViewModel.openPdf(uri)
-                                    delay(150) // Ensure state is ready
-                                    navController.navigate(Screen.PdfReader.route)
-                                }
-                            }
-                            if (intent?.getBooleanExtra("show_update", false) == true) {
-                                navController.navigate(Screen.Update.route)
-                            }
-                        }
-
-                        ToolzNavHost(navController, settingsRepository, aiSettingsManager, pdfViewModel, performanceMode)
+                        ToolzNavHost(
+                            navController = navController,
+                            settingsRepository = settingsRepository,
+                            aiSettingsManager = aiSettingsManager,
+                            pdfViewModel = pdfViewModel,
+                            performanceMode = performanceMode,
+                            incomingIntent = incomingIntent,
+                            incomingIntentVersion = incomingIntentVersion,
+                        )
 
                         UpdateOverlay(settingsRepository)
                     }
@@ -194,6 +199,8 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        currentIntentState.value = intent
+        currentIntentVersion.value += 1
     }
 
     private fun scheduleCleanup() {
@@ -386,10 +393,35 @@ fun ToolzNavHost(
     settingsRepository: SettingsRepository,
     aiSettingsManager: AiSettingsManager,
     pdfViewModel: PdfViewModel,
-    performanceMode: Boolean
+    performanceMode: Boolean,
+    incomingIntent: Intent?,
+    incomingIntentVersion: Long,
 ) {
     val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(incomingIntentVersion) {
+        val latestIntent = incomingIntent ?: return@LaunchedEffect
+        if (latestIntent.action == Intent.ACTION_VIEW && latestIntent.type == "application/pdf") {
+            latestIntent.data?.let { pdfViewModel.openPdf(it) }
+        }
+        pendingExternalRoute = resolveExternalNavigationRoute(latestIntent)
+    }
+
+    LaunchedEffect(pendingExternalRoute, onboardingCompleted, currentRoute) {
+        val route = pendingExternalRoute ?: return@LaunchedEffect
+        if (!onboardingCompleted) return@LaunchedEffect
+        if (currentRoute == null || currentRoute == Screen.Loading.route || currentRoute == "onboarding") return@LaunchedEffect
+
+        if (currentRoute != route) {
+            navController.navigate(route) {
+                launchSingleTop = true
+            }
+        }
+        pendingExternalRoute = null
+    }
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -624,3 +656,31 @@ fun ToolzNavHost(
         }
     }
 }
+private fun resolveExternalNavigationRoute(intent: Intent): String? {
+    if (intent.action == Intent.ACTION_VIEW && intent.type == "application/pdf" && intent.data != null) {
+        return Screen.PdfReader.route
+    }
+
+    if (intent.getBooleanExtra(MainActivity.EXTRA_SHOW_UPDATE, false) ||
+        intent.getBooleanExtra(MainActivity.EXTRA_SHOW_UPDATE_DIALOG, false)
+    ) {
+        return Screen.Update.route
+    }
+
+    val route = intent.getStringExtra(MainActivity.EXTRA_NAVIGATE_TO)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+
+    if (route == Screen.Notepad.route) {
+        val noteId = intent.getIntExtra("note_id", -1)
+        if (noteId != -1) {
+            return "${Screen.Notepad.route}?initialNoteId=$noteId"
+        }
+    }
+
+    return route
+}
+
+
+

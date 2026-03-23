@@ -1,10 +1,12 @@
-package com.frerox.toolz.service
+﻿package com.frerox.toolz.service
 
 import android.accessibilityservice.AccessibilityService
+import android.app.ActivityManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.media.AudioManager
 import android.os.Build
 import android.util.Log
 import android.view.Gravity
@@ -15,7 +17,9 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.TextView
+import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.CaffeinateRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -47,7 +51,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var validationJob: Job? = null
+    private var backgroundStopJob: Job? = null
     private var cachedHomePackage: String? = null
+    private var blockedPackagePendingDismissal: String? = null
+    private var previousMusicVolume: Int? = null
+    private var mutedPackage: String? = null
 
     companion object {
         private const val TAG = "FocusFlowService"
@@ -84,8 +92,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
         // 2. Handle "Safe" contexts where the lock must be hidden immediately.
         if (packageName == getHomePackage() || (packageName == TOOLZ_PACKAGE && (className.contains("Activity") || className.contains("MainActivity")))) {
-            hideOverlay()
             currentPackage = packageName
+            if (packageName == getHomePackage() && shouldKeepOverlayVisibleOnHome()) {
+                return
+            }
+            hideOverlay()
             return
         }
 
@@ -154,6 +165,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             withContext(Dispatchers.Main) {
                 if (shouldLock) {
                     showOverlay(packageName)
+                    enforceLockedApp(packageName)
                 } else if (overlayShowingForPackage == packageName) {
                     hideOverlay()
                 }
@@ -249,10 +261,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
 
         view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
-            Log.d(TAG, "User choosing to exit locked app")
-            val intent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            Log.d(TAG, "User choosing to leave locked app and return to dashboard")
+            hideOverlay()
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Dashboard.route)
             }
             startActivity(intent)
         }
@@ -274,6 +287,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             isOverlayShowing = false
             overlayShowingForPackage = null
         }
+        clearBlockEnforcement()
     }
 
     private fun removeOverlayInternal() {
@@ -289,10 +303,70 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun enforceLockedApp(packageName: String) {
+        blockedPackagePendingDismissal = packageName
+        muteLockedAppAudio(packageName)
+
+        backgroundStopJob?.cancel()
+        backgroundStopJob = serviceScope.launch {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            delay(250)
+            stopLockedAppInBackground(packageName)
+        }
+    }
+
+    private fun shouldKeepOverlayVisibleOnHome(): Boolean {
+        return isOverlayShowing &&
+            overlayShowingForPackage != null &&
+            blockedPackagePendingDismissal == overlayShowingForPackage
+    }
+
+    private fun muteLockedAppAudio(packageName: String) {
+        if (mutedPackage == packageName) return
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (previousMusicVolume == null) {
+            previousMusicVolume = currentVolume
+        }
+        if (currentVolume > 0) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+        }
+        mutedPackage = packageName
+    }
+
+    private fun restoreAudioAfterBlock() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val volumeToRestore = previousMusicVolume ?: return
+        if (audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volumeToRestore, 0)
+        }
+        previousMusicVolume = null
+        mutedPackage = null
+    }
+
+    private fun stopLockedAppInBackground(packageName: String) {
+        try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.killBackgroundProcesses(packageName)
+            Log.d(TAG, "Requested background stop for locked app: $packageName")
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to request background stop for $packageName", e)
+        }
+    }
+
+    private fun clearBlockEnforcement() {
+        backgroundStopJob?.cancel()
+        backgroundStopJob = null
+        blockedPackagePendingDismissal = null
+        restoreAudioAfterBlock()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         hideOverlay()
         validationJob?.cancel()
+        backgroundStopJob?.cancel()
         serviceScope.cancel()
     }
 
@@ -300,3 +374,8 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         Log.d(TAG, "Accessibility Service Interrupted")
     }
 }
+
+
+
+
+

@@ -64,6 +64,7 @@ class FocusFlowViewModel @Inject constructor(
         // SharedPreferences file + key for persisting AI-generated categories
         private const val PREFS_AI_CACHE    = "focus_ai_category_cache"
         private const val KEY_CATEGORIES    = "categories_json"
+        private const val PREFS_USAGE_CACHE = "focus_daily_usage_cache"
 
         private val EXCLUDED_PACKAGES = setOf(
             "android", "com.android.systemui",
@@ -78,6 +79,10 @@ class FocusFlowViewModel @Inject constructor(
     // ── Persistent AI category cache ───────────────────────────────────────
     private val aiPrefs: SharedPreferences =
         context.getSharedPreferences(PREFS_AI_CACHE, Context.MODE_PRIVATE)
+
+    // ── Local daily usage history cache ──────────────────────────────────
+    private val usagePrefs: SharedPreferences =
+        context.getSharedPreferences(PREFS_USAGE_CACHE, Context.MODE_PRIVATE)
 
     // ── Internal state ─────────────────────────────────────────────────────
 
@@ -97,6 +102,12 @@ class FocusFlowViewModel @Inject constructor(
 
     private val _isAiClassifying = MutableStateFlow(false)
     val isAiClassifying: StateFlow<Boolean> = _isAiClassifying.asStateFlow()
+
+    private val _screenTips = MutableStateFlow<String?>(null)
+    val screenTips = _screenTips.asStateFlow()
+
+    private val _isLoadingTips = MutableStateFlow(false)
+    val isLoadingTips = _isLoadingTips.asStateFlow()
 
     val aiClassifiedPackages: StateFlow<Set<String>> = _aiCategoryCache
         .map { it.keys.toSet() }
@@ -223,11 +234,73 @@ class FocusFlowViewModel @Inject constructor(
         }
     }
 
-    // ── Public API ─────────────────────────────────────────────────────────
-
     fun toggleWeekly(weekly: Boolean) {
         _isWeekly.value = weekly
         refreshStats()
+    }
+
+    data class DailyLocalStat(
+        val date: String,
+        val totalMillis: Long,
+        val topApps: List<Pair<String, Long>>
+    )
+
+    fun getWeeklyLocalStats(): List<DailyLocalStat> {
+        val result = mutableListOf<DailyLocalStat>()
+        val tz = TimeZone.getDefault()
+        val cal = Calendar.getInstance(tz)
+        for (i in 6 downTo 0) {
+            val dCal = cal.clone() as Calendar
+            dCal.add(Calendar.DAY_OF_YEAR, -i)
+            val y = dCal.get(Calendar.YEAR)
+            val m = dCal.get(Calendar.MONTH) + 1
+            val d = dCal.get(Calendar.DAY_OF_MONTH)
+            val key = String.format(Locale.US, "%04d-%02d-%02d", y, m, d)
+            val shortDate = android.text.format.DateFormat.format("EE dd", dCal).toString()
+
+            val jsonStr = usagePrefs.getString(key, null)
+            var total = 0L
+            val topApps = mutableListOf<Pair<String, Long>>()
+            if (jsonStr != null) {
+                try {
+                    val array = org.json.JSONArray(jsonStr)
+                    for (j in 0 until array.length()) {
+                        val obj = array.getJSONObject(j)
+                        val time = obj.getLong("time")
+                        val name = obj.getString("name")
+                        total += time
+                        topApps.add(Pair(name, time))
+                    }
+                    topApps.sortByDescending { it.second }
+                } catch(e: Exception) { Log.e(TAG, "Failed pulling daily usage", e) }
+            }
+            result.add(DailyLocalStat(shortDate, total, topApps.take(10)))
+        }
+        return result
+    }
+
+    fun resetAppSettings(packageName: String) {
+        viewModelScope.launch {
+            removeAppLimit(packageName)
+            settingsRepository.removeAppCategoryMapping(packageName)
+            refreshStats()
+        }
+    }
+
+    private fun saveDailyUsageLocally(dateKey: String, usageList: List<AppUsageInfo>) {
+        try {
+            val jsonArray = org.json.JSONArray()
+            usageList.forEach { info ->
+                val obj = JSONObject()
+                obj.put("pkg", info.packageName)
+                obj.put("name", info.appName)
+                obj.put("time", info.usageTimeMillis)
+                jsonArray.put(obj)
+            }
+            usagePrefs.edit().putString(dateKey, jsonArray.toString()).apply()
+        } catch(e: Exception) {
+            Log.e(TAG, "Failed to save daily usage locally", e)
+        }
     }
 
     /**
@@ -253,16 +326,14 @@ class FocusFlowViewModel @Inject constructor(
             val now = System.currentTimeMillis()
 
             // ── Timezone-correct interval ──────────────────────────────────
-            // Always pass the device's default timezone to Calendar so that
-            // midnight boundaries match the user's local clock, not UTC.
-            // The week rollback guard prevents DAY_OF_WEEK assignment from
-            // jumping forward when today is before the locale's firstDayOfWeek.
             val tz  = TimeZone.getDefault()
-            val cal = Calendar.getInstance(tz).apply {
+            val cal = Calendar.getInstance(tz)
+            
+            val todayStr = String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+
+            cal.apply {
                 if (_isWeekly.value) {
                     set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-                    // If setting firstDayOfWeek moved us into the future,
-                    // step back one full week
                     if (timeInMillis > now) add(Calendar.WEEK_OF_YEAR, -1)
                 }
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -274,31 +345,73 @@ class FocusFlowViewModel @Inject constructor(
 
             val usageList = withContext(Dispatchers.IO) {
                 try {
-                    statsManager.queryAndAggregateUsageStats(startTime, now)
-                        .asSequence()
-                        .filter { (pkg, stats) ->
-                            stats.totalTimeInForeground >= 5_000L &&
+                    val usageMap = mutableMapOf<String, Long>()
+                    val lastEventTimes = mutableMapOf<String, Long>()
+                    val isForeground = mutableMapOf<String, Boolean>()
+
+                    val events = statsManager.queryEvents(startTime, now)
+                    while (events.hasNextEvent()) {
+                        val event = android.app.usage.UsageEvents.Event()
+                        events.getNextEvent(event)
+                        val pkg = event.packageName
+                        val time = event.timeStamp
+
+                        when (event.eventType) {
+                            android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED -> {
+                                lastEventTimes[pkg] = time
+                                isForeground[pkg] = true
+                            }
+                            android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
+                            android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED -> {
+                                if (isForeground[pkg] == true) {
+                                    val start = lastEventTimes[pkg] ?: startTime
+                                    val diff = time - start
+                                    if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                                    isForeground[pkg] = false
+                                } else if (!lastEventTimes.containsKey(pkg)) {
+                                    val diff = time - startTime
+                                    if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                                    lastEventTimes[pkg] = time
+                                    isForeground[pkg] = false
+                                }
+                            }
+                        }
+                    }
+                    isForeground.forEach { (pkg, isFg) ->
+                        if (isFg) {
+                            val start = lastEventTimes[pkg] ?: startTime
+                            val diff = now - start
+                            if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                        }
+                    }
+
+                    usageMap.asSequence()
+                        .filter { (pkg, totalTime) ->
+                            totalTime >= 5_000L &&
                                     pkg !in EXCLUDED_PACKAGES &&
                                     pm.getLaunchIntentForPackage(pkg) != null
                         }
-                        .mapNotNull { (pkg, stats) ->
+                        .mapNotNull { (pkg, totalTime) ->
                             val name = try {
                                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
                             } catch (_: Exception) { return@mapNotNull null }
                             AppUsageInfo(
                                 packageName     = pkg,
                                 appName         = name,
-                                usageTimeMillis = stats.totalTimeInForeground,
+                                usageTimeMillis = totalTime,
                             )
                         }
                         .toList()
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to query usage stats", e)
+                    Log.e(TAG, "Failed to query exact usage stats", e)
                     emptyList()
                 }
             }
 
             _rawStats.value = usageList
+            if (!_isWeekly.value && usageList.isNotEmpty()) {
+                saveDailyUsageLocally(todayStr, usageList)
+            }
             if (usageList.isEmpty()) {
                 Log.d(TAG, "No usage stats found. Check permissions or app usage today.")
             }
@@ -408,6 +521,42 @@ class FocusFlowViewModel @Inject constructor(
         appendLine("""Reply ONLY with JSON: {"pkg.name":"productive","pkg2":"distraction"}""")
         appendLine()
         apps.forEach { appendLine(""""${it.packageName}": "${it.appName}"""") }
+    }
+
+    fun generateScreenTips() {
+        if (_screenTips.value != null || _isLoadingTips.value) return
+        _isLoadingTips.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val groqKey = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+                if (groqKey.isBlank()) {
+                    _screenTips.value = "AI key not configured. Please supply a Groq key in AI Settings."
+                    return@launch
+                }
+                
+                val request = OpenAiRequest(
+                    model = AI_MODEL_PRIMARY,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach.")),
+                        OpenAiMessage("user", MessageContent.Text("Give me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Do not output anything before or after the tips."))
+                    ),
+                    maxTokens = 350,
+                )
+                
+                val response = runGroqRequest(groqKey) { requestKey ->
+                    openAiService.getChatCompletion(
+                        url = GROQ_URL,
+                        authHeader = "Bearer $requestKey",
+                        request = request
+                    ).choices.firstOrNull()?.message?.content
+                }
+                _screenTips.value = response ?: "Failed to generate tips."
+            } catch (e: Exception) {
+                _screenTips.value = "Error generating tips: ${e.message}"
+            } finally {
+                _isLoadingTips.value = false
+            }
+        }
     }
 
     private suspend fun <T> runGroqRequest(
