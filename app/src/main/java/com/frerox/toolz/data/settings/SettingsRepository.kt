@@ -260,6 +260,13 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun removeAppCategoryMapping(packageName: String) {
+        dataStore.edit { pref ->
+            val current = pref[APP_CATEGORY_MAPPINGS] ?: emptySet()
+            pref[APP_CATEGORY_MAPPINGS] = current.filterNot { it.startsWith("$packageName:") }.toSet()
+        }
+    }
+
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
     suspend fun setWidgetAccentColor(color: Int) { dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }

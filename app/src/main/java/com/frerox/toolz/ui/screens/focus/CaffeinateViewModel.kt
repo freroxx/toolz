@@ -1,4 +1,4 @@
-package com.frerox.toolz.ui.screens.focus
+﻿package com.frerox.toolz.ui.screens.focus
 
 import android.Manifest
 import android.content.Context
@@ -75,7 +75,7 @@ class CaffeinateViewModel @Inject constructor(
             val intent = Intent(context, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_STOP
             }
-            context.stopService(intent)
+            context.startService(intent)
         } else {
             val intent = Intent(context, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_START
@@ -133,3 +133,4 @@ class CaffeinateViewModel @Inject constructor(
         return false
     }
 }
+

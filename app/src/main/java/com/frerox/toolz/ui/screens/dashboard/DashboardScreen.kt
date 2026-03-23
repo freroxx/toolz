@@ -1,4 +1,4 @@
-package com.frerox.toolz.ui.screens.dashboard
+﻿package com.frerox.toolz.ui.screens.dashboard
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
@@ -44,7 +44,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,10 +72,8 @@ import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.util.ConnectivityObserver
 import com.frerox.toolz.util.NetworkConnectivityObserver
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
-import kotlin.math.absoluteValue
 
 data class ToolCategory(
     val title: String,
@@ -424,26 +421,16 @@ private fun DashboardContent(
                         item {
                             SectionHeader("PINNED INSTRUMENTS")
                         }
-                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { index, tool ->
-                            val visible = remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) {
-                                delay(index * 40L)
-                                visible.value = true
-                            }
-                            AnimatedVisibility(
-                                visible = visible.value,
-                                enter = fadeIn(tween(400)) + slideInVertically(initialOffsetY = { 20 })
-                            ) {
-                                ToolListItem(
-                                    tool = tool,
-                                    isPinned = true,
-                                    onClick = { navigateWithRecent(tool.route) },
-                                    onLongClick = {
-                                        vibrationManager?.vibrateLongClick()
-                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                    }
-                                )
-                            }
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_${tool.route}" }) { _, tool ->
+                            ToolListItem(
+                                tool = tool,
+                                isPinned = true,
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    vibrationManager?.vibrateLongClick()
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
                         }
                         item { Spacer(Modifier.height(16.dp)) }
                     }
@@ -452,26 +439,16 @@ private fun DashboardContent(
                         item {
                             SectionHeader("RECENTLY USED")
                         }
-                        itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { index, tool ->
-                            val visible = remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) {
-                                delay((pinnedToolItems.size + index) * 40L)
-                                visible.value = true
-                            }
-                            AnimatedVisibility(
-                                visible = visible.value,
-                                enter = fadeIn(tween(400)) + slideInVertically(initialOffsetY = { 20 })
-                            ) {
-                                ToolListItem(
-                                    tool = tool,
-                                    isPinned = pinnedTools.contains(tool.route),
-                                    onClick = { navigateWithRecent(tool.route) },
-                                    onLongClick = {
-                                        vibrationManager?.vibrateLongClick()
-                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                    }
-                                )
-                            }
+                        itemsIndexed(recentToolItems, key = { _, tool -> "recent_${tool.route}" }) { _, tool ->
+                            ToolListItem(
+                                tool = tool,
+                                isPinned = pinnedTools.contains(tool.route),
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    vibrationManager?.vibrateLongClick()
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
                         }
                         item { Spacer(Modifier.height(16.dp)) }
                     }
@@ -516,26 +493,16 @@ private fun DashboardContent(
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             SectionHeader("PINNED INSTRUMENTS", topPadding = 8.dp)
                         }
-                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_grid_${tool.route}" }) { index, tool ->
-                            val visible = remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) {
-                                delay(index * 40L)
-                                visible.value = true
-                            }
-                            AnimatedVisibility(
-                                visible = visible.value,
-                                enter = if (performanceMode) fadeIn() else (fadeIn(tween(500)) + scaleIn(initialScale = 0.92f))
-                            ) {
-                                ImprovedToolCard(
-                                    tool = tool,
-                                    isPinned = true,
-                                    onClick = { navigateWithRecent(tool.route) },
-                                    onLongClick = {
-                                        vibrationManager?.vibrateLongClick()
-                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                    }
-                                )
-                            }
+                        itemsIndexed(pinnedToolItems, key = { _, tool -> "pinned_grid_${tool.route}" }) { _, tool ->
+                            ImprovedToolCard(
+                                tool = tool,
+                                isPinned = true,
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    vibrationManager?.vibrateLongClick()
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
                         }
                     }
 
@@ -568,28 +535,16 @@ private fun DashboardContent(
                         item(span = { GridItemSpan(maxLineSpan) }, key = category.title) {
                             SectionHeader(category.title, topPadding = 24.dp)
                         }
-                        itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { index, tool ->
-                            val visible = remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) {
-                                // Add offset for pinned/recent tools
-                                val baseDelay = (pinnedToolItems.size + (if (showRecentTools) 1 else 0)).coerceAtMost(10)
-                                delay((baseDelay + index) * 40L)
-                                visible.value = true
-                            }
-                            AnimatedVisibility(
-                                visible = visible.value,
-                                enter = if (performanceMode) fadeIn() else (fadeIn(tween(500)) + scaleIn(initialScale = 0.92f))
-                            ) {
-                                ImprovedToolCard(
-                                    tool = tool,
-                                    isPinned = pinnedTools.contains(tool.route),
-                                    onClick = { navigateWithRecent(tool.route) },
-                                    onLongClick = {
-                                        vibrationManager?.vibrateLongClick()
-                                        scope.launch { settingsRepository.togglePinnedTool(tool.route) }
-                                    }
-                                )
-                            }
+                        itemsIndexed(category.items, key = { _, tool -> tool.route + category.title }) { _, tool ->
+                            ImprovedToolCard(
+                                tool = tool,
+                                isPinned = pinnedTools.contains(tool.route),
+                                onClick = { navigateWithRecent(tool.route) },
+                                onLongClick = {
+                                    vibrationManager?.vibrateLongClick()
+                                    scope.launch { settingsRepository.togglePinnedTool(tool.route) }
+                                }
+                            )
                         }
                     }
 
@@ -660,22 +615,7 @@ private fun DashboardContent(
                         userScrollEnabled = true,
                         beyondViewportPageCount = 1
                     ) { pageIndex ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    if (!performanceMode) {
-                                        val pageOffset = (
-                                            (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                                        ).absoluteValue
-
-                                        alpha = lerp(0.4f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                        val scale = lerp(0.9f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                        scaleX = scale
-                                        scaleY = scale
-                                    }
-                                }
-                        ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             when (activePages[pageIndex]) {
                                 PillPage.Music -> MusicPill(musicState, musicViewModel)
                                 PillPage.Timer -> TimerPill(timerState, timerViewModel)
@@ -1237,7 +1177,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
 
                     if (state.sleepTimerActive && state.sleepTimerRemaining != null) {
                         Text(
-                            " • ⏳ ${formatTimeDashboard(state.sleepTimerRemaining)}",
+                            " â€¢ â³ ${formatTimeDashboard(state.sleepTimerRemaining)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Black,
@@ -1820,3 +1760,8 @@ fun getCategories() = listOf(
         )
     )
 )
+
+
+
+
+
