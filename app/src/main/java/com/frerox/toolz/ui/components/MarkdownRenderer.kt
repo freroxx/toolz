@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -147,33 +148,38 @@ fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
 }
 
 @Composable
-fun MarkdownSegment(seg: MdSegment, modifier: Modifier = Modifier) {
+fun MarkdownSegment(seg: MdSegment, modifier: Modifier = Modifier, baseFontSize: TextUnit = 16.sp) {
+    val bodyStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = baseFontSize,
+        lineHeight = (baseFontSize.value * 1.5f).sp
+    )
+
     when (seg) {
         is MdSegment.Header -> {
             val (fontSize, weight) = when (seg.level) {
-                1 -> 20.sp to FontWeight.Black
-                2 -> 18.sp to FontWeight.ExtraBold
-                else -> 16.sp to FontWeight.Bold
+                1 -> (baseFontSize.value * 1.4f).sp to FontWeight.Black
+                2 -> (baseFontSize.value * 1.25f).sp to FontWeight.ExtraBold
+                else -> (baseFontSize.value * 1.15f).sp to FontWeight.Bold
             }
-            Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, modifier = modifier.padding(top = 8.dp, bottom = 4.dp))
+            Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
         }
         is MdSegment.Paragraph -> {
-            Text(seg.content, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp, modifier = modifier)
+            Text(seg.content, style = bodyStyle, modifier = modifier)
         }
         is MdSegment.BulletItem -> {
             Row(modifier = modifier.padding(start = (seg.depth * 12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(5.dp).offset(y = 8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-                Text(seg.content, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp, modifier = Modifier.weight(1f))
+                Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                Text(seg.content, style = bodyStyle, modifier = Modifier.weight(1f))
             }
         }
         is MdSegment.NumberedItem -> {
             Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${seg.index}.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.widthIn(min = 20.dp))
-                Text(seg.content, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp, modifier = Modifier.weight(1f))
+                Text("${seg.index}.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, style = bodyStyle, modifier = Modifier.widthIn(min = (baseFontSize.value * 1.2f).dp))
+                Text(seg.content, style = bodyStyle, modifier = Modifier.weight(1f))
             }
         }
         is MdSegment.Code -> MarkdownCodeBlock(language = seg.language, code = seg.code, modifier = modifier)
-        MdSegment.Divider -> HorizontalDivider(modifier.padding(vertical = 8.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
+        MdSegment.Divider -> HorizontalDivider(modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
     }
 }
 

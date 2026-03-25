@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -27,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavType
@@ -110,9 +113,6 @@ class MainActivity : AppCompatActivity() {
         scheduleCleanup()
         scheduleUpdateCheck()
 
-        // â”€â”€ Fetch default API keys from Vercel on cold start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        // syncRemoteKeys() is a no-op when the 24-hour cache is still fresh,
-        // so it only hits the network once per day at most.
         lifecycleScope.launch {
             aiSettingsManager.syncRemoteKeys()
         }
@@ -401,12 +401,43 @@ fun ToolzNavHost(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     LaunchedEffect(incomingIntentVersion) {
         val latestIntent = incomingIntent ?: return@LaunchedEffect
-        if (latestIntent.action == Intent.ACTION_VIEW && latestIntent.type == "application/pdf") {
-            latestIntent.data?.let { pdfViewModel.openPdf(it) }
+        
+        // Handle PDF View/Send Intent explicitly
+        if (latestIntent.action == Intent.ACTION_VIEW || latestIntent.action == Intent.ACTION_SEND) {
+            val uri = if (latestIntent.action == Intent.ACTION_SEND) {
+                IntentCompat.getParcelableExtra(latestIntent, Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                latestIntent.data
+            }
+
+            if (uri != null) {
+                val mimeType = context.contentResolver.getType(uri)
+                val isPdf = latestIntent.type == "application/pdf" || 
+                            mimeType == "application/pdf" ||
+                            uri.toString().lowercase().endsWith(".pdf")
+                
+                if (isPdf) {
+                    var title = "Document"
+                    try {
+                        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1 && cursor.moveToFirst()) {
+                                title = cursor.getString(nameIndex)
+                            }
+                        }
+                    } catch (e: Exception) { e.printStackTrace() }
+
+                    pdfViewModel.openPdf(uri, title)
+                    pendingExternalRoute = Screen.PdfReader.route
+                    return@LaunchedEffect
+                }
+            }
         }
+        
         pendingExternalRoute = resolveExternalNavigationRoute(latestIntent)
     }
 
@@ -433,11 +464,11 @@ fun ToolzNavHost(
             if (performanceMode) fadeOut(animationSpec = tween(100))
             else fadeOut(animationSpec = tween(300))
         },
-        popEnterTransition = { 
+        popEnterTransition = {
             if (performanceMode) fadeIn(animationSpec = tween(100))
             else fadeIn(animationSpec = tween(300))
         },
-        popExitTransition = { 
+        popExitTransition = {
             if (performanceMode) fadeOut(animationSpec = tween(100))
             else fadeOut(animationSpec = tween(300))
         }
@@ -502,12 +533,10 @@ fun ToolzNavHost(
             )
         }
 
-        // AI
         composable(Screen.AiAssistant.route) {
             AiAssistantScreen(onBack = { navController.popBackStack() })
         }
 
-        // Time & Productivity
         composable(Screen.Timer.route) {
             TimerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -533,7 +562,6 @@ fun ToolzNavHost(
             CalendarScreen(viewModel = hiltViewModel())
         }
 
-        // Media & Documents
         composable(Screen.MusicPlayer.route) {
             MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -554,7 +582,6 @@ fun ToolzNavHost(
             LightMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
 
-        // Sensors & Navigation
         composable(Screen.Compass.route) {
             CompassScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -574,7 +601,6 @@ fun ToolzNavHost(
             VoiceRecorderScreen(onBack = { navController.popBackStack() })
         }
 
-        // Math & Conversion
         composable(Screen.Calculator.route) {
             CalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -591,7 +617,6 @@ fun ToolzNavHost(
             EquationSolverScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
 
-        // Utilities
         composable(Screen.Ruler.route) {
             RulerScreen(onBack = { navController.popBackStack() })
         }
@@ -652,7 +677,25 @@ fun ToolzNavHost(
             ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.FileCleaner.route) {
-            CleanerScreen(onBack = { navController.popBackStack() })
+            val musicViewModel: MusicPlayerViewModel = hiltViewModel()
+            CleanerScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToPdf = { uri, title ->
+                    pdfViewModel.openPdf(uri, title)
+                    navController.navigate(Screen.PdfReader.route)
+                },
+                onNavigateToMusic = { uri ->
+                    val track = musicViewModel.uiState.value.tracks.find { it.uri == uri.toString() }
+                    track?.let { 
+                        musicViewModel.playTrack(it)
+                        navController.navigate(Screen.MusicPlayer.route)
+                    } ?: run {
+                        // Fallback: if track not found in indexed list, try to play directly
+                        musicViewModel.playUri(uri)
+                        navController.navigate(Screen.MusicPlayer.route)
+                    }
+                }
+            )
         }
     }
 }
@@ -681,6 +724,3 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
 
     return route
 }
-
-
-

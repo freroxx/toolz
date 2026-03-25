@@ -177,23 +177,27 @@ class PdfViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = PdfUiState.Loading
             val existing = _openTabs.value.find { it.uri == uri }
-            if (existing != null) {
+            val tabToOpen = if (existing != null) {
                 _activeTabId.value = existing.id
+                existing
             } else {
                 val id = java.util.UUID.randomUUID().toString()
                 val keyPrefix = uri.hashCode()
                 val savedPage = dataStore.data.map { it[intPreferencesKey("pdf_page_$keyPrefix")] ?: 0 }.first()
                 val savedZoom = dataStore.data.map { it[floatPreferencesKey("pdf_zoom_$keyPrefix")] ?: 1f }.first()
                 val pageCount = repository.getPageCount(uri)
-                val newTab    = PdfWorkspaceTab(id, uri, title, page = savedPage, zoom = savedZoom, pageCount = pageCount)
-                _openTabs.value  = _openTabs.value + newTab
+                val newTab = PdfWorkspaceTab(id, uri, title, page = savedPage, zoom = savedZoom, pageCount = pageCount)
+                _openTabs.value = _openTabs.value + newTab
                 _activeTabId.value = id
+                newTab
             }
+            
+            _docState.value = DocumentState(
+                totalPages = tabToOpen.pageCount,
+                currentPageIndex = tabToOpen.page,
+                isReady = true
+            )
             _uiState.value = PdfUiState.Viewer
-            val tab = _activeTab.value
-            if (tab != null) {
-                _docState.value = DocumentState(totalPages = tab.pageCount, currentPageIndex = tab.page, isReady = true)
-            }
         }
     }
 

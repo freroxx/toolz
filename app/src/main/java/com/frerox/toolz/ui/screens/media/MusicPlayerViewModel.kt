@@ -8,6 +8,7 @@ import android.hardware.SensorManager
 import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -126,7 +127,21 @@ class MusicPlayerViewModel @Inject constructor(
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
-            val track = _uiState.value.tracks.find { it.uri == uri }
+            var track = _uiState.value.tracks.find { it.uri == uri }
+            
+            // Handle external tracks not in the main library
+            if (track == null && mediaItem != null) {
+                val metadata = mediaItem.mediaMetadata
+                track = MusicTrack(
+                    uri = uri ?: "",
+                    title = metadata.title?.toString() ?: "External Audio",
+                    artist = metadata.artist?.toString() ?: "Unknown",
+                    album = metadata.albumTitle?.toString() ?: "Unknown",
+                    duration = player.duration.coerceAtLeast(0L),
+                    thumbnailUri = metadata.artworkUri?.toString()
+                )
+            }
+
             val dur = player.duration.coerceAtLeast(0L)
             _uiState.update { it.copy(currentTrack = track, duration = dur) }
             _duration.value = dur
@@ -176,7 +191,6 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.Main) {
             val p: Player = controller ?: player
             val currentTracks = _uiState.value.tracks
-            if (currentTracks.isEmpty()) return@launch
             
             val trackMap = currentTracks.associateBy { it.uri }
             val queueTracks = mutableListOf<MusicTrack>()
@@ -185,9 +199,17 @@ class MusicPlayerViewModel @Inject constructor(
             for (i in 0 until p.mediaItemCount) {
                 val mediaItem = p.getMediaItemAt(i)
                 uris.add(mediaItem.mediaId)
-                trackMap[mediaItem.mediaId]?.let {
-                    queueTracks.add(it)
+                val track = trackMap[mediaItem.mediaId] ?: run {
+                    val meta = mediaItem.mediaMetadata
+                    MusicTrack(
+                        uri = mediaItem.mediaId,
+                        title = meta.title?.toString() ?: "External Audio",
+                        artist = meta.artist?.toString() ?: "Unknown",
+                        album = meta.albumTitle?.toString() ?: "Unknown",
+                        duration = 0L
+                    )
                 }
+                queueTracks.add(track)
             }
             
             currentQueueUris = uris
@@ -316,7 +338,7 @@ class MusicPlayerViewModel @Inject constructor(
                             recentlyPlayed = data.recent,
                             mostPlayed = data.most,
                             folders = folders,
-                            currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri) },
+                            currentTrack = prioritizedTracks.find { t -> t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri) } ?: state.currentTrack,
                             isPlaying = player.isPlaying,
                             isShuffleOn = player.shuffleModeEnabled,
                             repeatMode = player.repeatMode,
@@ -345,7 +367,7 @@ class MusicPlayerViewModel @Inject constructor(
                     isPlaying = controller?.isPlaying ?: false,
                     isShuffleOn = controller?.shuffleModeEnabled ?: false,
                     repeatMode = controller?.repeatMode ?: Player.REPEAT_MODE_OFF,
-                    currentTrack = _uiState.value.tracks.find { t -> t.uri == controller?.currentMediaItem?.mediaId },
+                    currentTrack = _uiState.value.tracks.find { t -> t.uri == controller?.currentMediaItem?.mediaId } ?: it.currentTrack,
                     duration = dur
                 )}
                 _duration.value = dur
@@ -445,7 +467,6 @@ class MusicPlayerViewModel @Inject constructor(
                         _playbackPosition.value = currentPos
                     }
                 }
-                // Faster update for better sync (100ms)
                 delay(if (_uiState.value.performanceMode) 500 else 100)
             }
         }
@@ -523,7 +544,6 @@ class MusicPlayerViewModel @Inject constructor(
             val trackUris = tracks.map { it.uri }
             val isSameQueue = trackUris == currentQueueUris
             
-            // Map models to MediaItem on Default Dispatcher
             val mediaItems = tracks.map { t -> t.toMediaItem() }
             val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
             
@@ -544,6 +564,47 @@ class MusicPlayerViewModel @Inject constructor(
                 p.play()
             }
         }
+    }
+
+    fun playUri(uri: Uri) {
+        startPlayerService()
+        
+        if (controller == null) {
+            pendingAction = { playUri(uri) }
+            connectToMediaController()
+            return
+        }
+
+        vibrationManager.vibrateClick()
+        
+        var title = "External Audio"
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    title = cursor.getString(nameIndex)
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setDisplayTitle(title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(uri.toString())
+            .setUri(uri)
+            .setMediaMetadata(metadata)
+            .build()
+
+        val p: Player = controller ?: player
+        p.stop()
+        p.setMediaItem(mediaItem)
+        p.prepare()
+        p.play()
     }
 
     fun addToQueue(track: MusicTrack) {
@@ -584,7 +645,6 @@ class MusicPlayerViewModel @Inject constructor(
         if (tracks.isEmpty()) return
         
         val p: Player = controller ?: player
-        // Better Shuffle: Force shuffle ON when using "SHUFFLE PLAY"
         p.shuffleModeEnabled = true
         _uiState.update { it.copy(isShuffleOn = true) }
         
