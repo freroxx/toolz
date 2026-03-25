@@ -61,7 +61,7 @@ import kotlin.math.roundToInt
 fun ToolzPdfScreen(
     viewModel: PdfViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToNote: (Int) -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onNavigateToNote: (Int) -> Unit = {},
 ) {
     val uiState       by viewModel.uiState.collectAsStateWithLifecycle()
     val pdfFiles      by viewModel.pdfFiles.collectAsStateWithLifecycle()
@@ -279,8 +279,8 @@ private fun OcrOverlay(ocrPageData: OcrPageData, bitmapWidth: Int, bitmapHeight:
     val context = LocalContext.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val scaleX  = with(density) { maxWidth.toPx()  } / bitmapWidth
-        val scaleY  = with(density) { maxHeight.toPx() } / bitmapHeight
+        val scaleX  = constraints.maxWidth.toFloat() / bitmapWidth
+        val scaleY  = constraints.maxHeight.toFloat() / bitmapHeight
         ocrPageData.blocks.forEach { block ->
             Box(
                 Modifier
@@ -327,7 +327,7 @@ fun OcrTextBottomSheet(
                 Box(Modifier.size(40.dp, 4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.2f), CircleShape))
             }
         },
-        modifier = Modifier.padding(top = 16.dp) // Avoid hitting the very top
+        modifier = Modifier.padding(top = 16.dp)
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
 
@@ -347,73 +347,109 @@ fun OcrTextBottomSheet(
                 ) { Icon(Icons.Rounded.ContentCopy, "Copy All", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
             }
 
-            // AI Summarize section
-            AnimatedContent(
-                targetState = when { isSummarizing -> "loading"; pdfSummary != null -> "done"; else -> "idle" },
-                transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) },
-                label = "sumState",
-            ) { state ->
-                when (state) {
-                    "loading" -> Surface(
-                        color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.35f),
-                        shape  = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.tertiary)
-                            Text("Summarising with AI…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer, fontWeight = FontWeight.Black)
-                        }
-                    }
-                    "done" -> Surface(
-                        color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.25f), shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.2f)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
-                                Text("AI SUMMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { viewModel.clearSummary() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                                    Text("Dismiss", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f), fontWeight = FontWeight.Black)
+            // Scrollable content area
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                // AI Summarize section
+                item {
+                    AnimatedContent(
+                        targetState = when { isSummarizing -> "loading"; pdfSummary != null -> "done"; else -> "idle" },
+                        transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) },
+                        label = "sumState",
+                    ) { state ->
+                        when (state) {
+                            "loading" -> Surface(
+                                color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.35f),
+                                shape  = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.tertiary)
+                                    Text("Summarising with AI…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer, fontWeight = FontWeight.Black)
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
-                            
-                            val segments = remember(pdfSummary) { parseMarkdownToSegments(pdfSummary ?: "") }
+                            "done" -> Surface(
+                                color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.25f), shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.2f)),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                        Text("AI SUMMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = { viewModel.clearSummary() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                            Text("Dismiss", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f), fontWeight = FontWeight.Black)
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    
+                                    val segments = remember(pdfSummary) { parseMarkdownToSegments(pdfSummary ?: "") }
+                                    SelectionContainer {
+                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            segments.forEach { seg -> MarkdownSegment(seg, baseFontSize = textSize.sp) }
+                                        }
+                                    }
+                                    
+                                    Spacer(Modifier.height(10.dp))
+                                    Text("Groq · llama-3.3-70b-versatile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontWeight = FontWeight.Black)
+                                }
+                            }
+                            else -> Surface(
+                                onClick  = { viewModel.summarizePdf(allText) },
+                                color    = MaterialTheme.colorScheme.tertiaryContainer.copy(0.2f), shape = RoundedCornerShape(20.dp),
+                                border   = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.18f)),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Summarise with AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        Text("Key points via Groq llama-3.3-70b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(0.7f), fontWeight = FontWeight.Bold)
+                                    }
+                                    Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary.copy(0.6f))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Extracted Text section with Markdown
+                item {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.TextFields, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text("EXTRACTED CONTENT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                        ) {
+                            val segments = remember(allText) { parseMarkdownToSegments(allText) }
                             SelectionContainer {
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    segments.forEach { seg -> MarkdownSegment(seg) }
+                                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    segments.forEach { seg -> 
+                                        MarkdownSegment(
+                                            seg, 
+                                            baseFontSize = textSize.sp
+                                        ) 
+                                    }
                                 }
                             }
-                            
-                            Spacer(Modifier.height(10.dp))
-                            Text("Groq · llama-3.3-70b-versatile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontWeight = FontWeight.Black)
-                        }
-                    }
-                    else -> Surface(
-                        onClick  = { viewModel.summarizePdf(allText) },
-                        color    = MaterialTheme.colorScheme.tertiaryContainer.copy(0.2f), shape = RoundedCornerShape(20.dp),
-                        border   = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.18f)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.tertiary)
-                            Column(Modifier.weight(1f)) {
-                                Text("Summarise with AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                Text("Key points via Groq llama-3.3-70b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(0.7f), fontWeight = FontWeight.Bold)
-                            }
-                            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary.copy(0.6f))
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
-
-            // Text size slider
+            // Bottom Control: Text size slider (Sticky at bottom of column)
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
             ) {
                 Row(
                     Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -424,7 +460,7 @@ fun OcrTextBottomSheet(
                     Slider(
                         value = textSize,
                         onValueChange = { textSize = it },
-                        valueRange = 10f..32f,
+                        valueRange = 12f..32f,
                         modifier = Modifier.weight(1f),
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
@@ -443,33 +479,7 @@ fun OcrTextBottomSheet(
                     )
                 }
             }
-
-            Spacer(Modifier.height(16.dp))
-
-            // Text content
-            Surface(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-            ) {
-                LazyColumn(contentPadding = PaddingValues(20.dp), modifier = Modifier.fillMaxSize()) {
-                    item {
-                        SelectionContainer {
-                             Text(
-                                text = allText,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = textSize.sp,
-                                    lineHeight = (textSize * 1.55f).sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(24.dp).navigationBarsPadding())
+            Spacer(Modifier.navigationBarsPadding())
         }
     }
 }

@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.data.cleaner.CleanerRepository
 import com.frerox.toolz.data.cleaner.ScanState
 import com.frerox.toolz.data.cleaner.StorageInfo
@@ -13,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -24,7 +26,6 @@ class CleanerViewModel @Inject constructor(
 
     val scanState: StateFlow<ScanState> = repository.scanState
     val storageInfo: StateFlow<StorageInfo> = repository.storageInfo
-    val currentPath: StateFlow<String> = repository.currentPath
 
     private val _hasStoragePermission = MutableStateFlow(false)
     val hasStoragePermission: StateFlow<Boolean> = _hasStoragePermission.asStateFlow()
@@ -32,16 +33,33 @@ class CleanerViewModel @Inject constructor(
     private val _showPermissionDialog = MutableStateFlow(false)
     val showPermissionDialog: StateFlow<Boolean> = _showPermissionDialog.asStateFlow()
 
+    private val _gridCategory = MutableStateFlow<CleanCategory?>(null)
+    val gridCategory: StateFlow<CleanCategory?> = _gridCategory.asStateFlow()
+
     init {
         checkPermission()
         repository.refreshStorageInfo()
+        
+        // Update grid category when scan results change
+        viewModelScope.launch {
+            scanState.collect { state ->
+                if (state is ScanState.Results) {
+                    _gridCategory.value?.let { current ->
+                        val updated = state.categories.find { it.id == current.id }
+                        _gridCategory.value = updated
+                    }
+                } else if (state !is ScanState.Results) {
+                    _gridCategory.value = null
+                }
+            }
+        }
     }
 
     fun checkPermission() {
         _hasStoragePermission.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
-            true // Below R, READ/WRITE_EXTERNAL_STORAGE handled elsewhere
+            true
         }
     }
 
@@ -62,12 +80,12 @@ class CleanerViewModel @Inject constructor(
         repository.cancelScan()
     }
 
-    fun toggleDuplicateFile(groupHash: String, filePath: String) {
-        repository.toggleDuplicateFile(groupHash, filePath)
+    fun toggleCategoryItem(categoryId: String, itemId: String) {
+        repository.toggleSelection(categoryId, itemId)
     }
 
-    fun toggleCorpse(path: String) {
-        repository.toggleCorpse(path)
+    fun toggleDuplicateFile(categoryId: String, groupHash: String, path: String) {
+        repository.toggleDuplicateFile(categoryId, groupHash, path)
     }
 
     fun deleteSelected() {
@@ -79,5 +97,14 @@ class CleanerViewModel @Inject constructor(
     fun resetState() {
         repository.resetState()
         repository.refreshStorageInfo()
+        _gridCategory.value = null
+    }
+
+    fun openGridView(category: CleanCategory) {
+        _gridCategory.value = category
+    }
+
+    fun closeGridView() {
+        _gridCategory.value = null
     }
 }

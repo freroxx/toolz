@@ -1,18 +1,25 @@
 package com.frerox.toolz.ui.screens.cleaner
 
+import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
 import android.text.format.Formatter
+import android.webkit.MimeTypeMap
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,38 +35,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CleanerScreen(
     onBack: () -> Unit,
+    onNavigateToPdf: (Uri, String) -> Unit = { _, _ -> },
+    onNavigateToMusic: (Uri) -> Unit = {},
     viewModel: CleanerViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
 
     val scanState by viewModel.scanState.collectAsState()
     val storageInfo by viewModel.storageInfo.collectAsState()
-    val currentPath by viewModel.currentPath.collectAsState()
     val hasPermission by viewModel.hasStoragePermission.collectAsState()
     val showPermDialog by viewModel.showPermissionDialog.collectAsState()
+    val gridCategory by viewModel.gridCategory.collectAsState()
 
-    // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -67,10 +73,12 @@ fun CleanerScreen(
         viewModel.dismissPermissionDialog()
     }
 
-    // Re-check permission on resume
     LaunchedEffect(Unit) {
         viewModel.checkPermission()
-        viewModel.resetState()
+    }
+
+    BackHandler(enabled = gridCategory != null) {
+        viewModel.closeGridView()
     }
 
     if (showPermDialog) {
@@ -89,26 +97,33 @@ fun CleanerScreen(
     }
 
     Scaffold(
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        "FILE CLEANER",
+                        if (gridCategory != null) gridCategory!!.name.uppercase() else "FILE CLEANER",
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
+                        letterSpacing = 1.sp,
                         style = MaterialTheme.typography.titleMedium
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = {
                         vibrationManager?.vibrateClick()
-                        onBack()
+                        if (gridCategory != null) {
+                            viewModel.closeGridView()
+                        } else {
+                            onBack()
+                        }
                     }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                ),
                 actions = {
                     if (scanState is ScanState.Scanning) {
                         IconButton(onClick = {
@@ -127,98 +142,205 @@ fun CleanerScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            when (val state = scanState) {
-                is ScanState.Idle -> {
-                    IdleDashboard(
-                        storageInfo = storageInfo,
-                        hasPermission = hasPermission,
-                        onScanClick = {
-                            vibrationManager?.vibrateClick()
-                            if (!hasPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                viewModel.showPermissionDialog()
-                            } else {
-                                viewModel.startScan()
+            AnimatedContent(
+                targetState = scanState,
+                contentKey = { it::class },
+                transitionSpec = {
+                    fadeIn(tween(400)) togetherWith fadeOut(tween(400))
+                },
+                label = "state_transition"
+            ) { state ->
+                when (state) {
+                    is ScanState.Idle -> {
+                        IdleDashboard(
+                            storageInfo = storageInfo,
+                            hasPermission = hasPermission,
+                            onScanClick = {
+                                vibrationManager?.vibrateClick()
+                                if (!hasPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    viewModel.showPermissionDialog()
+                                } else {
+                                    viewModel.startScan()
+                                }
                             }
-                        },
-                        performanceMode = performanceMode
-                    )
-                }
+                        )
+                    }
 
-                is ScanState.Scanning -> {
-                    ScanningView(
-                        state = state,
-                        currentPath = currentPath,
-                        performanceMode = performanceMode
-                    )
-                }
+                    is ScanState.Scanning -> {
+                        ScanningView(state = state)
+                    }
 
-                is ScanState.Results -> {
-                    ResultsView(
-                        state = state,
-                        onToggleDuplicate = { hash, path ->
-                            vibrationManager?.vibrateClick()
-                            viewModel.toggleDuplicateFile(hash, path)
-                        },
-                        onToggleCorpse = { path ->
-                            vibrationManager?.vibrateClick()
-                            viewModel.toggleCorpse(path)
-                        },
-                        onClean = {
-                            viewModel.deleteSelected()
-                        },
-                        onRescan = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.startScan()
-                        },
-                        performanceMode = performanceMode
-                    )
-                }
+                    is ScanState.Results -> {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            ResultsView(
+                                state = state,
+                                onToggleItem = { catId, itemId ->
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.toggleCategoryItem(catId, itemId)
+                                },
+                                onToggleDuplicate = { catId, hash, path ->
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.toggleDuplicateFile(catId, hash, path)
+                                },
+                                onClean = {
+                                    vibrationManager?.vibrateLongClick()
+                                    viewModel.deleteSelected()
+                                },
+                                onRescan = {
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.startScan()
+                                },
+                                onOpenFile = { path, isApp ->
+                                    vibrationManager?.vibrateClick()
+                                    if (isApp) {
+                                        openAppSettings(context, path)
+                                    } else {
+                                        openFile(context, path, onNavigateToPdf, onNavigateToMusic)
+                                    }
+                                },
+                                onLongPressCategory = { category ->
+                                    vibrationManager?.vibrateLongClick()
+                                    viewModel.openGridView(category)
+                                }
+                            )
 
-                is ScanState.Cleaning -> {
-                    CleaningView(state = state, performanceMode = performanceMode)
-                }
-
-                is ScanState.Done -> {
-                    DoneView(
-                        result = state.result,
-                        onDone = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.resetState()
+                            AnimatedVisibility(
+                                visible = gridCategory != null,
+                                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                            ) {
+                                gridCategory?.let { category ->
+                                    SectionGridView(
+                                        category = category,
+                                        onToggleItem = { itemId ->
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.toggleCategoryItem(category.id, itemId)
+                                        },
+                                        onToggleDuplicate = { hash, path ->
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.toggleDuplicateFile(category.id, hash, path)
+                                        },
+                                        onOpenFile = { path ->
+                                            vibrationManager?.vibrateClick()
+                                            if (category.id == "unused_apps") {
+                                                openAppSettings(context, path)
+                                            } else {
+                                                openFile(context, path, onNavigateToPdf, onNavigateToMusic)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
-                    )
-                }
+                    }
 
-                is ScanState.Error -> {
-                    ErrorView(
-                        message = state.message,
-                        onRetry = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.startScan()
-                        },
-                        onDismiss = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.resetState()
-                        }
-                    )
+                    is ScanState.Cleaning -> {
+                        CleaningView(state = state)
+                    }
+
+                    is ScanState.Done -> {
+                        DoneView(
+                            result = state.result,
+                            onDone = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.resetState()
+                            }
+                        )
+                    }
+
+                    is ScanState.Error -> {
+                        ErrorView(
+                            message = state.message,
+                            onRetry = { viewModel.startScan() },
+                            onDismiss = { viewModel.resetState() }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Idle Dashboard
-// ═══════════════════════════════════════════════════════════════════════════════
+private fun openAppSettings(context: Context, packageName: String) {
+    try {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+private fun openFile(
+    context: Context,
+    path: String,
+    onNavigateToPdf: (Uri, String) -> Unit,
+    onNavigateToMusic: (Uri) -> Unit
+) {
+    val file = File(path)
+    if (!file.exists()) return
+
+    val ext = file.extension.lowercase()
+    
+    val mediaStoreUri = getMediaStoreUri(context, path, ext)
+    
+    val uri = mediaStoreUri ?: try {
+        FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+    } catch (e: Exception) {
+        Uri.fromFile(file)
+    }
+
+    when (ext) {
+        "pdf" -> onNavigateToPdf(uri, file.name)
+        "mp3", "wav", "m4a", "ogg", "flac" -> onNavigateToMusic(uri)
+        else -> {
+            try {
+                val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Open file with"))
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+}
+
+private fun getMediaStoreUri(context: Context, path: String, ext: String): Uri? {
+    val collection = when (ext) {
+        "mp3", "wav", "m4a", "ogg", "flac" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        "pdf" -> MediaStore.Files.getContentUri("external")
+        "jpg", "jpeg", "png", "gif", "webp", "bmp" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        "mp4", "mkv", "avi", "mov", "webm" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        else -> return null
+    }
+    
+    val projection = arrayOf(MediaStore.MediaColumns._ID)
+    val selection = MediaStore.MediaColumns.DATA + "=?"
+    val selectionArgs = arrayOf(path)
+    
+    return try {
+        context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                ContentUris.withAppendedId(collection, id)
+            } else null
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
 
 @Composable
 private fun IdleDashboard(
     storageInfo: StorageInfo,
     hasPermission: Boolean,
-    onScanClick: () -> Unit,
-    performanceMode: Boolean
+    onScanClick: () -> Unit
 ) {
-    val context = LocalContext.current
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -231,99 +353,57 @@ private fun IdleDashboard(
             cleanableBytes = storageInfo.cleanableBytes
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(48.dp))
 
-        // Storage breakdown
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                StorageRow("Total", storageInfo.totalBytes, MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.height(8.dp))
-                StorageRow("Used", storageInfo.usedBytes, MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                StorageRow("Free", storageInfo.freeBytes, MaterialTheme.colorScheme.tertiary)
-            }
-        }
-
-        Spacer(Modifier.height(40.dp))
-
-        // Scan button
         Button(
             onClick = onScanClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            shape = RoundedCornerShape(18.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
         ) {
-            Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(12.dp))
+            Icon(Icons.Rounded.TravelExplore, contentDescription = null, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(16.dp))
             Text(
-                "DEEP SCAN",
+                "DEEP SCAN DEVICE",
                 fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp,
+                letterSpacing = 1.sp,
                 style = MaterialTheme.typography.titleMedium
             )
         }
 
         if (!hasPermission) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "Limited access — tap to grant full storage permission",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center
-            )
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.clickable { onScanClick() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Rounded.GppMaybe, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Grant permission for deeper scan",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun StorageRow(label: String, bytes: Long, color: Color) {
-    val context = LocalContext.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(color)
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Text(
-            Formatter.formatFileSize(context, bytes),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Black,
-            color = color
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Scanning View
-// ═══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ScanningView(
-    state: ScanState.Scanning,
-    currentPath: String,
-    performanceMode: Boolean
-) {
+private fun ScanningView(state: ScanState.Scanning) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -331,460 +411,190 @@ private fun ScanningView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        ScanningRadar()
+        ExpressiveScanningIndicator()
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(48.dp))
 
-        ScanStatsRow(
-            filesScanned = state.filesScanned,
-            duplicatesFound = state.duplicatesFound,
-            corpsesFound = state.corpsesFound
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        FileStreamTicker(
-            currentPath = currentPath,
-            filesScanned = state.filesScanned
-        )
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Results View
-// ═══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ResultsView(
-    state: ScanState.Results,
-    onToggleDuplicate: (String, String) -> Unit,
-    onToggleCorpse: (String) -> Unit,
-    onClean: () -> Unit,
-    onRescan: () -> Unit,
-    performanceMode: Boolean
-) {
-    val context = LocalContext.current
-    val hasCleanable = state.totalCleanableBytes > 0
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 8.dp,
-                bottom = if (hasCleanable) 100.dp else 24.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Summary header
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "SCAN COMPLETE",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 2.sp
-                            )
-                            Text(
-                                "${state.filesScanned} files analyzed",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        IconButton(onClick = onRescan) {
-                            Icon(
-                                Icons.Rounded.Refresh,
-                                contentDescription = "Rescan",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Duplicates section
-            if (state.duplicateGroups.isNotEmpty()) {
-                item {
-                    SectionLabel(
-                        "DUPLICATES",
-                        "${state.duplicateGroups.size} groups · ${
-                            Formatter.formatFileSize(
-                                context,
-                                state.duplicateGroups.sumOf { g -> g.files.filter { it.isSelected }.sumOf { g.sizeBytes } }
-                            )
-                        }"
-                    )
-                }
-
-                items(state.duplicateGroups, key = { it.hash }) { group ->
-                    DuplicateGroupCard(
-                        group = group,
-                        onToggle = { filePath -> onToggleDuplicate(group.hash, filePath) }
-                    )
-                }
-            }
-
-            // Corpses section
-            if (state.corpseEntries.isNotEmpty()) {
-                item {
-                    SectionLabel(
-                        "ORPHANED APP DATA",
-                        "${state.corpseEntries.size} entries · ${
-                            Formatter.formatFileSize(
-                                context,
-                                state.corpseEntries.filter { it.isSelected }.sumOf { it.sizeBytes }
-                            )
-                        }"
-                    )
-                }
-
-                items(state.corpseEntries, key = { it.path }) { corpse ->
-                    CorpseListItem(
-                        corpse = corpse,
-                        onToggle = { onToggleCorpse(corpse.path) }
-                    )
-                }
-            }
-
-            // Empty state
-            if (state.duplicateGroups.isEmpty() && state.corpseEntries.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "Your storage is clean!",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            "No duplicates or orphaned data found",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        // Slide to clean FAB
-        if (hasCleanable) {
-            SlideToCleanButton(
-                cleanableBytes = state.totalCleanableBytes,
-                onClean = onClean,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 24.dp, vertical = 24.dp)
-                    .navigationBarsPadding()
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionLabel(title: String, subtitle: String) {
-    Column(modifier = Modifier.padding(start = 4.dp, top = 8.dp)) {
         Text(
-            title,
+            state.currentCategory.uppercase(),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.sp
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center
         )
-        Text(
-            subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Duplicate Group Card
-// ═══════════════════════════════════════════════════════════════════════════════
+        Spacer(Modifier.height(16.dp))
 
-@Composable
-private fun DuplicateGroupCard(
-    group: DuplicateGroup,
-    onToggle: (String) -> Unit
-) {
-    val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    val fileName = remember(group.files) {
-        group.files.firstOrNull()?.path?.substringAfterLast('/') ?: "Unknown"
-    }
-    val isMediaFile = remember(fileName) {
-        val ext = fileName.substringAfterLast('.', "").lowercase()
-        ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "avi", "mov", "3gp")
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Thumbnail if media
-                if (isMediaFile) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(group.files.firstOrNull()?.path)
-                            .crossfade(true)
-                            .size(80)
-                            .build(),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(Modifier.width(12.dp))
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Rounded.FileCopy,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        fileName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${group.files.size} copies · ${Formatter.formatFileSize(context, group.sizeBytes)} each",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Icon(
-                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    contentDescription = "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Expanded file list
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column(modifier = Modifier.padding(top = 12.dp)) {
-                    group.files.forEachIndexed { index, file ->
-                        val shortPath = file.path
-                            .removePrefix(Environment.getExternalStorageDirectory().absolutePath)
-                            .trimStart('/')
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { onToggle(file.path) }
-                                .padding(vertical = 6.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = file.isSelected,
-                                onCheckedChange = { onToggle(file.path) },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = MaterialTheme.colorScheme.error,
-                                    uncheckedColor = MaterialTheme.colorScheme.outline
-                                )
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    shortPath,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (file.isSelected)
-                                        MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurface
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        if (index == 0) "ORIGINAL" else "COPY",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (index == 0) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.error,
-                                        fontSize = 9.sp,
-                                        letterSpacing = 1.sp
-                                    )
-                                    Text(
-                                        java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
-                                            .format(java.util.Date(file.lastModified)),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 9.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Corpse list item
-// ═══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun CorpseListItem(
-    corpse: CorpseEntry,
-    onToggle: () -> Unit
-) {
-    val context = LocalContext.current
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggle() },
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = corpse.isSelected,
-                onCheckedChange = { onToggle() },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = MaterialTheme.colorScheme.error,
-                    uncheckedColor = MaterialTheme.colorScheme.outline
-                )
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.DeleteSweep,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    corpse.packageName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (corpse.isSelected) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    "${corpse.type.name} · ${Formatter.formatFileSize(context, corpse.sizeBytes)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Cleaning View (progress)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun CleaningView(
-    state: ScanState.Cleaning,
-    performanceMode: Boolean
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        CircularProgressIndicator(
+        LinearProgressIndicator(
             progress = { state.progress },
-            modifier = Modifier.size(120.dp),
-            strokeWidth = 8.dp,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .height(8.dp)
+                .clip(CircleShape),
             color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
             strokeCap = StrokeCap.Round
         )
 
         Spacer(Modifier.height(32.dp))
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            ScanningStatItem("FILES SCANNED", state.filesScanned.toLong())
+            ScanningStatItem("JUNK FOUND", state.foundSize)
+        }
+    }
+}
+
+@Composable
+private fun ScanningStatItem(label: String, value: Long) {
+    val context = LocalContext.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        val animatedValue by animateIntAsState(
+            targetValue = value.toInt(),
+            animationSpec = tween(500),
+            label = "stat_value"
+        )
         Text(
-            "CLEANING",
+            if (label.contains("JUNK")) Formatter.formatFileSize(context, value) else "$animatedValue",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun ResultsView(
+    state: ScanState.Results,
+    onToggleItem: (String, String) -> Unit,
+    onToggleDuplicate: (String, String, String) -> Unit,
+    onClean: () -> Unit,
+    onRescan: () -> Unit,
+    onOpenFile: (String, Boolean) -> Unit,
+    onLongPressCategory: (CleanCategory) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 120.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                ResultsHeader(
+                    totalSize = state.totalCleanableBytes,
+                    filesScanned = state.filesScanned,
+                    onRescan = onRescan
+                )
+            }
+
+            items(state.categories, key = { it.id }) { category ->
+                CategoryCard(
+                    category = category,
+                    onToggleItem = { onToggleItem(category.id, it) },
+                    onToggleDuplicate = { hash, path -> onToggleDuplicate(category.id, hash, path) },
+                    onOpenFile = { path -> onOpenFile(path, category.id == "unused_apps") },
+                    onLongPress = { onLongPressCategory(category) }
+                )
+            }
+        }
+
+        if (state.totalCleanableBytes > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp)
+                    .navigationBarsPadding()
+            ) {
+                SlideToCleanButton(
+                    cleanableBytes = state.totalCleanableBytes,
+                    onClean = onClean
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultsHeader(
+    totalSize: Long,
+    filesScanned: Int,
+    onRescan: () -> Unit
+) {
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "TOTAL OPTIMIZABLE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    Formatter.formatFileSize(context, totalSize),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "Identified in $filesScanned items",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            FilledIconButton(
+                onClick = onRescan,
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Rescan")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CleaningView(state: ScanState.Cleaning) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        CleaningProgressIndicator(progress = state.progress)
+
+        Spacer(Modifier.height(48.dp))
+
+        Text(
+            "PURGING FILES",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
             letterSpacing = 2.sp
         )
-        Text(
-            "${(state.progress * 100).toInt()}%",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Black
-        )
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         Text(
             state.currentFile.substringAfterLast('/'),
@@ -793,14 +603,10 @@ private fun CleaningView(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
+            fontWeight = FontWeight.Medium
         )
     }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Done View
-// ═══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun DoneView(
@@ -808,25 +614,23 @@ private fun DoneView(
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .size(140.dp)
+                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Rounded.CheckCircle,
                 contentDescription = null,
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier.size(80.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
         }
@@ -834,32 +638,34 @@ private fun DoneView(
         Spacer(Modifier.height(32.dp))
 
         Text(
-            "CLEANING COMPLETE",
-            style = MaterialTheme.typography.labelSmall,
+            "DEVICE OPTIMIZED",
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.sp
+            letterSpacing = 1.sp
         )
-        Spacer(Modifier.height(8.dp))
         Text(
             Formatter.formatFileSize(context, result.freedBytes),
-            style = MaterialTheme.typography.displaySmall,
+            style = MaterialTheme.typography.displayLarge,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onSurface
         )
+
+        Spacer(Modifier.height(8.dp))
+
         Text(
-            "freed from ${result.deletedCount} items",
+            "Successfully cleared ${result.deletedCount} items",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold
         )
 
         if (result.failedCount > 0) {
-            Spacer(Modifier.height(8.dp))
             Text(
-                "${result.failedCount} items could not be deleted (permission restricted)",
+                "${result.failedCount} items skipped due to access restrictions",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center
+                fontWeight = FontWeight.Medium
             )
         }
 
@@ -869,67 +675,34 @@ private fun DoneView(
             onClick = onDone,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                .height(64.dp),
+            shape = RoundedCornerShape(20.dp)
         ) {
-            Text("DONE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text("RETURN TO DASHBOARD", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Error View
-// ═══════════════════════════════════════════════════════════════════════════════
-
 @Composable
-private fun ErrorView(
-    message: String,
-    onRetry: () -> Unit,
-    onDismiss: () -> Unit
-) {
+private fun ErrorView(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.Rounded.ErrorOutline,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.error
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            "Scan Error",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black
-        )
-        Text(
-            message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(32.dp))
-
+        Icon(Icons.Rounded.ErrorOutline, contentDescription = null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.height(24.dp))
+        Text("Scan Interrupted", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(8.dp))
+        Text(message, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(48.dp))
         Button(
-            onClick = onRetry,
+            onClick = onRetry, 
             modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Text("RETRY", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        TextButton(onClick = onDismiss) {
-            Text("GO BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+            shape = RoundedCornerShape(16.dp)
+        ) { Text("TRY AGAIN", fontWeight = FontWeight.Bold) }
+        TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) { 
+            Text("GO BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
         }
     }
 }
