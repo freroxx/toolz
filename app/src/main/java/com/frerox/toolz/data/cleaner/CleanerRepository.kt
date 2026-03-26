@@ -12,6 +12,7 @@ import android.os.StatFs
 import android.os.storage.StorageManager
 import android.util.Log
 import android.provider.MediaStore
+import android.text.format.Formatter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -53,31 +54,34 @@ class CleanerRepository @Inject constructor(
                 _scanState.value = ScanState.Scanning(currentCategory = "Initializing Engine...", progress = 0.05f)
 
                 val root = Environment.getExternalStorageDirectory()
-                val tempFiles = mutableListOf<FileEntry>()
+                val systemJunk = mutableListOf<FileEntry>()
                 val largeFiles = mutableListOf<FileEntry>()
-                val emptyDirs = mutableListOf<FileEntry>()
-                val mediaFiles = mutableListOf<FileEntry>()
                 val documentFiles = mutableListOf<FileEntry>()
-                val sizeMap = HashMap<Long, MutableList<File>>(16384)
+                val sizeMap = HashMap<Long, MutableList<File>>(65536)
                 var scannedCount = 0
 
                 val junkExtensions = setOf(
-                    "log", "tmp", "temp", "cache", "chk", "error", "dmp", "crash", "part", "crdownload"
+                    "log", "tmp", "temp", "cache", "chk", "error", "dmp", "crash", "part", "crdownload", "old", "bak", "thumb", "db-journal"
                 )
                 
-                val cachePatterns = listOf("cache", "cached", "temp", "tmp", "logs")
+                val junkPatterns = listOf(
+                    "cache", "cached", "temp", "tmp", "logs", ".thumbnails", "lost+found", 
+                    "BugReport", "sent", "diagnostics", "crash_reports", "UnityAdsCache", 
+                    "GmsCoreConfigCache", "fb_temp"
+                )
                 
-                val documentExtensions = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf")
+                val documentExtensions = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv")
                 val mediaExtensions = setOf("mp4", "mkv", "avi", "mov", "webm", "flv", "mp3", "wav", "m4a", "ogg", "flac")
                 val imageExtensions = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
                 val largeFileSizeThreshold = 100 * 1024 * 1024L 
 
-                _scanState.value = ScanState.Scanning(currentCategory = "Scanning Storage...", progress = 0.1f)
+                _scanState.value = ScanState.Scanning(currentCategory = "Crawling Storage...", progress = 0.1f)
                 
                 root.walkTopDown()
                     .onEnter { dir -> 
-                        val isHidden = dir.name.startsWith(".") && dir != root
-                        !isHidden || dir.name == ".cache"
+                        val name = dir.name
+                        if (name == "Android" && dir.parentFile == root) return@onEnter true
+                        true 
                     }
                     .forEach { file ->
                         ensureActive()
@@ -87,18 +91,17 @@ class CleanerRepository @Inject constructor(
                             val size = file.length()
                             val ext = file.extension.lowercase()
                             
-                            if (size > 50 * 1024) { 
+                            if (size > 1024) { 
                                 sizeMap.getOrPut(size) { mutableListOf() }.add(file)
                             }
 
-                            val isJunkPath = cachePatterns.any { file.absolutePath.contains(it, ignoreCase = true) }
+                            val isJunkPath = junkPatterns.any { file.absolutePath.contains(it, ignoreCase = true) }
                             val isMedia = imageExtensions.contains(ext) || mediaExtensions.contains(ext)
                             val isDocument = documentExtensions.contains(ext)
                             
                             if ((junkExtensions.contains(ext) || isJunkPath) && !isMedia && !isDocument) {
-                                tempFiles.add(file.toEntry(isSelected = true))
-                            }
-                            if (isDocument) {
+                                systemJunk.add(file.toEntry(isSelected = true))
+                            } else if (isDocument) {
                                 documentFiles.add(file.toEntry(isSelected = false))
                             }
 
@@ -107,17 +110,17 @@ class CleanerRepository @Inject constructor(
                             }
                         } else if (file.isDirectory) {
                             val children = file.list()
-                            if (children != null && children.isEmpty()) {
-                                emptyDirs.add(file.toEntry(isSelected = true))
+                            if (children != null && children.isEmpty() && file != root) {
+                                systemJunk.add(file.toEntry(isSelected = true))
                             }
                         }
 
-                        if (scannedCount % 500 == 0) {
+                        if (scannedCount % 2000 == 0) {
                             _scanState.value = ScanState.Scanning(
-                                currentCategory = "Crawling: ${file.name.take(20)}...",
+                                currentCategory = "Found: ${Formatter.formatFileSize(context, calculateFoundSize(systemJunk, largeFiles, documentFiles))}",
                                 filesScanned = scannedCount,
-                                foundSize = calculateFoundSize(tempFiles, largeFiles, mediaFiles, documentFiles, emptyDirs),
-                                progress = 0.1f + (scannedCount.toFloat() / 30000f).coerceAtMost(0.4f)
+                                foundSize = calculateFoundSize(systemJunk, largeFiles, documentFiles),
+                                progress = 0.1f + (scannedCount.toFloat() / 100000f).coerceAtMost(0.4f)
                             )
                         }
                     }
@@ -129,92 +132,85 @@ class CleanerRepository @Inject constructor(
                 
                 sizeMapFiltered.forEach { (size, files) ->
                     ensureActive()
-                    val hashGroups = HashMap<String, MutableList<File>>()
+                    val partialHashGroups = HashMap<String, MutableList<File>>()
                     for (file in files) {
-                        val hash = when {
-                            size > 100 * 1024 * 1024 -> computeSuperFastHash(file)
-                            size > 5 * 1024 * 1024 -> computeMediumHash(file)
-                            else -> computeFullHash(file)
-                        }
-                        if (hash != null) {
-                            hashGroups.getOrPut(hash) { mutableListOf() }.add(file)
+                        val pHash = computeQuickHash(file)
+                        if (pHash != null) {
+                            partialHashGroups.getOrPut(pHash) { mutableListOf() }.add(file)
                         }
                     }
 
-                    hashGroups.filter { it.value.size >= 2 }.forEach { (hash, dupes) ->
-                        val sorted = dupes.sortedBy { it.lastModified() }
-                        duplicateGroups.add(DuplicateGroup(
-                            hash = hash,
-                            sizeBytes = size,
-                            files = sorted.mapIndexed { index, f ->
-                                DuplicateFile(f.absolutePath, f.lastModified(), index > 0)
+                    partialHashGroups.filter { it.value.size >= 2 }.forEach { (_, potentialDupes) ->
+                        val finalHashGroups = HashMap<String, MutableList<File>>()
+                        for (file in potentialDupes) {
+                            val fHash = computeFullHash(file)
+                            if (fHash != null) {
+                                finalHashGroups.getOrPut(fHash) { mutableListOf() }.add(file)
                             }
-                        ))
+                        }
+
+                        finalHashGroups.filter { it.value.size >= 2 }.forEach { (hash, dupes) ->
+                            val sorted = dupes.sortedBy { it.lastModified() }
+                            duplicateGroups.add(DuplicateGroup(
+                                hash = hash,
+                                sizeBytes = size,
+                                files = sorted.mapIndexed { index, f ->
+                                    DuplicateFile(f.absolutePath, f.lastModified(), index > 0)
+                                }
+                            ))
+                        }
                     }
+                    
                     processedSizes++
-                    if (processedSizes % 20 == 0) {
+                    if (processedSizes % 100 == 0 || processedSizes == sizeMapFiltered.size) {
                         _scanState.value = ScanState.Scanning(
-                            currentCategory = "Hashing: ${processedSizes}/${sizeMapFiltered.size}",
+                            currentCategory = "Fingerprinting Duplicates...",
                             filesScanned = scannedCount,
-                            progress = 0.55f + (processedSizes.toFloat() / sizeMapFiltered.size.coerceAtLeast(1) * 0.15f)
+                            progress = 0.55f + (processedSizes.toFloat() / sizeMapFiltered.size.coerceAtLeast(1) * 0.2f)
                         )
                     }
                 }
 
-                _scanState.value = ScanState.Scanning(currentCategory = "Analyzing App Usage...", progress = 0.75f)
-                val unusedApps = getUnusedApps()
-
-                _scanState.value = ScanState.Scanning(currentCategory = "Scanning Leftovers...", progress = 0.85f)
+                _scanState.value = ScanState.Scanning(currentCategory = "Scanning App Leftovers...", progress = 0.8f)
                 val corpseEntries = mutableListOf<CorpseEntry>()
                 val pm = context.packageManager
                 val installedPackages = try {
                     pm.getInstalledPackages(0).map { it.packageName }.toSet()
                 } catch (_: Exception) { emptySet() }
 
-                listOf("Android/data", "Android/obb", "Android/media").forEach { path ->
+                listOf("Android/data", "Android/obb", "Android/media", "Android/obj").forEach { path ->
                     val baseDir = File(root, path)
+                    if (!baseDir.exists()) return@forEach
+                    
                     baseDir.listFiles()?.filter { it.isDirectory && !installedPackages.contains(it.name) }?.forEach { dir ->
-                        if (path == "Android/media" && (dir.name.startsWith("com.android") || dir.name.startsWith("com.google"))) return@forEach
+                        if (dir.name.startsWith("com.android.") || dir.name.startsWith("com.google.android.")) return@forEach
                         
                         val size = calculateDirSize(dir)
                         if (size > 0) {
-                            corpseEntries.add(CorpseEntry(dir.name, dir.absolutePath, size, if (path.contains("obb")) CorpseType.OBB else CorpseType.DATA))
+                            corpseEntries.add(CorpseEntry(
+                                packageName = dir.name,
+                                path = dir.absolutePath,
+                                sizeBytes = size,
+                                type = if (path.contains("obb")) CorpseType.OBB else CorpseType.DATA,
+                                isSelected = true
+                            ))
                         }
                     }
                 }
 
+                _scanState.value = ScanState.Scanning(currentCategory = "Analyzing App Usage...", progress = 0.9f)
+                val unusedApps = getUnusedApps()
+
                 val categories = mutableListOf<CleanCategory>()
                 
-                if (tempFiles.isNotEmpty()) {
+                if (systemJunk.isNotEmpty()) {
                     categories.add(CleanCategory(
                         id = "temp",
                         name = "System Junk",
                         icon = "DeleteSweep",
-                        items = tempFiles.map { CleanItem.GenericFile(it) },
-                        totalSize = tempFiles.sumOf { it.sizeBytes },
+                        items = systemJunk.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) },
+                        totalSize = systemJunk.sumOf { it.sizeBytes },
                         isSafeToClean = true
-                    ))
-                }
-
-                if (unusedApps.isNotEmpty()) {
-                    categories.add(CleanCategory(
-                        id = "unused_apps",
-                        name = "Unused Apps",
-                        icon = "AppSettingsAlt",
-                        items = unusedApps.map { CleanItem.UnusedApp(it) },
-                        totalSize = unusedApps.filter { it.isSelected }.sumOf { it.sizeBytes },
-                        isSafeToClean = false
-                    ))
-                }
-
-                if (duplicateGroups.isNotEmpty()) {
-                    categories.add(CleanCategory(
-                        id = "dupes",
-                        name = "Duplicate Files",
-                        icon = "FileCopy",
-                        items = duplicateGroups.sortedByDescending { it.sizeBytes * it.files.size }.map { CleanItem.Duplicate(it) },
-                        totalSize = duplicateGroups.sumOf { g -> g.files.filter { it.isSelected }.sumOf { g.sizeBytes } },
-                        isSafeToClean = false
                     ))
                 }
 
@@ -229,6 +225,18 @@ class CleanerRepository @Inject constructor(
                     ))
                 }
 
+                if (duplicateGroups.isNotEmpty()) {
+                    val totalDupesSize = duplicateGroups.sumOf { g -> g.files.filter { it.isSelected }.sumOf { g.sizeBytes } }
+                    categories.add(CleanCategory(
+                        id = "dupes",
+                        name = "Duplicate Files",
+                        icon = "FileCopy",
+                        items = duplicateGroups.sortedByDescending { it.sizeBytes * it.files.size }.map { CleanItem.Duplicate(it) },
+                        totalSize = totalDupesSize,
+                        isSafeToClean = false
+                    ))
+                }
+
                 if (largeFiles.isNotEmpty()) {
                     categories.add(CleanCategory(
                         id = "large",
@@ -236,6 +244,17 @@ class CleanerRepository @Inject constructor(
                         icon = "Straighten",
                         items = largeFiles.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) },
                         totalSize = largeFiles.filter { it.isSelected }.sumOf { it.sizeBytes },
+                        isSafeToClean = false
+                    ))
+                }
+
+                if (unusedApps.isNotEmpty()) {
+                    categories.add(CleanCategory(
+                        id = "unused_apps",
+                        name = "Unused Apps",
+                        icon = "AppSettingsAlt",
+                        items = unusedApps.map { CleanItem.UnusedApp(it) },
+                        totalSize = unusedApps.filter { it.isSelected }.sumOf { it.sizeBytes },
                         isSafeToClean = false
                     ))
                 }
@@ -286,6 +305,7 @@ class CleanerRepository @Inject constructor(
 
         for (app in installedApps) {
             if ((app.flags and ApplicationInfo.FLAG_SYSTEM) != 0) continue
+            if (app.packageName == context.packageName) continue
             
             val lastUsed = stats[app.packageName]?.lastTimeUsed ?: 0L
             val isUnused = lastUsed == 0L || lastUsed < startTime
@@ -313,12 +333,10 @@ class CleanerRepository @Inject constructor(
         return result.sortedBy { it.lastUsed }
     }
 
-    private fun calculateFoundSize(temp: List<FileEntry>, large: List<FileEntry>, media: List<FileEntry>, documents: List<FileEntry>, emptyDirs: List<FileEntry>): Long {
-        return temp.sumOf { it.sizeBytes } + 
+    private fun calculateFoundSize(systemJunk: List<FileEntry>, large: List<FileEntry>, documents: List<FileEntry>): Long {
+        return systemJunk.sumOf { it.sizeBytes } + 
                large.filter { it.isSelected }.sumOf { it.sizeBytes } +
-               media.filter { it.isSelected }.sumOf { it.sizeBytes } +
-               documents.filter { it.isSelected }.sumOf { it.sizeBytes } +
-               emptyDirs.filter { it.isSelected }.sumOf { it.sizeBytes } 
+               documents.filter { it.isSelected }.sumOf { it.sizeBytes }
     }
 
     fun cancelScan() {
@@ -373,7 +391,7 @@ class CleanerRepository @Inject constructor(
                 } catch (_: Exception) { failedCount++ }
             }
             
-            _scanState.value = ScanState.Cleaning(1f, "Finishing...")
+            _scanState.value = ScanState.Cleaning(1f, "Finishing up...")
             delay(500)
 
             refreshStorageInfo()
@@ -449,13 +467,6 @@ class CleanerRepository @Inject constructor(
 
     private fun File.toEntry(isSelected: Boolean): FileEntry {
         val ext = extension.lowercase()
-        val thumbnailUri: String? = when (ext) {
-            "pdf" -> getMediaStoreUri(this, MediaStore.Files.getContentUri("external"))
-            "mp3", "wav", "m4a", "ogg", "flac" -> getMediaStoreUri(this, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
-            "jpg", "jpeg", "png", "gif", "webp", "bmp" -> getMediaStoreUri(this, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-            "mp4", "mkv", "avi", "mov", "webm" -> getMediaStoreUri(this, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            else -> null
-        }
         return FileEntry(
             name = name,
             path = absolutePath,
@@ -463,30 +474,36 @@ class CleanerRepository @Inject constructor(
             lastModified = lastModified(),
             extension = ext,
             isSelected = isSelected,
-            thumbnailUri = thumbnailUri ?: absolutePath
+            thumbnailUri = getMediaStoreUri(context, absolutePath, ext) ?: absolutePath
         )
     }
 
-    private fun getMediaStoreUri(file: File, collection: android.net.Uri): String? {
+    private fun getMediaStoreUri(context: Context, path: String, ext: String): String? {
+        val collection = when (ext) {
+            "mp3", "wav", "m4a", "ogg", "flac" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+            "pdf" -> MediaStore.Files.getContentUri("external")
+            "jpg", "jpeg", "png", "gif", "webp", "bmp" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            "mp4", "mkv", "avi", "mov", "webm" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            else -> return null
+        }
+        
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = MediaStore.MediaColumns.DATA + "=?"
-        val selectionArgs = arrayOf(file.absolutePath)
+        val selectionArgs = arrayOf(path)
+        
         return try {
             context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     ContentUris.withAppendedId(collection, cursor.getLong(0)).toString()
                 } else null
             }
-        } catch (e: Exception) {
-            Log.e("CleanerRepository", "Error getting MediaStore URI: ${e.message}")
-            null
-        }
+        } catch (e: Exception) { null }
     }
 
     private fun computeFullHash(file: File): String? {
         return try {
             val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(65536)
             FileInputStream(file).use { fis ->
                 var read: Int
                 while (fis.read(buffer).also { read = it } != -1) {
@@ -497,60 +514,23 @@ class CleanerRepository @Inject constructor(
         } catch (_: Exception) { null }
     }
 
-    private fun computeMediumHash(file: File): String? {
+    private fun computeQuickHash(file: File): String? {
         return try {
             val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(16384)
             val size = file.length()
             FileInputStream(file).use { fis ->
-                val firstMb = 1024 * 1024L
-                var totalRead = 0L
-                while (totalRead < firstMb) {
-                    val toRead = minOf(buffer.size.toLong(), firstMb - totalRead).toInt()
-                    val read = fis.read(buffer, 0, toRead)
-                    if (read == -1) break
-                    digest.update(buffer, 0, read)
-                    totalRead += read
-                }
+                val buffer = ByteArray(65536)
+                val readStart = fis.read(buffer)
+                if (readStart > 0) digest.update(buffer, 0, readStart)
                 
-                if (size > 2 * 1024 * 1024) {
-                    fis.channel.position(size / 2)
-                    totalRead = 0
-                    while (totalRead < 512 * 1024) {
-                        val read = fis.read(buffer)
-                        if (read == -1) break
-                        digest.update(buffer, 0, read)
-                        totalRead += read
-                    }
+                if (size > 65536 * 2) {
+                    fis.channel.position(size - 65536)
+                    val readEnd = fis.read(buffer)
+                    if (readEnd > 0) digest.update(buffer, 0, readEnd)
                 }
             }
             digest.digest().joinToString("") { "%02x".format(it) }
         } catch (_: Exception) { null }
-    }
-
-    private fun computeSuperFastHash(file: File): String? {
-        return try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            val size = file.length()
-            FileInputStream(file).use { fis ->
-                val chunk = ByteArray(128 * 1024)
-                val readStart = fis.read(chunk)
-                if (readStart > 0) digest.update(chunk, 0, readStart)
-                
-                if (size > 512 * 1024) {
-                    fis.channel.position(size / 2)
-                    val readMid = fis.read(chunk)
-                    if (readMid > 0) digest.update(chunk, 0, readMid)
-                }
-                
-                if (size > 256 * 1024) {
-                    fis.channel.position(size - chunk.size)
-                    val readEnd = fis.read(chunk)
-                    if (readEnd > 0) digest.update(chunk, 0, readEnd)
-                }
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) { Log.e("CleanerRepository", "Error computing super fast hash for ${file.absolutePath}: ${e.message}"); null }
     }
 
     private fun calculateDirSize(dir: File): Long {

@@ -93,6 +93,9 @@ class SettingsRepository @Inject constructor(
     private val UPDATE_CHANGELOG = stringPreferencesKey("update_changelog")
     private val UPDATE_APK_URL = stringPreferencesKey("update_apk_url")
 
+    // AI Focus Custom Instructions
+    private val FOCUS_AI_CUSTOM_INSTRUCTIONS = stringPreferencesKey("focus_ai_custom_instructions")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -195,6 +198,8 @@ class SettingsRepository @Inject constructor(
     val updateChangelog: Flow<String?> = dataStore.data.map { it[UPDATE_CHANGELOG] }
     val updateApkUrl: Flow<String?> = dataStore.data.map { it[UPDATE_APK_URL] }
 
+    val focusAiCustomInstructions: Flow<String> = dataStore.data.map { it[FOCUS_AI_CUSTOM_INSTRUCTIONS] ?: "" }
+
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
     suspend fun setThemeMode(mode: String) { dataStore.edit { it[THEME_MODE] = mode } }
@@ -280,7 +285,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Setters
     suspend fun setMusicAudioFocus(enabled: Boolean) { dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
-    suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
+    suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = false } }
     suspend fun setMusicShakeSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_SHAKE_SENSITIVITY] = sensitivity } }
     suspend fun setMusicPlaybackSpeed(speed: Float) { dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
     suspend fun setMusicEqualizerPreset(preset: String) { dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
@@ -323,6 +328,10 @@ class SettingsRepository @Inject constructor(
             changelog?.let { pref[UPDATE_CHANGELOG] = it } ?: pref.remove(UPDATE_CHANGELOG)
             apkUrl?.let { pref[UPDATE_APK_URL] = it } ?: pref.remove(UPDATE_APK_URL)
         }
+    }
+
+    suspend fun setFocusAiCustomInstructions(instructions: String) {
+        dataStore.edit { it[FOCUS_AI_CUSTOM_INSTRUCTIONS] = instructions }
     }
 
     suspend fun resetOnboarding() {

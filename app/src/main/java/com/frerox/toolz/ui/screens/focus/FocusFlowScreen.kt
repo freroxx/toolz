@@ -1499,11 +1499,16 @@ fun WeeklyDetailedSheet(
 //  Screen Tips Bottom Sheet
 // ─────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
     val tips by viewModel.screenTips.collectAsState()
     val isLoading by viewModel.isLoadingTips.collectAsState()
+    val customInstructions by viewModel.customInstructions.collectAsState()
+    val vibrationManager = LocalVibrationManager.current
+
+    var showInstructionsDialog by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
         viewModel.generateScreenTips()
@@ -1515,31 +1520,67 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
         shape            = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp).navigationBarsPadding()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(MaterialTheme.colorScheme.primary.copy(0.1f), MaterialTheme.colorScheme.tertiary.copy(0.1f))
-                        )
-                    )
-                    .padding(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Lightbulb, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "AI FOCUS INSIGHTS", 
-                        style = MaterialTheme.typography.labelLarge, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.primary, 
-                        letterSpacing = 1.sp
-                    )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(MaterialTheme.colorScheme.primary.copy(0.1f), MaterialTheme.colorScheme.tertiary.copy(0.1f))
+                            )
+                        )
+                        .padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Lightbulb, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "AI FOCUS INSIGHTS", 
+                            style = MaterialTheme.typography.labelLarge, 
+                            fontWeight = FontWeight.Black, 
+                            color = MaterialTheme.colorScheme.primary, 
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+                
+                Spacer(Modifier.width(12.dp))
+                
+                Surface(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .combinedClickable(
+                            onClick = { 
+                                vibrationManager?.vibrateClick()
+                                viewModel.generateScreenTips(forceRefresh = true) 
+                            },
+                            onLongClick = {
+                                vibrationManager?.vibrateLongClick()
+                                showInstructionsDialog = true
+                            }
+                        ),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.Refresh, "Refresh tips")
+                        }
+                    }
                 }
             }
+            
             Spacer(Modifier.height(24.dp))
-            if (isLoading) {
+            
+            if (isLoading && tips == null) {
                 Column(Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
@@ -1550,22 +1591,82 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                     Text("Generating custom tips...", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    Text(
-                        tips ?: "No tips available at the moment. Please try again later.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        lineHeight = 26.sp,
-                        modifier = Modifier.padding(20.dp)
-                    )
+                Box(modifier = Modifier.weight(1f, fill = false)) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState)
+                                .padding(20.dp)
+                        ) {
+                            Text(
+                                tips ?: "No tips available at the moment. Please try again later.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = 26.sp,
+                            )
+                        }
+                    }
+                    
+                    // Simple custom scrollbar
+                    if (scrollState.maxValue > 0) {
+                        val scrollFraction = scrollState.value.toFloat() / scrollState.maxValue
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 6.dp, top = 20.dp, bottom = 20.dp)
+                                .width(4.dp)
+                                .fillMaxHeight(0.3f)
+                                .graphicsLayer { translationY = scrollFraction * (size.height * 0.7f) }
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                        )
+                    }
                 }
             }
         }
     }
+
+    if (showInstructionsDialog) {
+        var textInput by remember { mutableStateOf(customInstructions) }
+        AlertDialog(
+            onDismissRequest = { showInstructionsDialog = false },
+            title = { Text("Custom Instructions", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Tell the AI more about your goals or specific habits you want to change.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        placeholder = { Text("e.g. I want to spend less time on social media before bed.") },
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.setCustomInstructions(textInput)
+                        showInstructionsDialog = false
+                        viewModel.generateScreenTips(forceRefresh = true)
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("SAVE", fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInstructionsDialog = false }) {
+                    Text("CANCEL")
+                }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    }
 }
-
-

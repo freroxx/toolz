@@ -127,6 +127,9 @@ class FocusFlowViewModel @Inject constructor(
     private val appNameMappings = settingsRepository.appNameMappings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    val customInstructions = settingsRepository.focusAiCustomInstructions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
     // ── Combined stats ─────────────────────────────────────────────────────
 
     /**
@@ -447,6 +450,12 @@ class FocusFlowViewModel @Inject constructor(
         }
     }
 
+    fun setCustomInstructions(instructions: String) {
+        viewModelScope.launch {
+            settingsRepository.setFocusAiCustomInstructions(instructions)
+        }
+    }
+
     // ── AI categorization ──────────────────────────────────────────────────
 
     private suspend fun categorizeAppsWithAi(apps: List<AppUsageInfo>) {
@@ -523,8 +532,8 @@ class FocusFlowViewModel @Inject constructor(
         apps.forEach { appendLine(""""${it.packageName}": "${it.appName}"""") }
     }
 
-    fun generateScreenTips() {
-        if (_screenTips.value != null || _isLoadingTips.value) return
+    fun generateScreenTips(forceRefresh: Boolean = false) {
+        if (!forceRefresh && (_screenTips.value != null || _isLoadingTips.value)) return
         _isLoadingTips.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -533,14 +542,32 @@ class FocusFlowViewModel @Inject constructor(
                     _screenTips.value = "AI key not configured. Please supply a Groq key in AI Settings."
                     return@launch
                 }
+
+                // Get distraction apps used for more than an hour
+                val stats = combinedUsageStats.first()
+                val heavyDistractions = stats.filter { 
+                    it.category == AppCategory.DISTRACTION && it.usageTimeMillis > 3_600_000L 
+                }
+                
+                val customInstr = customInstructions.value
+                val distractionList = heavyDistractions.joinToString { "${it.appName} (${it.usageTimeMillis / 3_600_000}h)" }
+
+                val userContext = buildString {
+                    if (customInstr.isNotBlank()) {
+                        appendLine("User Custom Instructions: $customInstr")
+                    }
+                    if (heavyDistractions.isNotEmpty()) {
+                        appendLine("User is spending excessive time (over 1 hour today) on these distractions: $distractionList. Help them find alternatives or strategies to reduce this.")
+                    }
+                }
                 
                 val request = OpenAiRequest(
                     model = AI_MODEL_PRIMARY,
                     messages = listOf(
-                        OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach.")),
-                        OpenAiMessage("user", MessageContent.Text("Give me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Do not output anything before or after the tips."))
+                        OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach. Analyze the user's screen usage and provide personalized advice.")),
+                        OpenAiMessage("user", MessageContent.Text("${userContext}\n\nGive me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Do not output anything before or after the tips."))
                     ),
-                    maxTokens = 350,
+                    maxTokens = 500,
                 )
                 
                 val response = runGroqRequest(groqKey) { requestKey ->
