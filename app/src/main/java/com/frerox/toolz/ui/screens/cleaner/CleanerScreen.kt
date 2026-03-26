@@ -19,7 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -46,6 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -59,6 +60,7 @@ fun CleanerScreen(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
+    val isDark = isSystemInDarkTheme()
 
     val scanState by viewModel.scanState.collectAsState()
     val storageInfo by viewModel.storageInfo.collectAsState()
@@ -96,164 +98,172 @@ fun CleanerScreen(
         )
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        if (gridCategory != null) gridCategory!!.name.uppercase() else "FILE CLEANER",
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        vibrationManager?.vibrateClick()
-                        if (gridCategory != null) {
-                            viewModel.closeGridView()
-                        } else {
-                            onBack()
-                        }
-                    }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                actions = {
-                    if (scanState is ScanState.Scanning) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(toolzAppBackgroundBrush(isDark, performanceMode))
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            if (gridCategory != null) gridCategory!!.name.uppercase() else "FILE CLEANER",
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    },
+                    navigationIcon = {
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
-                            viewModel.cancelScan()
+                            if (gridCategory != null) {
+                                viewModel.closeGridView()
+                            } else {
+                                onBack()
+                            }
                         }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    actions = {
+                        if (scanState is ScanState.Scanning) {
+                            IconButton(onClick = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.cancelScan()
+                            }) {
+                                Icon(Icons.Rounded.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
+                            }
                         }
                     }
-                }
-            )
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            AnimatedContent(
-                targetState = scanState,
-                contentKey = { it::class },
-                transitionSpec = {
-                    fadeIn(tween(400)) togetherWith fadeOut(tween(400))
-                },
-                label = "state_transition"
-            ) { state ->
-                when (state) {
-                    is ScanState.Idle -> {
-                        IdleDashboard(
-                            storageInfo = storageInfo,
-                            hasPermission = hasPermission,
-                            onScanClick = {
-                                vibrationManager?.vibrateClick()
-                                if (!hasPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                    viewModel.showPermissionDialog()
-                                } else {
-                                    viewModel.startScan()
-                                }
-                            }
-                        )
-                    }
-
-                    is ScanState.Scanning -> {
-                        ScanningView(state = state)
-                    }
-
-                    is ScanState.Results -> {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            ResultsView(
-                                state = state,
-                                onToggleItem = { catId, itemId ->
+                )
+            }
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                AnimatedContent(
+                    targetState = scanState,
+                    contentKey = { it::class },
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(500, easing = EaseOutCubic)) + 
+                         scaleIn(initialScale = 0.92f, animationSpec = tween(500, easing = EaseOutCubic)))
+                            .togetherWith(fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 1.05f))
+                    },
+                    label = "state_transition"
+                ) { state ->
+                    when (state) {
+                        is ScanState.Idle -> {
+                            IdleDashboard(
+                                storageInfo = storageInfo,
+                                hasPermission = hasPermission,
+                                onScanClick = {
                                     vibrationManager?.vibrateClick()
-                                    viewModel.toggleCategoryItem(catId, itemId)
-                                },
-                                onToggleDuplicate = { catId, hash, path ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.toggleDuplicateFile(catId, hash, path)
-                                },
-                                onClean = {
-                                    vibrationManager?.vibrateLongClick()
-                                    viewModel.deleteSelected()
-                                },
-                                onRescan = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.startScan()
-                                },
-                                onOpenFile = { path, isApp ->
-                                    vibrationManager?.vibrateClick()
-                                    if (isApp) {
-                                        openAppSettings(context, path)
+                                    if (!hasPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                        viewModel.showPermissionDialog()
                                     } else {
-                                        openFile(context, path, onNavigateToPdf, onNavigateToMusic)
+                                        viewModel.startScan()
                                     }
-                                },
-                                onLongPressCategory = { category ->
-                                    vibrationManager?.vibrateLongClick()
-                                    viewModel.openGridView(category)
                                 }
                             )
+                        }
 
-                            AnimatedVisibility(
-                                visible = gridCategory != null,
-                                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-                            ) {
-                                gridCategory?.let { category ->
-                                    SectionGridView(
-                                        category = category,
-                                        onToggleItem = { itemId ->
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.toggleCategoryItem(category.id, itemId)
-                                        },
-                                        onToggleDuplicate = { hash, path ->
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.toggleDuplicateFile(category.id, hash, path)
-                                        },
-                                        onOpenFile = { path ->
-                                            vibrationManager?.vibrateClick()
-                                            if (category.id == "unused_apps") {
-                                                openAppSettings(context, path)
-                                            } else {
-                                                openFile(context, path, onNavigateToPdf, onNavigateToMusic)
-                                            }
+                        is ScanState.Scanning -> {
+                            ScanningView(state = state)
+                        }
+
+                        is ScanState.Results -> {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                ResultsView(
+                                    state = state,
+                                    onToggleItem = { catId, itemId ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.toggleCategoryItem(catId, itemId)
+                                    },
+                                    onToggleDuplicate = { catId, hash, path ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.toggleDuplicateFile(catId, hash, path)
+                                    },
+                                    onClean = {
+                                        vibrationManager?.vibrateLongClick()
+                                        viewModel.deleteSelected()
+                                    },
+                                    onRescan = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.startScan()
+                                    },
+                                    onOpenFile = { path, isApp ->
+                                        vibrationManager?.vibrateClick()
+                                        if (isApp) {
+                                            openAppSettings(context, path)
+                                        } else {
+                                            openFile(context, path, onNavigateToPdf, onNavigateToMusic)
                                         }
-                                    )
+                                    },
+                                    onLongPressCategory = { category ->
+                                        vibrationManager?.vibrateLongClick()
+                                        viewModel.openGridView(category)
+                                    }
+                                )
+
+                                AnimatedVisibility(
+                                    visible = gridCategory != null,
+                                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                                ) {
+                                    gridCategory?.let { category ->
+                                        SectionGridView(
+                                            category = category,
+                                            onToggleItem = { itemId ->
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.toggleCategoryItem(category.id, itemId)
+                                            },
+                                            onToggleDuplicate = { hash, path ->
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.toggleDuplicateFile(category.id, hash, path)
+                                            },
+                                            onOpenFile = { path ->
+                                                vibrationManager?.vibrateClick()
+                                                if (category.id == "unused_apps") {
+                                                    openAppSettings(context, path)
+                                                } else {
+                                                    openFile(context, path, onNavigateToPdf, onNavigateToMusic)
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    is ScanState.Cleaning -> {
-                        CleaningView(state = state)
-                    }
+                        is ScanState.Cleaning -> {
+                            CleaningView(state = state)
+                        }
 
-                    is ScanState.Done -> {
-                        DoneView(
-                            result = state.result,
-                            onDone = {
-                                vibrationManager?.vibrateClick()
-                                viewModel.resetState()
-                            }
-                        )
-                    }
+                        is ScanState.Done -> {
+                            DoneView(
+                                result = state.result,
+                                onDone = {
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.resetState()
+                                }
+                            )
+                        }
 
-                    is ScanState.Error -> {
-                        ErrorView(
-                            message = state.message,
-                            onRetry = { viewModel.startScan() },
-                            onDismiss = { viewModel.resetState() }
-                        )
+                        is ScanState.Error -> {
+                            ErrorView(
+                                message = state.message,
+                                onRetry = { viewModel.startScan() },
+                                onDismiss = { viewModel.resetState() }
+                            )
+                        }
                     }
                 }
             }
@@ -359,13 +369,13 @@ private fun IdleDashboard(
             onClick = onScanClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp),
-            shape = RoundedCornerShape(18.dp),
+                .height(68.dp),
+            shape = RoundedCornerShape(22.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
         ) {
             Icon(Icons.Rounded.TravelExplore, contentDescription = null, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(16.dp))
@@ -380,15 +390,15 @@ private fun IdleDashboard(
         if (!hasPermission) {
             Spacer(Modifier.height(16.dp))
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.clickable { onScanClick() }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.GppMaybe, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.GppMaybe, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(12.dp))
                     Text(
                         "Grant permission for deeper scan",
@@ -429,8 +439,8 @@ private fun ScanningView(state: ScanState.Scanning) {
         LinearProgressIndicator(
             progress = { state.progress },
             modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(8.dp)
+                .fillMaxWidth(0.85f)
+                .height(10.dp)
                 .clip(CircleShape),
             color = MaterialTheme.colorScheme.primary,
             trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
@@ -455,20 +465,21 @@ private fun ScanningStatItem(label: String, value: Long) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         val animatedValue by animateIntAsState(
             targetValue = value.toInt(),
-            animationSpec = tween(500),
+            animationSpec = tween(600, easing = FastOutSlowInEasing),
             label = "stat_value"
         )
         Text(
             if (label.contains("JUNK")) Formatter.formatFileSize(context, value) else "$animatedValue",
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onSurface
         )
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Bold
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp
         )
     }
 }
@@ -486,7 +497,7 @@ private fun ResultsView(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 120.dp),
+            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 130.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -508,18 +519,19 @@ private fun ResultsView(
             }
         }
 
-        if (state.totalCleanableBytes > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(24.dp)
-                    .navigationBarsPadding()
-            ) {
-                SlideToCleanButton(
-                    cleanableBytes = state.totalCleanableBytes,
-                    onClean = onClean
-                )
-            }
+        AnimatedVisibility(
+            visible = state.totalCleanableBytes > 0,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(24.dp)
+                .navigationBarsPadding(),
+            enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut() + scaleOut(targetScale = 0.9f)
+        ) {
+            SlideToCleanButton(
+                cleanableBytes = state.totalCleanableBytes,
+                onClean = onClean
+            )
         }
     }
 }
@@ -533,12 +545,12 @@ private fun ResultsHeader(
     val context = LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(32.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(24.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -564,10 +576,13 @@ private fun ResultsHeader(
             }
             FilledIconButton(
                 onClick = onRescan,
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape
+                modifier = Modifier.size(52.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Rescan")
+                Icon(Icons.Rounded.Refresh, contentDescription = "Rescan", modifier = Modifier.size(26.dp))
             }
         }
     }
@@ -603,7 +618,7 @@ private fun CleaningView(state: ScanState.Cleaning) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -623,14 +638,14 @@ private fun DoneView(
     ) {
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(160.dp)
                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Rounded.CheckCircle,
                 contentDescription = null,
-                modifier = Modifier.size(80.dp),
+                modifier = Modifier.size(90.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
         }
@@ -651,11 +666,11 @@ private fun DoneView(
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
 
         Text(
             "Successfully cleared ${result.deletedCount} items",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Bold
         )
@@ -665,7 +680,7 @@ private fun DoneView(
                 "${result.failedCount} items skipped due to access restrictions",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Bold
             )
         }
 
@@ -676,7 +691,7 @@ private fun DoneView(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp),
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(24.dp)
         ) {
             Text("RETURN TO DASHBOARD", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
@@ -694,15 +709,15 @@ private fun ErrorView(message: String, onRetry: () -> Unit, onDismiss: () -> Uni
         Spacer(Modifier.height(24.dp))
         Text("Scan Interrupted", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(8.dp))
-        Text(message, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+        Text(message, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(48.dp))
         Button(
             onClick = onRetry, 
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) { Text("TRY AGAIN", fontWeight = FontWeight.Bold) }
-        TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) { 
-            Text("GO BACK", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+            modifier = Modifier.fillMaxWidth().height(60.dp),
+            shape = RoundedCornerShape(20.dp)
+        ) { Text("TRY AGAIN", fontWeight = FontWeight.Black) }
+        TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 12.dp)) { 
+            Text("GO BACK", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
         }
     }
 }

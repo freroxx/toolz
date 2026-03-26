@@ -68,7 +68,8 @@ fun StorageArcIndicator(
     val performanceMode = LocalPerformanceMode.current
     val primary = MaterialTheme.colorScheme.primary
     val error = MaterialTheme.colorScheme.error
-    val outline = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+    val outline = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+    val success = Color(0xFF4CAF50)
 
     val total = storageInfo.totalBytes.coerceAtLeast(1L).toFloat()
     val usedFraction = (storageInfo.usedBytes.toFloat() / total).coerceIn(0f, 1f)
@@ -87,24 +88,32 @@ fun StorageArcIndicator(
     )
 
     Box(
-        modifier = modifier.size(300.dp),
+        modifier = modifier.size(320.dp),
         contentAlignment = Alignment.Center
     ) {
         if (!performanceMode) {
+            val infiniteTransition = rememberInfiniteTransition(label = "glow")
+            val glowScale by infiniteTransition.animateFloat(
+                initialValue = 0.95f,
+                targetValue = 1.05f,
+                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                label = "glowScale"
+            )
             Box(
                 modifier = Modifier
-                    .size(240.dp)
+                    .size(260.dp)
+                    .scale(glowScale)
                     .background(
                         Brush.radialGradient(
-                            listOf(primary.copy(alpha = 0.12f), Color.Transparent)
+                            listOf(primary.copy(alpha = 0.15f), Color.Transparent)
                         ),
                         CircleShape
                     )
             )
         }
 
-        Canvas(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-            val strokeWidth = 36f
+        Canvas(modifier = Modifier.fillMaxSize().padding(36.dp)) {
+            val strokeWidth = 42f
             val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
             val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
             val startAngle = 135f
@@ -121,7 +130,7 @@ fun StorageArcIndicator(
             )
 
             drawArc(
-                color = primary,
+                brush = Brush.sweepGradient(listOf(primary.copy(alpha = 0.7f), primary)),
                 startAngle = startAngle,
                 sweepAngle = totalSweep * animatedUsed,
                 useCenter = false,
@@ -132,7 +141,7 @@ fun StorageArcIndicator(
 
             if (animatedCleanable > 0f) {
                 drawArc(
-                    color = error,
+                    brush = Brush.sweepGradient(listOf(error.copy(alpha = 0.7f), error)),
                     startAngle = startAngle + totalSweep * animatedUsed,
                     sweepAngle = totalSweep * animatedCleanable,
                     useCenter = false,
@@ -148,45 +157,45 @@ fun StorageArcIndicator(
                 Formatter.formatFileSize(context, storageInfo.usedBytes),
                 style = MaterialTheme.typography.displayMedium.copy(
                     fontWeight = FontWeight.Black,
-                    letterSpacing = (-1).sp
+                    letterSpacing = (-1.5).sp
                 ),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                "STORAGE OCCUPIED",
+                "STORAGE USED",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                letterSpacing = 2.sp
+                letterSpacing = 3.sp
             )
             
             AnimatedVisibility(
                 visible = cleanableBytes > 0,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
+                enter = fadeIn() + expandVertically() + scaleIn(),
+                exit = fadeOut() + shrinkVertically() + scaleOut()
             ) {
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(20.dp))
                 Surface(
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(12.dp),
-                    shadowElevation = 4.dp
+                    color = success.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, success.copy(alpha = 0.3f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Rounded.AutoDelete, 
                             null, 
-                            modifier = Modifier.size(14.dp), 
-                            tint = MaterialTheme.colorScheme.onErrorContainer
+                            modifier = Modifier.size(16.dp), 
+                            tint = success
                         )
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            "${Formatter.formatFileSize(context, cleanableBytes)} CLEANABLE",
+                            "${Formatter.formatFileSize(context, cleanableBytes)} OPTIMIZABLE",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = success
                         )
                     }
                 }
@@ -211,96 +220,69 @@ fun ExpressiveScanningIndicator(modifier: Modifier = Modifier) {
         label = "rotation"
     )
 
-    val strokeWidth by infiniteTransition.animateFloat(
-        initialValue = 4f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "strokeWidth"
-    )
-
-    val sweepAngle by infiniteTransition.animateFloat(
-        initialValue = 30f,
-        targetValue = 270f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "sweepAngle"
-    )
-
-    Box(contentAlignment = Alignment.Center, modifier = modifier.size(260.dp)) {
+    Box(contentAlignment = Alignment.Center, modifier = modifier.size(280.dp)) {
         if (!performanceMode) {
-            for (i in 0..2) {
-                val pulseScale by infiniteTransition.animateFloat(
-                    initialValue = 0.8f,
-                    targetValue = 1.4f + (i * 0.2f),
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(2000 + (i * 500), easing = FastOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "pulse_$i"
-                )
-                val pulseAlpha by infiniteTransition.animateFloat(
-                    initialValue = 0.15f,
-                    targetValue = 0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(2000 + (i * 500), easing = FastOutSlowInEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "alpha_$i"
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .scale(pulseScale)
-                        .alpha(pulseAlpha)
-                        .background(primary, CircleShape)
-                )
-            }
+            val pulseScale by infiniteTransition.animateFloat(
+                initialValue = 0.9f,
+                targetValue = 1.1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "pulse"
+            )
+            
+            Box(
+                modifier = Modifier
+                    .size(180.dp)
+                    .scale(pulseScale)
+                    .background(primary.copy(alpha = 0.1f), CircleShape)
+                    .border(1.dp, primary.copy(alpha = 0.2f), CircleShape)
+            )
         }
 
-        Canvas(modifier = Modifier.size(200.dp)) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = size.minDimension / 2f
+        Canvas(modifier = Modifier.size(220.dp)) {
+            val strokeWidth = 6.dp.toPx()
             
             drawCircle(
                 color = primary.copy(alpha = 0.05f),
-                radius = radius,
-                center = center,
-                style = Stroke(width = 8.dp.toPx())
+                radius = size.minDimension / 2f,
+                style = Stroke(width = strokeWidth)
             )
 
             rotate(rotation) {
                 drawArc(
-                    color = primary,
-                    startAngle = 0f,
-                    sweepAngle = if (performanceMode) 270f else sweepAngle,
-                    useCenter = false,
-                    style = Stroke(
-                        width = if (performanceMode) 8.dp.toPx() else strokeWidth.dp.toPx(), 
-                        cap = StrokeCap.Round
+                    brush = Brush.sweepGradient(
+                        0.0f to primary.copy(alpha = 0f),
+                        0.5f to primary,
+                        1.0f to primary.copy(alpha = 0f)
                     ),
-                    size = Size(radius * 2, radius * 2),
-                    topLeft = Offset(center.x - radius, center.y - radius)
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                 )
             }
         }
 
         Surface(
-            modifier = Modifier.size(80.dp),
+            modifier = Modifier.size(90.dp),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shadowElevation = 6.dp
+            color = MaterialTheme.colorScheme.primary,
+            shadowElevation = 12.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
+                val iconScale by infiniteTransition.animateFloat(
+                    initialValue = 0.8f,
+                    targetValue = 1.1f,
+                    animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                    label = "iconScale"
+                )
                 Icon(
-                    Icons.Rounded.Search,
+                    Icons.Rounded.TravelExplore,
                     contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    modifier = Modifier.size(42.dp).scale(iconScale),
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
         }
@@ -320,13 +302,17 @@ fun CategoryCard(
     val context = LocalContext.current
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
+    val success = Color(0xFF4CAF50)
+
+    val surfaceColor = if (category.isSafeToClean) success.copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+    val borderColor = if (category.isSafeToClean) success.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp)),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        color = surfaceColor,
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Column {
             Row(
@@ -347,19 +333,22 @@ fun CategoryCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(48.dp)
                         .background(
-                            if (category.totalSize > 0) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(16.dp)
+                            if (category.totalSize > 0) {
+                                if (category.isSafeToClean) success.copy(alpha = 0.15f) else MaterialTheme.colorScheme.primaryContainer
+                            } else MaterialTheme.colorScheme.surfaceVariant,
+                            RoundedCornerShape(14.dp)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = getIconForName(category.icon),
                         contentDescription = null,
-                        tint = if (category.totalSize > 0) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(26.dp)
+                        tint = if (category.totalSize > 0) {
+                            if (category.isSafeToClean) success else MaterialTheme.colorScheme.onPrimaryContainer
+                        } else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 
@@ -372,70 +361,78 @@ fun CategoryCard(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        if (category.totalSize > 0) Formatter.formatFileSize(context, category.totalSize) else "Optimized",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (category.totalSize > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                if (category.isSafeToClean && category.totalSize > 0) {
-                    Icon(
-                        Icons.Rounded.Verified, 
-                        contentDescription = null, 
-                        tint = MaterialTheme.colorScheme.primary, 
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (category.totalSize > 0) Formatter.formatFileSize(context, category.totalSize) else "Optimized",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (category.totalSize > 0) {
+                                if (category.isSafeToClean) success else MaterialTheme.colorScheme.primary
+                            } else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (category.isSafeToClean && category.totalSize > 0) {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = success.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    "RECOMMENDED",
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = success,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 8.sp
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Icon(
                     if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
 
             AnimatedVisibility(
                 visible = expanded,
-                enter = if (performanceMode) fadeIn() else expandVertically() + fadeIn(),
-                exit = if (performanceMode) fadeOut() else shrinkVertically() + fadeOut()
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp, start = 12.dp, end = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(bottom = 16.dp, start = 8.dp, end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val displayItems = remember(category.items, performanceMode) {
-                        category.items.take(if (performanceMode) 5 else 8)
+                    val displayItems = remember(category.items) {
+                        category.items.take(8)
                     }
                     
                     displayItems.forEach { item ->
-                        key(item) {
-                            when (item) {
-                                is CleanItem.GenericFile -> GenericFileItem(item.file, onToggleItem, onOpenFile)
-                                is CleanItem.Corpse -> CorpseItem(item.entry, onToggleItem, onOpenFile)
-                                is CleanItem.Duplicate -> DuplicateGroupItem(item.group, onToggleDuplicate, onOpenFile)
-                                is CleanItem.UnusedApp -> UnusedAppItem(item.entry, onToggleItem)
-                            }
+                        when (item) {
+                            is CleanItem.GenericFile -> GenericFileItem(item.file, onToggleItem, onOpenFile, category.isSafeToClean)
+                            is CleanItem.Corpse -> CorpseItem(item.entry, onToggleItem, onOpenFile, category.isSafeToClean)
+                            is CleanItem.Duplicate -> DuplicateGroupItem(item.group, onToggleDuplicate, onOpenFile)
+                            is CleanItem.UnusedApp -> UnusedAppItem(item.entry, onToggleItem)
                         }
                     }
                     
                     if (category.items.size > displayItems.size) {
-                        Button(
-                            onClick = onLongPress,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                                contentColor = MaterialTheme.colorScheme.primary
-                            ),
-                            shape = RoundedCornerShape(16.dp)
+                        TextButton(
+                            onClick = { 
+                                vibrationManager?.vibrateClick()
+                                onLongPress()
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                         ) {
-                            Text("VIEW ALL ${category.items.size} ITEMS", fontWeight = FontWeight.Black, fontSize = 12.sp)
-                            Spacer(Modifier.width(8.dp))
-                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, modifier = Modifier.size(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("VIEW ALL ${category.items.size} ITEMS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
@@ -476,7 +473,7 @@ fun FileThumbnail(file: FileEntry, modifier: Modifier = Modifier) {
                 },
                 error = {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(icon, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                     }
                 }
             )
@@ -494,18 +491,18 @@ fun FileThumbnail(file: FileEntry, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun GenericFileItem(file: FileEntry, onToggle: (String) -> Unit, onOpenFile: (String) -> Unit) {
+private fun GenericFileItem(file: FileEntry, onToggle: (String) -> Unit, onOpenFile: (String) -> Unit, isSafe: Boolean = false) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val success = Color(0xFF4CAF50)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(16.dp))
             .clickable { 
                 vibrationManager?.vibrateClick()
-                onOpenFile(file.path) 
+                onToggle(file.path)
             }
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -515,10 +512,13 @@ private fun GenericFileItem(file: FileEntry, onToggle: (String) -> Unit, onOpenF
             onCheckedChange = { 
                 vibrationManager?.vibrateClick()
                 onToggle(file.path) 
-            }
+            },
+            colors = CheckboxDefaults.colors(
+                checkedColor = if (isSafe) success else MaterialTheme.colorScheme.primary
+            )
         )
         
-        FileThumbnail(file, modifier = Modifier.size(48.dp))
+        FileThumbnail(file, modifier = Modifier.size(44.dp))
 
         Spacer(Modifier.width(12.dp))
 
@@ -526,16 +526,14 @@ private fun GenericFileItem(file: FileEntry, onToggle: (String) -> Unit, onOpenF
             Text(
                 file.name,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 "${Formatter.formatFileSize(context, file.sizeBytes)} • ${file.extension.uppercase()}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -543,22 +541,23 @@ private fun GenericFileItem(file: FileEntry, onToggle: (String) -> Unit, onOpenF
             vibrationManager?.vibrateClick()
             onOpenFile(file.path) 
         }) {
-            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
         }
     }
 }
 
 @Composable
-private fun CorpseItem(corpse: CorpseEntry, onToggle: (String) -> Unit, onOpenFile: (String) -> Unit) {
+private fun CorpseItem(corpse: CorpseEntry, onToggle: (String) -> Unit, onOpenFile: (String) -> Unit, isSafe: Boolean = false) {
     val vibrationManager = LocalVibrationManager.current
+    val success = Color(0xFF4CAF50)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(16.dp))
             .clickable { 
                 vibrationManager?.vibrateClick()
-                onOpenFile(corpse.path) 
+                onToggle(corpse.path)
             }
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -568,16 +567,19 @@ private fun CorpseItem(corpse: CorpseEntry, onToggle: (String) -> Unit, onOpenFi
             onCheckedChange = { 
                 vibrationManager?.vibrateClick()
                 onToggle(corpse.path) 
-            }
+            },
+            colors = CheckboxDefaults.colors(
+                checkedColor = if (isSafe) success else MaterialTheme.colorScheme.primary
+            )
         )
         
         Box(
             modifier = Modifier
-                .size(48.dp)
-                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                .size(44.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Rounded.FolderDelete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+            Icon(Icons.Rounded.FolderZip, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
         }
 
         Spacer(Modifier.width(12.dp))
@@ -586,16 +588,14 @@ private fun CorpseItem(corpse: CorpseEntry, onToggle: (String) -> Unit, onOpenFi
             Text(
                 corpse.packageName,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
+                overflow = TextOverflow.Ellipsis
             )
             Text(
-                "${Formatter.formatFileSize(LocalContext.current, corpse.sizeBytes)} • ${corpse.type.name} Folder",
+                "${Formatter.formatFileSize(LocalContext.current, corpse.sizeBytes)} • ${corpse.type.name} Leftover",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -609,8 +609,7 @@ private fun UnusedAppItem(entry: UnusedAppEntry, onToggle: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .clip(RoundedCornerShape(16.dp))
             .clickable { 
                 vibrationManager?.vibrateClick()
                 onToggle(entry.packageName) 
@@ -618,25 +617,18 @@ private fun UnusedAppItem(entry: UnusedAppEntry, onToggle: (String) -> Unit) {
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(
-            checked = entry.isSelected, 
-            onCheckedChange = { 
-                vibrationManager?.vibrateClick()
-                onToggle(entry.packageName) 
-            }
-        )
+        Checkbox(checked = entry.isSelected, onCheckedChange = { 
+            vibrationManager?.vibrateClick()
+            onToggle(entry.packageName) 
+        })
         
         Surface(
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(44.dp),
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                AsyncImage(
-                    model = entry.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp)
-                )
+            Box(contentAlignment = Alignment.Center) {
+                AsyncImage(model = entry.icon, contentDescription = null, modifier = Modifier.size(28.dp))
             }
         }
 
@@ -646,16 +638,14 @@ private fun UnusedAppItem(entry: UnusedAppEntry, onToggle: (String) -> Unit) {
             Text(
                 entry.appName,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "${Formatter.formatFileSize(context, entry.sizeBytes)} • Last used ${formatLastUsed(entry.lastUsed)}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Medium
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -676,6 +666,7 @@ private fun formatLastUsed(time: Long): String {
 @Composable
 private fun DuplicateGroupItem(group: DuplicateGroup, onToggle: (String, String) -> Unit, onOpenFile: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
+    val context = LocalContext.current
     val firstFile = group.files.firstOrNull()
     val fileName = firstFile?.path?.substringAfterLast('/') ?: "Unknown"
     val extension = fileName.substringAfterLast('.', "").lowercase()
@@ -683,18 +674,18 @@ private fun DuplicateGroupItem(group: DuplicateGroup, onToggle: (String, String)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             firstFile?.let {
-                FileThumbnail(FileEntry(fileName, it.path, group.sizeBytes, it.lastModified, extension), modifier = Modifier.size(46.dp))
+                FileThumbnail(FileEntry(fileName, it.path, group.sizeBytes, it.lastModified, extension), modifier = Modifier.size(40.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(fileName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${group.files.size} Duplicates found", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                Text(fileName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${group.files.size} identical files found", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
         
@@ -709,7 +700,7 @@ private fun DuplicateGroupItem(group: DuplicateGroup, onToggle: (String, String)
                         vibrationManager?.vibrateClick()
                         onToggle(group.hash, file.path) 
                     }
-                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(
@@ -718,20 +709,20 @@ private fun DuplicateGroupItem(group: DuplicateGroup, onToggle: (String, String)
                         vibrationManager?.vibrateClick()
                         onToggle(group.hash, file.path) 
                     },
-                    modifier = Modifier.scale(0.85f)
+                    modifier = Modifier.scale(0.8f)
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        file.path.substringAfterLast('/'),
-                        style = MaterialTheme.typography.labelMedium,
+                        file.path,
+                        style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         color = if (index == 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                     Text(
-                        if (index == 0) "Original Version" else "Extra Copy",
+                        if (index == 0) "Original (Keep)" else "Duplicate (Can delete)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        color = if (index == 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold,
                         fontSize = 9.sp
                     )
@@ -755,16 +746,23 @@ fun CleaningProgressIndicator(progress: Float) {
     val primary = MaterialTheme.colorScheme.primary
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
-        animationSpec = if (performanceMode) tween(300) else spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessVeryLow),
+        animationSpec = if (performanceMode) tween(400) else spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessVeryLow),
         label = "cleaningProgress"
     )
     
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
         if (!performanceMode) {
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.05f,
+                targetValue = 0.12f,
+                animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+                label = "pulseAlpha"
+            )
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawCircle(
-                    color = primary.copy(alpha = 0.05f),
-                    radius = (size.minDimension / 2f) * (0.8f + (animatedProgress * 0.2f)),
+                    color = primary.copy(alpha = pulseAlpha),
+                    radius = (size.minDimension / 2f) * (0.85f + (animatedProgress * 0.15f)),
                     center = center
                 )
             }
@@ -772,14 +770,14 @@ fun CleaningProgressIndicator(progress: Float) {
 
         CircularProgressIndicator(
             progress = { 1f },
-            modifier = Modifier.fillMaxSize().padding(12.dp),
+            modifier = Modifier.fillMaxSize().padding(14.dp),
             strokeWidth = 14.dp,
             color = MaterialTheme.colorScheme.surfaceVariant,
             strokeCap = StrokeCap.Round
         )
         CircularProgressIndicator(
             progress = { animatedProgress },
-            modifier = Modifier.fillMaxSize().padding(12.dp),
+            modifier = Modifier.fillMaxSize().padding(14.dp),
             strokeWidth = 14.dp,
             color = primary,
             strokeCap = StrokeCap.Round
@@ -792,7 +790,7 @@ fun CleaningProgressIndicator(progress: Float) {
                 color = primary
             )
             Text(
-                "DELETING JUNK",
+                "OPTIMIZING",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 2.sp,
@@ -811,13 +809,14 @@ fun SlideToCleanButton(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val density = LocalDensity.current
+    val primary = MaterialTheme.colorScheme.primary
     
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var trackWidth by remember { mutableFloatStateOf(0f) }
     
     val thumbSizeDp = 64.dp
     val thumbSizePx = with(density) { thumbSizeDp.toPx() }
-    val horizontalPaddingPx = with(density) { 6.dp.toPx() }
+    val horizontalPaddingPx = with(density) { 8.dp.toPx() }
     
     val maxDrag = (trackWidth - thumbSizePx - (horizontalPaddingPx * 2)).coerceAtLeast(0f)
     val progress = if (maxDrag > 0) (dragOffset / maxDrag).coerceIn(0f, 1f) else 0f
@@ -837,13 +836,15 @@ fun SlideToCleanButton(
             .height(80.dp)
             .onSizeChanged { trackWidth = it.width.toFloat() }
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f), CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+            .border(1.5.dp, primary.copy(alpha = 0.2f), CircleShape)
             .pointerInput(trackWidth, maxDrag) {
                 if (trackWidth <= 0) return@pointerInput
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (progress < 0.98f) dragOffset = 0f
+                        if (progress < 0.98f) {
+                            dragOffset = 0f
+                        }
                     },
                     onHorizontalDrag = { _, dragAmount ->
                         dragOffset = (dragOffset + dragAmount).coerceIn(0f, maxDrag)
@@ -853,16 +854,16 @@ fun SlideToCleanButton(
         contentAlignment = Alignment.CenterStart
     ) {
         Text(
-            "SLIDE TO FREE ${Formatter.formatFileSize(context, cleanableBytes)}".uppercase(),
+            "SLIDE TO CLEAN ${Formatter.formatFileSize(context, cleanableBytes)}".uppercase(),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 80.dp)
-                .alpha(1f - progress),
+                .padding(horizontal = 84.dp)
+                .alpha(1f - progress * 1.5f),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Black,
             letterSpacing = 1.sp,
-            color = MaterialTheme.colorScheme.primary
+            color = primary
         )
 
         Surface(
@@ -871,7 +872,7 @@ fun SlideToCleanButton(
                 .size(thumbSizeDp)
                 .padding(4.dp),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary,
+            color = primary,
             shadowElevation = 8.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -913,7 +914,8 @@ fun SectionGridView(
                     item = item,
                     onToggleItem = onToggleItem,
                     onToggleDuplicate = onToggleDuplicate,
-                    onOpenFile = onOpenFile
+                    onOpenFile = onOpenFile,
+                    isSafe = category.isSafeToClean
                 )
             }
         }
@@ -925,10 +927,12 @@ private fun GridItem(
     item: CleanItem,
     onToggleItem: (String) -> Unit,
     onToggleDuplicate: (String, String) -> Unit,
-    onOpenFile: (String) -> Unit
+    onOpenFile: (String) -> Unit,
+    isSafe: Boolean = false
 ) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val success = Color(0xFF4CAF50)
     
     val isSelected = when (item) {
         is CleanItem.GenericFile -> item.file.isSelected
@@ -951,7 +955,9 @@ private fun GridItem(
             .fillMaxWidth()
             .aspectRatio(1f),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
         onClick = {
             vibrationManager?.vibrateClick()
             when (item) {
@@ -964,12 +970,12 @@ private fun GridItem(
                 }
             }
         },
-        border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null
+        border = if (isSelected) BorderStroke(3.dp, if (isSafe) success else MaterialTheme.colorScheme.primary) else null
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (item is CleanItem.UnusedApp) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                     AsyncImage(model = item.entry.icon, contentDescription = null, modifier = Modifier.size(56.dp))
+                     AsyncImage(model = item.entry.icon, contentDescription = null, modifier = Modifier.size(60.dp))
                 }
             } else {
                 val fileEntry = when(item) {
@@ -984,9 +990,9 @@ private fun GridItem(
             }
 
             if (isSelected) {
-                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)))
+                Box(modifier = Modifier.fillMaxSize().background((if (isSafe) success else MaterialTheme.colorScheme.primary).copy(alpha = 0.15f)))
                 Box(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(26.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(24.dp).background(if (isSafe) success else MaterialTheme.colorScheme.primary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
@@ -998,7 +1004,7 @@ private fun GridItem(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))))
-                    .padding(10.dp)
+                    .padding(8.dp)
             ) {
                 Text(
                     when (item) {
@@ -1032,9 +1038,9 @@ private fun GridItem(
                         vibrationManager?.vibrateClick()
                         onOpenFile(path) 
                     },
-                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).size(36.dp)
+                    modifier = Modifier.align(Alignment.TopStart).padding(4.dp).size(36.dp)
                 ) {
-                    Icon(Icons.Rounded.Visibility, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Visibility, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -1046,25 +1052,13 @@ fun PermissionEducationDialog(onGrantClick: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.FolderSpecial, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp)) },
-        title = { Text("Storage Access Required", fontWeight = FontWeight.Bold) },
-        text = { 
-            Text(
-                "To perform a deep scan and find hidden junk, Toolz requires permission to access all files. Your privacy is guaranteed.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            ) 
-        },
+        title = { Text("Storage Access", fontWeight = FontWeight.Bold) },
+        text = { Text("Toolz needs permission to access all files to find deep junk and leftover data from uninstalled apps.", textAlign = TextAlign.Center) },
         confirmButton = { 
-            Button(
-                onClick = onGrantClick,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().height(56.dp)
-            ) { Text("GRANT PERMISSION", fontWeight = FontWeight.Bold) } 
+            Button(onClick = onGrantClick, shape = RoundedCornerShape(16.dp)) { Text("GRANT ACCESS", fontWeight = FontWeight.Bold) } 
         },
         dismissButton = { 
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { 
-                Text("NOT NOW", color = MaterialTheme.colorScheme.secondary)
-            } 
+            TextButton(onClick = onDismiss) { Text("NOT NOW", fontWeight = FontWeight.Bold) } 
         },
         shape = RoundedCornerShape(28.dp)
     )
