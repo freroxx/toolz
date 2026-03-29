@@ -54,6 +54,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.MarkdownSegment
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,9 +75,9 @@ fun ToolzPdfScreen(
     var showTextSheet by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
         topBar = {
-            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
                     title = {
                         AnimatedContent(
@@ -90,6 +91,7 @@ fun ToolzPdfScreen(
                             },
                             label = "title",
                         ) { title ->
+                            @Suppress("DEPRECATION")
                             Text(title.uppercase(), style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Black, letterSpacing = 2.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -129,11 +131,11 @@ fun ToolzPdfScreen(
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 )
-                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f))
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f), modifier = Modifier.padding(top = 4.dp))
             }
         },
     ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
+        Box(Modifier.fillMaxSize().toolzBackground().padding(pad)) {
             AnimatedContent(
                 targetState = uiState,
                 transitionSpec = {
@@ -237,7 +239,9 @@ private fun ViewerContent(
                 Row(Modifier.padding(horizontal = 22.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.AutoStories, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(10.dp))
+                    @Suppress("DEPRECATION")
                     Text("PAGE ${docState.currentPageIndex + 1}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    @Suppress("DEPRECATION")
                     Text(" / ${docState.totalPages}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(0.4f))
                 }
             }
@@ -265,7 +269,7 @@ private fun PageContainer(
                 if (activeTool == PdfToolMode.OCR && ocrPageData != null)
                     OcrOverlay(ocrPageData, bmp.width, bmp.height)
             } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (performanceMode) Text("PAGE ${pageIndex+1}", style = MaterialTheme.typography.labelMedium,
+                if (performanceMode) @Suppress("DEPRECATION") Text("PAGE ${pageIndex+1}", style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary.copy(0.25f))
                 else CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 4.dp,
                     color = MaterialTheme.colorScheme.primary.copy(0.2f), strokeCap = StrokeCap.Round)
@@ -335,6 +339,7 @@ fun OcrTextBottomSheet(
             Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("EXTRACTED TEXT", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp, color = MaterialTheme.colorScheme.onSurface)
+                    @Suppress("DEPRECATION")
                     Text("${ocrData.pages.size} pages scanned", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
                 }
                 IconButton(
@@ -378,8 +383,10 @@ fun OcrTextBottomSheet(
                                 Column(Modifier.padding(16.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                        @Suppress("DEPRECATION")
                                         Text("AI SUMMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                                         TextButton(onClick = { viewModel.clearSummary() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                            @Suppress("DEPRECATION")
                                             Text("Dismiss", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f), fontWeight = FontWeight.Black)
                                         }
                                     }
@@ -393,6 +400,7 @@ fun OcrTextBottomSheet(
                                     }
                                     
                                     Spacer(Modifier.height(10.dp))
+                                    @Suppress("DEPRECATION")
                                     Text("Groq · llama-3.3-70b-versatile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontWeight = FontWeight.Black)
                                 }
                             }
@@ -406,6 +414,7 @@ fun OcrTextBottomSheet(
                                     Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.tertiary)
                                     Column(Modifier.weight(1f)) {
                                         Text("Summarise with AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        @Suppress("DEPRECATION")
                                         Text("Key points via Groq llama-3.3-70b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(0.7f), fontWeight = FontWeight.Bold)
                                     }
                                     Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary.copy(0.6f))
@@ -420,6 +429,7 @@ fun OcrTextBottomSheet(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Rounded.TextFields, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            @Suppress("DEPRECATION")
                             Text("EXTRACTED CONTENT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                         }
                         Spacer(Modifier.height(12.dp))
@@ -496,6 +506,7 @@ private fun OcrProgressOverlay(progress: Float, performanceMode: Boolean) {
                     Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(36.dp).graphicsLayer { rotationZ = spin }, tint = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(Modifier.height(20.dp))
+                @Suppress("DEPRECATION")
                 Text("AI TEXT SCAN", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 3.sp, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(4.dp))
                 Text("Processing document…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center, fontWeight = FontWeight.Black)
@@ -564,7 +575,7 @@ private fun PdfFileListContent(files: List<PdfFile>, onFileClick: (PdfFile) -> U
         }
     } else {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { Text("DOCUMENTS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp) }
+            item { @Suppress("DEPRECATION") Text("DOCUMENTS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp) }
             items(files, key = { it.uri.toString() }) { file ->
                 Surface(onClick = { onFileClick(file) }, modifier = Modifier.fillMaxWidth().bouncyClick { onFileClick(file) },
                     shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -582,8 +593,10 @@ private fun PdfFileListContent(files: List<PdfFile>, onFileClick: (PdfFile) -> U
                             Spacer(Modifier.height(3.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(0.4f), shape = RoundedCornerShape(6.dp)) {
+                                    @Suppress("DEPRECATION")
                                     Text("${file.pageCount} pages", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 }
+                                @Suppress("DEPRECATION")
                                 Text("%.1f MB".format(file.size / 1048576.0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.5f), fontWeight = FontWeight.Bold)
                             }
                         }
@@ -642,6 +655,7 @@ private fun PdfLoadingScreen() {
                 )
             }
             Spacer(Modifier.height(32.dp))
+            @Suppress("DEPRECATION")
             Text(
                 "SCANNING VAULT",
                 style = MaterialTheme.typography.labelLarge,
@@ -649,6 +663,7 @@ private fun PdfLoadingScreen() {
                 letterSpacing = 4.sp,
                 color = MaterialTheme.colorScheme.primary
             )
+            @Suppress("DEPRECATION")
             Text(
                 "Locating your documents...",
                 style = MaterialTheme.typography.bodySmall,

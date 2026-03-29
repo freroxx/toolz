@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,9 +47,9 @@ fun RulerScreen(
     var isFlipped by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val context = LocalContext.current
+    val performanceMode = LocalPerformanceMode.current
     val displayMetrics = context.resources.displayMetrics
     
-    val xdpi = displayMetrics.xdpi
     val ydpi = displayMetrics.ydpi
     
     val mmPx = ydpi / 25.4f
@@ -82,7 +84,7 @@ fun RulerScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("PRECISION RULER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("PRECISION RULER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -102,13 +104,14 @@ fun RulerScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .toolzBackground()
                 .padding(padding)
-                .fadingEdge(
+                .then(if (performanceMode) Modifier else Modifier.fadingEdge(
                     brush = Brush.verticalGradient(
                         0f to Color.Transparent,
                         0.05f to Color.Black,
@@ -116,7 +119,7 @@ fun RulerScreen(
                         1f to Color.Transparent
                     ),
                     length = 32.dp
-                )
+                ))
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { offset -> touchY = offset.y },
@@ -287,6 +290,7 @@ fun RulerScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.height(8.dp))
+                        @Suppress("DEPRECATION")
                         Text(
                             text = String.format(Locale.getDefault(), "%.2f inches", inches),
                             style = MaterialTheme.typography.headlineMedium,

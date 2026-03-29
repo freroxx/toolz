@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -93,172 +94,172 @@ fun CompassScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         val config = LocalConfiguration.current
         val dialSize = (config.screenWidthDp.dp * 0.92f).coerceAtMost(480.dp)
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(bottom = 40.dp)
+                verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "${state.displayAzimuth.toInt()}°",
-                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 100.sp, letterSpacing = (-4).sp),
-                    fontWeight = FontWeight.Black,
-                    color = onSurface
-                )
-                
-                Surface(
-                    color = primaryColor.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(bottom = 40.dp)
                 ) {
                     Text(
-                        text = getDirectionLabel(state.displayAzimuth).uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "${state.displayAzimuth.toInt()}°",
+                        style = MaterialTheme.typography.displayLarge.copy(fontSize = 100.sp, letterSpacing = (-4).sp),
                         fontWeight = FontWeight.Black,
-                        color = primaryColor,
-                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
-                        letterSpacing = 2.5.sp
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(dialSize)
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawCircle(
-                        color = onSurface.copy(alpha = 0.08f),
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                }
-
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .rotate(-animatedAzimuth)
-                ) {
-                    val center = Offset(size.width / 2, size.height / 2)
-                    val radius = size.width / 2
-
-                    for (i in 0 until 360 step 2) {
-                        val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
-                        val isMain = i % 30 == 0
-                        val isCardinal = i % 90 == 0
-                        
-                        val tickLength = if (isCardinal) 32.dp.toPx() else if (isMain) 20.dp.toPx() else 10.dp.toPx()
-                        val strokeWidth = if (isCardinal) 4.dp.toPx() else if (isMain) 2.5.dp.toPx() else 1.5.dp.toPx()
-                        val alpha = if (isMain) 0.9f else 0.35f
-                        
-                        val start = Offset(
-                            center.x + (radius - tickLength) * cos(angleRad),
-                            center.y + (radius - tickLength) * sin(angleRad)
-                        )
-                        val end = Offset(
-                            center.x + radius * cos(angleRad),
-                            center.y + radius * sin(angleRad)
-                        )
-                        
-                        drawLine(
-                            color = if (i == 0) Color.Red else onSurface.copy(alpha = alpha),
-                            start = start,
-                            end = end,
-                            strokeWidth = strokeWidth,
-                            cap = StrokeCap.Round
-                        )
-                    }
-
-                    val needlePath = Path().apply {
-                        moveTo(center.x, center.y - radius + 40.dp.toPx())
-                        lineTo(center.x - 14.dp.toPx(), center.y - radius + 75.dp.toPx())
-                        lineTo(center.x + 14.dp.toPx(), center.y - radius + 75.dp.toPx())
-                        close()
-                    }
-                    drawPath(needlePath, Color.Red)
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Rounded.KeyboardArrowUp,
-                        contentDescription = null,
-                        modifier = Modifier.size(36.dp).alpha(0.4f),
-                        tint = primaryColor
+                        color = onSurface
                     )
                     
-                    val bubbleX by animateFloatAsState(targetValue = (state.roll.coerceIn(-45f, 45f)), label = "levelX")
-                    val bubbleY by animateFloatAsState(targetValue = (state.pitch.coerceIn(-45f, 45f)), label = "levelY")
-                    
-                    Box(
-                        modifier = Modifier
-                            .size(90.dp)
-                            .clip(CircleShape)
-                            .background(surfaceVariant.copy(alpha = 0.6f))
-                            .border(1.5.dp, onSurface.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
+                    Surface(
+                        color = primaryColor.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
                     ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawLine(onSurface.copy(0.12f), Offset(size.width/2, 0f), Offset(size.width/2, size.height), 1.5.dp.toPx())
-                            drawLine(onSurface.copy(0.12f), Offset(0f, size.height/2), Offset(size.width, size.height/2), 1.5.dp.toPx())
+                        Text(
+                            text = getDirectionLabel(state.displayAzimuth).uppercase(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = primaryColor,
+                            modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
+                            letterSpacing = 2.5.sp
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(dialSize)
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(
+                            color = onSurface.copy(alpha = 0.08f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                    }
+
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .rotate(-animatedAzimuth)
+                    ) {
+                        val center = Offset(size.width / 2, size.height / 2)
+                        val radius = size.width / 2
+
+                        for (i in 0 until 360 step 2) {
+                            val angleRad = Math.toRadians(i.toDouble() - 90).toFloat()
+                            val isMain = i % 30 == 0
+                            val isCardinal = i % 90 == 0
+                            
+                            val tickLength = if (isCardinal) 32.dp.toPx() else if (isMain) 20.dp.toPx() else 10.dp.toPx()
+                            val strokeWidth = if (isCardinal) 4.dp.toPx() else if (isMain) 2.5.dp.toPx() else 1.5.dp.toPx()
+                            val alpha = if (isMain) 0.9f else 0.35f
+                            
+                            val start = Offset(
+                                center.x + (radius - tickLength) * cos(angleRad),
+                                center.y + (radius - tickLength) * sin(angleRad)
+                            )
+                            val end = Offset(
+                                center.x + radius * cos(angleRad),
+                                center.y + radius * sin(angleRad)
+                            )
+                            
+                            drawLine(
+                                color = if (i == 0) Color.Red else onSurface.copy(alpha = alpha),
+                                start = start,
+                                end = end,
+                                strokeWidth = strokeWidth,
+                                cap = StrokeCap.Round
+                            )
                         }
+
+                        val needlePath = Path().apply {
+                            moveTo(center.x, center.y - radius + 40.dp.toPx())
+                            lineTo(center.x - 14.dp.toPx(), center.y - radius + 75.dp.toPx())
+                            lineTo(center.x + 14.dp.toPx(), center.y - radius + 75.dp.toPx())
+                            close()
+                        }
+                        drawPath(needlePath, Color.Red)
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Rounded.KeyboardArrowUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp).alpha(0.4f),
+                            tint = primaryColor
+                        )
+                        
+                        val bubbleX by animateFloatAsState(targetValue = (state.roll.coerceIn(-45f, 45f)), label = "levelX")
+                        val bubbleY by animateFloatAsState(targetValue = (state.pitch.coerceIn(-45f, 45f)), label = "levelY")
                         
                         Box(
                             modifier = Modifier
-                                .size(14.dp)
-                                .offset(bubbleX.dp, bubbleY.dp)
+                                .size(90.dp)
                                 .clip(CircleShape)
-                                .background(if (state.isLevel) Color(0xFF4CAF50) else primaryColor)
-                                .then(if (performanceMode) Modifier else Modifier.shadow(4.dp, CircleShape))
-                        )
+                                .background(surfaceVariant.copy(alpha = 0.6f))
+                                .border(1.5.dp, onSurface.copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawLine(onSurface.copy(0.12f), Offset(size.width/2, 0f), Offset(size.width/2, size.height), 1.5.dp.toPx())
+                                drawLine(onSurface.copy(0.12f), Offset(0f, size.height/2), Offset(size.width, size.height/2), 1.5.dp.toPx())
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .offset(bubbleX.dp, bubbleY.dp)
+                                    .clip(CircleShape)
+                                    .background(if (state.isLevel) Color(0xFF4CAF50) else primaryColor)
+                                    .then(if (performanceMode) Modifier else Modifier.shadow(4.dp, CircleShape))
+                            )
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(64.dp))
+                Spacer(Modifier.height(64.dp))
 
-            Surface(
-                color = surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(32.dp),
-                border = BorderStroke(1.dp, onSurface.copy(alpha = 0.1f)),
-                modifier = Modifier.padding(horizontal = 32.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(40.dp)
+                Surface(
+                    color = surfaceVariant.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(32.dp),
+                    border = BorderStroke(1.dp, onSurface.copy(alpha = 0.1f)),
+                    modifier = Modifier.padding(horizontal = 32.dp)
                 ) {
-                    StatusItem(
-                        label = "ACCURACY",
-                        value = when (state.accuracy) {
-                            3 -> "HIGH"
-                            2 -> "MID"
-                            else -> "LOW"
-                        },
-                        color = when (state.accuracy) {
-                            3 -> Color(0xFF4CAF50)
-                            2 -> Color(0xFFFF9800)
-                            else -> Color(0xFFF44336)
-                        }
-                    )
-                    
-                    VerticalDivider(modifier = Modifier.height(40.dp), thickness = 1.dp, color = onSurface.copy(alpha = 0.1f))
-                    
-                    StatusItem(
-                        label = "STABILITY",
-                        value = if (state.isLevel) "FLAT" else "${abs(state.pitch).toInt()}°",
-                        color = if (state.isLevel) Color(0xFF4CAF50) else primaryColor
-                    )
+                    Row(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(40.dp)
+                    ) {
+                        StatusItem(
+                            label = "ACCURACY",
+                            value = when (state.accuracy) {
+                                3 -> "HIGH"
+                                2 -> "MID"
+                                else -> "LOW"
+                            },
+                            color = when (state.accuracy) {
+                                3 -> Color(0xFF4CAF50)
+                                2 -> Color(0xFFFF9800)
+                                else -> Color(0xFFF44336)
+                            }
+                        )
+                        
+                        VerticalDivider(modifier = Modifier.height(40.dp), thickness = 1.dp, color = onSurface.copy(alpha = 0.1f))
+                        
+                        StatusItem(
+                            label = "STABILITY",
+                            value = if (state.isLevel) "FLAT" else "${abs(state.pitch).toInt()}°",
+                            color = if (state.isLevel) Color(0xFF4CAF50) else primaryColor
+                        )
+                    }
                 }
             }
         }

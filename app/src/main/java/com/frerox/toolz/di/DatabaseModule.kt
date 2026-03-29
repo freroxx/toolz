@@ -2,6 +2,8 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
@@ -16,11 +18,14 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.ai.AiDao
 import com.frerox.toolz.data.calendar.EventDao
+import com.frerox.toolz.data.password.PasswordDao
+import com.frerox.toolz.util.security.KeyManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import javax.inject.Singleton
 
 @Module
@@ -30,12 +35,19 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
+        System.loadLibrary("sqlcipher")
+
+        val dbName = "toolz_db"
+        val passphrase = KeyManager.getOrCreateMasterKey(context)
+        val factory = SupportOpenHelperFactory(passphrase)
+        
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
-            "toolz_db"
+            dbName
         )
-        .fallbackToDestructiveMigration(true)
+        .openHelperFactory(factory)
+        .fallbackToDestructiveMigration(false) // CRITICAL: Stop erasing data on schema changes
         .build()
     }
 
@@ -102,5 +114,10 @@ object DatabaseModule {
     @Provides
     fun provideEventDao(database: AppDatabase): EventDao {
         return database.eventDao()
+    }
+
+    @Provides
+    fun providePasswordDao(database: AppDatabase): PasswordDao {
+        return database.passwordDao()
     }
 }

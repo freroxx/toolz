@@ -25,6 +25,9 @@ class CaffeinateViewModel @Inject constructor(
 
     private val _isServiceRunning = MutableStateFlow(false)
     val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
+    
+    val elapsedTime = CaffeinateService.elapsedTimeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     val allApps = repository.allApps.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -52,10 +55,18 @@ class CaffeinateViewModel @Inject constructor(
                 }
             }
         }
+        
+        // Periodic check to keep UI in sync if service stops from outside
+        viewModelScope.launch {
+            while (true) {
+                _isServiceRunning.value = CaffeinateService.isRunning
+                kotlinx.coroutines.delay(2000)
+            }
+        }
     }
 
     fun checkServiceStatus() {
-        _isServiceRunning.value = isServiceRunning(CaffeinateService::class.java)
+        _isServiceRunning.value = CaffeinateService.isRunning
         checkNotificationPermission()
     }
 
@@ -71,7 +82,7 @@ class CaffeinateViewModel @Inject constructor(
     }
 
     fun toggleService(themeColor: Int = android.graphics.Color.BLUE) {
-        if (_isServiceRunning.value) {
+        if (CaffeinateService.isRunning) {
             val intent = Intent(context, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_STOP
             }
@@ -90,8 +101,7 @@ class CaffeinateViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            // Give it a moment to start/stop
-            kotlinx.coroutines.delay(500)
+            kotlinx.coroutines.delay(200)
             checkServiceStatus()
         }
     }
@@ -121,16 +131,4 @@ class CaffeinateViewModel @Inject constructor(
             repository.updateAppAutoEnable(app, !app.isAutoEnabled)
         }
     }
-
-    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
-        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        @Suppress("DEPRECATION")
-        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
-            if (serviceClass.name == service.service.className) {
-                return true
-            }
-        }
-        return false
-    }
 }
-

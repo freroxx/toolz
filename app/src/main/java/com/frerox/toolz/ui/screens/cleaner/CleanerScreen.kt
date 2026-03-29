@@ -46,7 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
-import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -60,7 +60,6 @@ fun CleanerScreen(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
-    val isDark = isSystemInDarkTheme()
 
     val scanState by viewModel.scanState.collectAsState()
     val storageInfo by viewModel.storageInfo.collectAsState()
@@ -101,7 +100,7 @@ fun CleanerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(toolzAppBackgroundBrush(isDark, performanceMode))
+            .toolzBackground()
     ) {
         Scaffold(
             containerColor = Color.Transparent,

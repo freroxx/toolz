@@ -71,7 +71,7 @@ class DeviceInfoViewModel @Inject constructor(
             model = Build.MODEL,
             device = Build.DEVICE,
             hardware = Build.HARDWARE,
-            soc = getSocName(),
+            soc = getImprovedSocName(),
             androidVersion = "Android ${Build.VERSION.RELEASE}",
             apiLevel = Build.VERSION.SDK_INT,
             securityPatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Build.VERSION.SECURITY_PATCH else "N/A",
@@ -80,6 +80,7 @@ class DeviceInfoViewModel @Inject constructor(
             
             cpuCores = Runtime.getRuntime().availableProcessors(),
             cpuFreq = getCpuMaxFreq(),
+            cpuArch = System.getProperty("os.arch") ?: "Unknown",
             
             totalRam = memoryInfo.totalMem,
             availRam = memoryInfo.availMem,
@@ -106,10 +107,28 @@ class DeviceInfoViewModel @Inject constructor(
         )
     }
 
-    private fun getSocName(): String {
+    private fun getImprovedSocName(): String {
+        // Try reading from /proc/cpuinfo first as it often contains more accurate hardware info
+        try {
+            val cpuInfo = File("/proc/cpuinfo").readLines()
+            val hardware = cpuInfo.find { it.startsWith("Hardware", true) }?.split(":")?.getOrNull(1)?.trim()
+            if (!hardware.isNullOrBlank() && !hardware.contains("unknown", true)) {
+                return hardware
+            }
+            val modelName = cpuInfo.find { it.startsWith("Model Name", true) || it.startsWith("Processor", true) }?.split(":")?.getOrNull(1)?.trim()
+            if (!modelName.isNullOrBlank() && !modelName.contains("unknown", true)) {
+                return modelName
+            }
+        } catch (e: Exception) {}
+
+        // Fallback to Build properties
         return try {
             val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL
+                val manufacturer = Build.SOC_MANUFACTURER
+                val model = Build.SOC_MODEL
+                if (!manufacturer.isNullOrBlank() && !model.isNullOrBlank()) {
+                    "$manufacturer $model"
+                } else model ?: Build.BOARD
             } else {
                 Build.BOARD
             }
@@ -236,6 +255,7 @@ data class DetailedDeviceData(
     
     val cpuCores: Int,
     val cpuFreq: String,
+    val cpuArch: String,
     
     val totalRam: Long,
     val availRam: Long,

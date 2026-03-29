@@ -61,16 +61,18 @@ class CleanerRepository @Inject constructor(
                 var scannedCount = 0
 
                 val junkExtensions = setOf(
-                    "log", "tmp", "temp", "cache", "chk", "error", "dmp", "crash", "part", "crdownload", "old", "bak", "thumb", "db-journal"
+                    "log", "tmp", "temp", "cache", "chk", "error", "dmp", "crash", "part", "crdownload", "old", "bak", "thumb", "db-journal",
+                    "tombstone", "apk.analytics", "obbtemp", "tmp_video", "exo", "fb_temp", "apk.part"
                 )
                 
                 val junkPatterns = listOf(
                     "cache", "cached", "temp", "tmp", "logs", ".thumbnails", "lost+found", 
                     "BugReport", "sent", "diagnostics", "crash_reports", "UnityAdsCache", 
-                    "GmsCoreConfigCache", "fb_temp"
+                    "GmsCoreConfigCache", "fb_temp", ".exo", "vungle.cache", "fresco_cache",
+                    "video_cache", "image_cache", ".Fabric", "leakcanary", "bugly", "crashlytics"
                 )
                 
-                val documentExtensions = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv")
+                val documentExtensions = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv", "json", "xml", "html")
                 val mediaExtensions = setOf("mp4", "mkv", "avi", "mov", "webm", "flv", "mp3", "wav", "m4a", "ogg", "flac")
                 val imageExtensions = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
                 val largeFileSizeThreshold = 100 * 1024 * 1024L 
@@ -81,6 +83,8 @@ class CleanerRepository @Inject constructor(
                     .onEnter { dir -> 
                         val name = dir.name
                         if (name == "Android" && dir.parentFile == root) return@onEnter true
+                        // Skip sensitive directories
+                        if (name.startsWith(".") && name != ".thumbnails") return@onEnter false
                         true 
                     }
                     .forEach { file ->
@@ -120,7 +124,7 @@ class CleanerRepository @Inject constructor(
                                 currentCategory = "Found: ${Formatter.formatFileSize(context, calculateFoundSize(systemJunk, largeFiles, documentFiles))}",
                                 filesScanned = scannedCount,
                                 foundSize = calculateFoundSize(systemJunk, largeFiles, documentFiles),
-                                progress = 0.1f + (scannedCount.toFloat() / 100000f).coerceAtMost(0.4f)
+                                progress = 0.1f + (scannedCount.toFloat() / 150000f).coerceAtMost(0.4f)
                             )
                         }
                     }

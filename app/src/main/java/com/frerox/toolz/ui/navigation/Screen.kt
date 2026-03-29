@@ -45,6 +45,7 @@ sealed class Screen(val route: String) {
     object SoundMeter : Screen("sound_meter")
     object ColorPicker : Screen("color_picker")
     object PasswordGenerator : Screen("password_generator")
+    object PasswordVault : Screen("password_vault")
     object Notepad : Screen("notepad")
     object BatteryInfo : Screen("battery_info")
     object VoiceRecorder : Screen("voice_recorder")
@@ -57,6 +58,7 @@ sealed class Screen(val route: String) {
     
     // Media
     object MusicPlayer : Screen("music_player")
+    object FileConverter : Screen("file_converter")
 
     // System
     object FileCleaner : Screen("file_cleaner")

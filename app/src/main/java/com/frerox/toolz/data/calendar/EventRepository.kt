@@ -30,9 +30,6 @@ class EventRepository @Inject constructor(
         val startCal = Calendar.getInstance().apply { timeInMillis = start }
         val endCal = Calendar.getInstance().apply { timeInMillis = end }
 
-        // Simple yearly check: does the month and day fall between start and end?
-        // This is a bit complex for multi-month ranges, so we'll simplify:
-        // Check if the event's month/day occurs in the years spanned by start and end.
         for (year in startCal.get(Calendar.YEAR)..endCal.get(Calendar.YEAR)) {
             val occurrence = (eventCal.clone() as Calendar).apply {
                 set(Calendar.YEAR, year)
@@ -55,6 +52,8 @@ class EventRepository @Inject constructor(
     suspend fun updateEvent(event: EventEntry) = eventDao.updateEvent(event)
 
     suspend fun deleteEvent(eventId: Int) = eventDao.deleteEvent(eventId)
+
+    suspend fun updateTask(task: TaskEntry) = taskDao.updateTask(task)
 
     fun getUpcomingEvents(): Flow<List<EventEntry>> {
         val now = System.currentTimeMillis()

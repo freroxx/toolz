@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -49,21 +51,25 @@ fun EquationSolverScreen(
     var showHistory by remember { mutableStateOf(false) }
     var showSteps by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+    val performanceMode = LocalPerformanceMode.current
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
         // Decorative background
-        Box(
-            modifier = Modifier
-                .size(350.dp)
-                .align(Alignment.TopEnd)
-                .offset(x = 100.dp, y = (-50).dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f), CircleShape)
-        )
+        if (!performanceMode) {
+            Box(
+                modifier = Modifier
+                    .size(350.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 100.dp, y = (-50).dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.04f), CircleShape)
+            )
+        }
 
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
                     title = { 
+                        @Suppress("DEPRECATION")
                         Text("EQUATION SOLVER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) 
                     },
                     navigationIcon = {
@@ -94,6 +100,7 @@ fun EquationSolverScreen(
                     .padding(horizontal = 24.dp)
             ) {
                 // Type Selector
+                @Suppress("DEPRECATION")
                 Text(
                     "CHOOSE EQUATION TYPE",
                     style = MaterialTheme.typography.labelSmall,
@@ -116,6 +123,7 @@ fun EquationSolverScreen(
                             border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
                             modifier = Modifier.bouncyClick { viewModel.onTypeChange(type) }
                         ) {
+                            @Suppress("DEPRECATION")
                             Text(
                                 text = type.name,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -187,6 +195,7 @@ fun EquationSolverScreen(
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                         ) {
                             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                @Suppress("DEPRECATION")
                                 Text("SOLUTION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                 Text(state.result, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                             }
@@ -296,6 +305,7 @@ fun StepsBottomSheet(
         shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)
     ) {
         Column(modifier = Modifier.fillMaxHeight(0.7f).padding(horizontal = 28.dp).padding(bottom = 48.dp)) {
+            @Suppress("DEPRECATION")
             Text(
                 "SOLUTION STEPS",
                 style = MaterialTheme.typography.labelSmall,
@@ -314,6 +324,7 @@ fun StepsBottomSheet(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
+                                @Suppress("DEPRECATION")
                                 Text("${index + 1}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                             }
                         }
@@ -389,6 +400,7 @@ fun HistoryBottomSheet(
         shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp)
     ) {
         Column(modifier = Modifier.fillMaxHeight(0.6f).padding(horizontal = 28.dp).padding(bottom = 32.dp)) {
+            @Suppress("DEPRECATION")
             Text(
                 "HISTORY LOG",
                 style = MaterialTheme.typography.labelSmall,

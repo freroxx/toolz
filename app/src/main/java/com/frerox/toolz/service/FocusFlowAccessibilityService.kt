@@ -31,8 +31,6 @@ import javax.inject.Inject
  * FocusFlowAccessibilityService provides app locking functionality by monitoring
  * window state changes and usage stats. It overlays a lock screen when an app's
  * daily limit is reached.
- *
- * It also handles 'Caffeinate' auto-enable logic when a designated app is launched.
  */
 @AndroidEntryPoint
 class FocusFlowAccessibilityService : AccessibilityService() {
@@ -48,6 +46,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var isOverlayShowing = false
     private var overlayShowingForPackage: String? = null
     private var currentPackage: String? = null
+    private var currentPackageResumedTime: Long = 0
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var validationJob: Job? = null
@@ -83,16 +82,28 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val packageName = event.packageName?.toString() ?: return
         val className = event.className?.toString() ?: ""
 
-        // 1. Stability: Ignore events from the overlay itself to prevent flicker loops.
+        // Handle package change for precise tracking
+        if (packageName != currentPackage) {
+            // Update usage for the package that is being left
+            currentPackage?.let { pkg ->
+                if (pkg != TOOLZ_PACKAGE && pkg != getHomePackage() && !SYSTEM_UI_PACKAGES.contains(pkg)) {
+                    // This is handled by UsageStatsManager naturally, 
+                    // but we keep track of currentPackage for our own validation
+                }
+            }
+            currentPackage = packageName
+            currentPackageResumedTime = System.currentTimeMillis()
+        }
+
+        // Ignore events from the overlay itself or Toolz UI
         if (packageName == TOOLZ_PACKAGE && !className.contains("Activity") && !className.contains("MainActivity")) {
             return
         }
 
         Log.d(TAG, "onAccessibilityEvent: $packageName / $className")
 
-        // 2. Handle "Safe" contexts where the lock must be hidden immediately.
+        // Handle "Safe" contexts
         if (packageName == getHomePackage() || (packageName == TOOLZ_PACKAGE && (className.contains("Activity") || className.contains("MainActivity")))) {
-            currentPackage = packageName
             if (packageName == getHomePackage() && shouldKeepOverlayVisibleOnHome()) {
                 return
             }
@@ -100,13 +111,10 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 3. Handle System UI (Notifications, Recents, Dialogs).
         if (SYSTEM_UI_PACKAGES.contains(packageName)) {
             return
         }
 
-        // 4. It's a standard app. Update currentPackage and run validation.
-        currentPackage = packageName
         validateAndLock(packageName)
         checkCaffeinate(packageName)
         triggerClipboardCheck()
@@ -138,7 +146,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         validationJob?.cancel()
         validationJob = serviceScope.launch {
             while (isActive) {
-                delay(1500) // Validate every 1.5 seconds for responsiveness
+                delay(1500)
                 val pkg = currentPackage
                 if (pkg != null && pkg != getHomePackage() && pkg != TOOLZ_PACKAGE && !SYSTEM_UI_PACKAGES.contains(pkg)) {
                     validateAndLock(pkg)
@@ -174,6 +182,8 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun checkCaffeinate(packageName: String) {
+        if (CaffeinateService.isRunning) return // Already running
+
         serviceScope.launch {
             val autoEnabledPackages = withContext(Dispatchers.IO) {
                 caffeinateRepository.getAutoEnabledPackages()
@@ -203,7 +213,17 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
         return try {
             val stats = statsManager.queryAndAggregateUsageStats(startTime, endTime)
-            stats[packageName]?.totalTimeInForeground ?: 0L
+            var usage = stats[packageName]?.totalTimeInForeground ?: 0L
+            
+            // Critical Fix: Add time for the current ongoing session if it's the package we're checking
+            // UsageStatsManager only updates when activity changes or periodically (not real-time enough)
+            if (packageName == currentPackage && currentPackageResumedTime > 0) {
+                val sessionDuration = endTime - currentPackageResumedTime
+                if (sessionDuration > 0) {
+                    usage += sessionDuration
+                }
+            }
+            usage
         } catch (e: Exception) {
             Log.e(TAG, "Error querying usage stats", e)
             0L
@@ -253,7 +273,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         view.isFocusableInTouchMode = true
         view.setOnKeyListener { _, keyCode, _ ->
             if (keyCode == KeyEvent.KEYCODE_BACK) {
-                Log.d(TAG, "Back button intercepted")
                 true // Blocked
             } else {
                 false
@@ -261,7 +280,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
 
         view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
-            Log.d(TAG, "User choosing to leave locked app and return to dashboard")
             hideOverlay()
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -349,7 +367,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         try {
             val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             activityManager.killBackgroundProcesses(packageName)
-            Log.d(TAG, "Requested background stop for locked app: $packageName")
         } catch (e: Exception) {
             Log.w(TAG, "Unable to request background stop for $packageName", e)
         }
@@ -374,8 +391,3 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         Log.d(TAG, "Accessibility Service Interrupted")
     }
 }
-
-
-
-
-

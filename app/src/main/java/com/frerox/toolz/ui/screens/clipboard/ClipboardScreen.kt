@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,16 +66,15 @@ fun ClipboardScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     
     val context = LocalContext.current
+    val performanceMode = LocalPerformanceMode.current
 
     val groups = remember(filteredEntries) { viewModel.groupedEntries(filteredEntries) }
     val listState = rememberLazyListState()
     var showClearAllConfirmation by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
 
-    // Live refreshing is handled by the service and DAO flow
-
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
@@ -116,8 +118,6 @@ fun ClipboardScreen(
                                     tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-
-                            // Sync button removed as it's now live
 
                             if (entries.isNotEmpty()) {
                                 IconButton(
@@ -203,7 +203,11 @@ fun ClipboardScreen(
             )
         }
 
-        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .padding(top = padding.calculateTopPadding())
+        ) {
             if (entries.isEmpty()) {
                 EmptyClipboardState()
             } else {
@@ -211,7 +215,7 @@ fun ClipboardScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdges(top = 16.dp, bottom = 16.dp),
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

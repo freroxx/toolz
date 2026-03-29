@@ -16,8 +16,7 @@ class CaffeinateTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val isServiceRunning = isServiceRunning(CaffeinateService::class.java)
-        if (isServiceRunning) {
+        if (CaffeinateService.isRunning) {
             val intent = Intent(this, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_STOP
             }
@@ -26,6 +25,8 @@ class CaffeinateTileService : TileService() {
             val intent = Intent(this, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_START
                 putExtra(CaffeinateService.EXTRA_INTERVAL, 30) // Default
+                putExtra(CaffeinateService.EXTRA_INFINITE, false)
+                putExtra(CaffeinateService.EXTRA_COLOR, android.graphics.Color.BLUE)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -33,7 +34,9 @@ class CaffeinateTileService : TileService() {
                 startService(intent)
             }
         }
-        // Small delay to allow service to update state before we refresh the tile
+        
+        // Immediate update and another one after a short delay
+        updateTile()
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             updateTile()
         }, 500)
@@ -41,21 +44,11 @@ class CaffeinateTileService : TileService() {
 
     private fun updateTile() {
         val tile = qsTile ?: return
-        val isRunning = isServiceRunning(CaffeinateService::class.java)
+        val isRunning = CaffeinateService.isRunning
         tile.state = if (isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = if (isRunning) "Active" else "Inactive"
         }
         tile.updateTile()
-    }
-
-    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
-        val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
-            if (serviceClass.name == service.service.className) {
-                return true
-            }
-        }
-        return false
     }
 }

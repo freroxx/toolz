@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.theme
 
 import android.app.Activity
 import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.MaterialTheme
@@ -13,7 +14,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -23,6 +27,8 @@ import com.frerox.toolz.util.VibrationManager
 val LocalPerformanceMode = staticCompositionLocalOf { false }
 val LocalHapticEnabled = staticCompositionLocalOf { true }
 val LocalHapticIntensity = staticCompositionLocalOf { 0.5f }
+val LocalBackgroundGradientEnabled = staticCompositionLocalOf { true }
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
 val LocalVibrationManager = staticCompositionLocalOf<VibrationManager?> { null }
 
 private val DarkColorScheme = darkColorScheme(
@@ -77,30 +83,80 @@ private val LightColorScheme = lightColorScheme(
     surfaceTint = PrimaryLight
 )
 
+/**
+ * Compatible version of background brush that takes theme booleans.
+ */
 fun toolzAppBackgroundBrush(
     darkTheme: Boolean,
     performanceMode: Boolean,
+    gradientEnabled: Boolean = true
 ): Brush {
-    val colors = if (darkTheme) {
-        listOf(
-            BackgroundDark,
-            PrimaryDark.withAlpha(if (performanceMode) 0.08f else 0.15f),
-            SecondaryDark.withAlpha(if (performanceMode) 0.05f else 0.12f),
-            SurfaceDark
-        )
-    } else {
-        listOf(
-            BackgroundLight,
-            PrimaryLight.withAlpha(if (performanceMode) 0.06f else 0.12f),
-            SecondaryLight.withAlpha(if (performanceMode) 0.04f else 0.08f),
-            SurfaceLight
-        )
-    }
-    return Brush.verticalGradient(colors)
+    val primary = if (darkTheme) PrimaryDark else PrimaryLight
+    val secondary = if (darkTheme) SecondaryDark else SecondaryLight
+    val background = if (darkTheme) BackgroundDark else BackgroundLight
+    
+    return toolzAppBackgroundBrush(primary, secondary, background, performanceMode, gradientEnabled, darkTheme)
 }
 
-// Extension to avoid repetitive copy(alpha = ...)
-private fun Color.withAlpha(alpha: Float): Color = this.copy(alpha = alpha)
+/**
+ * Advanced background brush that uses provided colors.
+ */
+fun toolzAppBackgroundBrush(
+    primary: Color,
+    secondary: Color,
+    background: Color,
+    performanceMode: Boolean,
+    gradientEnabled: Boolean = true,
+    isDark: Boolean = true
+): Brush {
+    if (!gradientEnabled) {
+        return SolidColor(background)
+    }
+
+    return if (isDark) {
+        // Deep, atmospheric dark gradient
+        val colors = listOf(
+            background,
+            primary.copy(alpha = if (performanceMode) 0.08f else 0.15f),
+            secondary.copy(alpha = if (performanceMode) 0.04f else 0.1f),
+            background
+        )
+        Brush.verticalGradient(colors)
+    } else {
+        // Specialized specialized light theme gradient
+        // Smooth, airy wash using citrus/ocean tints at low intensity for a luminous feel
+        val colors = listOf(
+            background,
+            primary.copy(alpha = if (performanceMode) 0.03f else 0.06f),
+            secondary.copy(alpha = if (performanceMode) 0.015f else 0.035f),
+            background
+        )
+        Brush.verticalGradient(
+            0.0f to background,
+            0.35f to primary.copy(alpha = if (performanceMode) 0.03f else 0.06f),
+            0.75f to secondary.copy(alpha = if (performanceMode) 0.015f else 0.035f),
+            1.0f to background
+        )
+    }
+}
+
+fun Modifier.toolzBackground(): Modifier = composed {
+    val performanceMode = LocalPerformanceMode.current
+    val gradientEnabled = LocalBackgroundGradientEnabled.current
+    val colorScheme = MaterialTheme.colorScheme
+    val isDark = LocalIsDarkTheme.current
+    
+    this.background(
+        toolzAppBackgroundBrush(
+            primary = colorScheme.primary,
+            secondary = colorScheme.secondary,
+            background = colorScheme.background,
+            performanceMode = performanceMode,
+            gradientEnabled = gradientEnabled,
+            isDark = isDark
+        )
+    )
+}
 
 @Composable
 fun ToolzTheme(
@@ -108,6 +164,7 @@ fun ToolzTheme(
     dynamicColor: Boolean = true,
     customPrimary: Color? = null,
     customSecondary: Color? = null,
+    backgroundGradientEnabled: Boolean = true,
     performanceMode: Boolean = false,
     hapticEnabled: Boolean = true,
     hapticIntensity: Float = 0.5f,
@@ -175,6 +232,8 @@ fun ToolzTheme(
         LocalPerformanceMode provides performanceMode,
         LocalHapticEnabled provides hapticEnabled,
         LocalHapticIntensity provides hapticIntensity,
+        LocalBackgroundGradientEnabled provides backgroundGradientEnabled,
+        LocalIsDarkTheme provides darkTheme,
         LocalVibrationManager provides vibrationManager
     ) {
         MaterialTheme(

@@ -29,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,20 +40,19 @@ fun DeviceInfoScreen(
 ) {
     val deviceData by viewModel.deviceData.collectAsState()
     val performanceMode = LocalPerformanceMode.current
-    val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("DEVICE INTELLIGENCE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+                title = { @Suppress("DEPRECATION") Text("DEVICE INTELLIGENCE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -72,95 +72,96 @@ fun DeviceInfoScreen(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(top = padding.calculateTopPadding())
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // Hero Section
-            DeviceHeroSection(deviceData)
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Hero Section
+                DeviceHeroSection(deviceData)
 
-            // System Core
-            InfoSection(
-                title = "CORE ARCHITECTURE",
-                icon = Icons.Rounded.Memory,
-                items = listOf(
-                    "SoC" to deviceData.soc,
-                    "Processor" to deviceData.hardware,
-                    "CPU Cores" to "${deviceData.cpuCores} Cores",
-                    "Max Freq" to deviceData.cpuFreq,
-                    "Hardware" to deviceData.hardware,
-                    "Device" to deviceData.device
+                // System Core
+                InfoSection(
+                    title = "CORE ARCHITECTURE",
+                    icon = Icons.Rounded.Memory,
+                    items = listOf(
+                        "SoC" to deviceData.soc,
+                        "Processor" to deviceData.hardware,
+                        "CPU Cores" to "${deviceData.cpuCores} Cores",
+                        "Max Freq" to deviceData.cpuFreq,
+                        "Hardware" to deviceData.hardware,
+                        "Device" to deviceData.device
+                    )
                 )
-            )
 
-            // Memory & Storage
-            InfoSection(
-                title = "MEMORY & STORAGE",
-                icon = Icons.Rounded.Storage,
-                items = listOf(
-                    "Total RAM" to formatSize(deviceData.totalRam),
-                    "Available RAM" to formatSize(deviceData.availRam),
-                    "Internal Storage" to formatSize(deviceData.totalInternal),
-                    "Available Storage" to formatSize(deviceData.availInternal)
+                // Memory & Storage
+                InfoSection(
+                    title = "MEMORY & STORAGE",
+                    icon = Icons.Rounded.Storage,
+                    items = listOf(
+                        "Total RAM" to formatSize(deviceData.totalRam),
+                        "Available RAM" to formatSize(deviceData.availRam),
+                        "Internal Storage" to formatSize(deviceData.totalInternal),
+                        "Available Storage" to formatSize(deviceData.availInternal)
+                    )
                 )
-            )
 
-            // Display
-            InfoSection(
-                title = "DISPLAY MATRIX",
-                icon = Icons.Rounded.Screenshot,
-                items = listOf(
-                    "Resolution" to deviceData.screenRes,
-                    "Density" to deviceData.screenDensity,
-                    "Refresh Rate" to "${deviceData.refreshRate} Hz",
-                    "Screen Size" to "${String.format(Locale.getDefault(), "%.1f", deviceData.screenSize)}\""
+                // Display
+                InfoSection(
+                    title = "DISPLAY MATRIX",
+                    icon = Icons.Rounded.Screenshot,
+                    items = listOf(
+                        "Resolution" to deviceData.screenRes,
+                        "Density" to deviceData.screenDensity,
+                        "Refresh Rate" to "${deviceData.refreshRate} Hz",
+                        "Screen Size" to "${String.format(Locale.getDefault(), "%.1f", deviceData.screenSize)}\""
+                    )
                 )
-            )
 
-            // Battery
-            InfoSection(
-                title = "BATTERY STATUS",
-                icon = Icons.Rounded.BatteryChargingFull,
-                items = listOf(
-                    "Level" to "${deviceData.batteryLevel}%",
-                    "Capacity" to deviceData.batteryCapacity,
-                    "Health" to deviceData.batteryHealth,
-                    "Technology" to deviceData.batteryTech,
-                    "Voltage" to deviceData.batteryVoltage,
-                    "Temperature" to deviceData.batteryTemp
+                // Battery
+                InfoSection(
+                    title = "BATTERY STATUS",
+                    icon = Icons.Rounded.BatteryChargingFull,
+                    items = listOf(
+                        "Level" to "${deviceData.batteryLevel}%",
+                        "Capacity" to deviceData.batteryCapacity,
+                        "Health" to deviceData.batteryHealth,
+                        "Technology" to deviceData.batteryTech,
+                        "Voltage" to deviceData.batteryVoltage,
+                        "Temperature" to deviceData.batteryTemp
+                    )
                 )
-            )
 
-            // Software
-            InfoSection(
-                title = "SOFTWARE ECOSYSTEM",
-                icon = Icons.Rounded.Android,
-                items = listOf(
-                    "Version" to deviceData.androidVersion,
-                    "API Level" to deviceData.apiLevel.toString(),
-                    "Security Patch" to deviceData.securityPatch,
-                    "Build ID" to deviceData.buildId,
-                    "Kernel" to deviceData.kernelVersion,
-                    "Root Access" to if (deviceData.isRooted) "Detected" else "No"
+                // Software
+                InfoSection(
+                    title = "SOFTWARE ECOSYSTEM",
+                    icon = Icons.Rounded.Android,
+                    items = listOf(
+                        "Version" to deviceData.androidVersion,
+                        "API Level" to deviceData.apiLevel.toString(),
+                        "Security Patch" to deviceData.securityPatch,
+                        "Build ID" to deviceData.buildId,
+                        "Kernel" to deviceData.kernelVersion,
+                        "Root Access" to if (deviceData.isRooted) "Detected" else "No"
+                    )
                 )
-            )
 
-            // Others
-            InfoSection(
-                title = "EXTRAS & NETWORK",
-                icon = Icons.Rounded.Hub,
-                items = listOf(
-                    "Cameras" to if (deviceData.cameras.isNotEmpty()) deviceData.cameras.joinToString(", ") else "None",
-                    "Total Sensors" to "${deviceData.sensorsCount} Sensors",
-                    "IP Address" to deviceData.wifiIp
+                // Others
+                InfoSection(
+                    title = "EXTRAS & NETWORK",
+                    icon = Icons.Rounded.Hub,
+                    items = listOf(
+                        "Cameras" to if (deviceData.cameras.isNotEmpty()) deviceData.cameras.joinToString(", ") else "None",
+                        "Total Sensors" to "${deviceData.sensorsCount} Sensors",
+                        "IP Address" to deviceData.wifiIp
+                    )
                 )
-            )
 
-            Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(32.dp))
+            }
         }
     }
 }
@@ -223,6 +224,7 @@ fun StatusBadge(text: String, color: Color) {
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
+        @Suppress("DEPRECATION")
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -239,6 +241,7 @@ fun InfoSection(title: String, icon: ImageVector, items: List<Pair<String, Strin
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(12.dp))
+            @Suppress("DEPRECATION")
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,

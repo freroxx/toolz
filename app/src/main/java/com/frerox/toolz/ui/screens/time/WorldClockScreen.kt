@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,7 +30,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,15 +43,16 @@ fun WorldClockScreen(
 ) {
     val clocks by viewModel.clocks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    val performanceMode = LocalPerformanceMode.current
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("WORLD CLOCK", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("WORLD CLOCK", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -64,7 +68,7 @@ fun WorldClockScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showAddDialog = true },
@@ -78,6 +82,7 @@ fun WorldClockScreen(
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
+            .toolzBackground()
             .padding(padding)
         ) {
             if (clocks.isEmpty()) {
@@ -85,15 +90,7 @@ fun WorldClockScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
-                        .fadingEdge(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.05f to Color.Black,
-                                0.95f to Color.Black,
-                                1f to Color.Transparent
-                            ),
-                            length = 24.dp
-                        ),
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
                     contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 100.dp, top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -287,6 +284,7 @@ fun TimeZonePickerDialog(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val filteredZones = availableZones.filter { it.contains(searchQuery, ignoreCase = true) }
+    val performanceMode = LocalPerformanceMode.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -299,6 +297,7 @@ fun TimeZonePickerDialog(
                 .fillMaxHeight(0.85f)
                 .padding(horizontal = 24.dp)
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 "SELECT TIMEZONE", 
                 style = MaterialTheme.typography.labelSmall, 
@@ -325,10 +324,7 @@ fun TimeZonePickerDialog(
             )
 
             LazyColumn(
-                modifier = Modifier.weight(1f).fadingEdge(
-                    brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
-                    length = 16.dp
-                ),
+                modifier = Modifier.weight(1f).then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -352,6 +348,7 @@ fun TimeZonePickerDialog(
                             },
                             supportingContent = { 
                                 if (region.isNotEmpty()) {
+                                    @Suppress("DEPRECATION")
                                     Text(region.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) 
                                 }
                             },

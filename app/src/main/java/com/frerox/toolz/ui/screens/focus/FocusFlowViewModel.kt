@@ -73,6 +73,7 @@ class FocusFlowViewModel @Inject constructor(
             "com.miui.home", "com.oneplus.launcher", "com.huawei.android.launcher",
             "com.vivo.launcher", "com.oppo.launcher", "com.asus.launcher",
             "com.realme.launcher", "com.nothing.launcher",
+            "com.google.android.inputmethod.latin", "com.samsung.android.honeyboard",
         )
     }
 
@@ -372,8 +373,12 @@ class FocusFlowViewModel @Inject constructor(
                                     if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
                                     isForeground[pkg] = false
                                 } else if (!lastEventTimes.containsKey(pkg)) {
+                                    // Heuristic for apps running since start of window
                                     val diff = time - startTime
-                                    if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                                    // Tighten: Only if diff is reasonable (less than total window)
+                                    if (diff > 0 && diff < (now - startTime)) {
+                                        usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                                    }
                                     lastEventTimes[pkg] = time
                                     isForeground[pkg] = false
                                 }
@@ -390,8 +395,9 @@ class FocusFlowViewModel @Inject constructor(
 
                     usageMap.asSequence()
                         .filter { (pkg, totalTime) ->
-                            totalTime >= 5_000L &&
+                            totalTime >= 8_000L && // Increased threshold slightly to filter jitter
                                     pkg !in EXCLUDED_PACKAGES &&
+                                    pkg != context.packageName && // Exclude self
                                     pm.getLaunchIntentForPackage(pkg) != null
                         }
                         .mapNotNull { (pkg, totalTime) ->
@@ -565,7 +571,7 @@ class FocusFlowViewModel @Inject constructor(
                     model = AI_MODEL_PRIMARY,
                     messages = listOf(
                         OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach. Analyze the user's screen usage and provide personalized advice.")),
-                        OpenAiMessage("user", MessageContent.Text("${userContext}\n\nGive me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Do not output anything before or after the tips."))
+                        OpenAiMessage("user", MessageContent.Text("${userContext}\n\nGive me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Use Markdown formatting like **bold**, *italic*, and bullet points. Do not output anything before or after the tips."))
                     ),
                     maxTokens = 500,
                 )

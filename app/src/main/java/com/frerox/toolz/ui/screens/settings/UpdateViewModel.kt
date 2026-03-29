@@ -3,9 +3,11 @@ package com.frerox.toolz.ui.screens.settings
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -19,46 +21,67 @@ import javax.inject.Inject
 @HiltViewModel
 class UpdateViewModel @Inject constructor(
     private val updateService: UpdateService,
+    private val settingsRepository: SettingsRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     val uiState = _uiState.asStateFlow()
 
+    val preferredAbi = settingsRepository.preferredAbi.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), "AUTO"
+    )
+
+    fun setPreferredAbi(abi: String) {
+        viewModelScope.launch {
+            settingsRepository.setPreferredAbi(abi)
+        }
+    }
+
+    fun getDeviceAbi(): String {
+        return Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
+    }
+
     fun checkForUpdates() {
         viewModelScope.launch {
             _uiState.value = UpdateUiState.Checking
             try {
-                // Try fetching manifest first
+                // Fetch latest release from GitHub
+                val response = updateService.getLatestRelease(
+                    UpdateConstants.GITHUB_OWNER,
+                    UpdateConstants.GITHUB_REPO
+                )
+                
+                if (response.isSuccessful) {
+                    val release = response.body()
+                    if (release != null) {
+                        // Filter APKs that match our supported ABIs or are universal
+                        val hasCompatibleApk = release.assets.any { asset ->
+                            val name = asset.name.lowercase()
+                            name.endsWith(".apk") && (
+                                UpdateHelper.ABI_FILTERS.any { name.contains(it) } || 
+                                name.contains("universal")
+                            )
+                        }
+                        
+                        if (hasCompatibleApk) {
+                            _uiState.value = UpdateUiState.Success(release)
+                            return@launch
+                        }
+                    }
+                }
+
+                // Fallback to manifest if GitHub Release API fails or has no compatible APKs
                 val manifestResponse = updateService.getUpdateManifest(UpdateConstants.MANIFEST_URL)
                 if (manifestResponse.isSuccessful) {
                     val manifest = manifestResponse.body()
-                    if (manifest != null && !manifest.apkUrl.isNullOrEmpty()) {
+                    if (manifest != null && !manifest.releases.isNullOrEmpty()) {
                         _uiState.value = UpdateUiState.ManifestSuccess(manifest)
                         return@launch
                     }
                 }
 
-                // Fallback to GitHub Release API
-                val response = updateService.getLatestRelease(
-                    UpdateConstants.GITHUB_OWNER,
-                    UpdateConstants.GITHUB_REPO
-                )
-                if (response.isSuccessful) {
-                    val release = response.body()
-                    if (release != null) {
-                        val hasApk = release.assets.any { it.name.endsWith(".apk", ignoreCase = true) }
-                        if (hasApk) {
-                            _uiState.value = UpdateUiState.Success(release)
-                        } else {
-                            _uiState.value = UpdateUiState.Error("No APK identified in the latest release")
-                        }
-                    } else {
-                        _uiState.value = UpdateUiState.Error("No release information found")
-                    }
-                } else {
-                    _uiState.value = UpdateUiState.Error("Update check failed (HTTP ${response.code()})")
-                }
+                _uiState.value = UpdateUiState.Error("No compatible update APKs found in the latest release")
             } catch (e: Exception) {
                 _uiState.value = UpdateUiState.Error(e.message ?: "Network error occurred")
             }

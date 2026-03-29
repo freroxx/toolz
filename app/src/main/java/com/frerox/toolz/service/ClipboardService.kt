@@ -16,7 +16,6 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
@@ -124,6 +123,7 @@ class ClipboardService : Service() {
         Log.d(TAG, "Service creating")
         createNotificationChannel()
         
+        // "Silent" notification - Min importance and not showing in status bar if possible
         val notification = createNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -134,25 +134,22 @@ class ClipboardService : Service() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
         
-        // Initial check and periodic safety poll
         startPeriodicCheck()
     }
     
     private fun startPeriodicCheck() {
         serviceScope.launch {
             while (isActive) {
-                checkClipboard() // Poll clipboard directly to fix missed elements
-                
+                checkClipboard() 
                 try {
                     val unprocessed = clipboardDao.getUnprocessedEntries()
                     unprocessed.take(2).forEach { entry ->
                         processWithAi(entry.id, entry.content, entry.type)
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Periodic check background processing failed", e)
+                    Log.e(TAG, "Periodic check failed", e)
                 }
-                
-                delay(15000) // Poll every 15 seconds
+                delay(30000) // 30 seconds poll
             }
         }
     }
@@ -167,7 +164,6 @@ class ClipboardService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        Log.d(TAG, "Service destroying")
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
         serviceScope.cancel()
         super.onDestroy()
@@ -177,11 +173,12 @@ class ClipboardService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Clipboard Manager",
-                NotificationManager.IMPORTANCE_LOW
+                "System Background Process",
+                NotificationManager.IMPORTANCE_MIN // MIN means no sound, no vibration, might not show icon
             ).apply {
-                description = "Monitors clipboard for history tracking"
+                description = "Handles background intelligence features"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -189,32 +186,22 @@ class ClipboardService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "clipboard")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Smart Clipboard Active")
-            .setContentText("AI is tracking and summarizing your clips")
-            .setSmallIcon(android.R.drawable.ic_menu_recent_history)
+            .setContentTitle(null)
+            .setContentText(null)
+            .setSmallIcon(android.R.color.transparent) // Transparent icon to be less visible
             .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
     companion object {
-        const val CHANNEL_ID = "clipboard_service_channel"
+        const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
+        const val CHANNEL_ID = "clipboard_silent_channel"
         const val NOTIFICATION_ID = 3001
         const val MAX_ENTRIES = 150
-        const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.ACTION_CHECK_CLIPBOARD"
     }
 }

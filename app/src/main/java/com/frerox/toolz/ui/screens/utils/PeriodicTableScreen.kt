@@ -36,7 +36,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import java.util.Locale
 import java.util.Random
@@ -68,6 +70,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(true) }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
     var loadingStatus by remember { mutableStateOf("Initializing...") }
+    val performanceMode = LocalPerformanceMode.current
     
     val allElements = remember { getAllElements() }
     val categories = remember { allElements.map { it.category }.distinct() }
@@ -107,7 +110,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             Surface(
-                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                color = Color.Transparent,
                 tonalElevation = 0.dp
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
@@ -116,6 +119,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("PERIODIC TABLE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
                                 if (!isLoading) {
+                                    @Suppress("DEPRECATION")
                                     Text("${allElements.size} ELEMENTS INDEXED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -193,10 +197,11 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                 }
             }
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
+            .toolzBackground()
             .padding(padding)
         ) {
             if (isLoading) {
@@ -222,15 +227,13 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(32.dp))
                     Text(loadingStatus.uppercase(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    @Suppress("DEPRECATION")
                     Text("OPTIMIZING ATOMIC DATABASE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
                 }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 100.dp),
-                    modifier = Modifier.fillMaxSize().fadingEdge(
-                        brush = Brush.verticalGradient(0f to Color.Transparent, 0.02f to Color.Black, 0.98f to Color.Black, 1f to Color.Transparent),
-                        length = 24.dp
-                    ),
+                    modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -346,6 +349,7 @@ fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: 
                     color = element.color
                 )
                 
+                @Suppress("DEPRECATION")
                 Text(
                     text = element.name.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
@@ -408,6 +412,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             element.category.uppercase(), 
                             style = MaterialTheme.typography.labelSmall, 
@@ -447,6 +452,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                         color = element.color.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             "SCIENTIFIC OVERVIEW", 
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -489,6 +495,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.width(20.dp))
+                    @Suppress("DEPRECATION")
                     Column {
                         Text("ATOMIC INSIGHT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
                         Text(element.funFact, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
@@ -511,6 +518,7 @@ fun DetailCard(modifier: Modifier, label: String, value: String, icon: androidx.
             Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
             Spacer(Modifier.height(12.dp))
             Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
         }
     }
@@ -530,6 +538,7 @@ fun PropertyItem(label: String, value: String, icon: androidx.compose.ui.graphic
         }
         Spacer(Modifier.width(12.dp))
         Column {
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
             Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
         }

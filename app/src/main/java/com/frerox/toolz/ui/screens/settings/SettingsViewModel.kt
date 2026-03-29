@@ -28,6 +28,7 @@ class SettingsViewModel @Inject constructor(
     val dynamicColor = repository.dynamicColor
     val customPrimaryColor = repository.customPrimaryColor
     val customSecondaryColor = repository.customSecondaryColor
+    val backgroundGradientEnabled = repository.backgroundGradientEnabled
     val worldClockZones = repository.worldClockZones
     
     val dashboardView = repository.dashboardView
@@ -68,11 +69,14 @@ class SettingsViewModel @Inject constructor(
 
     val performanceMode = repository.performanceMode
 
+    val converterCustomOutputPath = repository.converterCustomOutputPath
+
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { repository.setDynamicColor(enabled) }
     fun setCustomPrimaryColor(color: Int?) = viewModelScope.launch { repository.setCustomPrimaryColor(color) }
     fun setCustomSecondaryColor(color: Int?) = viewModelScope.launch { repository.setCustomSecondaryColor(color) }
+    fun setBackgroundGradientEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBackgroundGradientEnabled(enabled) }
     
     fun setDashboardView(view: String) = viewModelScope.launch { repository.setDashboardView(view) }
     fun setShowRecentTools(enabled: Boolean) = viewModelScope.launch { repository.setShowRecentTools(enabled) }
@@ -110,6 +114,8 @@ class SettingsViewModel @Inject constructor(
     fun setMusicKeepScreenOnLyrics(enabled: Boolean) = viewModelScope.launch { repository.setMusicKeepScreenOnLyrics(enabled) }
 
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
+
+    fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
 
     fun resetOnboarding() = viewModelScope.launch {
         repository.setOnboardingCompleted(false)

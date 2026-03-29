@@ -14,17 +14,38 @@ android {
         applicationId = "com.frerox.toolz"
         minSdk = 31
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    configurations.all {
+        resolutionStrategy {
+            force("org.jetbrains.kotlin:kotlin-stdlib:2.1.10")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.10")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.10")
+            force("org.jetbrains.kotlin:kotlin-reflect:2.1.10")
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = false
+        }
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
         jniLibs {
+            // Set to false to support 16 KB page sizes. 
+            // This ensures uncompressed libraries are 16 KB aligned in the APK.
             useLegacyPackaging = false
         }
     }
@@ -130,6 +151,16 @@ dependencies {
     // Security Crypto
     implementation(libs.androidx.security.crypto)
 
+    // FFmpeg & Lottie
+    implementation(libs.ffmpeg.kit.standard)
+    implementation(libs.smart.exception.java)
+    implementation(libs.lottie.compose)
+
+    // Password Vault - SQLCipher & Biometrics
+    implementation(libs.sqlcipher)
+    implementation(libs.sqlite.framework)
+    implementation(libs.androidx.biometric)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.core)
@@ -143,6 +174,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     
     ksp(libs.androidx.room.compiler)
-    // Migrated Moshi Codegen to KSP to fix warning
     ksp(libs.moshi.kotlin.codegen)
 }

@@ -45,6 +45,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -63,6 +65,7 @@ fun MagnifierScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
     val scope = rememberCoroutineScope()
+    val performanceMode = LocalPerformanceMode.current
     
     var zoomLevel by remember { mutableFloatStateOf(0f) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
@@ -139,146 +142,147 @@ fun MagnifierScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (cameraPermissionState.status.isGranted) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(24.dp)
-                        .clip(RoundedCornerShape(48.dp))
-                        .background(Color.Black)
-                        .border(BorderStroke(2.dp, primaryColor.copy(alpha = 0.2f)), RoundedCornerShape(48.dp))
-                ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            val previewView = PreviewView(ctx)
-                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                            cameraProviderFuture.addListener({
-                                val cameraProvider = cameraProviderFuture.get()
-                                val preview = Preview.Builder().build().also {
-                                    it.setSurfaceProvider(previewView.surfaceProvider)
-                                }
-                                
-                                try {
-                                    cameraProvider.unbindAll()
-                                    val camera = cameraProvider.bindToLifecycle(
-                                        lifecycleOwner,
-                                        CameraSelector.DEFAULT_BACK_CAMERA,
-                                        preview,
-                                        imageCapture
-                                    )
-                                    cameraControl = camera.cameraControl
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            }, ContextCompat.getMainExecutor(ctx))
-                            previewView
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    
-                    // Center Crosshair
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (cameraPermissionState.status.isGranted) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(40.dp)
-                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)), CircleShape),
-                        contentAlignment = Alignment.Center
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(24.dp)
+                            .clip(RoundedCornerShape(48.dp))
+                            .background(Color.Black)
+                            .border(BorderStroke(2.dp, primaryColor.copy(alpha = 0.2f)), RoundedCornerShape(48.dp))
                     ) {
-                        Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
-                    }
-
-                    // Capture Button
-                    FloatingActionButton(
-                        onClick = { captureImage() },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 32.dp),
-                        containerColor = primaryColor,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Icon(Icons.Rounded.Camera, contentDescription = "Capture", modifier = Modifier.size(28.dp))
-                    }
-                }
-                
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
-                    shape = RoundedCornerShape(40.dp),
-                    color = surfaceVariantColor.copy(alpha = 0.3f),
-                    border = BorderStroke(1.dp, outlineVariantColor.copy(alpha = 0.2f))
-                ) {
-                    Column(modifier = Modifier.padding(28.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.ZoomIn, null, tint = primaryColor, modifier = Modifier.size(24.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                "OPTICAL ZOOM", 
-                                style = MaterialTheme.typography.labelSmall, 
-                                fontWeight = FontWeight.Black,
-                                color = primaryColor,
-                                letterSpacing = 1.5.sp
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                "${String.format(Locale.US, "%.1f", 1.0 + zoomLevel * 9)}X", 
-                                style = MaterialTheme.typography.titleMedium, 
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Slider(
-                            value = zoomLevel,
-                            onValueChange = {
-                                zoomLevel = it
-                                cameraControl?.setLinearZoom(it)
+                        AndroidView(
+                            factory = { ctx ->
+                                val previewView = PreviewView(ctx)
+                                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                                cameraProviderFuture.addListener({
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(previewView.surfaceProvider)
+                                    }
+                                    
+                                    try {
+                                        cameraProvider.unbindAll()
+                                        val camera = cameraProvider.bindToLifecycle(
+                                            lifecycleOwner,
+                                            CameraSelector.DEFAULT_BACK_CAMERA,
+                                            preview,
+                                            imageCapture
+                                        )
+                                        cameraControl = camera.cameraControl
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }, ContextCompat.getMainExecutor(ctx))
+                                previewView
                             },
-                            valueRange = 0f..1f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = primaryColor,
-                                activeTrackColor = primaryColor,
-                                inactiveTrackColor = primaryColor.copy(alpha = 0.1f)
-                            )
+                            modifier = Modifier.fillMaxSize()
                         )
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-            } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Surface(
-                            modifier = Modifier.size(140.dp),
-                            shape = RoundedCornerShape(48.dp),
-                            color = primaryContainerColor.copy(alpha = 0.3f),
-                            border = BorderStroke(2.dp, primaryColor.copy(alpha = 0.1f))
+                        
+                        // Center Crosshair
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(40.dp)
+                                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.ZoomIn, null, modifier = Modifier.padding(32.dp), tint = primaryColor.copy(alpha = 0.5f))
+                            Box(modifier = Modifier.size(4.dp).background(Color.White, CircleShape))
                         }
-                        Spacer(Modifier.height(32.dp))
-                        Text("CAMERA ACCESS REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                        Text(
-                            "Magnifier needs camera access to provide high-resolution zoom capabilities.", 
-                            textAlign = TextAlign.Center,
-                            color = onSurfaceVariantColor.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
-                        )
-                        Button(
-                            onClick = { cameraPermissionState.launchPermissionRequest() },
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier.fillMaxWidth().height(64.dp)
+
+                        // Capture Button
+                        FloatingActionButton(
+                            onClick = { captureImage() },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 32.dp),
+                            containerColor = primaryColor,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shape = RoundedCornerShape(20.dp)
                         ) {
-                            Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+                            Icon(Icons.Rounded.Camera, contentDescription = "Capture", modifier = Modifier.size(28.dp))
+                        }
+                    }
+                    
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        shape = RoundedCornerShape(40.dp),
+                        color = surfaceVariantColor.copy(alpha = 0.3f),
+                        border = BorderStroke(1.dp, outlineVariantColor.copy(alpha = 0.2f))
+                    ) {
+                        Column(modifier = Modifier.padding(28.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.ZoomIn, null, tint = primaryColor, modifier = Modifier.size(24.dp))
+                                Spacer(Modifier.width(12.dp))
+                                @Suppress("DEPRECATION")
+                                Text(
+                                    "OPTICAL ZOOM", 
+                                    style = MaterialTheme.typography.labelSmall, 
+                                    fontWeight = FontWeight.Black,
+                                    color = primaryColor,
+                                    letterSpacing = 1.5.sp
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    "${String.format(Locale.US, "%.1f", 1.0 + zoomLevel * 9)}X", 
+                                    style = MaterialTheme.typography.titleMedium, 
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Slider(
+                                value = zoomLevel,
+                                onValueChange = {
+                                    zoomLevel = it
+                                    cameraControl?.setLinearZoom(it)
+                                },
+                                valueRange = 0f..1f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = primaryColor,
+                                    activeTrackColor = primaryColor,
+                                    inactiveTrackColor = primaryColor.copy(alpha = 0.1f)
+                                )
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                            Surface(
+                                modifier = Modifier.size(140.dp),
+                                shape = RoundedCornerShape(48.dp),
+                                color = primaryContainerColor.copy(alpha = 0.3f),
+                                border = BorderStroke(2.dp, primaryColor.copy(alpha = 0.1f))
+                            ) {
+                                Icon(Icons.Rounded.ZoomIn, null, modifier = Modifier.padding(32.dp), tint = primaryColor.copy(alpha = 0.5f))
+                            }
+                            Spacer(Modifier.height(32.dp))
+                            Text("CAMERA ACCESS REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                            Text(
+                                "Magnifier needs camera access to provide high-resolution zoom capabilities.", 
+                                textAlign = TextAlign.Center,
+                                color = onSurfaceVariantColor.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
+                            )
+                            Button(
+                                onClick = { cameraPermissionState.launchPermissionRequest() },
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier.fillMaxWidth().height(64.dp)
+                            ) {
+                                Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+                            }
                         }
                     }
                 }

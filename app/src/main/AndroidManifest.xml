@@ -36,6 +36,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <queries>
         <intent>
@@ -54,7 +55,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Toolz"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+        android:extractNativeLibs="false">
 
         <activity
             android:name=".MainActivity"
@@ -94,6 +96,12 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.Toolz" />
+
+        <activity
+            android:name=".service.AutofillActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Toolz.Autofill"
+            android:label="Vault Autofill" />
 
         <service
             android:name=".service.StepCounterService"
@@ -187,6 +195,15 @@
         </service>
 
         <service
+            android:name=".service.FileConversionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_TYPE"
+                android:value="Media file conversion and processing" />
+        </service>
+
+        <service
             android:name=".service.CaffeinateTileService"
             android:label="Toolz: Caffeinate"
             android:icon="@drawable/ic_coffee"
@@ -197,6 +214,19 @@
             </intent-filter>
             <meta-data android:name="android.service.quicksettings.ACTIVE_TILE"
                 android:value="true" />
+        </service>
+
+        <service
+            android:name=".service.ToolzAutofillService"
+            android:label="Toolz Autofill"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service_config" />
         </service>
 
         <receiver android:name=".service.TaskReminderReceiver"
@@ -316,4 +346,3 @@
     </application>
 
 </manifest>
-

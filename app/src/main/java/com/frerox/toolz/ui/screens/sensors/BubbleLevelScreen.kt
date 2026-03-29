@@ -7,8 +7,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CenterFocusStrong
@@ -31,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.fadingEdges
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,6 +45,7 @@ fun BubbleLevelScreen(
 ) {
     val state by viewModel.bubbleState.collectAsState()
     val haptic = LocalHapticFeedback.current
+    val performanceMode = LocalPerformanceMode.current
     var wasLevel by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -65,7 +70,7 @@ fun BubbleLevelScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("BUBBLE LEVEL", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("BUBBLE LEVEL", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -77,133 +82,135 @@ fun BubbleLevelScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .fadingEdges(top = 24.dp, bottom = 24.dp)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            val isLevel = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
-            
-            Surface(
-                color = if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(32.dp),
-                modifier = Modifier.padding(bottom = 48.dp),
-                border = BorderStroke(1.5.dp, if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Rounded.CenterFocusStrong,
-                        null,
-                        tint = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = String.format(Locale.getDefault(), "X: %.1f°  Y: %.1f°", state.x, state.y),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Box(
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+            Column(
                 modifier = Modifier
-                    .size(310.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
-                    .border(BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), CircleShape),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                val glowScale by infiniteTransition.animateFloat(
-                    initialValue = 0.95f,
-                    targetValue = 1.05f,
-                    animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                    label = "glow"
-                )
-
-                if (isLevel) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .scale(glowScale)
-                            .background(
-                                Brush.radialGradient(
-                                    listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), Color.Transparent)
-                                )
-                            )
-                    )
-                }
-
-                // Background Grid
-                val gridColor = if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                Canvas(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-                    val center = Offset(size.width / 2, size.height / 2)
-                    val primaryColor = gridColor
-                    
-                    // Circles
-                    drawCircle(primaryColor, radius = 45.dp.toPx(), center = center, style = Stroke(2.5.dp.toPx()))
-                    drawCircle(primaryColor.copy(alpha = 0.15f), radius = 110.dp.toPx(), center = center, style = Stroke(1.5.dp.toPx()))
-                    
-                    // Lines
-                    drawLine(primaryColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(primaryColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.5.dp.toPx(), cap = StrokeCap.Round)
-                }
-
-                // The Bubble
-                val bubbleX = (animX * 12).dp
-                val bubbleY = (animY * 12).dp
+                val isLevelNow = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
                 
                 Surface(
-                    modifier = Modifier
-                        .offset(x = -bubbleX, y = bubbleY)
-                        .size(64.dp)
-                        .shadow(if (isLevel) 16.dp else 4.dp, CircleShape, spotColor = if (isLevel) MaterialTheme.colorScheme.primary else Color.Black),
-                    shape = CircleShape,
-                    color = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                    border = BorderStroke(3.dp, Color.White.copy(alpha = if (isLevel) 0.5f else 0.2f))
+                    color = if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(32.dp),
+                    modifier = Modifier.padding(bottom = 48.dp),
+                    border = BorderStroke(1.5.dp, if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        // Inner highlight for 3D effect
-                        Box(
-                            modifier = Modifier
-                                .size(24.dp)
-                                .offset(x = (-8).dp, y = (-8).dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.25f))
+                    Row(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.CenterFocusStrong,
+                            null,
+                            tint = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = String.format(Locale.getDefault(), "X: %.1f°  Y: %.1f°", state.x, state.y),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            }
-            
-            Spacer(modifier = Modifier.height(64.dp))
-            
-            AnimatedContent(
-                targetState = isLevel,
-                transitionSpec = { fadeIn() togetherWith fadeOut() }, label = ""
-            ) { level ->
-                Surface(
-                    color = if (level) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
-                    shape = RoundedCornerShape(12.dp)
+
+                Box(
+                    modifier = Modifier
+                        .size(310.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
+                        .border(BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = if (level) "PERFECTLY LEVEL" else "ALIGN DEVICE",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                        color = if (level) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                        letterSpacing = 1.sp
+                    val infiniteTransition = rememberInfiniteTransition(label = "glow")
+                    val glowScale by infiniteTransition.animateFloat(
+                        initialValue = 0.95f,
+                        targetValue = 1.05f,
+                        animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                        label = "glow"
                     )
+
+                    if (isLevelNow && !performanceMode) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .scale(glowScale)
+                                .background(
+                                    Brush.radialGradient(
+                                        listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), Color.Transparent)
+                                    )
+                                )
+                        )
+                    }
+
+                    // Background Grid
+                    val gridColor = if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    Canvas(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+                        val center = Offset(size.width / 2, size.height / 2)
+                        val primaryColor = gridColor
+                        
+                        // Circles
+                        drawCircle(primaryColor, radius = 45.dp.toPx(), center = center, style = Stroke(2.5.dp.toPx()))
+                        drawCircle(primaryColor.copy(alpha = 0.15f), radius = 110.dp.toPx(), center = center, style = Stroke(1.5.dp.toPx()))
+                        
+                        // Lines
+                        drawLine(primaryColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(primaryColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.5.dp.toPx(), cap = StrokeCap.Round)
+                    }
+
+                    // The Bubble
+                    val bubbleX = (animX * 12).dp
+                    val bubbleY = (animY * 12).dp
+                    
+                    Surface(
+                        modifier = Modifier
+                            .offset(x = -bubbleX, y = bubbleY)
+                            .size(64.dp)
+                            .shadow(if (isLevelNow && !performanceMode) 16.dp else 4.dp, CircleShape, spotColor = if (isLevelNow) MaterialTheme.colorScheme.primary else Color.Black),
+                        shape = CircleShape,
+                        color = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                        border = BorderStroke(3.dp, Color.White.copy(alpha = if (isLevelNow) 0.5f else 0.2f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            // Inner highlight for 3D effect
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .offset(x = (-8).dp, y = (-8).dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(64.dp))
+                
+                AnimatedContent(
+                    targetState = isLevelNow,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() }, label = ""
+                ) { level ->
+                    Surface(
+                        color = if (level) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = if (level) "PERFECTLY LEVEL" else "ALIGN DEVICE",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            color = if (level) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
             }
         }

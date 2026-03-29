@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -59,6 +60,7 @@ fun StepCounterScreen(
             Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
                     title = {
+                        @Suppress("DEPRECATION")
                         Text(
                             text = "FITNESS TRACKER",
                             style = MaterialTheme.typography.labelSmall,
@@ -91,20 +93,16 @@ fun StepCounterScreen(
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
                 )
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
-                    modifier = Modifier.padding(top = 4.dp)
-                )
             }
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         val hasActivityPermission = activityPermissionState?.status?.isGranted ?: true
         
         Box(modifier = Modifier
             .fillMaxSize()
+            .toolzBackground()
             .padding(top = padding.calculateTopPadding())
         ) {
             when {
@@ -305,6 +303,7 @@ fun StepProgressCard(steps: Int, goal: Int) {
                         ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    @Suppress("DEPRECATION")
                     Text(
                         text = "STEPS TODAY",
                         style = MaterialTheme.typography.labelSmall,
@@ -323,6 +322,7 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
+                    @Suppress("DEPRECATION")
                     Text("GOAL PROGRESS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Text("${(steps.toFloat() / goal.toFloat() * 100).toInt()}% COMPLETED", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                 }
@@ -330,6 +330,7 @@ fun StepProgressCard(steps: Int, goal: Int) {
                     color = MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(14.dp)
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "TARGET: $goal",
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -370,6 +371,7 @@ fun StatCard(
             }
             Column {
                 Text(text = value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                @Suppress("DEPRECATION")
                 Text(text = "$unit $title", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color.copy(alpha = 0.8f))
             }
         }
@@ -390,6 +392,7 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                @Suppress("DEPRECATION")
                 Text(
                     "WEEKLY ACTIVITY",
                     style = MaterialTheme.typography.labelSmall,
@@ -453,6 +456,7 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
                                 )
                         )
                         Spacer(modifier = Modifier.height(12.dp))
+                        @Suppress("DEPRECATION")
                         Text(
                             text = dayName.first().toString(),
                             style = MaterialTheme.typography.labelSmall,
@@ -491,6 +495,7 @@ fun DailyGoalSection(goal: Int) {
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
+                    @Suppress("DEPRECATION")
                     Text("DAILY GOAL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Text("$goal STEPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }

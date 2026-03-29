@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -54,6 +55,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -66,6 +69,7 @@ fun ScannerScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val clipboardManager = LocalClipboardManager.current
+    val performanceMode = LocalPerformanceMode.current
     
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -121,7 +125,7 @@ fun ScannerScreen(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("SCANNER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("SCANNER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -150,10 +154,10 @@ fun ScannerScreen(
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
@@ -164,7 +168,7 @@ fun ScannerScreen(
                     modifier = Modifier.fillMaxSize()
                 )
                 
-                ScannerOverlay()
+                ScannerOverlay(performanceMode)
                 
                 AnimatedVisibility(
                     visible = scanResult.isNotEmpty(),
@@ -191,9 +195,9 @@ fun ScannerScreen(
 }
 
 @Composable
-fun ScannerOverlay() {
+fun ScannerOverlay(performanceMode: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "scan")
-    val scanLinePos by infiniteTransition.animateFloat(
+    val scanLinePos by if (performanceMode) remember { mutableFloatStateOf(0.5f) } else infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -281,16 +285,18 @@ fun ScannerOverlay() {
         )
         drawLine(cornerColor, Offset(left + boxSize, top + boxSize - cornerRadius), Offset(left + boxSize, top + boxSize - lineLength), strokeWidth, cap = StrokeCap.Round)
 
-        val lineY = top + (boxSize * scanLinePos)
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color.White.copy(alpha = 0f), Color.White.copy(alpha = 0.5f), Color.White.copy(alpha = 0f)),
-                startY = lineY - 20.dp.toPx(),
-                endY = lineY + 20.dp.toPx()
-            ),
-            topLeft = Offset(left + 4.dp.toPx(), lineY - 1.dp.toPx()),
-            size = Size(boxSize - 8.dp.toPx(), 2.dp.toPx())
-        )
+        if (!performanceMode) {
+            val lineY = top + (boxSize * scanLinePos)
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.White.copy(alpha = 0f), Color.White.copy(alpha = 0.5f), Color.White.copy(alpha = 0f)),
+                    startY = lineY - 20.dp.toPx(),
+                    endY = lineY + 20.dp.toPx()
+                ),
+                topLeft = Offset(left + 4.dp.toPx(), lineY - 1.dp.toPx()),
+                size = Size(boxSize - 8.dp.toPx(), 2.dp.toPx())
+            )
+        }
     }
 }
 

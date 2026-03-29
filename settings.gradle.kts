@@ -19,9 +19,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://repo.zetetic.net/public/") }
     }
 }
 
 rootProject.name = "toolz"
 include(":app")
- 

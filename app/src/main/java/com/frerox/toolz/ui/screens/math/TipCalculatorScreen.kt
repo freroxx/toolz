@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 
@@ -39,6 +42,7 @@ fun TipCalculatorScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+    val performanceMode = LocalPerformanceMode.current
 
     var showCurrencySheet by remember { mutableStateOf(false) }
 
@@ -70,18 +74,19 @@ fun TipCalculatorScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .toolzBackground()
                 .padding(top = padding.calculateTopPadding())
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .fadingEdges(top = 16.dp, bottom = 16.dp)
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp))
                     .verticalScroll(scrollState)
                     .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -287,7 +292,7 @@ fun TipCalculatorScreen(
                     }
                 }
                 
-                Spacer(Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
 

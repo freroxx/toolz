@@ -1,13 +1,12 @@
 package com.frerox.toolz.ui.screens.todo
 
 import android.text.format.DateUtils
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -32,16 +31,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -53,14 +49,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
-import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.Locale
 import java.util.UUID
-import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -198,7 +193,7 @@ fun TodoScreen(
             },
             containerColor = Color.Transparent
         ) { padding ->
-            Column(modifier = Modifier.padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize().toolzBackground().padding(padding)) {
                 TaskSummaryHeader(activeCount = state.tasks.size, completedToday = state.completedToday.size)
 
                 LazyVerticalStaggeredGrid(
@@ -210,10 +205,7 @@ fun TodoScreen(
                 ) {
                     if (state.tasks.isEmpty() && state.completedToday.isEmpty()) {
                         item(span = StaggeredGridItemSpan.FullLine) {
-                            EmptyTasksState(onAddClick = { 
-                                vibrationManager?.vibrateClick()
-                                showEditor = true 
-                            })
+                            EmptyTasksState()
                         }
                     } else {
                         items(state.tasks, key = { it.id }) { task ->
@@ -334,7 +326,10 @@ fun TodoScreen(
                     editingTask?.let { viewModel.deleteTask(it) }
                     showEditor = false
                 },
-                onAddCategory = { viewModel.addCategory(it) }
+                onAddCategory = { viewModel.addCategory(it) },
+                onAddToCalendar = { task -> 
+                    viewModel.addToCalendar(task)
+                }
             )
         }
 
@@ -371,6 +366,10 @@ fun TodoScreen(
                         vibrationManager?.vibrateClick()
                         viewModel.startSession(task.id)
                         viewingTaskId = null
+                    },
+                    onAddToCalendar = {
+                        vibrationManager?.vibrateSuccess()
+                        viewModel.addToCalendar(task)
                     }
                 )
             }
@@ -379,7 +378,7 @@ fun TodoScreen(
 }
 
 @Composable
-fun EmptyTasksState(onAddClick: () -> Unit) {
+fun EmptyTasksState() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -413,24 +412,13 @@ fun EmptyTasksState(onAddClick: () -> Unit) {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "No active tasks detected. Deploy a new objective to start your workflow.",
+            "No active tasks detected. Deploy a new objective using the action button.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(0.8f),
             fontWeight = FontWeight.Medium
         )
-        Spacer(Modifier.height(32.dp))
-        Button(
-            onClick = onAddClick,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.height(56.dp).padding(horizontal = 32.dp)
-        ) {
-            Icon(Icons.Rounded.Add, null)
-            Spacer(Modifier.width(12.dp))
-            @Suppress("DEPRECATION")
-            Text("CREATE TASK", fontWeight = FontWeight.Black)
-        }
     }
 }
 
@@ -520,17 +508,17 @@ fun TaskCard(
                     onLongPress = { onLongClick() }
                 )
             },
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(28.dp),
         color = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                else if (isSessionTarget) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f)
+                else if (isSessionTarget) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
                 else MaterialTheme.colorScheme.surface,
         border = BorderStroke(
-            if (isSessionTarget) 2.dp else 1.5.dp,
+            if (isSessionTarget) 2.dp else 1.dp,
             if (isSessionTarget) MaterialTheme.colorScheme.primary
-            else if (task.priority == 1) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            else if (task.priority == 1) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
         ),
-        shadowElevation = if ((task.priority == 1 || isSessionTarget) && !performanceMode) 8.dp else 0.dp
+        shadowElevation = if ((task.priority == 1 || isSessionTarget) && !performanceMode) 4.dp else 0.dp
     ) {
         Box {
             if ((task.priority == 1 || isSessionTarget) && !task.isCompleted && !performanceMode) {
@@ -548,10 +536,10 @@ fun TaskCard(
                 )
             }
 
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CategoryBadge(task.category)
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(8.dp))
                     PriorityBadge(task.priority)
                     Spacer(Modifier.weight(1f))
                     if (!task.isCompleted) {
@@ -560,27 +548,26 @@ fun TaskCard(
                                 if (isSessionTarget) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
                                 null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(Modifier.width(8.dp))
                     }
                     IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
                         Icon(
                             if (task.isCompleted) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
                             null,
                             tint = if (task.isCompleted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
                 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
                 
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     color = if (task.isCompleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
@@ -592,24 +579,24 @@ fun TaskCard(
                     Text(
                         text = task.description,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (task.subTasks.isNotEmpty() || task.dueDate != null) {
+                    Spacer(Modifier.height(12.dp))
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically, 
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (task.subTasks.isNotEmpty()) {
                             val doneCount = task.subTasks.count { it.isDone }
                             Surface(
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 onClick = onExpandToggle
                             ) {
                                 Row(
@@ -618,9 +605,7 @@ fun TaskCard(
                                 ) {
                                     Icon(Icons.AutoMirrored.Rounded.PlaylistAddCheck, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(4.dp))
-                                    @Suppress("DEPRECATION")
-                                    Text("$doneCount/${task.subTasks.size}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(4.dp))
+                                    Text("$doneCount/${task.subTasks.size}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                     Icon(
                                         if (isExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
                                         null,
@@ -632,16 +617,23 @@ fun TaskCard(
                         }
                         
                         if (task.dueDate != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Schedule, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
-                                Spacer(Modifier.width(4.dp))
-                                @Suppress("DEPRECATION")
-                                Text(
-                                    text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().lowercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Schedule, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().lowercase(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
@@ -653,8 +645,8 @@ fun TaskCard(
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     Column(
-                        modifier = Modifier.padding(top = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         task.subTasks.forEach { sub ->
                             Row(
@@ -663,22 +655,20 @@ fun TaskCard(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
-                                    .pointerInput(Unit) {
-                                        detectTapGestures { onToggleSubtask(sub.id) }
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    .clickable { onToggleSubtask(sub.id) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
                                 Icon(
                                     if (sub.isDone) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
                                     null,
                                     tint = if (sub.isDone) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(Modifier.width(12.dp))
+                                Spacer(Modifier.width(10.dp))
                                 Text(
                                     sub.title,
                                     style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (sub.isDone) FontWeight.Normal else FontWeight.Bold,
+                                    fontWeight = if (sub.isDone) FontWeight.Normal else FontWeight.Medium,
                                     textDecoration = if (sub.isDone) TextDecoration.LineThrough else null,
                                     color = if (sub.isDone) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
@@ -703,17 +693,17 @@ fun PriorityBadge(priority: Int) {
         else -> Color(0xFF9E9E9E)
     }
     Surface(
-        color = color.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(12.dp),
+        color = color.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
         @Suppress("DEPRECATION")
         Text(
             text = "P$priority",
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
             color = color
         )
     }
@@ -727,7 +717,8 @@ fun TaskEditorSheet(
     onDismiss: () -> Unit,
     onSave: (String, String?, String, Int, Long?, List<SubTask>) -> Unit,
     onDelete: () -> Unit,
-    onAddCategory: (String) -> Unit
+    onAddCategory: (String) -> Unit,
+    onAddToCalendar: (TaskEntry) -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
     var title by remember { mutableStateOf(task?.title ?: "") }
@@ -745,7 +736,7 @@ fun TaskEditorSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = { BottomSheetDefaults.DragHandle() },
         containerColor = MaterialTheme.colorScheme.surface
     ) {
@@ -754,17 +745,26 @@ fun TaskEditorSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (task == null) "NEW OBJECTIVE" else "MODIFY OBJECTIVE",
+                    if (task == null) "NEW TASK" else "EDIT TASK",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
+                    fontWeight = FontWeight.Black
                 )
                 Spacer(Modifier.weight(1f))
                 if (task != null) {
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateSuccess()
+                            onAddToCalendar(task) 
+                        },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), CircleShape)
+                    ) {
+                        Icon(Icons.Rounded.CalendarToday, "Add to calendar", tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Spacer(Modifier.width(8.dp))
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateLongClick()
@@ -780,9 +780,9 @@ fun TaskEditorSheet(
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("TASK IDENTIFIER") },
+                label = { Text("Task Title") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
             )
@@ -790,15 +790,15 @@ fun TaskEditorSheet(
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("ANALYTICS / DETAILS") },
+                label = { Text("Notes & Details") },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 maxLines = 3
             )
 
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 onClick = { 
                     vibrationManager?.vibrateClick()
                     showDatePicker = true 
@@ -808,13 +808,12 @@ fun TaskEditorSheet(
                     modifier = Modifier.padding(16.dp).fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        @Suppress("DEPRECATION")
-                        Text("DEADLINE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        Text("DUE DATE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text(
-                            text = dueDate?.let { DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR) } ?: "NO TEMPORAL LIMIT",
+                            text = dueDate?.let { DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR) } ?: "Set a deadline",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -832,8 +831,7 @@ fun TaskEditorSheet(
 
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    @Suppress("DEPRECATION")
-                    Text("CLASSIFICATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                    Text("CATEGORY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { 
                         vibrationManager?.vibrateClick()
@@ -851,20 +849,15 @@ fun TaskEditorSheet(
                                 vibrationManager?.vibrateTick()
                                 category = cat 
                             },
-                            label = { Text(cat.uppercase(), fontWeight = FontWeight.Black, fontSize = 10.sp) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                            )
+                            label = { Text(cat) },
+                            shape = RoundedCornerShape(12.dp)
                         )
                     }
                 }
             }
 
             Column {
-                @Suppress("DEPRECATION")
-                Text("PRIORITY INDEX", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                Text("PRIORITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     (1..5).forEach { p ->
@@ -882,7 +875,7 @@ fun TaskEditorSheet(
                                 priority = p 
                             },
                             modifier = Modifier.size(52.dp),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = if (isSelected) pColor else pColor.copy(alpha = 0.1f),
                             border = BorderStroke(1.5.dp, if (isSelected) Color.White.copy(alpha = 0.3f) else pColor.copy(alpha = 0.2f))
                         ) {
@@ -896,12 +889,12 @@ fun TaskEditorSheet(
 
             Column {
                 @Suppress("DEPRECATION")
-                Text("SUB-STRUCTURE CHECKLIST", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                Text("SUBTASKS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(8.dp))
                 subTasks.forEach { sub ->
                     Surface(
                         modifier = Modifier.padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
@@ -925,9 +918,9 @@ fun TaskEditorSheet(
                 OutlinedTextField(
                     value = newSubtaskTitle,
                     onValueChange = { newSubtaskTitle = it },
-                    placeholder = { Text("NEW SUB-OBJECTIVE...") },
+                    placeholder = { Text("Add subtask...") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(12.dp),
                     trailingIcon = {
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
@@ -956,14 +949,13 @@ fun TaskEditorSheet(
                     vibrationManager?.vibrateClick()
                     if (title.isNotBlank()) onSave(title, description.takeIf { it.isNotBlank() }, category, priority, dueDate, subTasks) 
                 },
-                modifier = Modifier.fillMaxWidth().height(64.dp).padding(vertical = 4.dp),
-                shape = RoundedCornerShape(20.dp)
+                modifier = Modifier.fillMaxWidth().height(56.dp).padding(vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                @Suppress("DEPRECATION")
-                Text("DEPLOY OBJECTIVE", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                Text("SAVE TASK", fontWeight = FontWeight.Bold)
             }
             
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -976,15 +968,14 @@ fun TaskEditorSheet(
                     vibrationManager?.vibrateClick()
                     dueDate = datePickerState.selectedDateMillis
                     showDatePicker = false
-                }) { @Suppress("DEPRECATION") Text("INDEX", fontWeight = FontWeight.Black) }
+                }) { Text("OK") }
             },
             dismissButton = {
                 TextButton(onClick = { 
                     vibrationManager?.vibrateClick()
                     showDatePicker = false 
-                }) { @Suppress("DEPRECATION") Text("CANCEL", fontWeight = FontWeight.Bold) }
-            },
-            shape = RoundedCornerShape(32.dp)
+                }) { Text("CANCEL") }
+            }
         ) {
             DatePicker(state = datePickerState)
         }
@@ -993,14 +984,14 @@ fun TaskEditorSheet(
     if (showAddCategory) {
         AlertDialog(
             onDismissRequest = { showAddCategory = false },
-            title = { @Suppress("DEPRECATION") Text("NEW CLASSIFICATION", fontWeight = FontWeight.Black) },
+            title = { Text("New Category") },
             text = {
                 OutlinedTextField(
                     value = newCategoryName,
                     onValueChange = { newCategoryName = it },
-                    placeholder = { Text("Identifier name") },
+                    placeholder = { Text("Category name") },
                     singleLine = true,
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(12.dp)
                 )
             },
             confirmButton = {
@@ -1012,15 +1003,14 @@ fun TaskEditorSheet(
                         newCategoryName = ""
                         showAddCategory = false
                     }
-                }, shape = RoundedCornerShape(16.dp)) { @Suppress("DEPRECATION") Text("ADD", fontWeight = FontWeight.Black) }
+                }) { Text("ADD") }
             },
             dismissButton = {
                 TextButton(onClick = { 
                     vibrationManager?.vibrateClick()
                     showAddCategory = false 
-                }) { @Suppress("DEPRECATION") Text("CANCEL", fontWeight = FontWeight.Bold) }
-            },
-            shape = RoundedCornerShape(32.dp)
+                }) { Text("CANCEL") }
+            }
         )
     }
 }
@@ -1031,7 +1021,8 @@ fun TaskDetailOverlay(
     onDismiss: () -> Unit,
     onToggleSubtask: (String) -> Unit,
     onToggleComplete: () -> Unit,
-    onStartSession: () -> Unit
+    onStartSession: () -> Unit,
+    onAddToCalendar: () -> Unit
 ) {
     val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
@@ -1043,7 +1034,7 @@ fun TaskDetailOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            shape = RoundedCornerShape(40.dp),
+            shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
         ) {
@@ -1052,11 +1043,11 @@ fun TaskDetailOverlay(
                     .fillMaxSize()
                     .padding(24.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CategoryBadge(task.category)
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(8.dp))
                     PriorityBadge(task.priority)
                     Spacer(Modifier.weight(1f))
                     IconButton(
@@ -1079,21 +1070,19 @@ fun TaskDetailOverlay(
                     )
 
                     if (task.dueDate != null) {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
                         Surface(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                                 Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                @Suppress("DEPRECATION")
                                 Text(
                                     text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().uppercase(),
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    letterSpacing = 1.sp
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -1103,35 +1092,33 @@ fun TaskDetailOverlay(
                 if (!task.description.isNullOrBlank()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(modifier = Modifier.padding(16.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.Notes, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.AutoMirrored.Rounded.Notes, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(16.dp))
                             Text(
                                 task.description,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                lineHeight = 22.sp
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
                 if (task.subTasks.isNotEmpty()) {
-                    @Suppress("DEPRECATION")
-                    Text("OBJECTIVE COMPONENTS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("SUBTASKS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         task.subTasks.forEach { sub ->
                             Surface(
                                 onClick = { 
                                     vibrationManager?.vibrateTick()
                                     onToggleSubtask(sub.id) 
                                 },
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (sub.isDone) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-                                border = if (sub.isDone) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (sub.isDone) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
+                                border = if (sub.isDone) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else null
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1141,15 +1128,14 @@ fun TaskDetailOverlay(
                                         if (sub.isDone) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
                                         null,
                                         tint = if (sub.isDone) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(Modifier.width(16.dp))
                                     Text(
                                         sub.title,
                                         style = MaterialTheme.typography.bodyMedium,
                                         textDecoration = if (sub.isDone) TextDecoration.LineThrough else null,
-                                        color = if (sub.isDone) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = if (sub.isDone) FontWeight.Normal else FontWeight.Black
+                                        color = if (sub.isDone) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
@@ -1159,40 +1145,54 @@ fun TaskDetailOverlay(
 
                 Spacer(Modifier.weight(1f))
 
-                Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (!task.isCompleted) {
-                        Button(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                onStartSession() 
-                            },
-                            modifier = Modifier.weight(1f).height(60.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                        ) {
-                            Icon(Icons.Rounded.PlayArrow, null)
-                            Spacer(Modifier.width(8.dp))
-                            @Suppress("DEPRECATION")
-                            Text("ENGAGE", fontWeight = FontWeight.Black)
-                        }
-                    }
-
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = {
-                            if (hapticEnabled) vibrationManager?.vibrateSuccess()
-                            onToggleComplete() 
-                        },
-                        modifier = Modifier.weight(1.2f).height(60.dp),
-                        shape = RoundedCornerShape(20.dp),
+                        onClick = onAddToCalendar,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                            contentColor = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     ) {
-                        Icon(if (task.isCompleted) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.Check, null)
-                        Spacer(Modifier.width(8.dp))
-                        @Suppress("DEPRECATION")
-                        Text(if (task.isCompleted) "RESTORE" else "RESOLVE", fontWeight = FontWeight.Black)
+                        Icon(Icons.Rounded.CalendarToday, null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("ADD TO CALENDAR", fontWeight = FontWeight.Bold)
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (!task.isCompleted) {
+                            Button(
+                                onClick = {
+                                    vibrationManager?.vibrateClick()
+                                    onStartSession() 
+                                },
+                                modifier = Modifier.weight(1f).height(56.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Icon(Icons.Rounded.PlayArrow, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("START", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (hapticEnabled) vibrationManager?.vibrateSuccess()
+                                onToggleComplete() 
+                            },
+                            modifier = Modifier.weight(1.2f).height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
+                                contentColor = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Icon(if (task.isCompleted) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.Check, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (task.isCompleted) "RESTORE" else "DONE", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1222,24 +1222,23 @@ fun BrainDumpOverlay(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .pointerInput(Unit) { detectTapGestures { } },
-            shape = RoundedCornerShape(40.dp),
+            shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.surface,
-            shadowElevation = if (performanceMode) 0.dp else 24.dp
+            shadowElevation = if (performanceMode) 0.dp else 16.dp
         ) {
-            Column(modifier = Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(16.dp))
-                    @Suppress("DEPRECATION")
-                    Text("NEURAL QUICK ADD", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                    Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text("QUICK ADD", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }
 
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = { Text("What's next?") },
+                    placeholder = { Text("What needs to be done?") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(16.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = {
                         vibrationManager?.vibrateClick()
@@ -1254,11 +1253,10 @@ fun BrainDumpOverlay(
                         vibrationManager?.vibrateClick()
                         if (text.isNotBlank()) onConfirm(text) 
                     },
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    shape = RoundedCornerShape(20.dp)
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    @Suppress("DEPRECATION")
-                    Text("DEPLOY TASK", fontWeight = FontWeight.Black)
+                    Text("ADD TASK", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1277,17 +1275,16 @@ private fun formatSessionTime(millis: Long): String {
 fun CategoryBadge(category: String) {
     Surface(
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
         @Suppress("DEPRECATION")
         Text(
             text = category.uppercase(),
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
+            fontWeight = FontWeight.Bold,
             fontSize = 9.sp,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 0.5.sp
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }

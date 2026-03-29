@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -48,6 +50,7 @@ fun SoundMeterScreen(
     val db by viewModel.decibels.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val permissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    val performanceMode = LocalPerformanceMode.current
     
     val animatedDb by animateFloatAsState(
         targetValue = db,
@@ -62,7 +65,7 @@ fun SoundMeterScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -71,11 +74,12 @@ fun SoundMeterScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
+            .toolzBackground()
             .padding(top = padding.calculateTopPadding())
         ) {
             if (permissionState.status.isGranted) {
@@ -89,7 +93,7 @@ fun SoundMeterScreen(
                     // Gauge Area
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(320.dp)) {
                         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                        val glowAlpha by infiniteTransition.animateFloat(
+                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
                             initialValue = 0.05f,
                             targetValue = 0.15f,
                             animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
@@ -98,16 +102,18 @@ fun SoundMeterScreen(
                         
                         val activeColor = if (db > 85) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf(activeColor.copy(alpha = glowAlpha), Color.Transparent)
-                                    ),
-                                    CircleShape
-                                )
-                        )
+                        if (!performanceMode) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(activeColor.copy(alpha = glowAlpha), Color.Transparent)
+                                        ),
+                                        CircleShape
+                                    )
+                            )
+                        }
 
                         DecibelCircularGauge(db = animatedDb, color = activeColor)
                         
@@ -178,6 +184,7 @@ fun SoundMeterScreen(
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             text = if (isRecording) "MONITORING ACTIVE" else "READY TO MEASURE",
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -222,7 +229,6 @@ fun DecibelLinearGauge(db: Float) {
     val progress = (db / 120f).coerceIn(0f, 1f)
     Canvas(modifier = Modifier.fillMaxSize()) {
         val width = size.width
-        val height = size.height
         
         val activeColor = when {
             db > 90 -> Color(0xFFEF5350)

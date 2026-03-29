@@ -1,6 +1,10 @@
 package com.frerox.toolz.ui.screens.settings
 
+import android.content.Intent
+import android.net.Uri
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -31,6 +35,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,10 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.net.toUri
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,12 +59,14 @@ fun SettingsScreen(
     onResetOnboarding: () -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
+    val context = LocalContext.current
 
     val stepGoal by viewModel.stepGoal.collectAsState(initial = 10000)
     val themeMode by viewModel.themeMode.collectAsState(initial = "SYSTEM")
     val dynamicColor by viewModel.dynamicColor.collectAsState(initial = true)
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
+    val backgroundGradientEnabled by viewModel.backgroundGradientEnabled.collectAsState(initial = true)
 
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
     val showRecentTools by viewModel.showRecentTools.collectAsState(initial = true)
@@ -90,11 +99,26 @@ fun SettingsScreen(
 
     val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
 
+    val converterCustomPath by viewModel.converterCustomOutputPath.collectAsState(initial = null)
+
     var showResetDialog by remember { mutableStateOf(false) }
     var showAdvancedThemeDialog by remember { mutableStateOf(false) }
     val searchQuery by viewModel.searchQuery.collectAsState(initial = "")
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
+
+    val folderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            // Take persistable permission
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.setConverterCustomOutputPath(it.toString())
+        }
+    }
 
     if (showResetDialog) {
         AlertDialog(
@@ -171,227 +195,83 @@ fun SettingsScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
-        ) {
-            SearchField(
-                query = searchQuery,
-                onQueryChange = { viewModel.onSearchQueryChange(it) }
-            )
-
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fadingEdges(top = 16.dp, bottom = 16.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.fillMaxSize()
             ) {
-                Spacer(Modifier.height(8.dp))
+                SearchField(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.onSearchQueryChange(it) }
+                )
 
-                // Section: SYSTEM
-                SettingsExpandableSection(
-                    title = "SYSTEM & ENGINE",
-                    icon = Icons.Rounded.SettingsInputComponent,
-                    isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fadingEdges(top = 16.dp, bottom = 16.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (matches(searchQuery, "update", "auto", "version")) {
-                        SettingsToggleItem(
-                            title = "Automatic Updates",
-                            subtitle = "Download patches in the background",
-                            icon = Icons.Rounded.AutoFixHigh,
-                            checked = autoUpdateEnabled,
-                            onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
-                        )
-                        SettingsItem(
-                            title = "Check for Updates",
-                            subtitle = "See if a new version is available",
-                            icon = Icons.Rounded.SystemUpdate,
-                            onClick = onNavigateToUpdate
-                        )
-                    }
-                    if (matches(searchQuery, "performance", "lag", "animations", "blur")) {
-                        SettingsToggleItem(
-                            title = "Performance Mode",
-                            subtitle = "Disable blur and high-frequency animations",
-                            icon = Icons.Rounded.Speed,
-                            checked = performanceMode,
-                            onCheckedChange = { viewModel.setPerformanceMode(it) }
-                        )
-                    }
-                }
+                    Spacer(Modifier.height(8.dp))
 
-                // Section: EXPERIENCE
-                SettingsExpandableSection(
-                    title = "INTERFACE & TOOLS",
-                    icon = Icons.Rounded.DashboardCustomize,
-                    isExpanded = expandedSection == "EXPERIENCE" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "EXPERIENCE") null else "EXPERIENCE" }
-                ) {
-                    if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus")) {
-                        SettingsToggleItem(
-                            title = "Smart Overlay",
-                            subtitle = "Floating tool for quick access",
-                            icon = Icons.Rounded.SmartButton,
-                            checked = showToolzPill,
-                            onCheckedChange = { viewModel.setShowToolzPill(it) }
-                        )
-
-                        if (showToolzPill) {
+                    // Section: SYSTEM
+                    SettingsExpandableSection(
+                        title = "SYSTEM & ENGINE",
+                        icon = Icons.Rounded.SettingsInputComponent,
+                        isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
+                    ) {
+                        if (matches(searchQuery, "update", "auto", "version")) {
                             SettingsToggleItem(
-                                title = "Show Task Progress",
-                                subtitle = "Track active tasks on the overlay",
-                                icon = Icons.Rounded.TaskAlt,
-                                checked = pillTodoEnabled,
-                                onCheckedChange = { viewModel.setPillTodoEnabled(it) }
+                                title = "Automatic Updates",
+                                subtitle = "Download patches in the background",
+                                icon = Icons.Rounded.AutoFixHigh,
+                                checked = autoUpdateEnabled,
+                                onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
                             )
-                            SettingsToggleItem(
-                                title = "Show Focus Score",
-                                subtitle = "View productivity score on the overlay",
-                                icon = Icons.Rounded.Toll,
-                                checked = pillFocusEnabled,
-                                onCheckedChange = { viewModel.setPillFocusEnabled(it) }
-                            )
-                        }
-                    }
-
-                    if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "notes")) {
-                        SettingsToggleItem(
-                            title = "Show Recent Tools",
-                            subtitle = "List frequently used tools on home",
-                            icon = Icons.Rounded.History,
-                            checked = showRecentTools,
-                            onCheckedChange = { viewModel.setShowRecentTools(it) }
-                        )
-
-                        SettingsToggleItem(
-                            title = "Show Quick Notes",
-                            subtitle = "Show pinned notes on dashboard",
-                            icon = Icons.AutoMirrored.Rounded.StickyNote2,
-                            checked = showQuickNotes,
-                            onCheckedChange = { viewModel.setShowQuickNotes(it) }
-                        )
-
-                        SettingsItem(
-                            title = "Home Layout",
-                            subtitle = "Current style: ${dashboardView.lowercase()}",
-                            icon = Icons.Rounded.Dashboard
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf("DEFAULT", "LIST").forEach { viewStyle ->
-                                    val isSelected = dashboardView == viewStyle
-                                    Surface(
-                                        onClick = {
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.setDashboardView(viewStyle)
-                                        },
-                                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            @Suppress("DEPRECATION")
-                                            Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Section: PERSONAL & HEALTH
-                SettingsExpandableSection(
-                    title = "USER & ENVIRONMENT",
-                    icon = Icons.Rounded.PersonPin,
-                    isExpanded = expandedSection == "USER" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "USER") null else "USER" }
-                ) {
-                    if (matches(searchQuery, "profile", "name", "explorer")) {
-                        SettingsItem(
-                            title = "User Profile",
-                            subtitle = "Name: ${userName.ifBlank { "Explorer" }}",
-                            icon = Icons.Rounded.AccountCircle
-                        ) {
-                            OutlinedTextField(
-                                value = userName,
-                                onValueChange = { viewModel.setUserName(it) },
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                placeholder = { Text("Enter your identity") },
-                                shape = RoundedCornerShape(20.dp),
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    unfocusedBorderColor = Color.Transparent,
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                )
-                            )
-                        }
-                    }
-
-                    if (matches(searchQuery, "step", "goal", "health", "tracker")) {
-                        SettingsToggleItem(
-                            title = "Step Tracker",
-                            subtitle = "Monitor physical activity in background",
-                            icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                            checked = stepCounterEnabled,
-                            onCheckedChange = { viewModel.setStepCounterEnabled(it) }
-                        )
-
-                        if (stepCounterEnabled) {
                             SettingsItem(
-                                title = "Step Goal",
-                                subtitle = "Target: $stepGoal steps",
-                                icon = Icons.Rounded.EmojiEvents
-                            ) {
-                                Slider(
-                                    value = stepGoal.toFloat(),
-                                    onValueChange = { viewModel.setStepGoal(it.toInt()) },
-                                    valueRange = 1000f..30000f,
-                                    steps = 29,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                )
-                            }
+                                title = "Check for Updates",
+                                subtitle = "See if a new version is available",
+                                icon = Icons.Rounded.SystemUpdate,
+                                onClick = onNavigateToUpdate
+                            )
                         }
-                    }
-
-                    if (matches(searchQuery, "unit", "system", "metric", "imperial")) {
-                        SettingsItem(
-                            title = "Measurement Units",
-                            subtitle = "System: ${unitSystem.lowercase()}",
-                            icon = Icons.Rounded.SquareFoot
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        if (matches(searchQuery, "performance", "lag", "animations", "blur")) {
+                            SettingsToggleItem(
+                                title = "Performance Mode",
+                                subtitle = "Disable blur and high-frequency animations",
+                                icon = Icons.Rounded.Speed,
+                                checked = performanceMode,
+                                onCheckedChange = { viewModel.setPerformanceMode(it) }
+                            )
+                        }
+                        if (matches(searchQuery, "converter", "output", "path", "folder", "save")) {
+                            SettingsItem(
+                                title = "Converter Output Folder",
+                                subtitle = if (converterCustomPath == null) "Default: Downloads/Toolz" else "Custom folder selected",
+                                icon = Icons.Rounded.FolderSpecial,
+                                onClick = { folderLauncher.launch(null) }
                             ) {
-                                listOf("METRIC", "IMPERIAL").forEach { unit ->
-                                    val isSelected = unitSystem == unit
-                                    Surface(
-                                        onClick = {
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.setUnitSystem(unit)
-                                        },
-                                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                if (converterCustomPath != null) {
+                                    Row(
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            @Suppress("DEPRECATION")
-                                            Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "Custom path active",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        TextButton(
+                                            onClick = { viewModel.setConverterCustomOutputPath(null) },
+                                            modifier = Modifier.height(32.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
+                                        ) {
+                                            Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -399,313 +279,499 @@ fun SettingsScreen(
                         }
                     }
 
-                    if (matches(searchQuery, "vibration", "haptic", "intensity")) {
-                        SettingsToggleItem(
-                            title = "Haptic Feedback",
-                            subtitle = "Tactile response on interaction",
-                            icon = Icons.Rounded.Vibration,
-                            checked = hapticFeedback,
-                            onCheckedChange = { viewModel.setHapticFeedback(it) }
-                        )
-
-                        if (hapticFeedback) {
-                            SettingsItem(
-                                title = "Vibration Strength",
-                                subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
-                                icon = Icons.Rounded.GraphicEq
-                            ) {
-                                Slider(
-                                    value = hapticIntensity,
-                                    onValueChange = { viewModel.setHapticIntensity(it) },
-                                    onValueChangeFinished = { vibrationManager?.vibrateClick() },
-                                    valueRange = 0.1f..1f,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Section: MEDIA
-                SettingsExpandableSection(
-                    title = "MUSIC & AUDIO",
-                    icon = Icons.Rounded.MusicNote,
-                    isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
-                ) {
-                    if (matches(searchQuery, "ai", "now playing", "lyrics", "meaning", "smart")) {
-                        SettingsToggleItem(
-                            title = "NOW PLAYING AI",
-                            subtitle = "Smart lyrics, meanings, and recommendations",
-                            icon = Icons.Rounded.AutoAwesome,
-                            checked = musicAiEnabled,
-                            onCheckedChange = { viewModel.setMusicAiEnabled(it) }
-                        )
-                    }
-
-                    if (matches(searchQuery, "lyrics", "screen", "sleep", "awake")) {
-                        SettingsToggleItem(
-                            title = "Lyrics Keep Screen Awake",
-                            subtitle = "Stop phone from sleeping in lyrics mode",
-                            icon = Icons.Rounded.Visibility,
-                            checked = musicKeepScreenOnLyrics,
-                            onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
-                        )
-                    }
-
-                    if (matches(searchQuery, "shake", "skip", "audio", "sensitivity")) {
-                        SettingsToggleItem(
-                            title = "Shake to Skip",
-                            subtitle = "Shake phone to play next song",
-                            icon = Icons.Rounded.PhonelinkRing,
-                            checked = musicShakeToSkip,
-                            onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
-                        )
-                        
-                        if (musicShakeToSkip) {
-                            SettingsItem(
-                                title = "Shake Sensitivity",
-                                subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
-                                icon = Icons.Rounded.GraphicEq
-                            ) {
-                                Slider(
-                                    value = musicShakeSensitivity,
-                                    onValueChange = { viewModel.setMusicShakeSensitivity(it) },
-                                    valueRange = 0.1f..1f,
-                                    modifier = Modifier.padding(top = 8.dp),
-                                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                )
-                                Text(
-                                    text = if (musicShakeSensitivity < 0.4f) "High force required" else if (musicShakeSensitivity < 0.7f) "Medium force" else "Light shake",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textAlign = TextAlign.End
-                                )
-                            }
-                        }
-
-                        SettingsToggleItem(
-                            title = "Smart Audio Focus",
-                            subtitle = "Automatically pause for other apps",
-                            icon = Icons.Rounded.Hearing,
-                            checked = musicAudioFocus,
-                            onCheckedChange = { viewModel.setMusicAudioFocus(it) }
-                        )
-                    }
-                }
-
-                // Section: NOTIFICATIONS
-                SettingsExpandableSection(
-                    title = "ALERTS & VAULT",
-                    icon = Icons.Rounded.Notifications,
-                    isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
-                ) {
-                    if (matches(searchQuery, "notification", "vault", "history")) {
-                        SettingsToggleItem(
-                            title = "Master Switch",
-                            subtitle = "Enable or disable all app alerts",
-                            icon = Icons.Rounded.NotificationsActive,
-                            checked = notificationsEnabled,
-                            onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                        )
-
-                        if (notificationsEnabled) {
+                    // Section: EXPERIENCE
+                    SettingsExpandableSection(
+                        title = "INTERFACE & TOOLS",
+                        icon = Icons.Rounded.DashboardCustomize,
+                        isExpanded = expandedSection == "EXPERIENCE" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "EXPERIENCE") null else "EXPERIENCE" }
+                    ) {
+                        if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus")) {
                             SettingsToggleItem(
-                                title = "Notification History",
-                                subtitle = "Save and view previous alerts",
-                                icon = Icons.Rounded.VerifiedUser,
-                                checked = notificationVaultEnabled,
-                                onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
+                                title = "Smart Overlay",
+                                subtitle = "Floating tool for quick access",
+                                icon = Icons.Rounded.SmartButton,
+                                checked = showToolzPill,
+                                onCheckedChange = { viewModel.setShowToolzPill(it) }
                             )
+
+                            if (showToolzPill) {
+                                SettingsToggleItem(
+                                    title = "Show Task Progress",
+                                    subtitle = "Track active tasks on the overlay",
+                                    icon = Icons.Rounded.TaskAlt,
+                                    checked = pillTodoEnabled,
+                                    onCheckedChange = { viewModel.setPillTodoEnabled(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Show Focus Score",
+                                    subtitle = "View productivity score on the overlay",
+                                    icon = Icons.Rounded.Toll,
+                                    checked = pillFocusEnabled,
+                                    onCheckedChange = { viewModel.setPillFocusEnabled(it) }
+                                )
+                            }
+                        }
+
+                        if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "notes")) {
                             SettingsToggleItem(
-                                title = "Step Goal Alerts",
-                                subtitle = "Notify on daily progress",
+                                title = "Show Recent Tools",
+                                subtitle = "List frequently used tools on home",
+                                icon = Icons.Rounded.History,
+                                checked = showRecentTools,
+                                onCheckedChange = { viewModel.setShowRecentTools(it) }
+                            )
+
+                            SettingsToggleItem(
+                                title = "Show Quick Notes",
+                                subtitle = "Show pinned notes on dashboard",
+                                icon = Icons.AutoMirrored.Rounded.StickyNote2,
+                                checked = showQuickNotes,
+                                onCheckedChange = { viewModel.setShowQuickNotes(it) }
+                            )
+
+                            SettingsItem(
+                                title = "Home Layout",
+                                subtitle = "Current style: ${dashboardView.lowercase()}",
+                                icon = Icons.Rounded.Dashboard
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("DEFAULT", "LIST").forEach { viewStyle ->
+                                        val isSelected = dashboardView == viewStyle
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setDashboardView(viewStyle)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Section: PERSONAL & HEALTH
+                    SettingsExpandableSection(
+                        title = "USER & ENVIRONMENT",
+                        icon = Icons.Rounded.PersonPin,
+                        isExpanded = expandedSection == "USER" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "USER") null else "USER" }
+                    ) {
+                        if (matches(searchQuery, "profile", "name", "explorer")) {
+                            SettingsItem(
+                                title = "User Profile",
+                                subtitle = "Name: ${userName.ifBlank { "Explorer" }}",
+                                icon = Icons.Rounded.AccountCircle
+                            ) {
+                                OutlinedTextField(
+                                    value = userName,
+                                    onValueChange = { viewModel.setUserName(it) },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    placeholder = { Text("Enter your identity") },
+                                    shape = RoundedCornerShape(20.dp),
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        unfocusedBorderColor = Color.Transparent,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    )
+                                )
+                            }
+                        }
+
+                        if (matches(searchQuery, "step", "goal", "health", "tracker")) {
+                            SettingsToggleItem(
+                                title = "Step Tracker",
+                                subtitle = "Monitor physical activity in background",
                                 icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                checked = stepNotifications,
-                                onCheckedChange = { viewModel.setStepNotifications(it) }
+                                checked = stepCounterEnabled,
+                                onCheckedChange = { viewModel.setStepCounterEnabled(it) }
                             )
-                            SettingsToggleItem(
-                                title = "Timer Alerts",
-                                subtitle = "Alarms for timers and tasks",
-                                icon = Icons.Rounded.Timer,
-                                checked = timerNotifications,
-                                onCheckedChange = { viewModel.setTimerNotifications(it) }
-                            )
-                        }
-                    }
-                }
 
-                // Section: DESIGN
-                SettingsExpandableSection(
-                    title = "THEME & VISUALS",
-                    icon = Icons.Rounded.Palette,
-                    isExpanded = expandedSection == "DESIGN" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "DESIGN") null else "DESIGN" }
-                ) {
-                    if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette")) {
-                        SettingsToggleItem(
-                            title = "Dynamic Colors",
-                            subtitle = "Adapt to device wallpaper (Android 12+)",
-                            icon = Icons.Rounded.ColorLens,
-                            checked = dynamicColor,
-                            onCheckedChange = { viewModel.setDynamicColor(it) }
-                        )
-
-                        if (!dynamicColor) {
-                            SettingsItem(
-                                title = "Custom Palette",
-                                subtitle = "Define your unique color scheme",
-                                icon = Icons.Rounded.FormatColorFill
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                            @Suppress("DEPRECATION")
-                                            Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                                            IconButton(onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setCustomPrimaryColor(null)
-                                            }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
-                                                Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                        Spacer(Modifier.height(8.dp))
-                                        ColorPickerRow(
-                                            selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                            onColorSelected = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setCustomPrimaryColor(it)
-                                            }
-                                        )
-                                    }
-
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                            @Suppress("DEPRECATION")
-                                            Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
-                                            IconButton(onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setCustomSecondaryColor(null)
-                                            }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
-                                                Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                        Spacer(Modifier.height(8.dp))
-                                        ColorPickerRow(
-                                            selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-                                            onColorSelected = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setCustomSecondaryColor(it)
-                                            }
-                                        )
-                                    }
-
-                                    Button(
-                                        onClick = {
-                                            vibrationManager?.vibrateClick()
-                                            showAdvancedThemeDialog = true
-                                        },
-                                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                            contentColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    ) {
-                                        Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        @Suppress("DEPRECATION")
-                                        Text("ADVANCED THEMING", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (matches(searchQuery, "dark", "light", "mode", "appearance")) {
-                        SettingsItem(
-                            title = "Appearance Mode",
-                            subtitle = "Current: ${themeMode.lowercase()}",
-                            icon = Icons.Rounded.DarkMode
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                                    val isSelected = themeMode == mode
-                                    Surface(
-                                        onClick = {
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.setThemeMode(mode)
-                                        },
-                                        modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            @Suppress("DEPRECATION")
-                                            Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Section: WIDGETS
-                SettingsExpandableSection(
-                    title = "EXTERNAL COMPONENTS",
-                    icon = Icons.Rounded.Widgets,
-                    isExpanded = expandedSection == "WIDGETS" || searchQuery.isNotEmpty(),
-                    onExpandToggle = { expandedSection = if (expandedSection == "WIDGETS") null else "WIDGETS" }
-                ) {
-                    if (matches(searchQuery, "widget", "opacity", "background")) {
-                        SettingsItem(
-                            title = "Widget Styling",
-                            subtitle = "Transparency and color overrides",
-                            icon = Icons.Rounded.SettingsSuggest
-                        ) {
-                            Column(modifier = Modifier.padding(top = 12.dp)) {
-                                ColorPickerRow(
-                                    selectedColor = widgetBgColor,
-                                    onColorSelected = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.setWidgetBackgroundColor(it)
-                                    }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(16.dp))
+                            if (stepCounterEnabled) {
+                                SettingsItem(
+                                    title = "Step Goal",
+                                    subtitle = "Target: $stepGoal steps",
+                                    icon = Icons.Rounded.EmojiEvents
+                                ) {
                                     Slider(
-                                        value = widgetOpacity,
-                                        onValueChange = { viewModel.setWidgetOpacity(it) },
-                                        valueRange = 0.1f..1f,
-                                        modifier = Modifier.weight(1f),
+                                        value = stepGoal.DivideToFloat(),
+                                        onValueChange = { viewModel.setStepGoal(it.toInt()) },
+                                        valueRange = 1000f..30000f,
+                                        steps = 29,
+                                        modifier = Modifier.padding(top = 8.dp),
                                         colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
                                     )
-                                    Spacer(Modifier.width(16.dp))
-                                    @Suppress("DEPRECATION")
-                                    Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "unit", "system", "metric", "imperial")) {
+                            SettingsItem(
+                                title = "Measurement Units",
+                                subtitle = "System: ${unitSystem.lowercase()}",
+                                icon = Icons.Rounded.SquareFoot
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("METRIC", "IMPERIAL").forEach { unit ->
+                                        val isSelected = unitSystem == unit
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setUnitSystem(unit)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "vibration", "haptic", "intensity")) {
+                            SettingsToggleItem(
+                                title = "Haptic Feedback",
+                                subtitle = "Tactile response on interaction",
+                                icon = Icons.Rounded.Vibration,
+                                checked = hapticFeedback,
+                                onCheckedChange = { viewModel.setHapticFeedback(it) }
+                            )
+
+                            if (hapticFeedback) {
+                                SettingsItem(
+                                    title = "Vibration Strength",
+                                    subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
+                                    icon = Icons.Rounded.GraphicEq
+                                ) {
+                                    Slider(
+                                        value = hapticIntensity,
+                                        onValueChange = { viewModel.setHapticIntensity(it) },
+                                        onValueChangeFinished = { vibrationManager?.vibrateClick() },
+                                        valueRange = 0.1f..1f,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
                                 }
                             }
                         }
                     }
+
+                    // Section: MEDIA
+                    SettingsExpandableSection(
+                        title = "MUSIC & AUDIO",
+                        icon = Icons.Rounded.MusicNote,
+                        isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
+                    ) {
+                        if (matches(searchQuery, "ai", "now playing", "lyrics", "meaning", "smart")) {
+                            SettingsToggleItem(
+                                title = "NOW PLAYING AI",
+                                subtitle = "Smart lyrics, meanings, and recommendations",
+                                icon = Icons.Rounded.AutoAwesome,
+                                checked = musicAiEnabled,
+                                onCheckedChange = { viewModel.setMusicAiEnabled(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "lyrics", "screen", "sleep", "awake")) {
+                            SettingsToggleItem(
+                                title = "Lyrics Keep Screen Awake",
+                                subtitle = "Stop phone from sleeping in lyrics mode",
+                                icon = Icons.Rounded.Visibility,
+                                checked = musicKeepScreenOnLyrics,
+                                onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "shake", "skip", "audio", "sensitivity")) {
+                            SettingsToggleItem(
+                                title = "Shake to Skip",
+                                subtitle = "Shake phone to play next song",
+                                icon = Icons.Rounded.PhonelinkRing,
+                                checked = musicShakeToSkip,
+                                onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
+                            )
+                            
+                            if (musicShakeToSkip) {
+                                SettingsItem(
+                                    title = "Shake Sensitivity",
+                                    subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
+                                    icon = Icons.Rounded.GraphicEq
+                                ) {
+                                    Slider(
+                                        value = musicShakeSensitivity,
+                                        onValueChange = { viewModel.setMusicShakeSensitivity(it) },
+                                        valueRange = 0.1f..1f,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                    @Suppress("DEPRECATION")
+                                    Text(
+                                        text = if (musicShakeSensitivity < 0.4f) "High force required" else if (musicShakeSensitivity < 0.7f) "Medium force" else "Light shake",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        textAlign = TextAlign.End
+                                    )
+                                }
+                            }
+
+                            SettingsToggleItem(
+                                title = "Smart Audio Focus",
+                                subtitle = "Automatically pause for other apps",
+                                icon = Icons.Rounded.Hearing,
+                                checked = musicAudioFocus,
+                                onCheckedChange = { viewModel.setMusicAudioFocus(it) }
+                            )
+                        }
+                    }
+
+                    // Section: NOTIFICATIONS
+                    SettingsExpandableSection(
+                        title = "ALERTS & VAULT",
+                        icon = Icons.Rounded.Notifications,
+                        isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
+                    ) {
+                        if (matches(searchQuery, "notification", "vault", "history")) {
+                            SettingsToggleItem(
+                                title = "Master Switch",
+                                subtitle = "Enable or disable all app alerts",
+                                icon = Icons.Rounded.NotificationsActive,
+                                checked = notificationsEnabled,
+                                onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                            )
+
+                            if (notificationsEnabled) {
+                                SettingsToggleItem(
+                                    title = "Notification History",
+                                    subtitle = "Save and view previous alerts",
+                                    icon = Icons.Rounded.VerifiedUser,
+                                    checked = notificationVaultEnabled,
+                                    onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Step Goal Alerts",
+                                    subtitle = "Notify on daily progress",
+                                    icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                    checked = stepNotifications,
+                                    onCheckedChange = { viewModel.setStepNotifications(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Timer Alerts",
+                                    subtitle = "Alarms for timers and tasks",
+                                    icon = Icons.Rounded.Timer,
+                                    checked = timerNotifications,
+                                    onCheckedChange = { viewModel.setTimerNotifications(it) }
+                                )
+                            }
+                        }
+                    }
+
+                    // Section: DESIGN
+                    SettingsExpandableSection(
+                        title = "THEME & VISUALS",
+                        icon = Icons.Rounded.Palette,
+                        isExpanded = expandedSection == "DESIGN" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "DESIGN") null else "DESIGN" }
+                    ) {
+                        if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette")) {
+                            SettingsToggleItem(
+                                title = "Dynamic Colors",
+                                subtitle = "Adapt to device wallpaper (Android 12+)",
+                                icon = Icons.Rounded.ColorLens,
+                                checked = dynamicColor,
+                                onCheckedChange = { viewModel.setDynamicColor(it) }
+                            )
+
+                            if (!dynamicColor) {
+                                SettingsItem(
+                                    title = "Custom Palette",
+                                    subtitle = "Define your unique color scheme",
+                                    icon = Icons.Rounded.FormatColorFill
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                                @Suppress("DEPRECATION")
+                                                Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+                                                IconButton(onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomPrimaryColor(null)
+                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
+                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            ColorPickerRow(
+                                                selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+                                                onColorSelected = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomPrimaryColor(it)
+                                                }
+                                            )
+                                        }
+
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                                @Suppress("DEPRECATION")
+                                                Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
+                                                IconButton(onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomSecondaryColor(null)
+                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
+                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            ColorPickerRow(
+                                                selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+                                                onColorSelected = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomSecondaryColor(it)
+                                                }
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                showAdvancedThemeDialog = true
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                                contentColor = MaterialTheme.colorScheme.primary
+                                            )
+                                        ) {
+                                            Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            @Suppress("DEPRECATION")
+                                            Text("ADVANCED THEMING", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "gradient", "background", "effect", "visual")) {
+                            SettingsToggleItem(
+                                title = "Background Gradient",
+                                subtitle = "Subtle depth effect on main screens",
+                                icon = Icons.Rounded.Gradient,
+                                checked = backgroundGradientEnabled,
+                                onCheckedChange = { viewModel.setBackgroundGradientEnabled(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "dark", "light", "mode", "appearance")) {
+                            SettingsItem(
+                                title = "Appearance Mode",
+                                subtitle = "Current: ${themeMode.lowercase()}",
+                                icon = Icons.Rounded.DarkMode
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                                        val isSelected = themeMode == mode
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setThemeMode(mode)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Section: WIDGETS
+                    SettingsExpandableSection(
+                        title = "EXTERNAL COMPONENTS",
+                        icon = Icons.Rounded.Widgets,
+                        isExpanded = expandedSection == "WIDGETS" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "WIDGETS") null else "WIDGETS" }
+                    ) {
+                        if (matches(searchQuery, "widget", "opacity", "background")) {
+                            SettingsItem(
+                                title = "Widget Styling",
+                                subtitle = "Transparency and color overrides",
+                                icon = Icons.Rounded.SettingsSuggest
+                            ) {
+                                Column(modifier = Modifier.padding(top = 12.dp)) {
+                                    ColorPickerRow(
+                                        selectedColor = widgetBgColor,
+                                        onColorSelected = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setWidgetBackgroundColor(it)
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(16.dp))
+                                        Slider(
+                                            value = widgetOpacity,
+                                            onValueChange = { viewModel.setWidgetOpacity(it) },
+                                            valueRange = 0.1f..1f,
+                                            modifier = Modifier.weight(1f),
+                                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                        )
+                                        Spacer(Modifier.width(16.dp))
+                                        @Suppress("DEPRECATION")
+                                        Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    AboutSection(onCheckUpdate = onNavigateToUpdate)
+
+                    Spacer(modifier = Modifier.height(80.dp))
                 }
-
-                AboutSection(onCheckUpdate = onNavigateToUpdate)
-
-                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     }
 }
+
+fun Int.DivideToFloat(): Float = this.toFloat()
 
 @Composable
 fun AdvancedThemeDialog(
@@ -982,6 +1048,9 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
 
 @Composable
 fun AboutSection(onCheckUpdate: () -> Unit) {
+    val context = LocalContext.current
+    val vibrationManager = LocalVibrationManager.current
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1017,7 +1086,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "A polished toolkit for utility, focus, media, and everyday problem solving.",
+                "A polished toolkit designed for daily use by frerox.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,
@@ -1026,16 +1095,37 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            Button(
-                onClick = onCheckUpdate,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.height(52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(10.dp))
-                @Suppress("DEPRECATION")
-                Text("CHECK FOR UPDATES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                Button(
+                    onClick = onCheckUpdate,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    @Suppress("DEPRECATION")
+                    Text("UPDATES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
+
+                Button(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        val intent = Intent(Intent.ACTION_VIEW, "https://discord.gg/aAswRUerwh".toUri())
+                        context.startActivity(intent)
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5865F2).copy(alpha = 0.1f), contentColor = Color(0xFF5865F2))
+                ) {
+                    Icon(Icons.Rounded.Forum, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    @Suppress("DEPRECATION")
+                    Text("DISCORD", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
