@@ -57,6 +57,7 @@ import com.frerox.toolz.ui.screens.light.*
 import com.frerox.toolz.ui.screens.math.*
 import com.frerox.toolz.ui.screens.media.MusicPlayerScreen
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.media.FileConverterScreen
 import com.frerox.toolz.ui.screens.notepad.NotepadScreen
 import com.frerox.toolz.ui.screens.pdf.PdfViewModel
 import com.frerox.toolz.ui.screens.pdf.ToolzPdfScreen
@@ -73,8 +74,9 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.screens.cleaner.CleanerScreen
+import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
-import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.service.StepCounterService
 import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
@@ -122,6 +124,7 @@ class MainActivity : AppCompatActivity() {
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
             val customPrimary by settingsRepository.customPrimaryColor.collectAsState(initial = null)
             val customSecondary by settingsRepository.customSecondaryColor.collectAsState(initial = null)
+            val backgroundGradientEnabled by settingsRepository.backgroundGradientEnabled.collectAsState(initial = true)
             val performanceMode by settingsRepository.performanceMode.collectAsState(initial = false)
             val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
             val hapticIntensity by settingsRepository.hapticIntensity.collectAsState(initial = 0.5f)
@@ -137,6 +140,7 @@ class MainActivity : AppCompatActivity() {
                 dynamicColor = dynamicColor,
                 customPrimary = customPrimary?.let { Color(it) },
                 customSecondary = customSecondary?.let { Color(it) },
+                backgroundGradientEnabled = backgroundGradientEnabled,
                 performanceMode = performanceMode,
                 hapticEnabled = hapticEnabled,
                 hapticIntensity = hapticIntensity,
@@ -145,7 +149,7 @@ class MainActivity : AppCompatActivity() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(toolzAppBackgroundBrush(darkTheme = isDark, performanceMode = performanceMode))
+                        .toolzBackground()
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
@@ -162,6 +166,7 @@ class MainActivity : AppCompatActivity() {
                             aiSettingsManager = aiSettingsManager,
                             pdfViewModel = pdfViewModel,
                             performanceMode = performanceMode,
+                            backgroundGradientEnabled = backgroundGradientEnabled,
                             incomingIntent = incomingIntent,
                             incomingIntentVersion = incomingIntentVersion,
                         )
@@ -394,6 +399,7 @@ fun ToolzNavHost(
     aiSettingsManager: AiSettingsManager,
     pdfViewModel: PdfViewModel,
     performanceMode: Boolean,
+    backgroundGradientEnabled: Boolean,
     incomingIntent: Intent?,
     incomingIntentVersion: Long,
 ) {
@@ -565,6 +571,9 @@ fun ToolzNavHost(
         composable(Screen.MusicPlayer.route) {
             MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
+        composable(Screen.FileConverter.route) {
+            FileConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
         composable(Screen.Flashlight.route) {
             FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -628,6 +637,9 @@ fun ToolzNavHost(
         }
         composable(Screen.PasswordGenerator.route) {
             RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.PasswordVault.route) {
+            PasswordVaultScreen(onBackClick = { navController.popBackStack() })
         }
         composable(
             route = Screen.Notepad.route + "?initialNoteId={initialNoteId}",

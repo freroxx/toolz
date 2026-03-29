@@ -1,7 +1,28 @@
 {
-  "versionCode": 5,
-  "versionName": "1.0.4",
-  "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.4/toolz-release.apk",
-  "changelog": "The latest beta release of Toolz! (v1.0.4)",
-  "sha256": "c9d59e090e134962544f41bb97499b3f2a120d9b450da8474f6b1e82380bf236"
+  "versionCode": 6,
+  "versionName": "1.0.5",
+  "changelog": "Improved update system with ABI-specific releases support and compatibility with splits.",
+  "isCritical": false,
+  "releases": [
+    {
+      "abi": "arm64-v8a",
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-arm64-v8a-release.apk",
+      "size": 15728640
+    },
+    {
+      "abi": "armeabi-v7a",
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-armeabi-v7a-release.apk",
+      "size": 14680064
+    },
+    {
+      "abi": "x86_64",
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-x86_64-release.apk",
+      "size": 16777216
+    },
+    {
+      "abi": "x86",
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-x86-release.apk",
+      "size": 15728640
+    }
+  ]
 }

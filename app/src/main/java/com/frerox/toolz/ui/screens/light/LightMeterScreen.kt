@@ -27,6 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.max
 import kotlin.math.min
 
@@ -38,6 +40,7 @@ fun LightMeterScreen(
 ) {
     val luxValue by viewModel.luxValue.collectAsState()
     val hasSensor = viewModel.hasSensor
+    val performanceMode = LocalPerformanceMode.current
     
     var maxLux by remember { mutableStateOf(0f) }
     LaunchedEffect(luxValue) {
@@ -69,11 +72,11 @@ fun LightMeterScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("LIGHT METER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("LIGHT METER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -81,7 +84,7 @@ fun LightMeterScreen(
                 actions = {
                     IconButton(
                         onClick = { maxLux = 0f },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Reset Max")
                     }
@@ -89,11 +92,12 @@ fun LightMeterScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .toolzBackground()
                 .padding(padding),
             contentAlignment = Alignment.Center
         ) {
@@ -104,7 +108,7 @@ fun LightMeterScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdges(top = 16.dp, bottom = 16.dp)
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp))
                         .padding(horizontal = 24.dp)
                 ) {
                     Spacer(modifier = Modifier.height(16.dp))
@@ -115,7 +119,7 @@ fun LightMeterScreen(
                         modifier = Modifier.size(300.dp)
                     ) {
                         val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                        val glowAlpha by infiniteTransition.animateFloat(
+                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
                             initialValue = 0.05f,
                             targetValue = 0.12f,
                             animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),

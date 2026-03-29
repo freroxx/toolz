@@ -30,13 +30,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -50,6 +53,7 @@ fun SpeedometerScreen(
 ) {
     val state by viewModel.speedState.collectAsState()
     val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+    val performanceMode = LocalPerformanceMode.current
 
     val animatedSpeed by animateFloatAsState(
         targetValue = state.speedKmh,
@@ -72,7 +76,7 @@ fun SpeedometerScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("SPEEDOMETER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("SPEEDOMETER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -89,23 +93,22 @@ fun SpeedometerScreen(
                         Icon(Icons.Rounded.History, "Reset Stats")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
+            .toolzBackground()
+            .padding(top = padding.calculateTopPadding())
         ) {
             if (locationPermissionState.status.isGranted) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdge(
-                            brush = Brush.verticalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent),
-                            length = 24.dp
-                        )
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp))
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -113,23 +116,25 @@ fun SpeedometerScreen(
                     // Main Speed Gauge
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(320.dp)) {
                         val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                        val glowAlpha by infiniteTransition.animateFloat(
+                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
                             initialValue = 0.05f,
                             targetValue = 0.12f,
                             animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
                             label = "glow"
                         )
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent)
-                                    ),
-                                    CircleShape
-                                )
-                        )
+                        if (!performanceMode) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent)
+                                        ),
+                                        CircleShape
+                                    )
+                            )
+                        }
 
                         Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                             val strokeWidth = 20.dp.toPx()
@@ -166,6 +171,7 @@ fun SpeedometerScreen(
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            @Suppress("DEPRECATION")
                             Text(
                                 text = "KILOMETERS / HOUR",
                                 style = MaterialTheme.typography.labelSmall,
@@ -193,6 +199,7 @@ fun SpeedometerScreen(
                             }
                             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(signalColor))
                             Spacer(Modifier.width(8.dp))
+                            @Suppress("DEPRECATION")
                             Text(
                                 text = if (!state.isGpsEnabled) "GPS ENGINE OFFLINE" else "GPS SIGNAL STRENGTH: ${if (state.accuracy < 20) "HIGH" else "LOW"}",
                                 style = MaterialTheme.typography.labelSmall,
@@ -273,8 +280,10 @@ fun SpeedStatCard(modifier: Modifier, label: String, value: String, unit: String
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                @Suppress("DEPRECATION")
                 Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 4.dp, start = 4.dp), fontWeight = FontWeight.Bold, color = color)
             }
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(alpha = 0.7f), letterSpacing = 0.5.sp)
         }
     }
@@ -286,6 +295,7 @@ private fun InfoItemInternal(label: String, value: String, icon: ImageVector) {
         Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(12.dp))
         Column {
+            @Suppress("DEPRECATION")
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
             Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
         }
@@ -297,7 +307,7 @@ private fun PermissionViewInternal(onClick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(40.dp)) {
             Surface(
-                modifier = Modifier.size(120.dp), 
+                modifier = Modifier.size(140.dp), 
                 shape = RoundedCornerShape(40.dp), 
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                 border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
@@ -317,7 +327,7 @@ private fun PermissionViewInternal(onClick: () -> Unit) {
             )
             Button(
                 onClick = onClick,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth().height(64.dp)
             ) {
                 Text("GRANT PERMISSION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)

@@ -79,6 +79,16 @@ object AiSettingsHelper {
         }
     }
 
+    fun supportsFiles(provider: String, model: String): Boolean {
+        return when (provider) {
+            "Gemini" -> true
+            "Claude" -> true
+            "ChatGPT" -> model.contains("gpt-4", ignoreCase = true) || model.contains("o1", ignoreCase = true)
+            "OpenRouter" -> model.contains("claude", ignoreCase = true) || model.contains("gemini", ignoreCase = true)
+            else -> false
+        }
+    }
+
     fun isOpenAiCompatible(provider: String): Boolean = provider in openAiCompatibleProviders
 
     fun getChatCompletionUrl(provider: String): String? = when (provider) {

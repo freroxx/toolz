@@ -15,8 +15,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.update.GitHubRelease
 import com.frerox.toolz.data.update.UpdateConstants
 import com.frerox.toolz.data.update.UpdateService
+import com.frerox.toolz.data.update.UpdateHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -41,8 +43,9 @@ class UpdateCheckWorker @AssistedInject constructor(
                     val latestVersion = release.tagName.removePrefix("v")
                     
                     if (isNewerVersion(currentVersionName, latestVersion)) {
-                        val apkAsset = release.assets.find { it.name.endsWith(".apk") }
-                        val apkUrl = apkAsset?.downloadUrl ?: ""
+                        val preferredAbi = settingsRepository.preferredAbi.first()
+                        val bestAsset = UpdateHelper.getBestAsset(release.assets, preferredAbi)
+                        val apkUrl = bestAsset?.downloadUrl ?: ""
                         
                         if (apkUrl.isNotEmpty()) {
                             settingsRepository.setAvailableUpdate(latestVersion, release.body, apkUrl)
@@ -70,7 +73,10 @@ class UpdateCheckWorker @AssistedInject constructor(
                 val currentVersionName = getCurrentVersionName()
                 
                 if (isNewerVersion(currentVersionName, manifest.versionName)) {
-                    val apkUrl = manifest.apkUrl ?: ""
+                    val preferredAbi = settingsRepository.preferredAbi.first()
+                    val bestRelease = manifest.releases?.let { UpdateHelper.getBestRelease(it, preferredAbi) }
+                    val apkUrl = bestRelease?.downloadUrl ?: ""
+
                     if (apkUrl.isNotEmpty()) {
                         settingsRepository.setAvailableUpdate(manifest.versionName, manifest.changelog ?: "", apkUrl)
                         handleUpdateAvailability(manifest.versionName, apkUrl)

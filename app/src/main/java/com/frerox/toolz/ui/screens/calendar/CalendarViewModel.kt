@@ -10,6 +10,7 @@ import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.calendar.*
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.CalendarAlarmScheduler
+import com.frerox.toolz.util.TaskAlarmScheduler
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -77,6 +78,7 @@ class CalendarViewModel @Inject constructor(
     private val aiSettingsManager: AiSettingsManager,
     private val syncUseCase: SyncImageToCalendarUseCase,
     private val alarmScheduler: CalendarAlarmScheduler,
+    private val taskAlarmScheduler: TaskAlarmScheduler,
     private val moshi: Moshi,
 ) : ViewModel() {
 
@@ -144,13 +146,15 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun setDate(year: Int, month: Int) {
-        val cal = Calendar.getInstance().apply {
-            timeInMillis = _uiState.value.selectedDate
-            set(Calendar.YEAR, year)
-            set(Calendar.MONTH, month)
-            set(Calendar.DAY_OF_MONTH, 1)
+        _uiState.update {
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = it.selectedDate
+                set(Calendar.YEAR, year)
+                set(Calendar.MONTH, month)
+                set(Calendar.DAY_OF_MONTH, 1)
+            }
+            it.copy(selectedDate = cal.timeInMillis)
         }
-        _uiState.update { it.copy(selectedDate = cal.timeInMillis) }
     }
 
     fun nextMonth() {
@@ -386,6 +390,21 @@ class CalendarViewModel @Inject constructor(
             when {
                 updated.isCompleted      -> alarmScheduler.cancelEventReminders(updated)
                 updated.remindersEnabled -> alarmScheduler.scheduleEventReminders(updated)
+            }
+        }
+    }
+
+    fun toggleTaskCompletion(task: TaskEntry) {
+        viewModelScope.launch {
+            val updated = task.copy(
+                isCompleted = !task.isCompleted,
+                completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
+            )
+            repository.updateTask(updated)
+            if (updated.isCompleted) {
+                taskAlarmScheduler.cancelReminder(updated)
+            } else {
+                taskAlarmScheduler.scheduleReminder(updated)
             }
         }
     }

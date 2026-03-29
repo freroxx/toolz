@@ -18,6 +18,7 @@ class SettingsRepository @Inject constructor(
     private val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     private val CUSTOM_PRIMARY_COLOR = intPreferencesKey("custom_primary_color")
     private val CUSTOM_SECONDARY_COLOR = intPreferencesKey("custom_secondary_color")
+    private val BACKGROUND_GRADIENT_ENABLED = booleanPreferencesKey("background_gradient_enabled")
     private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
@@ -92,9 +93,13 @@ class SettingsRepository @Inject constructor(
     private val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_available_version")
     private val UPDATE_CHANGELOG = stringPreferencesKey("update_changelog")
     private val UPDATE_APK_URL = stringPreferencesKey("update_apk_url")
+    private val PREFERRED_ABI = stringPreferencesKey("preferred_abi") // "AUTO", "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
 
     // AI Focus Custom Instructions
     private val FOCUS_AI_CUSTOM_INSTRUCTIONS = stringPreferencesKey("focus_ai_custom_instructions")
+
+    // Converter Settings
+    private val CONVERTER_CUSTOM_OUTPUT_PATH = stringPreferencesKey("converter_custom_output_path")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -110,6 +115,7 @@ class SettingsRepository @Inject constructor(
     val dynamicColor: Flow<Boolean> = dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val customPrimaryColor: Flow<Int?> = dataStore.data.map { it[CUSTOM_PRIMARY_COLOR] }
     val customSecondaryColor: Flow<Int?> = dataStore.data.map { it[CUSTOM_SECONDARY_COLOR] }
+    val backgroundGradientEnabled: Flow<Boolean> = dataStore.data.map { it[BACKGROUND_GRADIENT_ENABLED] ?: true }
     val shutterSoundEnabled: Flow<Boolean> = dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
@@ -197,8 +203,11 @@ class SettingsRepository @Inject constructor(
     val updateAvailableVersion: Flow<String?> = dataStore.data.map { it[UPDATE_AVAILABLE_VERSION] }
     val updateChangelog: Flow<String?> = dataStore.data.map { it[UPDATE_CHANGELOG] }
     val updateApkUrl: Flow<String?> = dataStore.data.map { it[UPDATE_APK_URL] }
+    val preferredAbi: Flow<String> = dataStore.data.map { it[PREFERRED_ABI] ?: "AUTO" }
 
     val focusAiCustomInstructions: Flow<String> = dataStore.data.map { it[FOCUS_AI_CUSTOM_INSTRUCTIONS] ?: "" }
+
+    val converterCustomOutputPath: Flow<String?> = dataStore.data.map { it[CONVERTER_CUSTOM_OUTPUT_PATH] }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -214,6 +223,7 @@ class SettingsRepository @Inject constructor(
             if (color == null) it.remove(CUSTOM_SECONDARY_COLOR) else it[CUSTOM_SECONDARY_COLOR] = color
         }
     }
+    suspend fun setBackgroundGradientEnabled(enabled: Boolean) { dataStore.edit { it[BACKGROUND_GRADIENT_ENABLED] = enabled } }
     suspend fun setShutterSoundEnabled(enabled: Boolean) { dataStore.edit { it[SHUTTER_SOUND_ENABLED] = enabled } }
     suspend fun setShutterSoundUri(uri: String) { dataStore.edit { it[SHUTTER_SOUND_URI] = uri } }
     suspend fun addWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) + zone } }
@@ -257,6 +267,14 @@ class SettingsRepository @Inject constructor(
             pref[APP_CATEGORY_MAPPINGS] = filtered + "$packageName:$category"
         }
     }
+
+    suspend fun removeAppCategoryMapping(packageName: String) {
+        dataStore.edit { pref ->
+            val current = pref[APP_CATEGORY_MAPPINGS] ?: emptySet()
+            pref[APP_CATEGORY_MAPPINGS] = current.filterNot { it.startsWith("$packageName:") }.toSet()
+        }
+    }
+
     suspend fun setAppNameMapping(packageName: String, customName: String) {
         dataStore.edit { pref ->
             val current = pref[APP_NAME_MAPPINGS] ?: emptySet()
@@ -265,10 +283,10 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun removeAppCategoryMapping(packageName: String) {
+    suspend fun removeAppNameMapping(packageName: String) {
         dataStore.edit { pref ->
-            val current = pref[APP_CATEGORY_MAPPINGS] ?: emptySet()
-            pref[APP_CATEGORY_MAPPINGS] = current.filterNot { it.startsWith("$packageName:") }.toSet()
+            val current = pref[APP_NAME_MAPPINGS] ?: emptySet()
+            pref[APP_NAME_MAPPINGS] = current.filterNot { it.startsWith("$packageName:") }.toSet()
         }
     }
 
@@ -330,8 +348,16 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun setPreferredAbi(abi: String) { dataStore.edit { it[PREFERRED_ABI] = abi } }
+
     suspend fun setFocusAiCustomInstructions(instructions: String) {
         dataStore.edit { it[FOCUS_AI_CUSTOM_INSTRUCTIONS] = instructions }
+    }
+
+    suspend fun setConverterCustomOutputPath(path: String?) {
+        dataStore.edit {
+            if (path == null) it.remove(CONVERTER_CUSTOM_OUTPUT_PATH) else it[CONVERTER_CUSTOM_OUTPUT_PATH] = path
+        }
     }
 
     suspend fun resetOnboarding() {

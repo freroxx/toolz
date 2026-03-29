@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.abs
 
 // ─────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ fun BmiScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
 
     Scaffold(
         topBar = {
@@ -125,71 +128,72 @@ fun BmiScreen(
                 modifier = Modifier.statusBarsPadding(),
             )
         },
-        containerColor    = MaterialTheme.colorScheme.surface,
+        containerColor    = Color.Transparent,
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
-                .fadingEdges(top = 20.dp, bottom = 20.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            // ── BMI ring card ────────────────────────────────────────
-            ResultCard(
-                bmi      = state.bmi,
-                category = state.category,
-                range    = state.healthyRange,
-            )
-
-            // ── Goal card ────────────────────────────────────────────
-            AnimatedVisibility(
-                visible = state.weightDifference != null,
-                enter   = expandVertically() + fadeIn(),
-                exit    = shrinkVertically() + fadeOut(),
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 20.dp, bottom = 20.dp))
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                state.weightDifference?.let { diff ->
-                    GoalCard(
-                        difference = diff,
-                        unit       = if (state.isKg) "KG" else "LB",
+                // ── BMI ring card ────────────────────────────────────────
+                ResultCard(
+                    bmi      = state.bmi,
+                    category = state.category,
+                    range    = state.healthyRange,
+                )
+
+                // ── Goal card ────────────────────────────────────────────
+                AnimatedVisibility(
+                    visible = state.weightDifference != null,
+                    enter   = expandVertically() + fadeIn(),
+                    exit    = shrinkVertically() + fadeOut(),
+                ) {
+                    state.weightDifference?.let { diff ->
+                        GoalCard(
+                            difference = diff,
+                            unit       = if (state.isKg) "KG" else "LB",
+                        )
+                    }
+                }
+
+                // ── Inputs ───────────────────────────────────────────────
+                InputPanel(state = state, viewModel = viewModel)
+
+                // ── Activity level ───────────────────────────────────────
+                ActivityPanel(
+                    selected  = state.activity,
+                    onSelect  = viewModel::onActivityChange,
+                )
+
+                // ── Advanced metrics ─────────────────────────────────────
+                AnimatedVisibility(
+                    visible = state.bmi != null,
+                    enter   = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                    exit    = shrinkVertically() + fadeOut(),
+                ) {
+                    AdvancedMetrics(state = state)
+                }
+
+                // ── BMI classification ───────────────────────────────────
+                AnimatedVisibility(
+                    visible = state.bmi != null,
+                    enter   = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                    exit    = shrinkVertically() + fadeOut(),
+                ) {
+                    BmiInfoSection(
+                        bmi          = state.bmi ?: 0f,
+                        healthyRange = state.healthyRange,
                     )
                 }
+
+                Spacer(Modifier.height(40.dp))
             }
-
-            // ── Inputs ───────────────────────────────────────────────
-            InputPanel(state = state, viewModel = viewModel)
-
-            // ── Activity level ───────────────────────────────────────
-            ActivityPanel(
-                selected  = state.activity,
-                onSelect  = viewModel::onActivityChange,
-            )
-
-            // ── Advanced metrics ─────────────────────────────────────
-            AnimatedVisibility(
-                visible = state.bmi != null,
-                enter   = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit    = shrinkVertically() + fadeOut(),
-            ) {
-                AdvancedMetrics(state = state)
-            }
-
-            // ── BMI classification ───────────────────────────────────
-            AnimatedVisibility(
-                visible = state.bmi != null,
-                enter   = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit    = shrinkVertically() + fadeOut(),
-            ) {
-                BmiInfoSection(
-                    bmi          = state.bmi ?: 0f,
-                    healthyRange = state.healthyRange,
-                )
-            }
-
-            Spacer(Modifier.height(40.dp))
         }
     }
 }
@@ -485,6 +489,7 @@ private fun InputPanel(state: BmiState, viewModel: BmiViewModel) {
 @Composable
 private fun InputHeader(label: String, toggle: String, onToggle: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        @Suppress("DEPRECATION")
         Text(
             label,
             style         = MaterialTheme.typography.labelSmall,
@@ -498,6 +503,7 @@ private fun InputHeader(label: String, toggle: String, onToggle: () -> Unit) {
             color    = MaterialTheme.colorScheme.primaryContainer,
             shape    = RoundedCornerShape(8.dp),
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 toggle,
                 modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
@@ -520,6 +526,7 @@ fun BmiInput(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
+        @Suppress("DEPRECATION")
         Text(
             label,
             style         = MaterialTheme.typography.labelSmall,
@@ -581,6 +588,7 @@ private fun ActivityPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.DirectionsRun, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                @Suppress("DEPRECATION")
                 Text(
                     "ACTIVITY LEVEL",
                     style         = MaterialTheme.typography.labelSmall,
@@ -589,6 +597,7 @@ private fun ActivityPanel(
                     letterSpacing = 1.sp,
                 )
                 Spacer(Modifier.weight(1f))
+                @Suppress("DEPRECATION")
                 Text(
                     "× %.3f".format(selected.multiplier),
                     style      = MaterialTheme.typography.labelSmall,
@@ -621,6 +630,7 @@ private fun ActivityPanel(
                             modifier            = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
+                            @Suppress("DEPRECATION")
                             Text(
                                 level.shortLabel,
                                 style      = MaterialTheme.typography.labelSmall,
@@ -637,6 +647,7 @@ private fun ActivityPanel(
             }
             // Selected label
             Spacer(Modifier.height(6.dp))
+            @Suppress("DEPRECATION")
             Text(
                 selected.label,
                 style      = MaterialTheme.typography.labelSmall,
@@ -709,6 +720,7 @@ fun MetricCard(
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
     ) {
         Column(Modifier.padding(16.dp)) {
+            @Suppress("DEPRECATION")
             Text(
                 title,
                 style         = MaterialTheme.typography.labelSmall,
@@ -722,6 +734,7 @@ fun MetricCard(
             ) {
                 Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Spacer(Modifier.width(3.dp))
+                @Suppress("DEPRECATION")
                 Text(
                     unit,
                     style      = MaterialTheme.typography.labelSmall,
@@ -730,13 +743,14 @@ fun MetricCard(
                     color      = MaterialTheme.colorScheme.primary,
                 )
             }
+            @Suppress("DEPRECATION")
             Text(
                 subtitle,
                 style      = MaterialTheme.typography.labelSmall,
                 color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
                 fontWeight = FontWeight.Medium,
                 maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -822,6 +836,7 @@ private fun SectionLabel(text: String) {
             color  = MaterialTheme.colorScheme.primaryContainer.copy(0.5f),
             shape  = RoundedCornerShape(6.dp),
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 text,
                 modifier   = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),

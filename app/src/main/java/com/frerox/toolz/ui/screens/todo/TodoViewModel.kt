@@ -7,11 +7,14 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.calendar.EventEntry
+import com.frerox.toolz.data.calendar.EventRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.data.todo.TaskRepository
 import com.frerox.toolz.service.ToolService
+import com.frerox.toolz.util.CalendarAlarmScheduler
 import com.frerox.toolz.util.TaskAlarmScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -39,8 +42,10 @@ enum class TaskSortOrder {
 class TodoViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val repository: TaskRepository,
+    private val eventRepository: EventRepository,
     private val settingsRepository: SettingsRepository,
-    private val alarmScheduler: TaskAlarmScheduler
+    private val alarmScheduler: TaskAlarmScheduler,
+    private val calendarAlarmScheduler: CalendarAlarmScheduler
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TodoUiState())
@@ -208,18 +213,19 @@ class TodoViewModel @Inject constructor(
         }
     }
 
-    fun convertFromClipboard(text: String) {
-        val category = when {
-            text.contains("import", true) || text.contains("fun ", true) || text.contains("val ", true) -> "Dev"
-            text.contains("Exo", true) || text.contains("Revision", true) || text.contains("http", true) -> "Science"
-            text.length > 30 -> "Personal"
-            else -> "Shopping"
+    fun addToCalendar(task: TaskEntry) {
+        viewModelScope.launch {
+            val event = EventEntry(
+                title = task.title,
+                description = task.description,
+                timestamp = task.dueDate ?: System.currentTimeMillis(),
+                eventType = "DEADLINE",
+                subjectColor = "#6200EE",
+                remindersEnabled = true
+            )
+            val id = eventRepository.insertEvent(event)
+            calendarAlarmScheduler.scheduleEventReminders(event.copy(id = id.toInt()))
         }
-        addTask(
-            title = text.take(50).trim(),
-            category = category,
-            priority = 3
-        )
     }
 
     override fun onCleared() {

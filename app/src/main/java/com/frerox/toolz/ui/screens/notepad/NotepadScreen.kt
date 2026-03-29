@@ -53,6 +53,7 @@ import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -116,10 +117,10 @@ fun NotepadScreen(
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
         snackbarHost   = { SnackbarHost(snackbar) },
         topBar         = {
-            Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
+            Column(Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
                     title = {
                         Text(
@@ -191,6 +192,7 @@ fun NotepadScreen(
         Box(
             Modifier
                 .fillMaxSize()
+                .toolzBackground()
                 .padding(top = padding.calculateTopPadding())
                 .then(
                     if (performanceMode) Modifier
@@ -979,7 +981,7 @@ fun NoteEditorDialog(
                         }
                     },
                     actions = {
-                        // AI "Choose the Look" button
+                        // AI \"Choose the Look\" button
                         IconButton(
                             onClick  = {
                                 vibration?.vibrateClick()

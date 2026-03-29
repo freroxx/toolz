@@ -8,5 +8,6 @@ data class AiConfig(
     val provider: String,
     val model: String,
     val apiKey: String,
-    val iconRes: String = "AUTO" // "AUTO", "GEMINI", "CHATGPT", "GROQ", "CLAUDE", "BOT", "SPARKLE", "BRAIN"
+    val iconRes: String = "AUTO", // "AUTO", "GEMINI", "CHATGPT", "GROQ", "CLAUDE", "BOT", "SPARKLE", "BRAIN"
+    val customIconUri: String? = null
 )

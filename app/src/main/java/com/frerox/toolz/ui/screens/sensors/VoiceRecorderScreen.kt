@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,10 +36,14 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +52,8 @@ fun VoiceRecorderScreen(
     viewModel: VoiceRecorderViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
+    val isDark = isSystemInDarkTheme()
 
     var showSettingsSheet by remember { mutableStateOf(false) }
 
@@ -55,6 +62,7 @@ fun VoiceRecorderScreen(
             Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
                     title = {
+                        @Suppress("DEPRECATION")
                         Text(
                             text = "VOICE RECORDER",
                             style = MaterialTheme.typography.labelSmall,
@@ -94,202 +102,212 @@ fun VoiceRecorderScreen(
                 )
             }
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .padding(padding)
         ) {
-            // Recording Visualization Area
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 32.dp, horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                        val glowAlpha by infiniteTransition.animateFloat(
-                            initialValue = 0.05f,
-                            targetValue = 0.15f,
-                            animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
-                            label = "glow"
-                        )
-                        
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf((if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = glowAlpha), Color.Transparent)
-                                    ),
-                                    CircleShape
-                                )
-                        )
-
-                        if (uiState.isRecording) {
-                            WaveformAnimation(amplitude = uiState.maxAmplitude)
-                        } else {
-                            RecordingRippleAnimation()
-                        }
-                        
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = formatDuration(uiState.durationMillis),
-                                style = MaterialTheme.typography.displayLarge.copy(
-                                    fontSize = 64.sp,
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace,
-                                    letterSpacing = (-3).sp
-                                ),
-                                color = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                            )
-                            AnimatedVisibility(
-                                visible = uiState.isRecording,
-                                enter = fadeIn() + scaleIn(),
-                                exit = fadeOut() + scaleOut()
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.padding(top = 16.dp)
-                                ) {
-                                    Text(
-                                        if (uiState.isPaused) "SESSION PAUSED" else "LIVE CAPTURE",
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.error,
-                                        letterSpacing = 1.5.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(32.dp))
-                    
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (uiState.isRecording) {
-                            Surface(
-                                onClick = {
-                                    if (uiState.isPaused) viewModel.resumeRecording()
-                                    else viewModel.pauseRecording()
-                                },
-                                modifier = Modifier.size(64.dp).bouncyClick {},
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                tonalElevation = 4.dp
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(24.dp))
-                        }
-                        
-                        RecordButton(
-                            isRecording = uiState.isRecording,
-                            onClick = {
-                                if (uiState.isRecording) viewModel.stopRecording()
-                                else viewModel.startRecording()
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Recordings List
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 24.dp)
+                modifier = Modifier.fillMaxSize()
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Recording Visualization Area
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp)
+                    Column(
+                        modifier = Modifier.padding(vertical = 32.dp, horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Text(
-                            "AUDIO ARCHIVE",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.5.sp
-                        )
-                    }
-                    Text(
-                        "${uiState.recordings.size} ENTRIES",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-                
-                if (uiState.recordings.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                modifier = Modifier.size(100.dp),
-                                shape = RoundedCornerShape(32.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.MicNone, 
-                                    null, 
-                                    modifier = Modifier.padding(24.dp),
-                                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                            val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
+                                initialValue = 0.05f,
+                                targetValue = 0.15f,
+                                animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+                                label = "glow"
+                            )
+                            
+                            if (!performanceMode) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.radialGradient(
+                                                listOf((if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = glowAlpha), Color.Transparent)
+                                            ),
+                                            CircleShape
+                                        )
                                 )
                             }
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                "NO RECORDINGS YET", 
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                                letterSpacing = 1.sp
+
+                            if (uiState.isRecording) {
+                                WaveformAnimation(amplitude = uiState.maxAmplitude)
+                            } else {
+                                RecordingRippleAnimation(performanceMode)
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = formatDuration(uiState.durationMillis),
+                                    style = MaterialTheme.typography.displayLarge.copy(
+                                        fontSize = 64.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        letterSpacing = (-3).sp
+                                    ),
+                                    color = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
+                                AnimatedVisibility(
+                                    visible = uiState.isRecording,
+                                    enter = fadeIn() + scaleIn(),
+                                    exit = fadeOut() + scaleOut()
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.padding(top = 16.dp)
+                                    ) {
+                                        @Suppress("DEPRECATION")
+                                        Text(
+                                            if (uiState.isPaused) "SESSION PAUSED" else "LIVE CAPTURE",
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.error,
+                                            letterSpacing = 1.5.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(32.dp))
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (uiState.isRecording) {
+                                Surface(
+                                    onClick = {
+                                        if (uiState.isPaused) viewModel.resumeRecording()
+                                        else viewModel.pauseRecording()
+                                    },
+                                    modifier = Modifier.size(64.dp).bouncyClick {},
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    tonalElevation = 4.dp
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(24.dp))
+                            }
+                            
+                            RecordButton(
+                                isRecording = uiState.isRecording,
+                                onClick = {
+                                    if (uiState.isRecording) viewModel.stopRecording()
+                                    else viewModel.startRecording()
+                                }
                             )
                         }
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 100.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 100.dp)
+                }
+
+                // Recordings List
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 24.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        items(uiState.recordings, key = { it.absolutePath }) { recording ->
-                            RecordingCard(
-                                file = recording,
-                                isPlaying = uiState.playingFile == recording && uiState.isPlaying,
-                                playbackPosition = if (uiState.playingFile == recording) uiState.playbackPosition else 0,
-                                playbackDuration = if (uiState.playingFile == recording) uiState.playbackDuration else 0,
-                                onTogglePlay = { viewModel.togglePlayback(recording) },
-                                onDelete = { viewModel.deleteRecording(recording) },
-                                onRename = { viewModel.renameRecording(recording, it) }
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            @Suppress("DEPRECATION")
+                            Text(
+                                "AUDIO ARCHIVE",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.5.sp
                             )
+                        }
+                        @Suppress("DEPRECATION")
+                        Text(
+                            "${uiState.recordings.size} ENTRIES",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    
+                    if (uiState.recordings.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            @Suppress("DEPRECATION")
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Surface(
+                                    modifier = Modifier.size(100.dp),
+                                    shape = RoundedCornerShape(32.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.MicNone, 
+                                        null, 
+                                        modifier = Modifier.padding(24.dp),
+                                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                    )
+                                }
+                                Spacer(Modifier.height(16.dp))
+                                Text(
+                                    "NO RECORDINGS YET", 
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                                    letterSpacing = 1.sp
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 100.dp)),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 100.dp)
+                        ) {
+                            items(uiState.recordings, key = { it.absolutePath }) { recording ->
+                                RecordingCard(
+                                    file = recording,
+                                    isPlaying = uiState.playingFile == recording && uiState.isPlaying,
+                                    playbackPosition = if (uiState.playingFile == recording) uiState.playbackPosition else 0,
+                                    playbackDuration = if (uiState.playingFile == recording) uiState.playbackDuration else 0,
+                                    onTogglePlay = { viewModel.togglePlayback(recording) },
+                                    onDelete = { viewModel.deleteRecording(recording) },
+                                    onRename = { viewModel.renameRecording(recording, it) }
+                                )
+                            }
                         }
                     }
                 }
@@ -316,7 +334,7 @@ fun WaveformAnimation(amplitude: Int) {
     LaunchedEffect(amplitude) {
         val norm = (amplitude.toFloat() / 32767f).coerceIn(0.1f, 1f)
         heights.forEach { h ->
-            h.value = norm * (0.3f + Math.random().toFloat() * 0.7f)
+            h.value = norm * (0.3f + Random.nextFloat() * 0.7f)
         }
     }
 
@@ -368,6 +386,7 @@ fun VoiceRecorderSettingsSheet(
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 40.dp)
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 "AUDIO CONFIGURATION",
                 style = MaterialTheme.typography.labelLarge,
@@ -383,14 +402,8 @@ fun VoiceRecorderSettingsSheet(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("SENSITIVITY (GAIN)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                        Text("${String.format("%.1f", state.gainLevel)}x", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    }
+                    Text("SENSITIVITY (GAIN)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("${String.format("%.1f", state.gainLevel)}x", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                     Slider(
                         value = state.gainLevel,
                         onValueChange = onGainChange,
@@ -456,7 +469,8 @@ fun VoiceRecorderSettingsSheet(
 }
 
 @Composable
-fun RecordingRippleAnimation() {
+fun RecordingRippleAnimation(performanceMode: Boolean) {
+    if (performanceMode) return
     val infiniteTransition = rememberInfiniteTransition(label = "ripple")
     val scale1 by infiniteTransition.animateFloat(
         initialValue = 0.8f,
@@ -579,6 +593,7 @@ fun RecordingCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    @Suppress("DEPRECATION")
                     Text(
                         SimpleDateFormat("dd MMM yyyy • HH:mm", Locale.getDefault()).format(Date(file.lastModified())).uppercase(),
                         style = MaterialTheme.typography.labelSmall,
@@ -606,7 +621,9 @@ fun RecordingCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(formatDuration(playbackPosition.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    @Suppress("DEPRECATION")
                     Text(formatDuration(playbackDuration.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
                 }
             }

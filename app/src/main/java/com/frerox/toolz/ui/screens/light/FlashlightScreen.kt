@@ -5,6 +5,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -54,6 +58,7 @@ fun FlashlightScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
+    val performanceMode = LocalPerformanceMode.current
 
     Scaffold(
         topBar = {
@@ -80,27 +85,31 @@ fun FlashlightScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
             )
         },
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
-        if (cameraPermission.status.isGranted) {
-            FlashlightContent(
-                state    = state,
-                onToggle = viewModel::toggleFlashlight,
-                onSetMode       = viewModel::setMode,
-                onSetBrightness = viewModel::setBrightness,
-                onSetStrobe     = viewModel::setStrobeInterval,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = padding.calculateTopPadding()),
-            )
-        } else {
-            PermissionContent(
-                onRequest = { cameraPermission.launchPermissionRequest() },
-                modifier  = Modifier
-                    .fillMaxSize()
-                    .padding(top = padding.calculateTopPadding()),
-            )
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .padding(top = padding.calculateTopPadding())
+        ) {
+            if (cameraPermission.status.isGranted) {
+                FlashlightContent(
+                    state    = state,
+                    onToggle = viewModel::toggleFlashlight,
+                    onSetMode       = viewModel::setMode,
+                    onSetBrightness = viewModel::setBrightness,
+                    onSetStrobe     = viewModel::setStrobeInterval,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
+                )
+            } else {
+                PermissionContent(
+                    onRequest = { cameraPermission.launchPermissionRequest() },
+                    modifier  = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
@@ -372,7 +381,7 @@ private fun ControlsPanel(
                             )
                         } else {
                             Text(
-                                "${(state.brightness * 100).roundToInt()}%",
+                                "${(state.brightness * 100).toInt()}%",
                                 style      = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Black,
                                 color      = MaterialTheme.colorScheme.primary,
@@ -407,7 +416,7 @@ private fun ControlsPanel(
                     }
                     val freqHz = remember(state.strobeIntervalMs) {
                         (1000f / (2f * state.strobeIntervalMs)).let {
-                            if (it >= 10f) "${it.roundToInt()} Hz" else "%.1f Hz".format(it)
+                            if (it >= 10f) "${it.toInt()} Hz" else "%.1f Hz".format(it)
                         }
                     }
                     Row(
@@ -591,5 +600,4 @@ private fun PermissionContent(
 //  Utility
 // ─────────────────────────────────────────────────────────────
 
-private fun Float.roundToInt(): Int = (this + 0.5f).toInt()
 private fun Float.roundToLong(): Long = (this + 0.5f).toLong()

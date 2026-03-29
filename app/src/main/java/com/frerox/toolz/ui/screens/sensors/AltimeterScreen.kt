@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -50,6 +52,7 @@ fun AltimeterScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val locationPermissionState = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
+    val performanceMode = LocalPerformanceMode.current
 
     val animatedAltitude by animateFloatAsState(
         targetValue = state.altitudeMeters.toFloat(),
@@ -69,7 +72,7 @@ fun AltimeterScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("ALTITUDE TRACKER", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("ALTITUDE TRACKER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -90,21 +93,22 @@ fun AltimeterScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
+            .toolzBackground()
             .padding(top = padding.calculateTopPadding())
         ) {
             if (locationPermissionState.status.isGranted) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .fadingEdge(
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdge(
                             brush = Brush.verticalGradient(listOf(Color.Black, Color.Transparent)),
                             length = 24.dp
-                        )
+                        ))
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally

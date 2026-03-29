@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -47,12 +50,14 @@ fun UnitConverterScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val units = state.availableUnits
+    val performanceMode = LocalPerformanceMode.current
+    val isDark = isSystemInDarkTheme()
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { 
-                    Text("UNIT ANALYTICS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) 
+                    Text("UNIT ANALYTICS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium)
                 },
                 navigationIcon = {
                     IconButton(
@@ -69,199 +74,204 @@ fun UnitConverterScreen(
                 modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
-                .fadingEdges(top = 24.dp, bottom = 24.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .background(toolzAppBackgroundBrush(isDark, performanceMode))
+            .padding(top = padding.calculateTopPadding())
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(40.dp),
-                modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .fadingEdges(top = 24.dp, bottom = 24.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                val scrollState = rememberScrollState()
-                Box(modifier = Modifier.height(280.dp).fadingEdges(top = 16.dp, bottom = 16.dp).padding(16.dp).verticalScroll(scrollState)) {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        maxItemsInEachRow = 3
-                    ) {
-                        ConversionType.entries.forEachIndexed { index, type ->
-                            val isSelected = state.type == type
-                            var itemVisible by remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) {
-                                delay(index * 20L)
-                                itemVisible = true
-                            }
-                            
-                            val scale by animateFloatAsState(
-                                targetValue = if (itemVisible) 1f else 0.7f,
-                                animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow)
-                            )
-                            val alpha by animateFloatAsState(if (itemVisible) 1f else 0f)
-    
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(72.dp)
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                        this.alpha = alpha
-                                    }
-                                    .bouncyClick { viewModel.onTypeChange(type) },
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)) else null
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(4.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+                    shape = RoundedCornerShape(40.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+                ) {
+                    val scrollState = rememberScrollState()
+                    Box(modifier = Modifier.height(280.dp).fadingEdges(top = 16.dp, bottom = 16.dp).padding(16.dp).verticalScroll(scrollState)) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            maxItemsInEachRow = 3
+                        ) {
+                            ConversionType.entries.forEachIndexed { index, type ->
+                                val isSelected = state.type == type
+                                var itemVisible by remember { mutableStateOf(false) }
+                                LaunchedEffect(Unit) {
+                                    delay(index * 20L)
+                                    itemVisible = true
+                                }
+                                
+                                val scale by animateFloatAsState(
+                                    targetValue = if (itemVisible) 1f else 0.7f,
+                                    animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow)
+                                )
+                                val alpha by animateFloatAsState(if (itemVisible) 1f else 0f)
+        
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(72.dp)
+                                        .graphicsLayer {
+                                            scaleX = scale
+                                            scaleY = scale
+                                            this.alpha = alpha
+                                        }
+                                        .bouncyClick { viewModel.onTypeChange(type) },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)) else null
                                 ) {
-                                    Icon(
-                                        imageVector = getIconForType(type),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        text = type.name.lowercase().replaceFirstChar { it.uppercase() }.replace("_", " "),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        fontSize = 9.sp,
-                                        letterSpacing = 0.2.sp
-                                    )
+                                    Column(
+                                        modifier = Modifier.padding(4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = getIconForType(type),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = type.name.lowercase().replaceFirstChar { it.uppercase() }.replace("_", " "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            fontSize = 9.sp,
+                                            letterSpacing = 0.2.sp
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(48.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-            ) {
-                Column(modifier = Modifier.padding(32.dp)) {
-                    UnitSection(
-                        isInput = true,
-                        label = "INPUT PARAMETER",
-                        value = state.inputValue,
-                        unit = state.fromUnit,
-                        units = units,
-                        onValueChange = { viewModel.onInputValueChange(it) },
-                        onUnitChange = { viewModel.onFromUnitChange(it) }
-                    )
-                    
-                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), contentAlignment = Alignment.Center) {
-                        HorizontalDivider(modifier = Modifier.alpha(0.1f))
-                        Surface(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .shadow(12.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                                .bouncyClick { viewModel.swapUnits() },
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            tonalElevation = 8.dp,
-                            border = BorderStroke(2.dp, Color.White.copy(alpha = 0.2f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SwapVert,
-                                contentDescription = "Swap",
-                                modifier = Modifier.padding(16.dp).size(32.dp),
-                                tint = MaterialTheme.colorScheme.onPrimary
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(48.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    Column(modifier = Modifier.padding(32.dp)) {
+                        UnitSection(
+                            isInput = true,
+                            label = "INPUT PARAMETER",
+                            value = state.inputValue,
+                            unit = state.fromUnit,
+                            units = units,
+                            onValueChange = { viewModel.onInputValueChange(it) },
+                            onUnitChange = { viewModel.onFromUnitChange(it) }
+                        )
+                        
+                        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), contentAlignment = Alignment.Center) {
+                            HorizontalDivider(modifier = Modifier.alpha(0.1f))
+                            Surface(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .shadow(12.dp, CircleShape, spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                                    .bouncyClick { viewModel.swapUnits() },
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary,
+                                tonalElevation = 8.dp,
+                                border = BorderStroke(2.dp, Color.White.copy(alpha = 0.2f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SwapVert,
+                                    contentDescription = "Swap",
+                                    modifier = Modifier.padding(16.dp).size(32.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+
+                        UnitSection(
+                            isInput = false,
+                            label = "CALCULATED OUTPUT",
+                            value = state.outputValue,
+                            unit = state.toUnit,
+                            units = units,
+                            onUnitChange = { viewModel.onToUnitChange(it) }
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                AnimatedVisibility(
+                    visible = state.inputValue.isNotEmpty(),
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(32.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    ) {
+                        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "PRECISION RESULT",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 2.sp
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                text = "${state.inputValue} ${state.fromUnit} = ${state.outputValue} ${state.toUnit}",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Black,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                letterSpacing = (-0.5).sp
                             )
                         }
                     }
-
-                    UnitSection(
-                        isInput = false,
-                        label = "CALCULATED OUTPUT",
-                        value = state.outputValue,
-                        unit = state.toUnit,
-                        units = units,
-                        onUnitChange = { viewModel.onToUnitChange(it) }
-                    )
                 }
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            AnimatedVisibility(
-                visible = state.inputValue.isNotEmpty(),
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
                 ) {
-                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        modifier = Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
                         Text(
-                            "PRECISION RESULT",
+                            text = "Engine leverages high-precision IEEE 754 floating-point architecture for all unit calculations.",
                             style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 2.sp
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = "${state.inputValue} ${state.fromUnit} = ${state.outputValue} ${state.toUnit}",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            letterSpacing = (-0.5).sp
+                            lineHeight = 16.sp
                         )
                     }
                 }
+                
+                Spacer(Modifier.height(48.dp))
+                Spacer(Modifier.navigationBarsPadding())
             }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(32.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
-                    Text(
-                        text = "Engine leverages high-precision IEEE 754 floating-point architecture for all unit calculations.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        fontWeight = FontWeight.Black,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-            
-            Spacer(Modifier.height(48.dp))
-            Spacer(Modifier.navigationBarsPadding())
         }
     }
 }

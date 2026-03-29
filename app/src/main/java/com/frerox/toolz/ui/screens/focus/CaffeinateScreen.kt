@@ -30,7 +30,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.focus.CaffeinateApp
 import com.frerox.toolz.ui.components.AppIcon
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -50,6 +53,7 @@ fun CaffeinateScreen(
     
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
     val primaryColorInt = MaterialTheme.colorScheme.primary.toArgb()
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -63,9 +67,12 @@ fun CaffeinateScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("CAFFEINATE", fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = { Text("CAFFEINATE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
                     }
                 },
@@ -73,7 +80,7 @@ fun CaffeinateScreen(
                     Box(contentAlignment = Alignment.Center) {
                         IconButton(onClick = { viewModel.refreshAppCategories() }, enabled = !isCategorizing) {
                             Icon(
-                                Icons.Rounded.AutoAwesome, 
+                                Icons.Rounded.AutoAwesome,
                                 contentDescription = "AI Categorize",
                                 tint = if (isCategorizing) MaterialTheme.colorScheme.primary.copy(0.3f) else MaterialTheme.colorScheme.primary
                             )
@@ -86,15 +93,21 @@ fun CaffeinateScreen(
                             )
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
-        }
+        },
+        containerColor = Color.Transparent,
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .padding(top = padding.calculateTopPadding())
+        ) {
             Column(
                 modifier = Modifier
-                    .padding(padding)
                     .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -136,7 +149,7 @@ fun CaffeinateScreen(
                 apps = allApps,
                 onToggleApp = { viewModel.toggleAppAutoEnable(it) }
             )
-            
+
             Spacer(Modifier.height(40.dp))
             }
 
@@ -168,6 +181,7 @@ fun CaffeinateScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+                        @Suppress("DEPRECATION")
                         Text(
                             aiStatus.uppercase(),
                             style = MaterialTheme.typography.labelLarge,
@@ -205,6 +219,7 @@ fun PermissionBanner(onAuthorize: () -> Unit) {
                 Icon(Icons.Rounded.NotificationsActive, null, tint = MaterialTheme.colorScheme.error)
             }
             Column(modifier = Modifier.weight(1f)) {
+                @Suppress("DEPRECATION")
                 Text("NOTIFICATION REQUIRED", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 Text("Needed to keep screen awake while active", style = MaterialTheme.typography.bodySmall)
             }
@@ -396,6 +411,7 @@ fun ReminderSettingsCard(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column {
+                    @Suppress("DEPRECATION")
                     Text("REMINDER ALERT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     Text(
                         if (isInfinite) "Running indefinitely" else "Alert every $interval mins",
@@ -446,13 +462,14 @@ fun CategoryManagerUI(
     onToggleApp: (CaffeinateApp) -> Unit
 ) {
     val categories = apps.groupBy { it.category }
-    
+
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 "AUTO-COFFEE CATEGORIES",
                 style = MaterialTheme.typography.labelMedium,
@@ -473,10 +490,10 @@ fun CategoryManagerUI(
                 )
             }
         }
-        
+
         categories.forEach { (category, categoryApps) ->
             var expanded by remember { mutableStateOf(false) }
-            
+
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -517,7 +534,7 @@ fun CategoryManagerUI(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    
+
                     AnimatedVisibility(visible = expanded) {
                         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp)) {
                             HorizontalDivider(modifier = Modifier.padding(bottom = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(0.2f))

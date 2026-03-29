@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.draw.scale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -69,6 +70,7 @@ import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.util.ConnectivityObserver
 import com.frerox.toolz.util.NetworkConnectivityObserver
@@ -322,6 +324,7 @@ private fun DashboardContent(
                     exit = fadeOut() + shrinkVertically()
                 ) {
                     Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        @Suppress("DEPRECATION")
                         Text(
                             "AI RECOMMENDED",
                             style = MaterialTheme.typography.labelSmall,
@@ -386,6 +389,7 @@ private fun DashboardContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .toolzBackground()
                 .padding(top = padding.calculateTopPadding())
         ) {
             if (dashboardView == "LIST") {
@@ -557,7 +561,7 @@ private fun DashboardContent(
             }
 
             // Universal App Pill
-            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, recorderState, todoState, productivityScore, showPillSetting, pillTodoEnabled, pillFocusEnabled) {
+            val activePages = remember(musicState, timerState, stopwatchState, pomodoroState, stepState, recorderState, todoState, productivityScore, showPillSetting, pillTodoEnabled, pillFocusEnabled, isCaffeinateActive) {
                 if (!showPillSetting) return@remember emptyList<PillPage>()
                 val pages = mutableListOf<PillPage>()
                 if (musicState.currentTrack != null) pages.add(PillPage.Music)
@@ -667,6 +671,7 @@ fun AiAssistantCard(onClick: () -> Unit) {
             }
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
+                @Suppress("DEPRECATION")
                 Text(
                     "AI ASSISTANT",
                     style = MaterialTheme.typography.labelSmall,
@@ -697,6 +702,7 @@ fun AiAssistantCard(onClick: () -> Unit) {
 
 @Composable
 fun SectionHeader(title: String, topPadding: androidx.compose.ui.unit.Dp = 0.dp) {
+    @Suppress("DEPRECATION")
     Text(
         text = title.uppercase(),
         style = MaterialTheme.typography.labelSmall,
@@ -780,6 +786,7 @@ fun TodoPill(state: TodoUiState, viewModel: TodoViewModel) {
                 }
             }
             Spacer(Modifier.width(16.dp))
+            @Suppress("DEPRECATION")
             Column(modifier = Modifier.weight(1f)) {
                 Text("ACTIVE TASK", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                 Text(
@@ -839,6 +846,7 @@ fun FocusPill(score: Int) {
             Icon(Icons.Rounded.Toll, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
         }
         Spacer(Modifier.width(20.dp))
+        @Suppress("DEPRECATION")
         Column(modifier = Modifier.weight(1f)) {
             Text("PRODUCTIVITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             Text(
@@ -860,48 +868,75 @@ fun FocusPill(score: Int) {
 @Composable
 fun CaffeinatePill(viewModel: com.frerox.toolz.ui.screens.focus.CaffeinateViewModel) {
     val isRunning by viewModel.isServiceRunning.collectAsState()
+    val elapsedTime by viewModel.elapsedTime.collectAsState()
     val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
     
     Row(
         modifier = Modifier.padding(horizontal = 24.dp).fillMaxSize(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(64.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.Coffee, 
-                    null, 
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer, 
-                    modifier = Modifier.size(32.dp)
+        Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+            val infiniteTransition = rememberInfiniteTransition(label = "caffeinate")
+            val pulse by if (performanceMode) remember { mutableFloatStateOf(1f) } else infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.2f,
+                animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                label = "pulse"
+            )
+            
+            if (isRunning && !performanceMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .scale(pulse)
+                        .alpha(0.15f)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
                 )
             }
+            
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Coffee, 
+                        null, 
+                        tint = if (isRunning) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary, 
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
         }
+        
         Spacer(Modifier.width(16.dp))
+        
+        @Suppress("DEPRECATION")
         Column(modifier = Modifier.weight(1f)) {
-            Text("CAFFEINATE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+            Text("SYSTEM AWAKE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
             Text(
-                "ON DRAIN: ACTIVE",
-                style = MaterialTheme.typography.titleMedium,
+                if (isRunning) formatTimeDashboard(elapsedTime) else "STANDBY",
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             )
         }
+        
         IconButton(
             onClick = {
                 vibrationManager?.vibrateClick()
-                viewModel.toggleService()
+                viewModel.toggleService(android.graphics.Color.BLUE)
             },
-            modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
+            modifier = Modifier.size(48.dp).background(if (isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer, CircleShape)
         ) {
             Icon(
                 if (isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
                 null,
-                tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(32.dp)
+                tint = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
             )
         }
     }
@@ -982,6 +1017,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            @Suppress("DEPRECATION")
             Text(
                 "QUICK NOTES",
                 style = MaterialTheme.typography.labelSmall,
@@ -993,6 +1029,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                 vibrationManager?.vibrateClick()
                 onNoteClick()
             }) {
+                @Suppress("DEPRECATION")
                 Text("VIEW ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
             }
         }
@@ -1026,6 +1063,7 @@ fun NotepadPreview(notes: List<Note>, onNoteClick: () -> Unit) {
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(6.dp))
+                        @Suppress("DEPRECATION")
                         Text(
                             note.content,
                             style = MaterialTheme.typography.bodySmall,
@@ -1072,6 +1110,7 @@ fun RecorderPill(state: RecordingState, viewModel: VoiceRecorderViewModel) {
             }
         }
         Spacer(Modifier.width(16.dp))
+        @Suppress("DEPRECATION")
         Column(modifier = Modifier.weight(1f)) {
             Text("RECORDING", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
             Text(
@@ -1120,7 +1159,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        val targetProgress = if (duration > 0) playbackPosition.toFloat() / duration else 0f
+        val targetProgress = if (duration > 0) playbackPosition.toFloat() / duration.toFloat() else 0f
         val animatedProgress by animateFloatAsState(
             targetValue = targetProgress,
             animationSpec = if (performanceMode) snap() else tween(500, easing = LinearOutSlowInEasing),
@@ -1156,6 +1195,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
 
             Spacer(Modifier.width(16.dp))
 
+            @Suppress("DEPRECATION")
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     track.title,
@@ -1177,7 +1217,7 @@ fun MusicPill(state: MusicUiState, viewModel: MusicPlayerViewModel) {
 
                     if (state.sleepTimerActive && state.sleepTimerRemaining != null) {
                         Text(
-                            " â€¢ â³ ${formatTimeDashboard(state.sleepTimerRemaining)}",
+                            " • ⌛ ${formatTimeDashboard(state.sleepTimerRemaining)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Black,
@@ -1251,6 +1291,7 @@ fun TimerPill(state: com.frerox.toolz.ui.screens.time.TimerState, viewModel: Tim
                 }
             }
             Spacer(Modifier.width(16.dp))
+            @Suppress("DEPRECATION")
             Column(modifier = Modifier.weight(1f)) {
                 Text("TIMER", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
                 Text(
@@ -1304,6 +1345,7 @@ fun StopwatchPill(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewMo
             }
         }
         Spacer(Modifier.width(16.dp))
+        @Suppress("DEPRECATION")
         Column(modifier = Modifier.weight(1f)) {
             Text("STOPWATCH", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
             Text(
@@ -1366,6 +1408,7 @@ fun PomodoroPill(state: com.frerox.toolz.ui.screens.time.PomodoroState, viewMode
                 }
             }
             Spacer(Modifier.width(16.dp))
+            @Suppress("DEPRECATION")
             Column(modifier = Modifier.weight(1f)) {
                 Text(state.mode.name, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
                 Text(
@@ -1421,6 +1464,7 @@ fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
             Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(28.dp))
         }
         Spacer(Modifier.width(20.dp))
+        @Suppress("DEPRECATION")
         Column(modifier = Modifier.weight(1f)) {
             Text("DAILY STEPS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
             Text(
@@ -1432,6 +1476,7 @@ fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
         }
         Column(horizontalAlignment = Alignment.End) {
             Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color(0xFF4CAF50))
+            @Suppress("DEPRECATION")
             Text("GOAL: ${state.goal}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
         }
     }
@@ -1439,9 +1484,14 @@ fun StepsPill(state: com.frerox.toolz.ui.screens.sensors.StepState) {
 
 private fun formatTimeDashboard(millis: Long): String {
     val totalSeconds = (millis + 999) / 1000
-    val min = totalSeconds / 60
+    val hours = totalSeconds / 3600
+    val min = (totalSeconds % 3600) / 60
     val sec = totalSeconds % 60
-    return String.format(Locale.getDefault(), "%02d:%02d", min, sec)
+    return if (hours > 0) {
+        String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, min, sec)
+    } else {
+        String.format(Locale.getDefault(), "%02d:%02d", min, sec)
+    }
 }
 
 private fun formatSessionTime(millis: Long): String {
@@ -1474,6 +1524,7 @@ fun WelcomeHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
+            @Suppress("DEPRECATION")
             Text(
                 text = "$greeting, $displayName".uppercase(),
                 style = MaterialTheme.typography.labelSmall,
@@ -1580,6 +1631,7 @@ fun ImprovedToolCard(tool: ToolItem, isPinned: Boolean, onClick: () -> Unit, onL
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1
                     )
+                    @Suppress("DEPRECATION")
                     Text(
                         text = tool.description.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
@@ -1676,6 +1728,7 @@ private fun DashboardLoadingScreen() {
                 )
             }
             Spacer(Modifier.height(24.dp))
+            @Suppress("DEPRECATION")
             Text(
                 "TOOLZ PRO",
                 style = MaterialTheme.typography.labelLarge,
@@ -1694,74 +1747,62 @@ private fun DashboardLoadingScreen() {
 
 fun getCategories() = listOf(
     ToolCategory(
-        "FAVORITES & ESSENTIALS",
+        "SMART FLOW",
         listOf(
             ToolItem("Ai Assistant", Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, "Gemini Flash AI"),
             ToolItem("Focus Flow", Icons.Rounded.Toll, Screen.FocusFlow.route, "Productivity insights"),
             ToolItem("Todo List", Icons.Rounded.TaskAlt, Screen.Todo.route, "Physics task flow"),
-            ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
-            ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
-            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker"),
+            ToolItem("Pomodoro", Icons.Rounded.AvTimer, Screen.Pomodoro.route, "Deep focus"),
             ToolItem("Caffeinate", Icons.Rounded.Coffee, Screen.Caffeinate.route, "Screen wake tool")
         )
     ),
     ToolCategory(
-        "UTILITIES & TOOLS",
+        "DAILY UTILS",
         listOf(
             ToolItem("Calculator", Icons.Rounded.Calculate, Screen.Calculator.route, "Standard math"),
             ToolItem("Unit Converter", Icons.Rounded.SyncAlt, Screen.UnitConverter.route, "Instant conversion"),
+            ToolItem("File Converter", Icons.Rounded.Transform, Screen.FileConverter.route, "Format transformation"),
+            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Quick notes"),
             ToolItem("Clipboard", Icons.Rounded.ContentPaste, Screen.Clipboard.route, "Smart copy history"),
-            ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Light tools"),
-            ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Precision leveling"),
-            ToolItem("Password Gen", Icons.Rounded.Password, Screen.PasswordGenerator.route, "Secure keys")
+            ToolItem("Password Vault", Icons.Rounded.Security, Screen.PasswordVault.route, "Encrypted credentials"),
+            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
+            ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Light tools")
         )
     ),
     ToolCategory(
-        "TIME & PRODUCTIVITY",
+        "TIME & MEDIA",
         listOf(
             ToolItem("Calendar", Icons.Rounded.CalendarMonth, Screen.Calendar.route, "Time-fluid agenda"),
-            ToolItem("Timer", Icons.Rounded.Timer, Screen.Timer.route, "Countdown"),
-            ToolItem("Pomodoro", Icons.Rounded.AvTimer, Screen.Pomodoro.route, "Deep focus"),
-            ToolItem("Stopwatch", Icons.Rounded.History, Screen.Stopwatch.route, "Laps"),
-            ToolItem("World Clock", Icons.Rounded.Public, Screen.WorldClock.route, "Global time"),
-            ToolItem("Notepad", Icons.Rounded.Description, Screen.Notepad.route, "Quick notes")
-        )
-    ),
-    ToolCategory(
-        "MEDIA & DOCUMENTS",
-        listOf(
-            ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View documents"),
-            ToolItem("Scanner", Icons.Rounded.QrCodeScanner, Screen.Scanner.route, "QR / Barcode"),
+            ToolItem("Music Player", Icons.Rounded.MusicNote, Screen.MusicPlayer.route, "Audio library"),
             ToolItem("Voice Recorder", Icons.Rounded.Mic, Screen.VoiceRecorder.route, "Audio memo"),
-            ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom")
+            ToolItem("Timer", Icons.Rounded.Timer, Screen.Timer.route, "Countdown"),
+            ToolItem("Stopwatch", Icons.Rounded.History, Screen.Stopwatch.route, "Laps"),
+            ToolItem("World Clock", Icons.Rounded.Public, Screen.WorldClock.route, "Global time")
         )
     ),
     ToolCategory(
-        "SCIENCE & SENSORS",
+        "SENSORS & SCAN",
         listOf(
+            ToolItem("Scanner", Icons.Rounded.QrCodeScanner, Screen.Scanner.route, "QR / Barcode"),
             ToolItem("Compass", Icons.Rounded.Explore, Screen.Compass.route, "Navigation"),
+            ToolItem("Bubble Level", Icons.Rounded.Architecture, Screen.BubbleLevel.route, "Precision leveling"),
+            ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom"),
             ToolItem("Light Meter", Icons.Rounded.LightMode, Screen.LightMeter.route, "Lux measure"),
             ToolItem("Periodic Table", Icons.Rounded.Science, Screen.PeriodicTable.route, "Atomic data"),
-            ToolItem("Equation Solver", Icons.Rounded.Calculate, Screen.EquationSolver.route, "Scientific math"),
-            ToolItem("Speedometer", Icons.Rounded.Speed, Screen.Speedometer.route, "GPS Speed"),
-            ToolItem("Altimeter", Icons.Rounded.FilterHdr, Screen.Altimeter.route, "Altitude")
+            ToolItem("Speedometer", Icons.Rounded.Speed, Screen.Speedometer.route, "GPS Speed")
         )
     ),
     ToolCategory(
         "SYSTEM & HEALTH",
         listOf(
-            ToolItem("File Cleaner", Icons.Rounded.CleaningServices, Screen.FileCleaner.route, "Deep clean"),
-            ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
             ToolItem("Device Info", Icons.Rounded.Info, Screen.DeviceInfo.route, "Intelligence"),
+            ToolItem("Step Counter", Icons.AutoMirrored.Rounded.DirectionsRun, Screen.StepCounter.route, "Fitness tracker"),
+            ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status"),
+            ToolItem("File Cleaner", Icons.Rounded.CleaningServices, Screen.FileCleaner.route, "Deep clean"),
+            ToolItem("Notification Vault", Icons.Rounded.VerifiedUser, Screen.NotificationVault.route, "Anti-recall logs"),
             ToolItem("BMI Calc", Icons.Rounded.MonitorWeight, Screen.BmiCalculator.route, "Health"),
-            ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills"),
             ToolItem("Ruler", Icons.Rounded.Straighten, Screen.Ruler.route, "Measure"),
             ToolItem("Flip Coin", Icons.Rounded.Casino, Screen.FlipCoin.route, "Decisions")
         )
     )
 )
-
-
-
-
-

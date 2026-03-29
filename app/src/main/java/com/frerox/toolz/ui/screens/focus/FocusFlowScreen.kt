@@ -61,6 +61,9 @@ import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.rememberLifecycleEvent
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.components.parseMarkdownToSegments
+import com.frerox.toolz.ui.components.MarkdownSegment
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -101,7 +104,7 @@ fun FocusFlowScreen(
 
     Scaffold(
         topBar = {
-            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.background(Color.Transparent)) {
                 CenterAlignedTopAppBar(
                     title = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -217,9 +220,9 @@ fun FocusFlowScreen(
                 )
             }
         },
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
     ) { padding ->
-        Box(Modifier.padding(top = padding.calculateTopPadding()).fillMaxSize()) {
+        Box(Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -459,7 +462,7 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
         onClick = onResolveClick,
         modifier = Modifier.fillMaxWidth().bouncyClick { },
         shape    = RoundedCornerShape(24.dp),
-        color    = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f),
         border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
     ) {
         Row(
@@ -1603,12 +1606,19 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                                 .verticalScroll(scrollState)
                                 .padding(20.dp)
                         ) {
-                            Text(
-                                tips ?: "No tips available at the moment. Please try again later.",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                lineHeight = 26.sp,
-                            )
+                            if (tips != null) {
+                                val segments = remember(tips) { parseMarkdownToSegments(tips!!) }
+                                segments.forEach { seg ->
+                                    MarkdownSegment(seg, modifier = Modifier.padding(vertical = 4.dp))
+                                }
+                            } else {
+                                Text(
+                                    "No tips available at the moment. Please try again later.",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    lineHeight = 26.sp,
+                                )
+                            }
                         }
                     }
                     

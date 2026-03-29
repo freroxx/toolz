@@ -61,7 +61,9 @@ import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -77,6 +79,7 @@ fun NotificationVaultScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val performanceMode = LocalPerformanceMode.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var selectedAppDetails by remember { mutableStateOf<AppDetails?>(null) }
     var showNotificationMenu by remember { mutableStateOf<NotificationEntry?>(null) }
@@ -109,6 +112,7 @@ fun NotificationVaultScreen(
                             )
                             Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
                             Spacer(Modifier.width(6.dp))
+                            @Suppress("DEPRECATION")
                             Text("ANTI-RECALL ENGINE ACTIVE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -138,104 +142,107 @@ fun NotificationVaultScreen(
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            VaultSearchBar(
-                query = searchQuery,
-                onQueryChange = { viewModel.setSearchQuery(it) }
-            )
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                VaultSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.setSearchQuery(it) }
+                )
 
-            CategoryStrip(
-                categories = categories,
-                selectedCategory = selectedCategory,
-                onCategorySelect = { viewModel.setCategory(it) }
-            )
+                CategoryStrip(
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    onCategorySelect = { viewModel.setCategory(it) }
+                )
 
-            if (!isPermissionGranted) {
-                Surface(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-                    },
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().bouncyClick { },
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.SecurityUpdateWarning, null, tint = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("LISTENER DISABLED", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
-                            Text("Notifications cannot be archived without permission.", style = MaterialTheme.typography.bodySmall)
+                if (!isPermissionGranted) {
+                    Surface(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                        },
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().bouncyClick { },
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.SecurityUpdateWarning, null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                @Suppress("DEPRECATION")
+                                Text("LISTENER DISABLED", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                                Text("Notifications cannot be archived without permission.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
                         }
-                        Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
                     }
                 }
-            }
 
-            AnimatedContent(
-                targetState = notifications.isEmpty(),
-                transitionSpec = { 
-                    (fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.95f))
-                        .togetherWith(fadeOut(animationSpec = tween(200))) 
-                },
-                label = "listContent",
-                modifier = Modifier.weight(1f)
-            ) { isEmpty ->
-                if (isEmpty) {
-                    EmptyVaultState(searchQuery.isNotEmpty())
-                } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize()
-                                .fadingEdges(top = 16.dp, bottom = 16.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            itemsIndexed(notifications, key = { _, item -> item.id }) { index, notification ->
-                                var itemVisible by remember { mutableStateOf(false) }
-                                LaunchedEffect(Unit) {
-                                    delay(index * 20L)
-                                    itemVisible = true
-                                }
-
-                                SwipeToDeleteContainer(
-                                    onDelete = { viewModel.deleteNotification(notification.id) },
-                                    modifier = Modifier.graphicsLayer {
-                                        alpha = if (itemVisible) 1f else 0f
-                                        translationY = if (itemVisible) 0f else 20f
-                                    }.animateContentSize()
-                                ) {
-                                    NotificationVaultCard(
-                                        notification = notification,
-                                        onDelete = { 
-                                            vibrationManager?.vibrateLongClick()
-                                            viewModel.deleteNotification(notification.id) 
-                                        },
-                                        onLongClick = { 
-                                            vibrationManager?.vibrateLongClick()
-                                            showNotificationMenu = notification 
-                                        }
-                                    )
-                                }
-                            }
-                            item { Spacer(Modifier.height(80.dp)) }
-                        }
-                        
-                        if (notifications.isNotEmpty() && searchQuery.isEmpty() && selectedCategory == "All") {
-                            FloatingActionButton(
-                                onClick = { 
-                                    vibrationManager?.vibrateClick()
-                                    showDeleteDialog = true 
-                                },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.error,
-                                shape = RoundedCornerShape(20.dp)
+                AnimatedContent(
+                    targetState = notifications.isEmpty(),
+                    transitionSpec = { 
+                        (fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.95f))
+                            .togetherWith(fadeOut(animationSpec = tween(200))) 
+                    },
+                    label = "listContent",
+                    modifier = Modifier.weight(1f)
+                ) { isEmpty ->
+                    if (isEmpty) {
+                        EmptyVaultState(searchQuery.isNotEmpty())
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize()
+                                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
+                                itemsIndexed(notifications, key = { _, item -> item.id }) { index, notification ->
+                                    var itemVisible by remember { mutableStateOf(false) }
+                                    LaunchedEffect(Unit) {
+                                        delay(index * 20L)
+                                        itemVisible = true
+                                    }
+
+                                    SwipeToDeleteContainer(
+                                        onDelete = { viewModel.deleteNotification(notification.id) },
+                                        modifier = Modifier.graphicsLayer {
+                                            alpha = if (itemVisible) 1f else 0f
+                                            translationY = if (itemVisible) 0f else 20f
+                                        }.animateContentSize()
+                                    ) {
+                                        NotificationVaultCard(
+                                            notification = notification,
+                                            onDelete = { 
+                                                vibrationManager?.vibrateLongClick()
+                                                viewModel.deleteNotification(notification.id) 
+                                            },
+                                            onLongClick = { 
+                                                vibrationManager?.vibrateLongClick()
+                                                showNotificationMenu = notification 
+                                            }
+                                        )
+                                    }
+                                }
+                                item { Spacer(Modifier.height(80.dp)) }
+                            }
+                            
+                            if (notifications.isNotEmpty() && searchQuery.isEmpty() && selectedCategory == "All") {
+                                FloatingActionButton(
+                                    onClick = { 
+                                        vibrationManager?.vibrateClick()
+                                        showDeleteDialog = true 
+                                    },
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.error,
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
+                                }
                             }
                         }
                     }
@@ -304,11 +311,13 @@ fun NotificationVaultScreen(
                         Spacer(Modifier.width(16.dp))
                         Column {
                             Text(notification.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                            @Suppress("DEPRECATION")
                             Text(notification.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                     
                     Spacer(Modifier.height(32.dp))
+                    @Suppress("DEPRECATION")
                     Text("VAULT ACTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                     Spacer(Modifier.height(12.dp))
                     
@@ -413,11 +422,13 @@ fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
                     Spacer(Modifier.width(16.dp))
                     Column {
                         Text(details.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        @Suppress("DEPRECATION")
                         Text(details.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
                 
                 Spacer(Modifier.height(32.dp))
+                @Suppress("DEPRECATION")
                 Text("VAULT STATISTICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                 Spacer(Modifier.height(16.dp))
                 
@@ -447,6 +458,7 @@ fun DetailRow(label: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        @Suppress("DEPRECATION")
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
         Text(value, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
     }
@@ -490,6 +502,7 @@ fun VaultSettingsDialog(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "MANAGED SECTIONS", 
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -557,6 +570,7 @@ fun VaultSettingsDialog(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "APPLICATION MAPPING", 
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -596,7 +610,9 @@ fun VaultSettingsDialog(
                             }
                             Spacer(Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
+                                @Suppress("DEPRECATION")
                                 Text(pkg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                                @Suppress("DEPRECATION")
                                 Text("SECTION: $currentCat", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                             }
                             Icon(Icons.Rounded.ChevronRight, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
@@ -609,6 +625,7 @@ fun VaultSettingsDialog(
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "BLACKLISTED APPS", 
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -630,6 +647,7 @@ fun VaultSettingsDialog(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                @Suppress("DEPRECATION")
                                 Text(pkg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                 IconButton(onClick = { 
                                     vibrationManager?.vibrateTick()
@@ -726,6 +744,7 @@ fun SwipeToDeleteContainer(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    @Suppress("DEPRECATION")
                     Text(
                         "DELETE", 
                         modifier = Modifier.alpha(alpha),
@@ -826,6 +845,7 @@ fun CategoryStrip(
                 color = backgroundColor,
                 border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
+                @Suppress("DEPRECATION")
                 Text(
                     text = category.uppercase(),
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -914,6 +934,7 @@ fun NotificationVaultCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        @Suppress("DEPRECATION")
                         Text(
                             notification.appName.uppercase(),
                             style = MaterialTheme.typography.labelSmall,
@@ -923,6 +944,7 @@ fun NotificationVaultCard(
                             overflow = TextOverflow.Ellipsis,
                             letterSpacing = 1.sp
                         )
+                        @Suppress("DEPRECATION")
                         Text(
                             timeString,
                             style = MaterialTheme.typography.labelSmall,
@@ -978,6 +1000,7 @@ fun NotificationVaultCard(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
+                            @Suppress("DEPRECATION")
                             Text("COPY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
                     }
