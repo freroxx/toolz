@@ -1,28 +1,23 @@
 {
-  "versionCode": 6,
-  "versionName": "1.0.5",
-  "changelog": "Improved update system with ABI-specific releases support and compatibility with splits.",
-  "isCritical": false,
+  "versionName": "1.0.6",
+  "versionCode": 7,
+  "changelog": "Smart search, New dashboard, Better Performance, Music Player enhancements, AI visualizer colors, and Random Engine improvements.",
   "releases": [
     {
       "abi": "arm64-v8a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-arm64-v8a-release.apk",
-      "size": 15728640
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-arm64-v8a.apk"
     },
     {
       "abi": "armeabi-v7a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-armeabi-v7a-release.apk",
-      "size": 14680064
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-armeabi-v7a.apk"
     },
     {
       "abi": "x86_64",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-x86_64-release.apk",
-      "size": 16777216
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-x86_64.apk"
     },
     {
       "abi": "x86",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.5/toolz-x86-release.apk",
-      "size": 15728640
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-x86.apk"
     }
   ]
 }

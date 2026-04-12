@@ -8,6 +8,7 @@ sealed class Screen(val route: String) {
     
     // AI
     object AiAssistant : Screen("ai_assistant")
+    object SmartSearch : Screen("smart_search")
     
     // Time & Productivity
     object Timer : Screen("timer")
@@ -55,9 +56,15 @@ sealed class Screen(val route: String) {
     object NotificationVault : Screen("notification_vault")
     object Clipboard : Screen("clipboard")
     object DeviceInfo : Screen("device_info")
+    object Search : Screen("search")
+    object Browser : Screen("browser?url={url}") {
+        fun createRoute(url: String) = "browser?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
+    }
     
     // Media
-    object MusicPlayer : Screen("music_player")
+    object MusicPlayer : Screen("music_player?tab={tab}") {
+        fun createRoute(tab: Int) = "music_player?tab=$tab"
+    }
     object FileConverter : Screen("file_converter")
 
     // System

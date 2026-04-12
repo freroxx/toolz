@@ -1215,13 +1215,13 @@ fun BrainDumpOverlay(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.5f))
             .then(if (performanceMode) Modifier else Modifier.blur(12.dp))
-            .pointerInput(Unit) { detectTapGestures { onDismiss() } },
+            .pointerInput(Unit) { detectTapGestures(onTap = { _ -> onDismiss() }) },
         contentAlignment = Alignment.Center
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
-                .pointerInput(Unit) { detectTapGestures { } },
+                .pointerInput(Unit) { detectTapGestures(onTap = { _ -> }) },
             shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = if (performanceMode) 0.dp else 16.dp

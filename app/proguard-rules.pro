@@ -12,6 +12,11 @@
 #   public *;
 #}
 
+# Keep BuildConfig fields for AI keys accessed via reflection
+-keepclassmembers class com.frerox.toolz.BuildConfig {
+    public static final java.lang.String *_DEFAULT;
+}
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable

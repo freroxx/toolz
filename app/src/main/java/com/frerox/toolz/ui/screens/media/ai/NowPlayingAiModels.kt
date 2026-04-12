@@ -16,13 +16,33 @@ data class AiLyricsState(
     val lyrics: String = "",
     val isLoading: Boolean = false,
     val isAutoScrollEnabled: Boolean = true,
+    val isSeekEnabled: Boolean = true,
     val syncedLyrics: List<LyricsLine> = emptyList(),
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val layout: LyricsLayout = LyricsLayout.RIGHT,
+    val fontFamily: LyricsFont = LyricsFont.SANS_SERIF
 )
 
+enum class LyricsLayout {
+    LEFT, CENTER, RIGHT
+}
+
+enum class LyricsFont {
+    SANS_SERIF, SERIF, MONOSPACE, CURSIVE
+}
+
+@Immutable
 data class LyricsLine(
     val timeMs: Long,
-    val content: String
+    val content: String,
+    val words: List<LyricsWord> = emptyList()
+)
+
+@Immutable
+data class LyricsWord(
+    val word: String,
+    val startTimeMs: Long,
+    val durationMs: Long
 )
 
 @Immutable
@@ -36,14 +56,20 @@ data class AiMoreInfoState(
 data class AiRecommendation(
     val title: String,
     val artist: String,
-    val explanation: String
+    val explanation: String,
+    val thumbnailUrl: String? = null,
+    val videoId: String? = null
 )
 
 @Immutable
 data class AiTasteState(
-    val recommendations: List<AiRecommendation> = emptyList(),
-    val isLoading: Boolean = false
-)
+    val curatedRecommendations: List<AiRecommendation> = emptyList(),
+    val artistRecommendations: List<AiRecommendation> = emptyList(),
+    val isLoadingCurated: Boolean = false,
+    val isLoadingArtist: Boolean = false
+) {
+    val isLoading: Boolean get() = isLoadingCurated || isLoadingArtist
+}
 
 sealed class AiTab(val index: Int, val title: String) {
     object Lyrics : AiTab(0, "Lyrics")
@@ -59,5 +85,6 @@ data class NowPlayingAiUiState(
     val tasteState: AiTasteState = AiTasteState(),
     val error: String? = null,
     val isAiEnabled: Boolean = true,
-    val isExpandedPill: Boolean = false
+    val isExpandedPill: Boolean = false,
+    val performanceMode: Boolean = false
 )

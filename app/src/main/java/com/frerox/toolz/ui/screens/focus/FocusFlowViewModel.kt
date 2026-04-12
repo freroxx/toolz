@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.ai.AiSettingsManager
+import com.frerox.toolz.data.ai.ApiKeySource
 import com.frerox.toolz.data.ai.MessageContent
 import com.frerox.toolz.data.ai.OpenAiMessage
 import com.frerox.toolz.data.ai.OpenAiRequest
@@ -601,14 +602,14 @@ class FocusFlowViewModel @Inject constructor(
         } catch (e: HttpException) {
             if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
                 val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
-                if (refreshed.source == com.frerox.toolz.data.ai.ApiKeySource.REMOTE &&
+                if ((refreshed.source == ApiKeySource.REMOTE || refreshed.source == ApiKeySource.DEFAULT) &&
                     refreshed.value.isNotBlank() &&
                     refreshed.value != initialKey
                 ) {
                     return requestBlock(refreshed.value)
                 }
                 throw IllegalStateException(
-                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
+                    "The Toolz default key for Groq is invalid or unavailable. Please add your own key in AI settings."
                 )
             }
             throw e

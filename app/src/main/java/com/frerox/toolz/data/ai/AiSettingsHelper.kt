@@ -1,10 +1,9 @@
 package com.frerox.toolz.data.ai
 
+import com.frerox.toolz.BuildConfig
+
 /**
  * Stateless helper for AI provider metadata and lightweight validation.
- *
- * Default keys are not stored in the APK. They are fetched at runtime and
- * cached by [AiSettingsManager].
  */
 object AiSettingsHelper {
 
@@ -16,9 +15,9 @@ object AiSettingsHelper {
         "Gemini" -> "gemini-2.0-flash"
         "ChatGPT" -> "gpt-4o-mini"
         "Groq" -> "llama-3.3-70b-versatile"
-        "Claude" -> "claude-sonnet-4-5"
+        "Claude" -> "claude-3-5-sonnet-20241022"
         "DeepSeek" -> "deepseek-chat"
-        "OpenRouter" -> "openrouter/auto"
+        "OpenRouter" -> "google/gemini-2.0-flash-001"
         else -> "gemini-2.0-flash"
     }
 
@@ -30,31 +29,38 @@ object AiSettingsHelper {
             "gemini-1.5-flash",
             "gemini-1.5-pro"
         )
-        "ChatGPT" -> listOf("gpt-4o-mini", "gpt-4o", "o3-mini", "o1-mini", "o1", "gpt-4-turbo")
+        "ChatGPT" -> listOf(
+            "gpt-4o-mini",
+            "gpt-4o",
+            "o3-mini",
+            "o1-mini",
+            "o1",
+            "gpt-4-turbo"
+        )
         "Groq" -> listOf(
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
             "deepseek-r1-distill-llama-70b",
-            "mixtral-8x7b-32768",
-            "qwen-2.5-coder-32b"
+            "mixtral-8x7b-32768"
         )
         "Claude" -> listOf(
-            "claude-opus-4-5",
-            "claude-sonnet-4-5",
-            "claude-haiku-4-5",
+            "claude-3-7-sonnet-20250219",
             "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022"
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229"
         )
-        "DeepSeek" -> listOf("deepseek-chat", "deepseek-reasoner", "deepseek-vl2", "deepseek-vl2-tiny")
+        "DeepSeek" -> listOf(
+            "deepseek-chat",
+            "deepseek-reasoner"
+        )
         "OpenRouter" -> listOf(
-            "openrouter/auto",
-            "openrouter/free",
             "google/gemini-2.0-flash-001",
-            "anthropic/claude-sonnet-4-5",
+            "anthropic/claude-3.5-sonnet",
             "openai/gpt-4o-mini",
-            "deepseek/deepseek-r1",
+            "deepseek/deepseek-chat",
             "meta-llama/llama-3.3-70b-instruct",
-            "mistralai/mistral-7b-instruct-v0.1"
+            "mistralai/mistral-7b-instruct",
+            "google/gemini-2.0-pro-exp-02-05:free"
         )
         else -> emptyList()
     }
@@ -66,15 +72,13 @@ object AiSettingsHelper {
         return when (provider) {
             "Gemini" -> true
             "ChatGPT" -> model.contains("gpt-4o", ignoreCase = true) || model.contains("gpt-4-turbo", ignoreCase = true)
-            "Claude" -> true
+            "Claude" -> model.contains("sonnet", ignoreCase = true) || model.contains("opus", ignoreCase = true)
             "OpenRouter" -> {
-                model.contains("free", ignoreCase = true) ||
-                    model.contains("auto", ignoreCase = true) ||
-                    model.contains("gemini", ignoreCase = true) ||
+                model.contains("gemini", ignoreCase = true) ||
                     model.contains("claude", ignoreCase = true) ||
                     model.contains("gpt-4", ignoreCase = true)
             }
-            "DeepSeek" -> model.contains("vl", ignoreCase = true)
+            "DeepSeek" -> false
             else -> false
         }
     }
@@ -83,7 +87,7 @@ object AiSettingsHelper {
         return when (provider) {
             "Gemini" -> true
             "Claude" -> true
-            "ChatGPT" -> model.contains("gpt-4", ignoreCase = true) || model.contains("o1", ignoreCase = true)
+            "ChatGPT" -> model.contains("gpt-4", ignoreCase = true) || model.contains("o1", ignoreCase = true) || model.contains("o3", ignoreCase = true)
             "OpenRouter" -> model.contains("claude", ignoreCase = true) || model.contains("gemini", ignoreCase = true)
             else -> false
         }
@@ -125,29 +129,53 @@ object AiSettingsHelper {
     fun normalizeApiKeyInput(raw: String): String =
         raw.trim().removePrefix("\"").removeSuffix("\"").removePrefix("'").removeSuffix("'")
 
-    /**
-     * Relaxed validation to prevent false negatives while still catching
-     * obviously incomplete keys.
-     */
     fun validateApiKey(provider: String, key: String): Boolean {
         val normalized = normalizeApiKeyInput(key)
         if (normalized.isBlank()) return true
         if (normalized.length < 8) return false
 
         return when (provider) {
-            "Gemini" -> normalized.startsWith("AIza") || normalized.length > 20
+            "Gemini" -> normalized.startsWith("AIza")
             "ChatGPT" -> normalized.startsWith("sk-")
-            "Groq" -> normalized.startsWith("gsk_") || normalized.startsWith("sk-")
-            "Claude" -> normalized.startsWith("sk-ant-") || normalized.startsWith("sk-")
+            "Groq" -> normalized.startsWith("gsk_")
+            "Claude" -> normalized.startsWith("sk-ant-")
             "DeepSeek" -> normalized.startsWith("sk-")
-            "OpenRouter" -> normalized.startsWith("sk-or-") || normalized.startsWith("sk-")
+            "OpenRouter" -> normalized.startsWith("sk-or-")
             else -> true
         }
     }
 
-    fun getDefaultKey(provider: String): String = ""
+    fun getDefaultKey(provider: String): String {
+        val key = when (provider) {
+            "Gemini" -> BuildConfig.GEMINI_DEFAULT
+            "ChatGPT" -> BuildConfig.CHATGPT_DEFAULT
+            "Groq" -> BuildConfig.GROQ_DEFAULT
+            "OpenRouter" -> BuildConfig.OPENROUTER_DEFAULT
+            "Claude" -> BuildConfig.CLAUDE_DEFAULT
+            "DeepSeek" -> BuildConfig.DEEPSEEK_DEFAULT
+            else -> ""
+        }
+        return if (isPlaceholder(key)) "" else key
+    }
 
-    fun isDefaultKey(key: String): Boolean = false
+    fun isPlaceholder(key: String): Boolean {
+        if (key.isBlank()) return true
+        val k = key.uppercase()
+        return k.contains("YOUR_") || k.contains("REPLACE_") || 
+               k == "MISSING" || k == "DEFAULT" || k == "UNDEFINED" || 
+               k == "NULL" || k == "API_KEY" || k.length < 10 ||
+               k.contains("INSERT_") || k.contains("KEY_HERE")
+    }
+
+    fun isDefaultKey(key: String): Boolean {
+        if (key.isBlank() || isPlaceholder(key)) return false
+        return key == BuildConfig.GEMINI_DEFAULT ||
+               key == BuildConfig.CHATGPT_DEFAULT ||
+               key == BuildConfig.GROQ_DEFAULT ||
+               key == BuildConfig.OPENROUTER_DEFAULT ||
+               key == BuildConfig.CLAUDE_DEFAULT ||
+               key == BuildConfig.DEEPSEEK_DEFAULT
+    }
 
     val tutorials: Map<String, List<String>> = mapOf(
         "Gemini" to listOf(

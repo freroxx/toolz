@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">toolz</string>
+    <string name="app_name">Toolz</string>
     <string name="accessibility_description">Enables Focus Flow to monitor app usage and apply hard locks when limits are reached.</string>
 </resources>

@@ -35,6 +35,10 @@ import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.calendar.EventDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.password.PasswordDao
+import com.frerox.toolz.data.search.BookmarkEntry
+import com.frerox.toolz.data.search.QuickLinkEntry
+import com.frerox.toolz.data.search.SearchDao
+import com.frerox.toolz.data.search.SearchHistoryEntry
 
 @Database(
     entities = [
@@ -53,9 +57,12 @@ import com.frerox.toolz.data.password.PasswordDao
         AiChat::class,
         AiMessage::class,
         EventEntry::class,
-        PasswordEntity::class
+        PasswordEntity::class,
+        SearchHistoryEntry::class,
+        BookmarkEntry::class,
+        QuickLinkEntry::class
     ], 
-    version = 28,
+    version = 31,
     exportSchema = false
 )
 @TypeConverters(MusicConverters::class, TodoConverters::class)
@@ -74,4 +81,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun aiDao(): AiDao
     abstract fun eventDao(): EventDao
     abstract fun passwordDao(): PasswordDao
+    abstract fun searchDao(): SearchDao
 }

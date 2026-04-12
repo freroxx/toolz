@@ -3,6 +3,8 @@ package com.frerox.toolz.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -10,6 +12,7 @@ import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.ui.navigation.Screen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,13 +92,20 @@ class ToolService : Service() {
             }
             ACTION_POMODORO_STOP -> resetPomodoro()
             ACTION_TODO_STOP -> stopTodoSession()
+            ACTION_DISMISS_ALARM -> {
+                val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
+                if (notificationId != -1) {
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.cancel(notificationId)
+                }
+            }
         }
         return START_STICKY
     }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
         
         serviceScope.launch {
             combine(
@@ -184,6 +194,7 @@ class ToolService : Service() {
 
     private fun onTimerFinished() {
         _isTimerRunning.value = false
+        showAlarmNotification("Timer", "Time is up!", TIMER_ALARM_ID, Screen.Timer.route)
         updateTimerNotification("Time is up!")
     }
 
@@ -201,10 +212,17 @@ class ToolService : Service() {
             }
             if (_pomodoroRemaining.value == 0L) {
                 _isPomodoroRunning.value = false
-                updatePomodoroNotification("Session finished!")
+                onPomodoroFinished()
             }
         }
         startForeground(POMODORO_NOTIFICATION_ID, createPomodoroNotification())
+    }
+
+    private fun onPomodoroFinished() {
+        val title = if (pomodoroMode == "WORK") "Work Session Finished" else "Break Finished"
+        val message = if (pomodoroMode == "WORK") "Time to take a break!" else "Ready to focus?"
+        showAlarmNotification(title, message, POMODORO_ALARM_ID, Screen.Pomodoro.route)
+        updatePomodoroNotification("Session finished!")
     }
 
     fun pausePomodoro() {
@@ -245,9 +263,11 @@ class ToolService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java)
+            
+            val liveChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Toolz Active Tools",
                 NotificationManager.IMPORTANCE_LOW
@@ -255,14 +275,56 @@ class ToolService : Service() {
                 description = "Live notifications for active tools"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(liveChannel)
+
+            val alarmChannel = NotificationChannel(
+                ALARM_CHANNEL_ID,
+                "Toolz Alarms",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifications when timers or sessions finish"
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build())
+                enableVibration(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            manager.createNotificationChannel(alarmChannel)
         }
     }
 
+    private fun showAlarmNotification(title: String, message: String, notificationId: Int, route: String) {
+        val intent = Intent(this, MainActivity::class.java).apply { 
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, route)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(this, notificationId, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val dismissIntent = Intent(this, ToolService::class.java).apply { 
+            action = ACTION_DISMISS_ALARM
+            putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+        }
+        val dismissPI = PendingIntent.getService(this, notificationId + 100, dismissIntent, PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissPI)
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(notificationId, builder.build())
+    }
+
     private fun createStopwatchNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "stopwatch") }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Stopwatch.route) }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_TOGGLE }
         val togglePI = PendingIntent.getService(this, 1, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -298,8 +360,8 @@ class ToolService : Service() {
     }
 
     private fun createTimerNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "timer") }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Timer.route) }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_TOGGLE }
         val togglePI = PendingIntent.getService(this, 21, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -336,8 +398,8 @@ class ToolService : Service() {
     }
 
     private fun createPomodoroNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "pomodoro") }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Pomodoro.route) }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_TOGGLE }
         val togglePI = PendingIntent.getService(this, 3, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -374,8 +436,8 @@ class ToolService : Service() {
     }
 
     private fun createTodoNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra("navigate_to", "todo") }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Todo.route) }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TODO_STOP }
         val stopPI = PendingIntent.getService(this, 41, stopIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -411,10 +473,15 @@ class ToolService : Service() {
 
     companion object {
         const val CHANNEL_ID = "tool_service_channel"
+        const val ALARM_CHANNEL_ID = "tool_alarm_channel"
+        
         const val STOPWATCH_NOTIFICATION_ID = 2001
         const val TIMER_NOTIFICATION_ID = 2002
         const val POMODORO_NOTIFICATION_ID = 2003
         const val TODO_NOTIFICATION_ID = 2004
+        
+        const val TIMER_ALARM_ID = 3001
+        const val POMODORO_ALARM_ID = 3002
 
         const val ACTION_STOPWATCH_TOGGLE = "com.frerox.toolz.STOPWATCH_TOGGLE"
         const val ACTION_STOPWATCH_STOP = "com.frerox.toolz.STOPWATCH_STOP"
@@ -423,5 +490,8 @@ class ToolService : Service() {
         const val ACTION_POMODORO_TOGGLE = "com.frerox.toolz.POMODORO_TOGGLE"
         const val ACTION_POMODORO_STOP = "com.frerox.toolz.POMODORO_STOP"
         const val ACTION_TODO_STOP = "com.frerox.toolz.TODO_STOP"
+        const val ACTION_DISMISS_ALARM = "com.frerox.toolz.DISMISS_ALARM"
+        
+        const val EXTRA_NOTIFICATION_ID = "notification_id"
     }
 }

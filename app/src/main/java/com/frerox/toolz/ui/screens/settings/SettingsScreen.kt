@@ -85,6 +85,7 @@ fun SettingsScreen(
     val unitSystem by viewModel.unitSystem.collectAsState(initial = "METRIC")
     val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState(initial = true)
     val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
+    val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
     val pillTodoEnabled by viewModel.pillTodoEnabled.collectAsState(initial = true)
     val pillFocusEnabled by viewModel.pillFocusEnabled.collectAsState(initial = true)
 
@@ -261,6 +262,7 @@ fun SettingsScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        @Suppress("DEPRECATION")
                                         Text(
                                             "Custom path active",
                                             style = MaterialTheme.typography.labelSmall,
@@ -271,6 +273,7 @@ fun SettingsScreen(
                                             modifier = Modifier.height(32.dp),
                                             contentPadding = PaddingValues(horizontal = 8.dp)
                                         ) {
+                                            @Suppress("DEPRECATION")
                                             Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                         }
                                     }
@@ -286,7 +289,7 @@ fun SettingsScreen(
                         isExpanded = expandedSection == "EXPERIENCE" || searchQuery.isNotEmpty(),
                         onExpandToggle = { expandedSection = if (expandedSection == "EXPERIENCE") null else "EXPERIENCE" }
                     ) {
-                        if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus")) {
+                        if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill")) {
                             SettingsToggleItem(
                                 title = "Smart Overlay",
                                 subtitle = "Floating tool for quick access",
@@ -296,6 +299,13 @@ fun SettingsScreen(
                             )
 
                             if (showToolzPill) {
+                                SettingsToggleItem(
+                                    title = "Fill the Pill",
+                                    subtitle = "Show tips when no active services are running",
+                                    icon = Icons.Rounded.AutoAwesome,
+                                    checked = fillThePillEnabled,
+                                    onCheckedChange = { viewModel.setFillThePillEnabled(it) }
+                                )
                                 SettingsToggleItem(
                                     title = "Show Task Progress",
                                     subtitle = "Track active tasks on the overlay",

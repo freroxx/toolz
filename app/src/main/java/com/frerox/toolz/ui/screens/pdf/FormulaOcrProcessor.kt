@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.util.Log
 import com.frerox.toolz.data.ai.AiSettingsManager
+import com.frerox.toolz.data.ai.ApiKeySource
 import com.frerox.toolz.data.ai.MessageContent
 import com.frerox.toolz.data.ai.OpenAiMessage
 import com.frerox.toolz.data.ai.OpenAiRequest
@@ -395,7 +396,7 @@ class FormulaOcrProcessor @Inject constructor(
         } catch (e: HttpException) {
             if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
                 val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
-                if (refreshed.source == com.frerox.toolz.data.ai.ApiKeySource.REMOTE &&
+                if (refreshed.source == ApiKeySource.REMOTE &&
                     refreshed.value.isNotBlank() &&
                     refreshed.value != initialKey
                 ) {

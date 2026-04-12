@@ -53,6 +53,7 @@ class SettingsViewModel @Inject constructor(
     val showQibla = repository.showQibla
     val stepCounterEnabled = repository.stepCounterEnabled
     val showToolzPill = repository.showToolzPill
+    val fillThePillEnabled = repository.fillThePillEnabled
     val pillTodoEnabled = repository.pillTodoEnabled
     val pillFocusEnabled = repository.pillFocusEnabled
     val userName = repository.userName
@@ -100,6 +101,7 @@ class SettingsViewModel @Inject constructor(
     fun setShowQibla(enabled: Boolean) = viewModelScope.launch { repository.setShowQibla(enabled) }
     fun setStepCounterEnabled(enabled: Boolean) = viewModelScope.launch { repository.setStepCounterEnabled(enabled) }
     fun setShowToolzPill(enabled: Boolean) = viewModelScope.launch { repository.setShowToolzPill(enabled) }
+    fun setFillThePillEnabled(enabled: Boolean) = viewModelScope.launch { repository.setFillThePillEnabled(enabled) }
     fun setPillTodoEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillTodoEnabled(enabled) }
     fun setPillFocusEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillFocusEnabled(enabled) }
     fun setUserName(name: String) = viewModelScope.launch { repository.setUserName(name) }

@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.hilt.android)
+    alias(libs.plugins.secrets)
 }
 
 android {
@@ -14,8 +15,8 @@ android {
         applicationId = "com.frerox.toolz"
         minSdk = 31
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.0.5"
+        versionCode = 7
+        versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -42,6 +43,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            excludes += "META-INF/DEPENDENCIES"
         }
         jniLibs {
             // Set to false to support 16 KB page sizes. 
@@ -60,8 +62,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures {
@@ -71,8 +73,23 @@ android {
     }
 }
 
+secrets {
+    // Optionally specify a different file name containing your secrets.
+    // The default is "local.properties"
+    propertiesFileName = "secrets.properties"
+
+    // A properties file, containing default values for secrets, so that,
+    // if a secret is not found in secrets.properties, it'll fall back to here.
+    defaultPropertiesFileName = "secrets.defaults.properties"
+
+    // Configure which keys should be ignored by the plugin by providing regular expressions.
+    // "sdk.dir" is ignored by default.
+    ignoreList.add("keyToIgnore") // Ignore the key "keyToIgnore"
+    ignoreList.add("sdk.*")       // Ignore all keys matching the regexp "sdk.*"
+}
+
 kotlin {
-    jvmToolchain(11)
+    jvmToolchain(17)
 }
 
 dependencies {
@@ -95,6 +112,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation("androidx.palette:palette-ktx:1.0.0")
     
     // Coil 3
     implementation(libs.coil.compose)
@@ -128,6 +146,8 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation(libs.exp4j)
+    implementation("org.jsoup:jsoup:1.22.1")
+    implementation("androidx.webkit:webkit:1.12.1")
     
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
@@ -139,6 +159,10 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.media3.common)
+    implementation(libs.media3.exoplayer.dash)
+
+    // NewPipeExtractor
+    implementation(libs.newpipe.extractor)
 
     // Hilt
     implementation(libs.hilt.android)

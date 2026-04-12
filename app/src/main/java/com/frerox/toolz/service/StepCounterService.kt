@@ -17,6 +17,7 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepRepository
+import com.frerox.toolz.ui.navigation.Screen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -148,18 +149,25 @@ class StepCounterService : Service(), SensorEventListener {
             manager.createNotificationChannel(channel)
         }
 
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.StepCounter.route)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val steps = runBlocking { stepRepository.currentSteps.first() }
+        val steps = try {
+            runBlocking { stepRepository.currentSteps.first() }
+        } catch (e: Exception) { 0 }
         
         val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Step Counter")
             .setSmallIcon(android.R.drawable.ic_menu_directions) 
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
 
         if (isNotificationEnabled) {
             builder.setContentText("$steps / $currentGoal steps")

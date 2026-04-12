@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 
 enum class ConversionType {
-    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY, FORCE, PRESSURE, POWER
+    LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY, FORCE, PRESSURE, POWER, CURRENCY
 }
 
 data class UnitConverterState(
@@ -39,7 +39,8 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
         ConversionType.ENERGY to listOf("Joule", "Kilojoule", "Calorie", "Kilocalorie", "Watt-hour", "Kilowatt-hour", "Electronvolt"),
         ConversionType.FORCE to listOf("Newton", "Kilonewton", "Dyne", "Pound-force", "Gram-force", "Kilogram-force"),
         ConversionType.PRESSURE to listOf("Pascal", "Kilopascal", "Bar", "Millibar", "PSI", "Atmosphere", "Torr"),
-        ConversionType.POWER to listOf("Watt", "Kilowatt", "Megawatt", "Horsepower", "Foot-pound/min", "BTU/hour")
+        ConversionType.POWER to listOf("Watt", "Kilowatt", "Megawatt", "Horsepower", "Foot-pound/min", "BTU/hour"),
+        ConversionType.CURRENCY to listOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "INR", "BRL", "RUB", "KRW", "SGD", "NZD", "MXN", "HKD", "IDR", "TRY", "SAR", "AED")
     )
 
     init {
@@ -51,7 +52,7 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
 
     fun onTypeChange(type: ConversionType) {
         val units = unitsMap[type]!!
-        _uiState.update { it.copy(type = type, availableUnits = units, fromUnit = units[0], toUnit = units[1]) }
+        _uiState.update { it.copy(type = type, availableUnits = units, fromUnit = units[0], toUnit = if (units.size > 1) units[1] else units[0]) }
         convert()
     }
 
@@ -90,6 +91,7 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             ConversionType.FORCE -> convertForce(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.PRESSURE -> convertPressure(input, _uiState.value.fromUnit, _uiState.value.toUnit)
             ConversionType.POWER -> convertPower(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+            ConversionType.CURRENCY -> convertCurrency(input, _uiState.value.fromUnit, _uiState.value.toUnit)
         }
         _uiState.update { 
             it.copy(outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'))
@@ -198,5 +200,39 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
             "Horsepower" to 745.7, "Foot-pound/min" to 0.022597, "BTU/hour" to 0.293071
         )
         return value * (toWatt[from] ?: 1.0) / (toWatt[to] ?: 1.0)
+    }
+
+    private fun convertCurrency(value: Double, from: String, to: String): Double {
+        // Exchange rates relative to 1 USD (Approximate values for demonstration)
+        val toUsd = mapOf(
+            "USD" to 1.0,
+            "EUR" to 0.92,
+            "GBP" to 0.79,
+            "JPY" to 150.0,
+            "AUD" to 1.52,
+            "CAD" to 1.35,
+            "CHF" to 0.88,
+            "CNY" to 7.19,
+            "INR" to 82.90,
+            "BRL" to 4.97,
+            "RUB" to 92.50,
+            "KRW" to 1330.0,
+            "SGD" to 1.34,
+            "NZD" to 1.63,
+            "MXN" to 17.10,
+            "HKD" to 7.82,
+            "IDR" to 15600.0,
+            "TRY" to 31.00,
+            "SAR" to 3.75,
+            "AED" to 3.67
+        )
+        
+        // Value in USD = input / rate_of_from_currency_to_usd (Wait, toUsd means 1 USD = X EUR, so value * (1/X) converts EUR to USD)
+        // If 1 USD = 0.92 EUR, then 1 EUR = 1/0.92 USD.
+        // value_in_usd = value / (toUsd[from] ?: 1.0)
+        // result = value_in_usd * (toUsd[to] ?: 1.0)
+        
+        val valueInUsd = value / (toUsd[from] ?: 1.0)
+        return valueInUsd * (toUsd[to] ?: 1.0)
     }
 }

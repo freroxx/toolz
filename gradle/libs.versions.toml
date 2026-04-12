@@ -12,9 +12,9 @@ kotlin = "2.1.10"
 composeBom = "2025.02.00"
 googleDevtoolsKsp = "2.1.10-1.0.29"
 navigationCompose = "2.8.8"
-roomRuntime = "2.6.1"
-roomKtx = "2.6.1"
-roomCompiler = "2.6.1"
+roomRuntime = "2.8.4"
+roomKtx = "2.8.4"
+roomCompiler = "2.8.4"
 kotlinxCoroutinesTest = "1.10.2"
 core = "1.6.1"
 runner = "1.6.2"
@@ -53,9 +53,12 @@ securityCrypto = "1.1.0"
 ffmpegKit = "6.1.7"
 smartException = "0.2.1"
 lottie = "6.7.1"
+jsoup = "1.21.1"
 sqlcipher = "4.14.0"
 sqlite = "2.6.2"
 biometric = "1.1.0"
+secretsGradlePlugin = "2.0.1"
+newpipeExtractor = "v0.26.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -134,11 +137,16 @@ media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", versi
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
+media3-exoplayer-dash = { group = "androidx.media3", name = "media3-exoplayer-dash", version.ref = "media3" }
+
+# NewPipeExtractor
+newpipe-extractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor", version.ref = "newpipeExtractor" }
 
 # FFmpeg & Lottie
 ffmpeg-kit-standard = { group = "io.github.jamaismagic.ffmpeg", name = "ffmpeg-kit-lts-16kb", version.ref = "ffmpegKit" }
 smart-exception-java = { group = "com.arthenica", name = "smart-exception-java", version.ref = "smartException" }
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -146,3 +154,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "googleDevtoolsKsp" }
 hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+secrets = { id = "com.google.android.libraries.mapsplatform.secrets-gradle-plugin", version.ref = "secretsGradlePlugin" }

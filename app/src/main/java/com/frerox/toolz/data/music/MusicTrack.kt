@@ -16,6 +16,7 @@ data class MusicTrack(
     val lastPlayed: Long = 0L,
     val playCount: Int = 0,
     val path: String? = null,
+    val sourceUrl: String? = null,
     val dateAdded: Long = java.lang.System.currentTimeMillis(),
     // AI Cache Fields
     val aiLyrics: String? = null,
