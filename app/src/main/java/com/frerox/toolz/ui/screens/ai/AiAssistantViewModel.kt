@@ -39,7 +39,6 @@ data class AiAssistantUiState(
     val streamingText     : String           = "",
     val isSyncingKeys     : Boolean          = false,
     val keysUnavailable   : Boolean          = false,
-    // ── New fields ───────────────────────────────────────────
     val chatSummary       : String?          = null,
     val isSummarizing     : Boolean          = false,
     val isGeneratingTitle : Boolean          = false,
@@ -82,7 +81,6 @@ class AiAssistantViewModel @Inject constructor(
     init {
         loadSettings()
         loadConfigs()
-        syncDefaultKeysInBackground()
         viewModelScope.launch {
             aiDao.getAllChats().collect { chats -> _uiState.update { it.copy(chats = chats) } }
         }
@@ -96,7 +94,7 @@ class AiAssistantViewModel @Inject constructor(
                 provider             = provider,
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = settingsManager.getSelectedModel(provider),
-                isRemoteKeyAvailable = settingsManager.getRemoteKey(provider).isNotBlank(),
+                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(provider),
             )
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
@@ -112,11 +110,10 @@ class AiAssistantViewModel @Inject constructor(
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = it.selectedModel.takeIf { model -> model in availableModels }
                     ?: AiSettingsHelper.getRecommendedModel(provider),
-                isRemoteKeyAvailable = settingsManager.getRemoteKey(provider).isNotBlank(),
+                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(provider),
             )
         }
         validateKey()
-        if (settingsManager.getRawApiKey(provider).isBlank()) syncDefaultKeysInBackground()
     }
 
     fun updateApiKey(key: String) {
@@ -151,7 +148,6 @@ class AiAssistantViewModel @Inject constructor(
         with(_settingsUiState.value) {
             settingsManager.setAiProvider(provider); settingsManager.setApiKey(AiSettingsHelper.normalizeApiKeyInput(apiKey), provider)
             settingsManager.setSelectedModel(selectedModel, provider)
-            if (apiKey.isBlank()) syncDefaultKeysInBackground()
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
         loadSettings()
@@ -174,7 +170,7 @@ class AiAssistantViewModel @Inject constructor(
                 selectedModel = config.model, editingConfig = config,
                 selectedIcon = config.iconRes,
                 customIconUri = config.customIconUri,
-                isRemoteKeyAvailable = settingsManager.getRemoteKey(config.provider).isNotBlank(),
+                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(config.provider),
             )
         }
     }
@@ -209,38 +205,14 @@ class AiAssistantViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _settingsUiState.update { it.copy(isTesting = true, testResult = null) }
-            val keyToTest = s.apiKey.ifBlank { settingsManager.resolveApiKeyWithRemoteSync(s.provider).value }
+            val keyToTest = s.apiKey.ifBlank { settingsManager.resolveApiKey(s.provider).value }
             if (keyToTest.isBlank()) {
-                _settingsUiState.update { it.copy(isTesting = false, isRemoteKeyAvailable = settingsManager.getRemoteKey(s.provider).isNotBlank(), testResult = "No API key for ${s.provider}. Tap Refresh or add your own.") }
+                _settingsUiState.update { it.copy(isTesting = false, testResult = "No API key for ${s.provider}.") }
                 return@launch
             }
             chatRepository.testConnection(AiConfig("__test__", s.provider, s.selectedModel, keyToTest, "AUTO")).collect { r ->
                 r.onSuccess { reply -> _settingsUiState.update { it.copy(isTesting = false, testResult = "✓ Connected — $reply") } }
                     .onFailure { e    -> _settingsUiState.update { it.copy(isTesting = false, testResult = "✗ ${e.message}") } }
-            }
-        }
-    }
-
-    fun refreshRemoteKeys() {
-        viewModelScope.launch {
-            _settingsUiState.update { it.copy(isTesting = true, testResult = "Syncing keys…") }
-            val ok = settingsManager.syncRemoteKeys(force = true)
-            _settingsUiState.update {
-                it.copy(isTesting = false, testResult = if (ok) "✓ Keys refreshed" else "✗ Sync failed — check network",
-                    isRemoteKeyAvailable = settingsManager.getRemoteKey(it.provider).isNotBlank())
-            }
-            if (ok) _uiState.update { it.copy(keysUnavailable = false, error = null) }
-        }
-    }
-
-    fun retrySyncKeys() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSyncingKeys = true, error = null) }
-            val ok = settingsManager.syncRemoteKeys(force = true)
-            _settingsUiState.update { it.copy(isRemoteKeyAvailable = settingsManager.getRemoteKey(it.provider).isNotBlank()) }
-            _uiState.update {
-                it.copy(isSyncingKeys = false, keysUnavailable = !ok && !settingsManager.hasRemoteKeys,
-                    error = if (!ok && !settingsManager.hasRemoteKeys) "Could not load API keys. Check network." else null)
             }
         }
     }
@@ -290,9 +262,9 @@ class AiAssistantViewModel @Inject constructor(
                 return@launch
             }
 
-            val resolved = settingsManager.resolveApiKeyWithRemoteSync(provider)
+            val resolved = settingsManager.resolveApiKey(provider)
             if (resolved.source == ApiKeySource.NONE) {
-                _uiState.update { it.copy(error = "No API key. Tap Retry Sync or add a key in Settings.", keysUnavailable = true) }
+                _uiState.update { it.copy(error = "No API key. Add a key in Settings.", keysUnavailable = true) }
                 return@launch
             }
 
@@ -316,14 +288,7 @@ class AiAssistantViewModel @Inject constructor(
                 }.onFailure { e ->
                     val msg     = e.message ?: "Unknown error"
                     val isQuota = msg.contains("quota", true) || msg.contains("limit", true) || msg.contains("429")
-                    val isAuth  = msg.contains("401") || msg.contains("Unauthorized") || msg.contains("Invalid API key")
-
-                    if (isAuth) {
-                        settingsManager.invalidateRemoteKey(provider)
-                        _uiState.update { it.copy(isLoading = false, streamingText = "", error = "Auth failed. Tap Retry Sync to refresh keys.", keysUnavailable = true) }
-                    } else {
-                        _uiState.update { it.copy(isLoading = false, streamingText = "", error = if (isQuota) "Quota exceeded for $provider." else "Error: $msg", quotaExceeded = isQuota, suggestedProvider = if (isQuota) nextProvider(provider) else null) }
-                    }
+                    _uiState.update { it.copy(isLoading = false, streamingText = "", error = if (isQuota) "Quota exceeded for $provider." else "Error: $msg", quotaExceeded = isQuota, suggestedProvider = if (isQuota) nextProvider(provider) else null) }
                 }
             }
 
@@ -460,7 +425,6 @@ Summarize this AI conversation as 3-6 concise bullet points.
         settingsManager.setAiProvider(provider)
         settingsManager.setSelectedModel(AiSettingsHelper.getRecommendedModel(provider))
         loadSettings()
-        if (settingsManager.getRawApiKey(provider).isBlank()) syncDefaultKeysInBackground()
         _uiState.update { it.copy(error = null, quotaExceeded = false, keysUnavailable = false) }
         if (_uiState.value.messages.isNotEmpty()) createNewChat()
     }
@@ -471,21 +435,16 @@ Summarize this AI conversation as 3-6 concise bullet points.
         viewModelScope.launch { aiDao.deleteChat(chat); if (_uiState.value.currentChatId == chat.id) createNewChat() }
     }
 
+    // ── Remote Keys ───────────────────────────────────────────────────────
+
+    fun refreshRemoteKeys() { settingsManager.refreshRemoteKeys() }
+    fun retrySyncKeys() { settingsManager.retrySyncKeys() }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private fun nextProvider(current: String): String = when (current) {
         "Gemini" -> "Groq"; "Groq" -> "ChatGPT"; "ChatGPT" -> "Claude"
         "Claude" -> "OpenRouter"; "OpenRouter" -> "DeepSeek"; else -> "Gemini"
-    }
-
-    private fun syncDefaultKeysInBackground(force: Boolean = false) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSyncingKeys = true) }
-            val ok = settingsManager.syncRemoteKeys(force = force)
-            val p  = _settingsUiState.value.provider
-            _settingsUiState.update { it.copy(isRemoteKeyAvailable = settingsManager.getRemoteKey(p).isNotBlank()) }
-            _uiState.update { it.copy(isSyncingKeys = false, keysUnavailable = !ok && !settingsManager.hasRemoteKeys) }
-        }
     }
 }
 

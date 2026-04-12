@@ -38,6 +38,48 @@ class SettingsRepository @Inject constructor(
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
     private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
+
+    private val SEARCH_FIRST_TIME = booleanPreferencesKey("search_first_time")
+    private val SEARCH_ADBLOCK_ENABLED = booleanPreferencesKey("search_adblock_enabled")
+    private val SEARCH_DNS_PROVIDER = stringPreferencesKey("search_dns_provider") // "DEFAULT", "ADGUARD", "CLOUDFLARE", "GOOGLE", "CUSTOM"
+    private val SEARCH_CUSTOM_DNS = stringPreferencesKey("search_custom_dns")
+    private val SEARCH_RECENT_DNS = stringSetPreferencesKey("search_recent_dns")
+
+    val searchFirstTime: Flow<Boolean> = dataStore.data.map { it[SEARCH_FIRST_TIME] ?: true }
+    val searchAdBlockEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_ENABLED] ?: true }
+    val searchDnsProvider: Flow<String> = dataStore.data.map { it[SEARCH_DNS_PROVIDER] ?: "ADGUARD" }
+    val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
+    val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
+
+    suspend fun setSearchFirstTime(isFirstTime: Boolean) {
+        dataStore.edit { it[SEARCH_FIRST_TIME] = isFirstTime }
+    }
+
+    suspend fun setSearchAdBlockEnabled(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_ADBLOCK_ENABLED] = enabled }
+    }
+
+    suspend fun setDnsProvider(provider: String) {
+        dataStore.edit { it[SEARCH_DNS_PROVIDER] = provider }
+    }
+
+    suspend fun setCustomDns(dns: String) {
+        dataStore.edit { it[SEARCH_CUSTOM_DNS] = dns }
+        if (dns.isNotBlank()) {
+            dataStore.edit { pref ->
+                val current = pref[SEARCH_RECENT_DNS] ?: emptySet()
+                val updated = (current + dns).toList()
+                pref[SEARCH_RECENT_DNS] = if (updated.size > 5) updated.takeLast(5).toSet() else updated.toSet()
+            }
+        }
+    }
+    
+    suspend fun removeRecentDns(dns: String) {
+        dataStore.edit { pref ->
+            val current = pref[SEARCH_RECENT_DNS] ?: emptySet()
+            pref[SEARCH_RECENT_DNS] = current - dns
+        }
+    }
     private val HIDDEN_NOTIFICATION_APPS = stringSetPreferencesKey("hidden_notification_apps")
     private val CUSTOM_NOTIFICATION_CATEGORIES = stringSetPreferencesKey("custom_notification_categories")
     private val APP_CATEGORY_MAPPINGS = stringSetPreferencesKey("app_category_mappings") // List of "package:category"
@@ -66,6 +108,9 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_PIP_ENABLED = booleanPreferencesKey("music_pip_enabled")
     private val MUSIC_AI_ENABLED = booleanPreferencesKey("music_ai_enabled")
     private val MUSIC_KEEP_SCREEN_ON_LYRICS = booleanPreferencesKey("music_keep_screen_on_lyrics")
+    private val MUSIC_LYRICS_LAYOUT = stringPreferencesKey("music_lyrics_layout") // "LEFT", "CENTER", "RIGHT"
+    private val MUSIC_LYRICS_SEEK_ENABLED = booleanPreferencesKey("music_lyrics_seek_enabled")
+    private val MUSIC_LYRICS_FONT = stringPreferencesKey("music_lyrics_font") // "SANS_SERIF", "SERIF", "MONOSPACE", "CURSIVE"
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
@@ -75,12 +120,19 @@ class SettingsRepository @Inject constructor(
 
     // Universal Pill
     private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
+    private val FILL_THE_PILL_ENABLED = booleanPreferencesKey("fill_the_pill_enabled")
     private val PILL_TODO_ENABLED = booleanPreferencesKey("pill_todo_enabled")
     private val PILL_FOCUS_ENABLED = booleanPreferencesKey("pill_focus_enabled")
 
     // Onboarding
     private val USER_NAME = stringPreferencesKey("user_name")
     private val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+    private val CATALOG_ONBOARDING_COMPLETED = booleanPreferencesKey("catalog_onboarding_completed")
+    private val SHOW_CATALOG_BETA_CARD = booleanPreferencesKey("show_catalog_beta_card")
+
+    // Download Settings
+    private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format") // "M4A", "OPUS", "MP3"
+    private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality") // "HIGH", "MEDIUM", "LOW"
 
     // Timer Duration Persistence
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
@@ -182,17 +234,26 @@ class SettingsRepository @Inject constructor(
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
     val musicAiEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true }
     val musicKeepScreenOnLyrics: Flow<Boolean> = dataStore.data.map { it[MUSIC_KEEP_SCREEN_ON_LYRICS] ?: true }
+    val musicLyricsLayout: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_LAYOUT] ?: "RIGHT" }
+    val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
+    val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
 
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
+    val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: true }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
     val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: false }
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
+    val catalogOnboardingCompleted: Flow<Boolean> = dataStore.data.map { it[CATALOG_ONBOARDING_COMPLETED] ?: false }
+    val showCatalogBetaCard: Flow<Boolean> = dataStore.data.map { it[SHOW_CATALOG_BETA_CARD] ?: true }
+
+    val downloadFormat: Flow<String> = dataStore.data.map { it[DOWNLOAD_FORMAT] ?: "M4A" }
+    val downloadQuality: Flow<String> = dataStore.data.map { it[DOWNLOAD_QUALITY] ?: "HIGH" }
 
     val lastTimerMinutes: Flow<Int> = dataStore.data.map { it[LAST_TIMER_MINUTES] ?: 0 }
     val lastTimerSeconds: Flow<Int> = dataStore.data.map { it[LAST_TIMER_SECONDS] ?: 0 }
@@ -303,7 +364,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Setters
     suspend fun setMusicAudioFocus(enabled: Boolean) { dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
-    suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = false } }
+    suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
     suspend fun setMusicShakeSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_SHAKE_SENSITIVITY] = sensitivity } }
     suspend fun setMusicPlaybackSpeed(speed: Float) { dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
     suspend fun setMusicEqualizerPreset(preset: String) { dataStore.edit { it[MUSIC_EQUALIZER_PRESET] = preset } }
@@ -313,17 +374,26 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicPipEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_PIP_ENABLED] = enabled } }
     suspend fun setMusicAiEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_AI_ENABLED] = enabled } }
     suspend fun setMusicKeepScreenOnLyrics(enabled: Boolean) { dataStore.edit { it[MUSIC_KEEP_SCREEN_ON_LYRICS] = enabled } }
+    suspend fun setMusicLyricsLayout(layout: String) { dataStore.edit { it[MUSIC_LYRICS_LAYOUT] = layout } }
+    suspend fun setMusicLyricsSeekEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_SEEK_ENABLED] = enabled } }
+    suspend fun setMusicLyricsFont(font: String) { dataStore.edit { it[MUSIC_LYRICS_FONT] = font } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
 
     suspend fun setStepCounterEnabled(enabled: Boolean) { dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
 
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
+    suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }
     suspend fun setPillTodoEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TODO_ENABLED] = enabled } }
     suspend fun setPillFocusEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FOCUS_ENABLED] = enabled } }
 
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
+    suspend fun setCatalogOnboardingCompleted(completed: Boolean) { dataStore.edit { it[CATALOG_ONBOARDING_COMPLETED] = completed } }
+    suspend fun setShowCatalogBetaCard(show: Boolean) { dataStore.edit { it[SHOW_CATALOG_BETA_CARD] = show } }
+
+    suspend fun setDownloadFormat(format: String) { dataStore.edit { it[DOWNLOAD_FORMAT] = format } }
+    suspend fun setDownloadQuality(quality: String) { dataStore.edit { it[DOWNLOAD_QUALITY] = quality } }
 
     suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
         dataStore.edit {

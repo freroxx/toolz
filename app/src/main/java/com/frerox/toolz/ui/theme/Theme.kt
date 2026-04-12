@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.theme
 
 import android.app.Activity
 import android.os.Build
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Brush
@@ -10,12 +11,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
@@ -23,6 +22,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.frerox.toolz.util.VibrationManager
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 val LocalPerformanceMode = staticCompositionLocalOf { false }
 val LocalHapticEnabled = staticCompositionLocalOf { true }
@@ -84,7 +86,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 /**
- * Compatible version of background brush that takes theme booleans.
+ * Enhanced background brush utility.
  */
 fun toolzAppBackgroundBrush(
     darkTheme: Boolean,
@@ -95,26 +97,9 @@ fun toolzAppBackgroundBrush(
     val secondary = if (darkTheme) SecondaryDark else SecondaryLight
     val background = if (darkTheme) BackgroundDark else BackgroundLight
     
-    return toolzAppBackgroundBrush(primary, secondary, background, performanceMode, gradientEnabled, darkTheme)
-}
+    if (!gradientEnabled) return SolidColor(background)
 
-/**
- * Advanced background brush that uses provided colors.
- */
-fun toolzAppBackgroundBrush(
-    primary: Color,
-    secondary: Color,
-    background: Color,
-    performanceMode: Boolean,
-    gradientEnabled: Boolean = true,
-    isDark: Boolean = true
-): Brush {
-    if (!gradientEnabled) {
-        return SolidColor(background)
-    }
-
-    return if (isDark) {
-        // Deep, atmospheric dark gradient
+    return if (darkTheme) {
         val colors = listOf(
             background,
             primary.copy(alpha = if (performanceMode) 0.08f else 0.15f),
@@ -123,14 +108,6 @@ fun toolzAppBackgroundBrush(
         )
         Brush.verticalGradient(colors)
     } else {
-        // Specialized specialized light theme gradient
-        // Smooth, airy wash using citrus/ocean tints at low intensity for a luminous feel
-        val colors = listOf(
-            background,
-            primary.copy(alpha = if (performanceMode) 0.03f else 0.06f),
-            secondary.copy(alpha = if (performanceMode) 0.015f else 0.035f),
-            background
-        )
         Brush.verticalGradient(
             0.0f to background,
             0.35f to primary.copy(alpha = if (performanceMode) 0.03f else 0.06f),
@@ -140,22 +117,46 @@ fun toolzAppBackgroundBrush(
     }
 }
 
+/**
+ * Animated background modifier.
+ */
+@Composable
 fun Modifier.toolzBackground(): Modifier = composed {
     val performanceMode = LocalPerformanceMode.current
     val gradientEnabled = LocalBackgroundGradientEnabled.current
     val colorScheme = MaterialTheme.colorScheme
     val isDark = LocalIsDarkTheme.current
     
-    this.background(
-        toolzAppBackgroundBrush(
-            primary = colorScheme.primary,
-            secondary = colorScheme.secondary,
-            background = colorScheme.background,
-            performanceMode = performanceMode,
-            gradientEnabled = gradientEnabled,
-            isDark = isDark
+    if (!gradientEnabled) return@composed this.background(colorScheme.background)
+
+    if (performanceMode) {
+        return@composed this.background(
+            toolzAppBackgroundBrush(isDark, performanceMode = true)
         )
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "bg")
+    val angle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2 * PI.toFloat(),
+        animationSpec = infiniteRepeatable(tween(25000, easing = LinearEasing), RepeatMode.Restart),
+        label = "angle"
     )
+
+    val brush = remember(angle, colorScheme.primary, colorScheme.secondary, isDark) {
+        val offset = Offset(x = (sin(angle) + 1f) / 2f, y = (cos(angle) + 1f) / 2f)
+        Brush.radialGradient(
+            colors = if (isDark) {
+                listOf(colorScheme.primary.copy(alpha = 0.12f), colorScheme.secondary.copy(alpha = 0.06f), colorScheme.background)
+            } else {
+                listOf(colorScheme.primary.copy(alpha = 0.08f), colorScheme.secondary.copy(alpha = 0.04f), colorScheme.background)
+            },
+            center = Offset(offset.x * 1500f, offset.y * 1500f),
+            radius = 2500f
+        )
+    }
+
+    this.background(brush).background(colorScheme.background.copy(alpha = 0.4f))
 }
 
 @Composable
@@ -179,36 +180,28 @@ fun ToolzTheme(
             val secondary = customSecondary ?: base.secondary
             base.copy(
                 primary = primary,
-                primaryContainer = primary.copy(alpha = if (darkTheme) 0.3f else 0.1f),
+                primaryContainer = primary.copy(alpha = if (darkTheme) 0.25f else 0.12f),
                 onPrimaryContainer = if (darkTheme) Color.White else primary,
                 secondary = secondary,
-                secondaryContainer = secondary.copy(alpha = if (darkTheme) 0.3f else 0.1f),
+                secondaryContainer = secondary.copy(alpha = if (darkTheme) 0.25f else 0.12f),
                 onSecondaryContainer = if (darkTheme) Color.White else secondary,
-                outline = primary.copy(alpha = 0.5f),
-                outlineVariant = secondary.copy(alpha = 0.3f),
-                surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.1f else 0.05f),
-                onSurface = if (darkTheme) Color(0xFFF5F0F5) else Color(0xFF1A1A1A),
+                surfaceVariant = secondary.copy(alpha = if (darkTheme) 0.08f else 0.04f),
+                onSurface = if (darkTheme) Color(0xFFFBF8FF) else Color(0xFF1B1B1F),
                 background = if (darkTheme) BackgroundDark else BackgroundLight,
                 surface = if (darkTheme) SurfaceDark else SurfaceLight,
-                onBackground = if (darkTheme) Color(0xFFF5F0F5) else Color(0xFF1A1A1A),
-                onSurfaceVariant = if (darkTheme) Color(0xFFD0CBD5) else Color(0xFF313131)
+                onBackground = if (darkTheme) Color(0xFFFBF8FF) else Color(0xFF1B1B1F)
             )
         }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             dynamic.copy(
-                onSurface = if (darkTheme) Color(0xFFF5F0F5) else dynamic.onSurface,
+                onSurface = if (darkTheme) Color(0xFFFBF8FF) else dynamic.onSurface,
                 background = if (darkTheme) BackgroundDark else BackgroundLight,
                 surface = if (darkTheme) SurfaceDark else SurfaceLight,
-                onBackground = if (darkTheme) Color(0xFFF5F0F5) else dynamic.onBackground,
-                onSurfaceVariant = if (darkTheme) Color(0xFFD0CBD5) else dynamic.onSurfaceVariant
+                onBackground = if (darkTheme) Color(0xFFFBF8FF) else dynamic.onBackground
             )
         }
-        darkTheme -> DarkColorScheme.copy(
-            onSurface = Color(0xFFF5F0F5), 
-            onBackground = Color(0xFFF5F0F5),
-            onSurfaceVariant = Color(0xFFD0CBD5)
-        )
+        darkTheme -> DarkColorScheme.copy(onSurface = Color(0xFFFBF8FF), onBackground = Color(0xFFFBF8FF))
         else -> LightColorScheme
     }
 
@@ -236,10 +229,6 @@ fun ToolzTheme(
         LocalIsDarkTheme provides darkTheme,
         LocalVibrationManager provides vibrationManager
     ) {
-        MaterialTheme(
-            colorScheme = colorScheme,
-            typography = Typography,
-            content = content
-        )
+        MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
     }
 }

@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,7 +17,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.AlignHorizontalLeft
+import androidx.compose.material.icons.automirrored.rounded.AlignHorizontalRight
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -34,6 +39,7 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import android.graphics.RenderEffect as AndroidRenderEffect
 import android.graphics.Shader as AndroidShader
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -42,9 +48,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -52,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.util.VibrationManager
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,13 +71,15 @@ import com.frerox.toolz.util.VibrationManager
 fun NowPlayingAiBottomSheet(
     viewModel: NowPlayingAiViewModel,
     onDismiss: () -> Unit,
-    vibrationManager: VibrationManager
+    vibrationManager: VibrationManager,
+    onSeek: (Long) -> Unit = {},
+    onPlayRecommendation: (AiRecommendation) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
         containerColor = Color.Transparent,
         dragHandle = null,
         scrimColor = Color.Black.copy(alpha = 0.65f)
@@ -78,7 +88,9 @@ fun NowPlayingAiBottomSheet(
             uiState = uiState,
             viewModel = viewModel,
             onDismiss = onDismiss,
-            vibrationManager = vibrationManager
+            vibrationManager = vibrationManager,
+            onSeek = onSeek,
+            onPlayRecommendation = onPlayRecommendation
         )
     }
 }
@@ -92,28 +104,38 @@ fun NowPlayingAiContent(
     uiState: NowPlayingAiUiState,
     viewModel: NowPlayingAiViewModel,
     onDismiss: () -> Unit,
-    vibrationManager: VibrationManager
+    vibrationManager: VibrationManager,
+    onSeek: (Long) -> Unit = {},
+    onPlayRecommendation: (AiRecommendation) -> Unit = {}
 ) {
+    val performanceMode = LocalPerformanceMode.current
+
+    LaunchedEffect(uiState.isAiEnabled) {
+        if (!uiState.isAiEnabled && uiState.selectedTab != AiTab.Lyrics) {
+            viewModel.selectTab(AiTab.Lyrics)
+        }
+    }
+
     Box(
         modifier = Modifier
-            .fillMaxHeight(0.93f)
+            .fillMaxHeight(0.9f)
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
     ) {
-        // Blurred album art atmospheric background
         AsyncImage(
             model = uiState.currentSong?.coverUrl,
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
-                .alpha(0.1f)
-                .blur(100.dp),
+                .alpha(if (performanceMode) 0.05f else 0.1f)
+                .run {
+                    if (performanceMode) this else blur(100.dp)
+                },
             contentScale = ContentScale.Crop,
             error = painterResource(android.R.drawable.ic_media_play)
         )
 
-        // Vignette over blur — surface fades in from bottom so text remains legible
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -129,7 +151,7 @@ fun NowPlayingAiContent(
 
         Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
             AiHeader(
-                selectedTab = uiState.selectedTab,
+                uiState = uiState,
                 onTabSelected = {
                     vibrationManager.vibrateClick()
                     viewModel.selectTab(it)
@@ -142,25 +164,30 @@ fun NowPlayingAiContent(
             )
 
             Box(modifier = Modifier.weight(1f)) {
+                val performanceMode = LocalPerformanceMode.current
                 AnimatedContent(
                     targetState = uiState.selectedTab,
                     transitionSpec = {
-                        val dir = if (targetState.index > initialState.index) 1 else -1
-                        (fadeIn(tween(280)) + slideInHorizontally(
-                            spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
-                        ) { dir * it / 3 })
-                            .togetherWith(
-                                fadeOut(tween(180)) + slideOutHorizontally(
-                                    spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
-                                ) { -dir * it / 3 }
-                            )
+                        if (performanceMode) {
+                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                        } else {
+                            val dir = if (targetState.index > initialState.index) 1 else -1
+                            (fadeIn(tween(280)) + slideInHorizontally(
+                                spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
+                            ) { dir * it / 3 })
+                                .togetherWith(
+                                    fadeOut(tween(180)) + slideOutHorizontally(
+                                        spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
+                                    ) { -dir * it / 3 }
+                                )
+                        }
                     },
                     label = "AiTabContent"
                 ) { tab ->
                     when (tab) {
-                        AiTab.Lyrics     -> LyricsTab(uiState.lyricsState, viewModel, vibrationManager)
+                        AiTab.Lyrics     -> LyricsTab(uiState.lyricsState, viewModel, vibrationManager, uiState.performanceMode, onSeek)
                         AiTab.MoreInfo   -> MoreInfoTab(uiState.moreInfoState)
-                        AiTab.MusicTaste -> TasteTab(uiState.tasteState)
+                        AiTab.MusicTaste -> TasteTab(uiState.tasteState, onRecommendationClick = onPlayRecommendation)
                     }
                 }
             }
@@ -174,13 +201,13 @@ fun NowPlayingAiContent(
 
 @Composable
 fun AiHeader(
-    selectedTab: AiTab,
+    uiState: NowPlayingAiUiState,
     onTabSelected: (AiTab) -> Unit,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val performanceMode = LocalPerformanceMode.current
     Column(modifier = Modifier.padding(top = 14.dp)) {
-        // Drag handle
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(
                 modifier = Modifier
@@ -191,7 +218,6 @@ fun AiHeader(
             )
         }
 
-        // Title row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -199,7 +225,6 @@ fun AiHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Sparkle icon + label
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Surface(
                     modifier = Modifier.size(38.dp),
@@ -225,7 +250,7 @@ fun AiHeader(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        "Powered by LRC lib.",
+                        "Powered by Toolz Intelligence",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                         fontWeight = FontWeight.SemiBold
@@ -233,9 +258,7 @@ fun AiHeader(
                 }
             }
 
-            // Actions
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Refresh — small pill
                 Surface(
                     onClick = onRefresh,
                     modifier = Modifier.height(36.dp).wrapContentWidth().bouncyClick {},
@@ -251,7 +274,6 @@ fun AiHeader(
                         Text("Refresh", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                // Dismiss
                 Surface(
                     onClick = onDismiss,
                     modifier = Modifier.size(36.dp),
@@ -265,18 +287,24 @@ fun AiHeader(
             }
         }
 
-        // Tab pills — matching PillTabRow style from MusicPlayerScreen
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf(AiTab.Lyrics, AiTab.MoreInfo, AiTab.MusicTaste).forEach { tab ->
-                val isSelected = selectedTab == tab
+            val tabs = remember(uiState.isAiEnabled) {
+                if (uiState.isAiEnabled) {
+                    listOf(AiTab.Lyrics, AiTab.MoreInfo, AiTab.MusicTaste)
+                } else {
+                    listOf(AiTab.Lyrics)
+                }
+            }
+            tabs.forEach { tab ->
+                val isSelected = uiState.selectedTab == tab
                 val weight by animateFloatAsState(
                     if (isSelected) 1.25f else 1f,
-                    spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+                    if (performanceMode) snap() else spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
                     label = "aiTabW"
                 )
                 Surface(
@@ -334,9 +362,10 @@ fun AiHeader(
 fun LyricsTab(
     state: AiLyricsState,
     viewModel: NowPlayingAiViewModel,
-    vibrationManager: VibrationManager
+    vibrationManager: VibrationManager,
+    performanceMode: Boolean = LocalPerformanceMode.current,
+    onSeek: (Long) -> Unit = {}
 ) {
-    // Keep screen on while lyrics are displayed
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
@@ -346,8 +375,7 @@ fun LyricsTab(
     val playbackPosition by viewModel.playbackPositionMs.collectAsState()
     val listState = rememberLazyListState()
 
-    // Shift playback position forward slightly to compensate for render latency
-    val syncedPosition = playbackPosition + 400L
+    val syncedPosition = playbackPosition + 250L
 
     val currentLineIndex = remember(syncedPosition, state.syncedLyrics) {
         if (state.isSynced && state.syncedLyrics.isNotEmpty()) {
@@ -355,28 +383,37 @@ fun LyricsTab(
         } else -1
     }
 
-    // ── Better manual scroll detection ───────────────────────────────────────
-    // Track whether the list is currently being programmatically scrolled.
-    // If the user physically moves the list (isScrollInProgress while NOT
-    // triggered by animateScrollToItem) we consider it a manual gesture.
     val isAutoScrollInFlight = remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentLineIndex, state.isAutoScrollEnabled) {
+    LaunchedEffect(Unit) {
         if (state.isAutoScrollEnabled && currentLineIndex >= 0) {
             isAutoScrollInFlight.value = true
-            listState.animateScrollToItem(
-                index = currentLineIndex,
-                scrollOffset = -420
-            )
+            listState.scrollToItem(index = currentLineIndex, scrollOffset = -250)
             isAutoScrollInFlight.value = false
         }
     }
 
-    // Detect user-initiated scroll: list is scrolling AND it wasn't us who started it
+    LaunchedEffect(currentLineIndex, state.isAutoScrollEnabled) {
+        if (state.isAutoScrollEnabled && currentLineIndex >= 0) {
+            isAutoScrollInFlight.value = true
+            if (performanceMode) {
+                listState.scrollToItem(
+                    index = currentLineIndex,
+                    scrollOffset = -250
+                )
+            } else {
+                listState.animateScrollToItem(
+                    index = currentLineIndex,
+                    scrollOffset = -250
+                )
+            }
+            isAutoScrollInFlight.value = false
+        }
+    }
+
     val isScrolling = listState.isScrollInProgress
     LaunchedEffect(isScrolling) {
         if (isScrolling && !isAutoScrollInFlight.value && state.isAutoScrollEnabled) {
-            vibrationManager.vibrateClick()
             viewModel.onManualScroll()
         }
     }
@@ -393,66 +430,79 @@ fun LyricsTab(
                 )
 
             state.isSynced -> {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .fadingEdges(top = 72.dp, bottom = 100.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(22.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    itemsIndexed(state.syncedLyrics) { index, line ->
-                        val isCurrent = index == currentLineIndex
-                        // Batch all animations under one key to avoid independent recomp
-                        val animFrac by animateFloatAsState(
-                            if (isCurrent) 1f else 0f,
-                            tween(550),
-                            label = "lyricFrac$index"
-                        )
-                        val scale by animateFloatAsState(
-                            if (isCurrent) 1.10f else 1f,
-                            spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow),
-                            label = "lyricScale$index"
-                        )
-                        val primary = MaterialTheme.colorScheme.primary
-                        val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
-                        // Interpolate color manually to avoid animateColorAsState overhead in list
-                        val r = dim.red + (primary.red - dim.red) * animFrac
-                        val g = dim.green + (primary.green - dim.green) * animFrac
-                        val b = dim.blue + (primary.blue - dim.blue) * animFrac
-                        val a = 0.18f + (1f - 0.18f) * animFrac
+                AnimatedContent(
+                    targetState = state.layout,
+                    transitionSpec = {
+                         fadeIn(tween(500), initialAlpha = 0.1f) togetherWith fadeOut(tween(400))
+                    },
+                    label = "lyricLayoutAnim"
+                ) { layout ->
+                        val lyricsWithStops = remember(state.syncedLyrics) {
+                        if (state.syncedLyrics.isEmpty()) return@remember emptyList<LyricsLine>()
+                        
+                        val result = mutableListOf<LyricsLine>()
+                        for (i in 0 until state.syncedLyrics.size - 1) {
+                            result.add(state.syncedLyrics[i])
+                            val currentLineEnd = state.syncedLyrics[i].timeMs + 4000L 
+                            val nextLineStart = state.syncedLyrics[i+1].timeMs
+                            if (nextLineStart - currentLineEnd > 6000L) {
+                                result.add(LyricsLine(
+                                    timeMs = currentLineEnd + 1000L,
+                                    content = "[STOP_INDICATOR]",
+                                    words = emptyList()
+                                ))
+                            }
+                        }
+                        result.add(state.syncedLyrics.last())
+                        result
+                    }
 
-                        Text(
-                            text = line.content,
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.Black,
-                                fontSize = 24.sp,
-                                lineHeight = 32.sp,
-                                letterSpacing = (-0.3).sp,
-                                textAlign = TextAlign.Center
-                            ),
-                            color = Color(r, g, b, a),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                    // Blur inactive lines softly (API 31+); fall back to alpha
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                                        renderEffect = if (!isCurrent && animFrac < 0.5f)
-                                            AndroidRenderEffect.createBlurEffect(1.2f, 1.2f, AndroidShader.TileMode.CLAMP)
-                                                .asComposeRenderEffect()
-                                        else null
-                                    }
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .fadingEdges(top = 72.dp, bottom = 100.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 80.dp),
+                        verticalArrangement = Arrangement.spacedBy(22.dp),
+                        horizontalAlignment = when (layout) {
+                            LyricsLayout.LEFT -> Alignment.Start
+                            LyricsLayout.CENTER -> Alignment.CenterHorizontally
+                            LyricsLayout.RIGHT -> Alignment.End
+                        }
+                    ) {
+                        itemsIndexed(lyricsWithStops) { index, line ->
+                            val isCurrent = remember(currentLineIndex, lyricsWithStops, index) {
+                                if (currentLineIndex < 0) false
+                                else {
+                                    val originalLine = state.syncedLyrics.getOrNull(currentLineIndex)
+                                    originalLine != null && line.timeMs == originalLine.timeMs && line.content == originalLine.content
                                 }
-                        )
+                            }
+
+                            SyncedLyricLine(
+                                line = line,
+                                isCurrent = isCurrent,
+                                playbackPosition = syncedPosition,
+                                alignment = when (layout) {
+                                    LyricsLayout.LEFT -> TextAlign.Start
+                                    LyricsLayout.CENTER -> TextAlign.Center
+                                    LyricsLayout.RIGHT -> TextAlign.End
+                                },
+                                performanceMode = performanceMode,
+                                isSeekEnabled = state.isSeekEnabled,
+                                onClick = {
+                                    vibrationManager.vibrateClick()
+                                    viewModel.updateProgress(line.timeMs)
+                                    onSeek(line.timeMs)
+                                },
+                                font = state.fontFamily
+                            )
+                        }
                     }
                 }
             }
 
             else -> {
-                // Plain (non-synced) lyrics scroll
                 val scrollState = rememberScrollState()
                 Column(
                     modifier = Modifier
@@ -477,7 +527,6 @@ fun LyricsTab(
             }
         }
 
-        // ── Sync / Manual toggle FAB ──────────────────────────────────────────
         if (!state.isLoading && state.isSynced) {
             val fabScale by animateFloatAsState(
                 if (state.isAutoScrollEnabled) 1f else 1.04f,
@@ -526,39 +575,225 @@ fun LyricsTab(
                     )
                 }
             }
-
-            // Manual mode pill banner — shown when user has taken control
-            if (!state.isAutoScrollEnabled) {
-                Surface(
-                    onClick = {
-                        vibrationManager.vibrateClick()
-                        viewModel.toggleAutoScroll()
-                    },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 22.dp)
-                        .bouncyClick {},
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
-                    ) {
-                        Icon(Icons.Rounded.TouchApp, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text(
-                            "Tap MANUAL to re-sync",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-                        )
-                    }
-                }
-            }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@Composable
+fun SyncedLyricLine(
+    line: LyricsLine,
+    isCurrent: Boolean,
+    playbackPosition: Long,
+    alignment: TextAlign,
+    performanceMode: Boolean = LocalPerformanceMode.current,
+    onClick: () -> Unit = {},
+    isSeekEnabled: Boolean = true,
+    font: LyricsFont = LyricsFont.SANS_SERIF
+) {
+    val lineAlpha by animateFloatAsState(
+        if (isCurrent) 1f else 0.35f,
+        if (performanceMode) snap() else spring(stiffness = Spring.StiffnessLow),
+        label = "lineAlpha"
+    )
+
+    val fontFamily = when(font) {
+        LyricsFont.SANS_SERIF -> androidx.compose.ui.text.font.FontFamily.Default
+        LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+        LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
+        LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+    }
+
+    val primary = MaterialTheme.colorScheme.primary
+    val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        if (isPressed && isSeekEnabled) 0.96f else 1f,
+        spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMedium),
+        label = "pressScale"
+    )
+
+    if (line.words.isNotEmpty()) {
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                    alpha = lineAlpha
+                }
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = if (isSeekEnabled) onClick else null
+                ),
+            horizontalArrangement = when (alignment) {
+                TextAlign.Start -> Arrangement.Start
+                TextAlign.Center -> Arrangement.Center
+                TextAlign.End -> Arrangement.End
+                else -> Arrangement.Center
+            },
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            line.words.forEach { word ->
+                WordView(
+                    word = word,
+                    playbackPosition = playbackPosition,
+                    isLineCurrent = isCurrent,
+                    performanceMode = performanceMode,
+                    fontFamily = fontFamily
+                )
+            }
+        }
+    } else if (line.content == "[STOP_INDICATOR]") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val indicatorAlpha by animateFloatAsState(
+                if (isCurrent) 1f else 0.2f,
+                tween(500),
+                label = "stopAlpha"
+            )
+            
+            repeat(3) { i ->
+                val delay = i * 200
+                val infiniteTransition = rememberInfiniteTransition(label = "dots")
+                val dy by if (isCurrent) {
+                    infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = -10f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(600, delayMillis = delay, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "dy"
+                    )
+                } else {
+                    remember { mutableStateOf(0f) }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .graphicsLayer { translationY = dy }
+                        .alpha(indicatorAlpha),
+                    shape = CircleShape,
+                    color = if (isCurrent) primary else dim
+                ) {}
+                if (i < 2) Spacer(Modifier.width(12.dp))
+            }
+        }
+    } else {
+        val animFrac by animateFloatAsState(
+            if (isCurrent) 1f else 0f,
+            if (performanceMode) snap() else tween(550),
+            label = "lineAnim"
+        )
+        val color = if (performanceMode) (if (isCurrent) primary else dim) else lerp(dim, primary, animFrac)
+        val scale by animateFloatAsState(
+            if (isCurrent) 1.05f else 1f,
+            if (performanceMode) snap() else spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
+            label = "lineScale"
+        )
+        Text(
+            text = line.content,
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Black,
+                fontSize = 24.sp,
+                lineHeight = 32.sp,
+                textAlign = alignment,
+                fontFamily = fontFamily
+            ),
+            color = color,
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = scale * pressScale
+                    scaleY = scale * pressScale
+                    alpha = lineAlpha
+                }
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = if (isSeekEnabled) onClick else null
+                )
+        )
+    }
+}
+
+@Composable
+fun WordView(
+    word: LyricsWord,
+    playbackPosition: Long,
+    isLineCurrent: Boolean,
+    performanceMode: Boolean = LocalPerformanceMode.current,
+    fontFamily: androidx.compose.ui.text.font.FontFamily = androidx.compose.ui.text.font.FontFamily.Default
+) {
+    val isActive = playbackPosition in word.startTimeMs..(word.startTimeMs + word.durationMs)
+    val isPast = playbackPosition > (word.startTimeMs + word.durationMs)
+    
+    val animFrac by animateFloatAsState(
+        targetValue = if (isActive) 1f else 0f,
+        animationSpec = if (performanceMode) snap() else spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "wordAnim"
+    )
+
+    val isLight = !isSystemInDarkTheme()
+    val highlightColor = if (isLight) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 1f)
+    }
+    
+    val dim = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+    val pastColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f) 
+
+    val baseColor = if (isPast) pastColor else dim
+    val color = if (performanceMode) (if (isActive) highlightColor else baseColor) else lerp(baseColor, highlightColor, animFrac)
+    val wordScale = if (performanceMode) (if (isActive) 1.15f else 1f) else 1f + (0.18f * animFrac)
+
+    Text(
+        text = word.word + " ",
+        style = MaterialTheme.typography.headlineSmall.copy(
+            fontWeight = FontWeight.Black,
+            fontSize = 32.sp,
+            letterSpacing = if (performanceMode) (-1.2).sp else ((-1.2).sp * (0.8f + 0.2f * animFrac)),
+            lineHeight = 42.sp,
+            fontFamily = fontFamily
+        ),
+        color = color,
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = wordScale
+                scaleY = wordScale
+                if (!performanceMode) {
+                    translationY = -3.dp.toPx() * animFrac
+                }
+            }
+            .then(
+                if (!performanceMode && animFrac > 0.01f) Modifier.drawBehind {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                highlightColor.copy(alpha = 0.25f * animFrac),
+                                highlightColor.copy(alpha = 0.05f * animFrac),
+                                Color.Transparent
+                            ),
+                            center = center,
+                            radius = size.maxDimension * 2f
+                        )
+                    )
+                } else Modifier
+            )
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -580,7 +815,10 @@ fun MoreInfoTab(state: AiMoreInfoState) {
         else -> Column(
             modifier = Modifier
                 .fillMaxSize()
-                .fadingEdges(top = 20.dp, bottom = 40.dp)
+                .run {
+                    if (state.isLoading) this
+                    else fadingEdges(top = 20.dp, bottom = 40.dp)
+                }
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -615,7 +853,6 @@ fun InfoCard(title: String, content: String, icon: ImageVector, accentColor: Col
         border = BorderStroke(1.dp, accentColor.copy(alpha = 0.18f))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            // Title row
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(38.dp),
@@ -654,147 +891,283 @@ fun InfoCard(title: String, content: String, icon: ImageVector, accentColor: Col
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun TasteTab(state: AiTasteState) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Section header
-        if (!state.isLoading) {
-            Row(
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+fun TasteTab(
+    state: AiTasteState,
+    onRecommendationClick: (AiRecommendation) -> Unit = {}
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scrollState = rememberScrollState()
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(bottom = 80.dp)
+    ) {
+        // Section 1: Curated For You
+        RecommendationSection(
+            title = "CURATED FOR YOU",
+            subtitle = "Based on the vibe of this song",
+            icon = Icons.Rounded.Recommend,
+            accentColor = MaterialTheme.colorScheme.primary,
+            isLoading = state.isLoadingCurated,
+            recommendations = state.curatedRecommendations,
+            onRecommendationClick = onRecommendationClick,
+            context = context
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Section 2: Same Artist
+        RecommendationSection(
+            title = "MORE FROM ARTIST",
+            subtitle = "Similar tracks by the same creator",
+            icon = Icons.Rounded.Person,
+            accentColor = MaterialTheme.colorScheme.secondary,
+            isLoading = state.isLoadingArtist,
+            recommendations = state.artistRecommendations,
+            onRecommendationClick = onRecommendationClick,
+            context = context
+        )
+    }
+}
+
+@Composable
+private fun RecommendationSection(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    isLoading: Boolean,
+    recommendations: List<AiRecommendation>,
+    onRecommendationClick: (AiRecommendation) -> Unit,
+    context: android.content.Context
+) {
+    Column {
+        Row(
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(34.dp), 
+                shape = RoundedCornerShape(12.dp), 
+                color = accentColor.copy(alpha = 0.15f)
             ) {
-                Surface(modifier = Modifier.size(34.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Recommend, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
-                    }
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = accentColor, modifier = Modifier.size(18.dp))
                 }
-                Column {
-                    Text(
-                        "CURATED FOR YOU",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.5.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Based on what you're listening to",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+            }
+            Column {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp,
+                    color = accentColor
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
 
         when {
-            state.isLoading -> AiShimmerTaste()
-            state.recommendations.isEmpty() -> AiEmptyState(
-                icon = Icons.Rounded.Recommend,
-                message = "No recommendations yet",
-                sub = "Tap Refresh to discover music"
-            )
+            isLoading -> AiShimmerTaste()
+            recommendations.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No recommendations found",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
             else -> LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(state.recommendations) { rec ->
-                    RecommendationCard(rec)
+                items(recommendations) { rec ->
+                    RecommendationCard(
+                        rec = rec, 
+                        onPlay = { onRecommendationClick(rec) },
+                        onViewOnYouTube = {
+                            rec.videoId?.let { id ->
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://www.youtube.com/watch?v=$id")
+                                )
+                                context.startActivity(intent)
+                            }
+                        }
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun RecommendationCard(rec: AiRecommendation) {
-    Surface(
-        modifier = Modifier
-            .width(260.dp)
-            .height(300.dp)
-            .bouncyClick { /* Handle play */ },
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Soft gradient overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
+fun RecommendationCard(
+    rec: AiRecommendation, 
+    onPlay: () -> Unit,
+    onViewOnYouTube: () -> Unit = {}
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box {
+        Surface(
+            modifier = Modifier
+                .width(260.dp)
+                .height(300.dp)
+                .combinedClickable(
+                    onClick = onPlay,
+                    onLongClick = { showMenu = true }
+                ),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = rec.thumbnailUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.15f)
+                        .blur(20.dp),
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(android.R.drawable.ic_media_play)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                )
                             )
                         )
-                    )
-            )
+                )
 
-            Column(modifier = Modifier.padding(22.dp)) {
-                // Music note icon surface
+                Column(modifier = Modifier.padding(22.dp)) {
+                    Surface(
+                        modifier = Modifier.size(80.dp),
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shadowElevation = 8.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (rec.thumbnailUrl != null) {
+                                AsyncImage(
+                                    model = rec.thumbnailUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.MusicNote,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+
+                    Text(
+                        rec.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        rec.artist.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(modifier = Modifier.alpha(0.07f))
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        rec.explanation,
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    onClick = onPlay,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                        .size(48.dp)
+                        .bouncyClick {},
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 6.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.MusicNote, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
                 }
-
-                Spacer(Modifier.height(18.dp))
-
-                Text(
-                    rec.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    rec.artist.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(14.dp))
-                HorizontalDivider(modifier = Modifier.alpha(0.07f))
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    rec.explanation,
-                    style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
+        }
 
-            // Play icon
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-                    .size(38.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                }
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            DropdownMenuItem(
+                text = { Text("Play Now", fontWeight = FontWeight.SemiBold) },
+                onClick = {
+                    showMenu = false
+                    onPlay()
+                },
+                leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) }
+            )
+            if (rec.videoId != null) {
+                DropdownMenuItem(
+                    text = { Text("View on YouTube", fontWeight = FontWeight.SemiBold) },
+                    onClick = {
+                        showMenu = false
+                        onViewOnYouTube()
+                    },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null) }
+                )
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Markdown renderer
+// Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -840,10 +1213,6 @@ private fun AnnotatedString.Builder.appendInlineItalic(text: String) {
         else append(part)
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shimmer states
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun AiShimmerLyrics() {
@@ -909,10 +1278,6 @@ fun ShimmerBox(modifier: Modifier) {
     Box(modifier = modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Empty state
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
 fun AiEmptyState(
     icon: ImageVector,
@@ -952,12 +1317,24 @@ fun AiEmptyState(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AI Sparkle button (used in FullPlayerView secondary controls)
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
 fun AiSparkleButton(onClick: () -> Unit) {
+    val performanceMode = LocalPerformanceMode.current
+    if (performanceMode) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.size(46.dp).bouncyClick {},
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary,
+            shadowElevation = 0.dp
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(22.dp))
+            }
+        }
+        return
+    }
+
     val transition = rememberInfiniteTransition(label = "sparkle")
     val glowScale by transition.animateFloat(
         1f, 1.22f,

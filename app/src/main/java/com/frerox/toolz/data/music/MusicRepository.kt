@@ -31,6 +31,10 @@ class MusicRepository @Inject constructor(
         musicDao.getTrackByUri(uri)
     }
 
+    suspend fun getTrackBySourceUrl(sourceUrl: String): MusicTrack? = withContext(Dispatchers.IO) {
+        musicDao.getTrackBySourceUrl(sourceUrl)
+    }
+
     suspend fun updateTrackAiData(
         uri: String,
         lyrics: String? = null,
@@ -90,6 +94,8 @@ class MusicRepository @Inject constructor(
                 val path = cursor.getString(dataColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                 
+                val albumArtUri = if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null
+                
                 val existingTrack = musicDao.getTrackByUri(contentUri.toString()) 
                     ?: (path?.let { musicDao.getTrackByPath(it) })
                     ?: musicDao.findDuplicate(title, artist, duration, path)
@@ -103,7 +109,7 @@ class MusicRepository @Inject constructor(
                             album = album,
                             albumId = albumId,
                             duration = duration,
-                            thumbnailUri = getAlbumArtUri(albumId).toString(),
+                            thumbnailUri = albumArtUri,
                             isFavorite = false,
                             lastPlayed = 0L,
                             playCount = 0,
@@ -112,9 +118,21 @@ class MusicRepository @Inject constructor(
                         )
                     )
                 } else {
-                    // Update existing track if necessary, but don't duplicate
-                    if (existingTrack.uri != contentUri.toString() || existingTrack.path != path) {
-                         musicDao.updateTrack(existingTrack.copy(uri = contentUri.toString(), path = path))
+                    // Update existing track and fix potential buggy thumbnailUri (where it was set to the audio file Uri)
+                    val currentThumb = existingTrack.thumbnailUri
+                    val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
+                    
+                    val needsUpdate = existingTrack.uri != contentUri.toString() || 
+                                     existingTrack.path != path || 
+                                     currentThumb == null || isBuggyThumb
+                    
+                    if (needsUpdate) {
+                         musicDao.updateTrack(existingTrack.copy(
+                             uri = contentUri.toString(), 
+                             path = path,
+                             albumId = albumId,
+                             thumbnailUri = if (currentThumb == null || isBuggyThumb) albumArtUri else currentThumb
+                         ))
                     }
                 }
             }
@@ -124,7 +142,8 @@ class MusicRepository @Inject constructor(
         tracks
     }
 
-    private fun getAlbumArtUri(albumId: Long): Uri {
+    private fun getAlbumArtUri(albumId: Long): Uri? {
+        if (albumId < 0) return null
         return ContentUris.withAppendedId(
             Uri.parse("content://media/external/audio/albumart"),
             albumId
@@ -154,6 +173,17 @@ class MusicRepository @Inject constructor(
 
                         if (existingTrack == null) {
                             tracks.add(extractMetadata(file.uri))
+                        } else {
+                            // Fix buggy thumbnails or update data
+                            val currentThumb = existingTrack.thumbnailUri
+                            val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
+                            if (currentThumb == null || isBuggyThumb) {
+                                val meta = extractMetadata(file.uri)
+                                musicDao.updateTrack(existingTrack.copy(
+                                    thumbnailUri = meta.thumbnailUri,
+                                    uri = file.uri.toString()
+                                ))
+                            }
                         }
                     } catch (e: Exception) {
                         val existingTrack = musicDao.getTrackByUri(file.uri.toString())
@@ -201,7 +231,7 @@ class MusicRepository @Inject constructor(
                 artist = artist,
                 album = album,
                 duration = duration,
-                thumbnailUri = thumbnailUri ?: uri.toString(),
+                thumbnailUri = thumbnailUri,
                 isFavorite = false,
                 lastPlayed = 0L,
                 playCount = 0,
@@ -215,7 +245,7 @@ class MusicRepository @Inject constructor(
                 artist = "Unknown Artist",
                 album = "Unknown Album",
                 duration = 0,
-                thumbnailUri = uri.toString(),
+                thumbnailUri = null,
                 isFavorite = false,
                 lastPlayed = 0L,
                 playCount = 0,
@@ -229,8 +259,20 @@ class MusicRepository @Inject constructor(
         }
     }
 
-    suspend fun incrementPlayCount(uri: String) {
-        musicDao.incrementPlayCount(uri, System.currentTimeMillis())
+    suspend fun incrementPlayCount(track: MusicTrack) {
+        if (track.sourceUrl != null) {
+            musicDao.incrementPlayCountBySourceUrl(track.sourceUrl, System.currentTimeMillis())
+        } else {
+            musicDao.incrementPlayCount(track.uri, System.currentTimeMillis())
+        }
+    }
+
+    suspend fun insertTrack(track: MusicTrack) {
+        musicDao.insertTrack(track)
+    }
+
+    suspend fun updateTrack(track: MusicTrack) {
+        musicDao.updateTrack(track)
     }
 
     suspend fun createPlaylist(playlist: Playlist) {

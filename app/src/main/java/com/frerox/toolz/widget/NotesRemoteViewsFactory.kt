@@ -8,6 +8,8 @@ import androidx.room.Room
 import com.frerox.toolz.R
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.Note
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import com.frerox.toolz.util.security.KeyManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -22,11 +24,16 @@ class NotesRemoteViewsFactory(private val context: Context) : RemoteViewsService
         // Room doesn't allow database access on main thread, and widget factory can be picky.
         runBlocking {
             try {
+                System.loadLibrary("sqlcipher")
+                val passphrase = KeyManager.getOrCreateMasterKey(context)
+                val factory = SupportOpenHelperFactory(passphrase)
+
                 val db = Room.databaseBuilder(
                     context,
                     AppDatabase::class.java,
                     "toolz_db"
                 )
+                .openHelperFactory(factory)
                 .fallbackToDestructiveMigration(true)
                 .build()
                 notes = db.noteDao().getAllNotes().first().take(10)

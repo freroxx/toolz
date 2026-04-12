@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import com.frerox.toolz.ui.theme.toolzAppBackgroundBrush
+import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -50,8 +50,6 @@ fun UnitConverterScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val units = state.availableUnits
-    val performanceMode = LocalPerformanceMode.current
-    val isDark = isSystemInDarkTheme()
 
     Scaffold(
         topBar = {
@@ -79,7 +77,7 @@ fun UnitConverterScreen(
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
-            .background(toolzAppBackgroundBrush(isDark, performanceMode))
+            .toolzBackground()
             .padding(top = padding.calculateTopPadding())
         ) {
             Column(
@@ -411,5 +409,6 @@ private fun getIconForType(type: ConversionType): androidx.compose.ui.graphics.v
         ConversionType.FORCE -> Icons.Rounded.FitnessCenter
         ConversionType.PRESSURE -> Icons.Rounded.TireRepair
         ConversionType.POWER -> Icons.Rounded.ElectricBolt
+        ConversionType.CURRENCY -> Icons.Rounded.Paid
     }
 }

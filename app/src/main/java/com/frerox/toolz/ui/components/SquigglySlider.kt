@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -32,9 +33,10 @@ fun SquigglySlider(
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
 
-    // Compatibility check: In performance mode (isPlaying = false), we skip animations
+    // Compatibility check: In performance mode, we skip animations
+    val performanceMode = LocalPerformanceMode.current
     val infiniteTransition = rememberInfiniteTransition(label = "wave_motion")
-    val phase by if (isPlaying) {
+    val phase by if (isPlaying && !performanceMode) {
         infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2 * PI).toFloat(),
@@ -49,14 +51,14 @@ fun SquigglySlider(
     }
 
     val currentAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying && !isDragged) 6f else if (isDragged) 8f else 0f,
-        animationSpec = if (isPlaying) spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow) else snap(),
+        targetValue = if (isPlaying && !isDragged && !performanceMode) 6f else if (isDragged) 8f else 0f,
+        animationSpec = if (isPlaying && !performanceMode) spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow) else snap(),
         label = "amplitude_state"
     )
 
     val thumbScale by animateFloatAsState(
         targetValue = if (isDragged) 1.2f else 1f,
-        animationSpec = if (isPlaying) spring(Spring.DampingRatioMediumBouncy) else snap(),
+        animationSpec = if (isPlaying && !performanceMode) spring(Spring.DampingRatioMediumBouncy) else snap(),
         label = "thumb_scale"
     )
 

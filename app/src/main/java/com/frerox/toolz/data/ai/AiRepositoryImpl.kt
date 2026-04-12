@@ -298,14 +298,14 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
     ): Result<String> = try {
         if (keyState.value.isBlank()) {
-            Result.failure(Exception("No API key available for $provider. Please add one in settings or wait for sync."))
+            Result.failure(Exception("No API key available for $provider. Please add your own key in settings."))
         } else if (image != null && !AiSettingsHelper.supportsVision(provider, modelName)) {
             Result.failure(Exception("$provider model '$modelName' does not support image input. Choose a vision-capable model or remove the image."))
         } else {
             executeProviderCall(provider, keyState.value, modelName, prompt, history, image)
         }
     } catch (e: HttpException) {
-        if (e.code() == 401 && keyState.source == ApiKeySource.REMOTE) {
+        if (e.code() == 401 && (keyState.source == ApiKeySource.REMOTE || keyState.source == ApiKeySource.DEFAULT)) {
             refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image)
         } else {
             Result.failure(Exception(httpErrorMessage(e, provider, keyState.source)))
@@ -343,16 +343,15 @@ class AiRepositoryImpl @Inject constructor(
         val refreshed = settingsManager.syncRemoteKeys(force = true)
         val refreshedKey = settingsManager.resolveApiKey(provider)
 
-        if (!refreshed || refreshedKey.source != ApiKeySource.REMOTE || refreshedKey.value.isBlank()) {
+        if (!refreshed || (refreshedKey.source != ApiKeySource.REMOTE && refreshedKey.source != ApiKeySource.DEFAULT) || refreshedKey.value.isBlank()) {
             return Result.failure(
-                Exception("The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings.")
+                Exception("The Toolz default key for $provider is invalid or unavailable. Please add your own key in settings.")
             )
         }
 
         if (refreshedKey.value == failedKey) {
-            settingsManager.invalidateRemoteKey(provider, failedKey)
             return Result.failure(
-                Exception("The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings.")
+                Exception("The Toolz default key for $provider is invalid or unavailable. Please add your own key in settings.")
             )
         }
 
@@ -553,8 +552,8 @@ class AiRepositoryImpl @Inject constructor(
         val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         return when (e.code()) {
             401  -> {
-                if (keySource == ApiKeySource.REMOTE) {
-                    "The Toolz default key for $provider is unavailable. Refresh keys or add your own key in settings."
+                if (keySource == ApiKeySource.REMOTE || keySource == ApiKeySource.DEFAULT) {
+                    "The Toolz default key for $provider is invalid or expired. Please add your own key in settings."
                 } else {
                     "Invalid API key for $provider. Please check your settings."
                 }

@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.ui.navigation.Screen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,9 +183,9 @@ class VoiceRecorderService : Service() {
 
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "voice_recorder")
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.VoiceRecorder.route)
         }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleAction = if (_isPaused.value) ACTION_RESUME else ACTION_PAUSE
         val toggleIntent = Intent(this, VoiceRecorderService::class.java).apply { action = toggleAction }

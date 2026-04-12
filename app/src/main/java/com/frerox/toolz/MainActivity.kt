@@ -51,6 +51,7 @@ import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.LoadingScreen
+import com.frerox.toolz.ui.screens.LoadingViewModel
 import com.frerox.toolz.ui.screens.OnboardingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
 import com.frerox.toolz.ui.screens.light.*
@@ -74,6 +75,8 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.screens.cleaner.CleanerScreen
+import com.frerox.toolz.ui.screens.search.SearchScreen
+import com.frerox.toolz.ui.screens.browser.WebViewScreen
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -480,7 +483,9 @@ fun ToolzNavHost(
         }
     ) {
         composable(Screen.Loading.route) {
+            val loadingViewModel: LoadingViewModel = hiltViewModel()
             LoadingScreen(
+                viewModel = loadingViewModel,
                 onLoadingComplete = {
                     val nextRoute = if (onboardingCompleted) Screen.Dashboard.route else "onboarding"
                     navController.navigate(nextRoute) {
@@ -549,6 +554,27 @@ fun ToolzNavHost(
         composable(Screen.Stopwatch.route) {
             StopwatchScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
+
+        composable(Screen.Search.route) {
+            SearchScreen(
+                onBackClick = { navController.popBackStack() },
+                onResultClick = { url ->
+                    navController.navigate(Screen.Browser.createRoute(url))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.Browser.route,
+            arguments = listOf(navArgument("url") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val url = backStackEntry.arguments?.getString("url") ?: ""
+            val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
+            WebViewScreen(
+                url = decodedUrl,
+                onBack = { navController.popBackStack() }
+            )
+        }
         composable(Screen.WorldClock.route) {
             WorldClockScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
@@ -568,8 +594,16 @@ fun ToolzNavHost(
             CalendarScreen(viewModel = hiltViewModel())
         }
 
-        composable(Screen.MusicPlayer.route) {
-            MusicPlayerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        composable(
+            route = Screen.MusicPlayer.route,
+            arguments = listOf(navArgument("tab") { defaultValue = 0; type = NavType.IntType })
+        ) { backStackEntry ->
+            val initialTab = backStackEntry.arguments?.getInt("tab") ?: 0
+            MusicPlayerScreen(
+                viewModel = hiltViewModel(),
+                initialTab = initialTab,
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.FileConverter.route) {
             FileConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })

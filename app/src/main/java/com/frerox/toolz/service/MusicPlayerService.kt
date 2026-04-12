@@ -19,6 +19,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
@@ -63,6 +65,61 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var catalogRepository: com.frerox.toolz.data.catalog.CatalogRepository
+
+    private val playerListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            updateWidget(forceBitmapRefresh = true)
+            
+            // Check if we need to resolve the stream URL for catalog tracks
+            mediaItem?.let { item ->
+                val isCatalog = item.mediaMetadata.extras?.getBoolean("is_catalog") ?: false
+                if (isCatalog && (item.localConfiguration?.uri == null || item.localConfiguration?.uri.toString() == item.mediaId)) {
+                    resolveCatalogTrack(item)
+                }
+            }
+        }
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updateWidget()
+            if (isPlaying) {
+                startWidgetTimer()
+                observeShakeSetting()
+            } else {
+                stopWidgetTimer()
+                unregisterShakeListener()
+            }
+        }
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            updateWidget()
+        }
+    }
+
+    private fun resolveCatalogTrack(item: MediaItem) {
+        serviceScope.launch {
+            try {
+                val sourceUrl = item.mediaMetadata.extras?.getString("source_url") ?: return@launch
+                val streamUrl = catalogRepository.resolveAudioStream(sourceUrl)
+                
+                if (streamUrl != null) {
+                    val updatedItem = item.buildUpon()
+                        .setUri(Uri.parse(streamUrl))
+                        .build()
+                    
+                    // Replace the item in the player
+                    for (i in 0 until player.mediaItemCount) {
+                        if (player.getMediaItemAt(i).mediaId == item.mediaId) {
+                            player.replaceMediaItem(i, updatedItem)
+                            break
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -86,24 +143,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             .setSessionActivity(pendingIntent)
             .build()
 
-        player.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                updateWidget(forceBitmapRefresh = true)
-            }
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                updateWidget()
-                if (isPlaying) {
-                    startWidgetTimer()
-                    observeShakeSetting()
-                } else {
-                    stopWidgetTimer()
-                    unregisterShakeListener()
-                }
-            }
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                updateWidget()
-            }
-        })
+        player.addListener(playerListener)
         
         if (player.isPlaying) {
             startWidgetTimer()

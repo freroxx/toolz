@@ -6,9 +6,15 @@ import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.media.audiofx.Equalizer
+import android.media.audiofx.Visualizer
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import java.io.File
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +28,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.lifecycle.asFlow
+import androidx.work.WorkManager
+import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
@@ -34,6 +43,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -68,15 +78,27 @@ data class MusicUiState(
     val pipEnabled: Boolean = false,
     val sleepTimerActive: Boolean = false,
     val sleepTimerRemaining: Long? = null,
-    val queue: List<MusicTrack> = emptyList(),
+    val queue: List<QueueEntry> = emptyList(),
     val performanceMode: Boolean = false,
     val playbackPosition: Long = 0L,
-    val duration: Long = 0L
+    val duration: Long = 0L,
+    val isOnline: Boolean = false,
+    val isResolvingCatalog: Boolean = false,
+    val playbackSpeed: Float = 1.0f,
+    val equalizerPreset: String = "Normal",
+    val equalizerPresets: List<String> = listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Dance", "Heavy Metal", "Hip Hop", "Flat"),
+    val showMusicSettings: Boolean = false
 )
 
+data class QueueEntry(
+    val id: String,
+    val track: MusicTrack
+)
+
+@UnstableApi
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
-    private val repository: MusicRepository,
+    val repository: MusicRepository,
     private val settingsRepository: SettingsRepository,
     val vibrationManager: VibrationManager,
     val player: ExoPlayer,
@@ -106,56 +128,82 @@ class MusicPlayerViewModel @Inject constructor(
     private var pendingAction: (() -> Unit)? = null
     
     private var equalizer: Equalizer? = null
+    private var visualizer: Visualizer? = null
     private var shakeDetector: ShakeDetector? = null
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+    private val _visualizerData = MutableStateFlow(FloatArray(0))
+    val visualizerData = _visualizerData.asStateFlow()
+
+    private val _equalizerPresets = MutableStateFlow<List<String>>(emptyList())
+    val equalizerPresets = _equalizerPresets.asStateFlow()
 
     private var currentQueueUris: List<String> = emptyList()
 
+    @UnstableApi
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _uiState.update { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
                 startProgressUpdate()
                 startPlayerService()
+                startVisualizer()
                 initEqualizer()
                 vibrationManager.vibrateClick()
             } else {
                 stopProgressUpdate()
+                stopVisualizer()
                 vibrationManager.vibrateClick()
             }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val uri = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
-            var track = _uiState.value.tracks.find { it.uri == uri }
+            val metadata = mediaItem?.mediaMetadata
+            val sourceUrl = metadata?.extras?.getString("source_url")
             
-            // Handle external tracks not in the main library
-            if (track == null && mediaItem != null) {
-                val metadata = mediaItem.mediaMetadata
-                track = MusicTrack(
-                    uri = uri ?: "",
-                    title = metadata.title?.toString() ?: "External Audio",
-                    artist = metadata.artist?.toString() ?: "Unknown",
-                    album = metadata.albumTitle?.toString() ?: "Unknown",
-                    duration = player.duration.coerceAtLeast(0L),
-                    thumbnailUri = metadata.artworkUri?.toString()
-                )
-            }
-
-            val dur = player.duration.coerceAtLeast(0L)
-            _uiState.update { it.copy(currentTrack = track, duration = dur) }
-            _duration.value = dur
-            
-            val currentUri = player.currentMediaItem?.mediaId
-            if (currentUri != null) {
-                viewModelScope.launch {
-                    repository.incrementPlayCount(currentUri)
+            viewModelScope.launch {
+                var track = repository.getTrackByUri(uri ?: "")
+                
+                if (track == null && sourceUrl != null) {
+                    track = repository.getTrackBySourceUrl(sourceUrl)
                 }
-            }
-            
-            updateQueue()
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
-                 vibrationManager.vibrateClick()
+
+                // Handle external tracks not in the main library
+                if (track == null && mediaItem != null) {
+                    track = MusicTrack(
+                        uri = uri ?: "",
+                        title = metadata?.title?.toString() ?: "External Audio",
+                        artist = metadata?.artist?.toString() ?: "Unknown",
+                        album = metadata?.albumTitle?.toString() ?: "Unknown",
+                        duration = player.duration.coerceAtLeast(0L),
+                        thumbnailUri = metadata?.artworkUri?.toString() ?: metadata?.albumTitle?.let { "" }, // Fallback check
+                        sourceUrl = sourceUrl,
+                        lastPlayed = System.currentTimeMillis()
+                    )
+                    
+                    // Persist the external track to database
+                    repository.insertTrack(track)
+                } else if (track != null) {
+                    // Update lastPlayed for recently played tracking
+                    val updatedTrack = track.copy(
+                        lastPlayed = System.currentTimeMillis(),
+                        duration = if (player.duration > 0 && track.duration <= 0) player.duration else track.duration
+                    )
+                    repository.updateTrack(updatedTrack)
+                    track = updatedTrack
+                }
+
+                val dur = player.duration.coerceAtLeast(0L)
+                _uiState.update { it.copy(currentTrack = track, duration = dur) }
+                _duration.value = dur
+                
+                if (track != null) {
+                    repository.incrementPlayCount(track)
+                }
+                
+                updateQueue()
             }
         }
 
@@ -164,6 +212,16 @@ class MusicPlayerViewModel @Inject constructor(
                 val dur = player.duration.coerceAtLeast(0L)
                 _uiState.update { it.copy(duration = dur) }
                 _duration.value = dur
+                
+                // Also update database if duration was previously unknown
+                val currentTrack = _uiState.value.currentTrack
+                if (currentTrack != null && dur > 0 && currentTrack.duration <= 0) {
+                    val updatedTrack = currentTrack.copy(duration = dur)
+                    viewModelScope.launch {
+                        repository.updateTrack(updatedTrack)
+                    }
+                    _uiState.update { it.copy(currentTrack = updatedTrack) }
+                }
             }
         }
 
@@ -193,12 +251,23 @@ class MusicPlayerViewModel @Inject constructor(
             val currentTracks = _uiState.value.tracks
             
             val trackMap = currentTracks.associateBy { it.uri }
-            val queueTracks = mutableListOf<MusicTrack>()
+            val queueEntries = mutableListOf<QueueEntry>()
             val uris = mutableListOf<String>()
+            
+            val timeline = p.currentTimeline
+            val window = androidx.media3.common.Timeline.Window()
             
             for (i in 0 until p.mediaItemCount) {
                 val mediaItem = p.getMediaItemAt(i)
                 uris.add(mediaItem.mediaId)
+                
+                // Get a stable UID from the timeline window if possible
+                val stableId = if (!timeline.isEmpty && i < timeline.windowCount) {
+                    timeline.getWindow(i, window).uid.toString()
+                } else {
+                    "${mediaItem.mediaId}_$i"
+                }
+
                 val track = trackMap[mediaItem.mediaId] ?: run {
                     val meta = mediaItem.mediaMetadata
                     MusicTrack(
@@ -209,11 +278,11 @@ class MusicPlayerViewModel @Inject constructor(
                         duration = 0L
                     )
                 }
-                queueTracks.add(track)
+                queueEntries.add(QueueEntry(id = stableId, track = track))
             }
             
             currentQueueUris = uris
-            _uiState.update { it.copy(queue = queueTracks) }
+            _uiState.update { it.copy(queue = queueEntries) }
         }
     }
 
@@ -264,6 +333,7 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicPlaybackSpeed.collect { speed ->
                 player.playbackParameters = PlaybackParameters(speed)
+                _uiState.update { it.copy(playbackSpeed = speed) }
             }
         }
 
@@ -280,6 +350,7 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicEqualizerPreset.collect { preset ->
                 applyEqualizerPreset(preset)
+                _uiState.update { it.copy(equalizerPreset = preset) }
             }
         }
 
@@ -301,6 +372,12 @@ class MusicPlayerViewModel @Inject constructor(
             }
         }
 
+        viewModelScope.launch {
+            observeConnectivity().collect { online ->
+                _uiState.update { it.copy(isOnline = online) }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.Default) {
             val combinedFlow = combine(
                 repository.allTracks,
@@ -312,11 +389,30 @@ class MusicPlayerViewModel @Inject constructor(
                 MusicData(tracks, playlists, favorites, recent, most)
             }
 
-            combinedFlow.combine(_uiState.map { it.sortOrder }.distinctUntilChanged()) { data, sortOrder ->
+            combinedFlow.combine(
+                combine(
+                    _uiState.map { it.sortOrder }.distinctUntilChanged(),
+                    _uiState.map { it.isOnline }.distinctUntilChanged()
+                ) { sortOrder, isOnline -> sortOrder to isOnline }
+            ) { data, (sortOrder, isOnline) ->
+                // Deduplicate tracks: prioritize offline (those with a path)
+                val deduplicatedTracks = data.tracks
+                    .groupBy { "${it.title}|${it.artist}" }
+                    .map { (_, tracks) ->
+                        tracks.find { it.path != null } ?: tracks.first()
+                    }
+
+                // Filter online tracks if offline
+                val visibleTracks = if (!isOnline) {
+                    deduplicatedTracks.filter { it.path != null }
+                } else {
+                    deduplicatedTracks
+                }
+
                 val sortedBase = when (sortOrder) {
-                    SortOrder.TITLE -> data.tracks.sortedBy { it.title }
-                    SortOrder.ARTIST -> data.tracks.sortedBy { it.artist ?: "Unknown" }
-                    SortOrder.RECENT -> data.tracks.reversed()
+                    SortOrder.TITLE -> visibleTracks.sortedBy { it.title }
+                    SortOrder.ARTIST -> visibleTracks.sortedBy { it.artist ?: "Unknown" }
+                    SortOrder.RECENT -> visibleTracks.reversed()
                 }
 
                 val prioritizedTracks = sortedBase.sortedWith(
@@ -324,9 +420,23 @@ class MusicPlayerViewModel @Inject constructor(
                         .thenByDescending { it.artist != null && it.artist != "Unknown Artist" && it.artist != "<unknown>" }
                 )
                 
+                val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                val toolzDirPath = File(downloadsDir, "Toolz").absolutePath
+
                 val folders = prioritizedTracks.groupBy { track ->
-                    val uri = track.uri.toUri()
-                    uri.path?.substringBeforeLast("/")?.substringAfterLast("/") ?: "Internal Storage"
+                    if (track.album == "Toolz Downloads" || (track.path != null && track.path.startsWith(toolzDirPath))) {
+                        "Toolz Downloads"
+                    } else {
+                        val pathStr = track.path ?: track.uri.toUri().path ?: ""
+                        if (pathStr.contains("/")) {
+                            val folder = pathStr.substringBeforeLast("/").substringAfterLast("/")
+                            folder.ifEmpty { "Internal Storage" }
+                        } else {
+                            "Internal Storage"
+                        }
+                    }
                 }
 
                 withContext(Dispatchers.Main) {
@@ -355,6 +465,31 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
+    private fun observeConnectivity(): Flow<Boolean> = callbackFlow {
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                trySend(true)
+            }
+            override fun onLost(network: Network) {
+                trySend(false)
+            }
+        }
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager.registerNetworkCallback(request, callback)
+        
+        val current = connectivityManager.activeNetwork?.let {
+            connectivityManager.getNetworkCapabilities(it)
+        }?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ?: false
+        trySend(current)
+        
+        awaitClose {
+            connectivityManager.unregisterNetworkCallback(callback)
+        }
+    }
+
+    @UnstableApi
     private fun connectToMediaController() {
         val sessionToken = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
@@ -406,6 +541,19 @@ class MusicPlayerViewModel @Inject constructor(
                 equalizer = Equalizer(0, player.audioSessionId).apply {
                     enabled = true
                 }
+                
+                val presets = mutableListOf<String>()
+                // Add standard Android presets
+                for (i in 0 until (equalizer?.numberOfPresets?.toInt() ?: 0)) {
+                    presets.add(equalizer?.getPresetName(i.toShort()) ?: "")
+                }
+                
+                // Add our custom enhanced presets if not present
+                val customPresets = listOf("Bass Boost", "Vocal Booster", "Treble Booster", "Electronic", "Classical", "Pop", "Rock")
+                customPresets.forEach { if (!presets.contains(it)) presets.add(it) }
+                
+                _equalizerPresets.value = presets.distinct()
+
                 viewModelScope.launch {
                     applyEqualizerPreset(settingsRepository.musicEqualizerPreset.first())
                 }
@@ -413,6 +561,56 @@ class MusicPlayerViewModel @Inject constructor(
                 e.printStackTrace()
             }
         }
+    }
+
+    private fun startVisualizer() {
+        if (visualizer != null || player.audioSessionId == 0) return
+        try {
+            visualizer = Visualizer(player.audioSessionId).apply {
+                captureSize = Visualizer.getCaptureSizeRange()[1]
+                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
+                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                        fft?.let {
+                            val n = it.size / 2
+                            val magnitudes = FloatArray(64)
+                            
+                            // Group FFT bins into 64 bars with logarithmic spacing for better visual representation
+                            // Low frequencies (bass) are usually more interesting to watch
+                            for (i in 0 until 64) {
+                                // Simple logarithmic mapping from 64 bars to FFT bins
+                                val startBin = (Math.pow(2.0, i / 10.6) - 1).toInt().coerceIn(0, n - 1)
+                                val endBin = (Math.pow(2.0, (i + 1) / 10.6) - 1).toInt().coerceIn(startBin + 1, n)
+                                
+                                var sum = 0f
+                                for (j in startBin until endBin) {
+                                    val r = it[j * 2].toInt()
+                                    val im = it[j * 2 + 1].toInt()
+                                    sum += Math.sqrt((r * r + im * im).toDouble()).toFloat()
+                                }
+                                
+                                val avg = if (endBin > startBin) sum / (endBin - startBin) else 0f
+                                // Apply sensitivity boost and scaling
+                                magnitudes[i] = (avg * (1f + i * 0.02f) * 0.5f).coerceIn(0f, 100f)
+                            }
+                            _visualizerData.value = magnitudes
+                        }
+                    }
+                }, Visualizer.getMaxCaptureRate(), false, true)
+                enabled = true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun stopVisualizer() {
+        try {
+            visualizer?.enabled = false
+            visualizer?.release()
+        } catch (e: Exception) {}
+        visualizer = null
+        _visualizerData.value = FloatArray(0)
     }
 
     private fun applyEqualizerPreset(preset: String) {
@@ -432,20 +630,47 @@ class MusicPlayerViewModel @Inject constructor(
                 }
             }
             
-            if (preset == "Bass Boost") {
-                for (i in 0 until eq.numberOfBands.toInt()) {
-                    try {
+            // Custom Equalizer logic for non-system presets
+            val numBands = eq.numberOfBands.toInt()
+            when (preset) {
+                "Bass Boost" -> {
+                    for (i in 0 until numBands) {
                         val freq = eq.getCenterFreq(i.toShort())
-                        if (freq < 500000) {
-                            eq.setBandLevel(i.toShort(), 1000.toShort())
+                        if (freq < 500000) eq.setBandLevel(i.toShort(), 1000.toShort())
+                        else eq.setBandLevel(i.toShort(), 0.toShort())
+                    }
+                }
+                "Vocal Booster" -> {
+                    for (i in 0 until numBands) {
+                        val freq = eq.getCenterFreq(i.toShort())
+                        if (freq in 500000..3000000) eq.setBandLevel(i.toShort(), 800.toShort())
+                        else eq.setBandLevel(i.toShort(), (-200).toShort())
+                    }
+                }
+                "Treble Booster" -> {
+                    for (i in 0 until numBands) {
+                        val freq = eq.getCenterFreq(i.toShort())
+                        if (freq > 3000000) eq.setBandLevel(i.toShort(), 1000.toShort())
+                        else eq.setBandLevel(i.toShort(), 0.toShort())
+                    }
+                }
+                "Electronic" -> {
+                    for (i in 0 until numBands) {
+                        val freq = eq.getCenterFreq(i.toShort())
+                        when {
+                            freq < 250000 -> eq.setBandLevel(i.toShort(), 800.toShort())
+                            freq in 250000..1000000 -> eq.setBandLevel(i.toShort(), 0.toShort())
+                            freq > 4000000 -> eq.setBandLevel(i.toShort(), 600.toShort())
+                            else -> eq.setBandLevel(i.toShort(), 200.toShort())
                         }
-                    } catch (e: Exception) {}
+                    }
                 }
             }
         } catch (e: Exception) {
         }
     }
 
+    @UnstableApi
     private fun startPlayerService() {
         val intent = Intent(context, MusicPlayerService::class.java)
         try {
@@ -467,13 +692,20 @@ class MusicPlayerViewModel @Inject constructor(
                         _playbackPosition.value = currentPos
                     }
                 }
-                delay(if (_uiState.value.performanceMode) 500 else 100)
+                val isSyncedLyricsVisible = _uiState.value.currentTrack?.aiLyrics?.contains("[0") == true
+                val interval = when {
+                    _uiState.value.performanceMode -> 500L
+                    isSyncedLyricsVisible -> 16L
+                    else -> 100L
+                }
+                delay(interval)
             }
         }
     }
 
     private fun stopProgressUpdate() {
         progressJob?.cancel()
+        _visualizerData.value = FloatArray(0)
     }
 
     fun onSliderChange(position: Long) {
@@ -532,6 +764,17 @@ class MusicPlayerViewModel @Inject constructor(
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
         startPlayerService()
         
+        // Auto-load lyrics when song is played
+        viewModelScope.launch {
+            // We need a reference to the NowPlayingAiViewModel or a way to trigger it.
+            // Since we're in MusicPlayerViewModel, we might not have direct access.
+            // But we can check if lyrics already exist in the track.
+            if (track.aiLyrics.isNullOrBlank()) {
+                // If the track is from the repository, we could fetch them here or 
+                // trust that the UI will trigger it.
+            }
+        }
+
         if (controller == null) {
             pendingAction = { playTrack(track, tracks) }
             connectToMediaController()
@@ -566,38 +809,50 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
-    fun playUri(uri: Uri) {
+    fun playUri(uri: Uri, title: String? = null, artist: String? = null, thumbUrl: String? = null, sourceUrl: String? = null) {
         startPlayerService()
         
         if (controller == null) {
-            pendingAction = { playUri(uri) }
+            pendingAction = { playUri(uri, title, artist, thumbUrl, sourceUrl) }
             connectToMediaController()
             return
         }
 
         vibrationManager.vibrateClick()
         
-        var title = "External Audio"
-        try {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex != -1 && cursor.moveToFirst()) {
-                    title = cursor.getString(nameIndex)
+        var displayTitle = title ?: "External Audio"
+        if (title == null) {
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        displayTitle = cursor.getString(nameIndex)
+                    }
                 }
-            }
-        } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
 
-        val metadata = MediaMetadata.Builder()
-            .setTitle(title)
-            .setDisplayTitle(title)
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(displayTitle)
+            .setDisplayTitle(displayTitle)
+            .setArtist(artist ?: "Unknown Artist")
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .setIsPlayable(true)
-            .build()
+        
+        thumbUrl?.let {
+            metadataBuilder.setArtworkUri(Uri.parse(it))
+        }
+        
+        sourceUrl?.let {
+            metadataBuilder.setExtras(android.os.Bundle().apply {
+                putString("source_url", it)
+            })
+        }
 
         val mediaItem = MediaItem.Builder()
             .setMediaId(uri.toString())
             .setUri(uri)
-            .setMediaMetadata(metadata)
+            .setMediaMetadata(metadataBuilder.build())
             .build()
 
         val p: Player = controller ?: player
@@ -620,6 +875,108 @@ class MusicPlayerViewModel @Inject constructor(
         vibrationManager.vibrateClick()
     }
 
+    fun playCatalogTracks(tracks: List<CatalogTrack>, startIndex: Int = 0) {
+        startPlayerService()
+        
+        if (controller == null) {
+            pendingAction = { playCatalogTracks(tracks, startIndex) }
+            connectToMediaController()
+            return
+        }
+
+        vibrationManager.vibrateClick()
+        
+        viewModelScope.launch {
+            _uiState.update { it.copy(isResolvingCatalog = true) }
+            try {
+                val mediaItems = tracks.map { track ->
+                    val metadata = MediaMetadata.Builder()
+                        .setTitle(track.title)
+                        .setArtist(track.artist)
+                        .setAlbumTitle("YouTube Catalog")
+                        .setDisplayTitle(track.title)
+                        .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                        .setIsPlayable(true)
+                        .setArtworkUri(track.thumbnailUrl?.toUri())
+                        .setExtras(android.os.Bundle().apply {
+                            putString("source_url", track.sourceUrl)
+                            putBoolean("is_catalog", true)
+                        })
+                        .build()
+
+                    MediaItem.Builder()
+                        .setMediaId(track.sourceUrl)
+                        .setUri(track.sourceUrl.toUri())
+                        .setMediaMetadata(metadata)
+                        .build()
+                }
+
+                withContext(Dispatchers.Main) {
+                    val p: Player = controller ?: player
+                    p.stop()
+                    p.setMediaItems(mediaItems, startIndex, 0L)
+                    p.prepare()
+                    p.play()
+                }
+            } finally {
+                _uiState.update { it.copy(isResolvingCatalog = false) }
+            }
+        }
+    }
+
+    fun addToQueue(track: CatalogTrack) {
+        val p: Player = controller ?: player
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setAlbumTitle("YouTube Catalog")
+            .setDisplayTitle(track.title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setArtworkUri(track.thumbnailUrl?.toUri())
+            .setExtras(android.os.Bundle().apply {
+                putString("source_url", track.sourceUrl)
+                putBoolean("is_catalog", true)
+            })
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(track.sourceUrl)
+            .setUri(track.sourceUrl.toUri())
+            .setMediaMetadata(metadata)
+            .build()
+            
+        p.addMediaItem(mediaItem)
+        vibrationManager.vibrateClick()
+    }
+
+    fun playNext(track: CatalogTrack) {
+        val p: Player = controller ?: player
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setAlbumTitle("YouTube Catalog")
+            .setDisplayTitle(track.title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setArtworkUri(track.thumbnailUrl?.toUri())
+            .setExtras(android.os.Bundle().apply {
+                putString("source_url", track.sourceUrl)
+                putBoolean("is_catalog", true)
+            })
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(track.sourceUrl)
+            .setUri(track.sourceUrl.toUri())
+            .setMediaMetadata(metadata)
+            .build()
+
+        val nextIndex = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
+        p.addMediaItem(nextIndex, mediaItem)
+        vibrationManager.vibrateClick()
+    }
+
     private fun MusicTrack.toMediaItem(): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
@@ -629,6 +986,13 @@ class MusicPlayerViewModel @Inject constructor(
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .setIsPlayable(true)
             .setArtworkUri(thumbnailUri?.toUri())
+            .apply {
+                sourceUrl?.let {
+                    setExtras(android.os.Bundle().apply {
+                        putString("source_url", it)
+                    })
+                }
+            }
             .build()
 
         return MediaItem.Builder()
@@ -777,6 +1141,13 @@ class MusicPlayerViewModel @Inject constructor(
         vibrationManager.vibrateLongClick()
     }
 
+    fun toggleShowVisualizer() {
+        viewModelScope.launch {
+            settingsRepository.setShowMusicVisualizer(!_uiState.value.showVisualizer)
+            vibrationManager.vibrateClick()
+        }
+    }
+
     fun setArtShape(shape: String) {
         viewModelScope.launch {
             settingsRepository.setMusicArtShape(shape)
@@ -858,6 +1229,52 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
     
+    fun setPlaybackSpeed(speed: Float) {
+        viewModelScope.launch {
+            settingsRepository.setMusicPlaybackSpeed(speed)
+            val p: Player = controller ?: player
+            p.playbackParameters = PlaybackParameters(speed)
+            _uiState.update { it.copy(playbackSpeed = speed) }
+            vibrationManager.vibrateClick()
+        }
+    }
+
+    fun setEqualizerPreset(preset: String) {
+        viewModelScope.launch {
+            settingsRepository.setMusicEqualizerPreset(preset)
+            _uiState.update { it.copy(equalizerPreset = preset) }
+            applyEqualizerPreset(preset)
+            vibrationManager.vibrateClick()
+        }
+    }
+
+    fun toggleMusicSettings() {
+        _uiState.update { it.copy(showMusicSettings = !it.showMusicSettings) }
+        vibrationManager.vibrateClick()
+    }
+
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        val p: Player = controller ?: player
+        if (fromIndex in 0 until p.mediaItemCount && toIndex in 0 until p.mediaItemCount) {
+            p.moveMediaItem(fromIndex, toIndex)
+            vibrationManager.vibrateTick()
+        }
+    }
+
+    fun removeQueueItem(index: Int) {
+        val p: Player = controller ?: player
+        if (index in 0 until p.mediaItemCount) {
+            p.removeMediaItem(index)
+            vibrationManager.vibrateClick()
+        }
+    }
+
+    fun clearQueue() {
+        val p: Player = controller ?: player
+        p.clearMediaItems()
+        vibrationManager.vibrateClick()
+    }
+
     fun toggleFavorite(track: MusicTrack) {
         viewModelScope.launch {
             repository.toggleFavorite(track)
@@ -865,10 +1282,50 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
+    fun setResolvingCatalog(resolving: Boolean) {
+        _uiState.update { it.copy(isResolvingCatalog = resolving) }
+    }
+
+    fun enqueueCatalogTrack(track: CatalogTrack, playNext: Boolean) {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setDisplayTitle(track.title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setArtworkUri(Uri.parse(track.thumbnailUrl))
+            .setExtras(android.os.Bundle().apply {
+                putString("source_url", track.sourceUrl)
+                putBoolean("is_catalog", true)
+            })
+            .build()
+            
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(track.sourceUrl)
+            .setUri(Uri.parse(track.sourceUrl)) // Use sourceUrl as fallback/ID
+            .setMediaMetadata(metadata)
+            .build()
+            
+        val p: Player = controller ?: player
+        if (playNext) {
+            val nextIndex = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
+            p.addMediaItem(nextIndex, mediaItem)
+        } else {
+            p.addMediaItem(mediaItem)
+        }
+        
+        if (!p.isPlaying && !p.playWhenReady) {
+            p.prepare()
+        }
+        
+        vibrationManager.vibrateClick()
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopProgressUpdate()
         stopShakeDetection()
+        stopVisualizer()
         sleepTimerJob?.cancel()
         equalizer?.release()
         player.removeListener(playerListener)

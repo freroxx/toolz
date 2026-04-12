@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 // ─────────────────────────────────────────────────────────────
 //  Domain enums
@@ -41,27 +42,34 @@ data class BmiState(
     val isKg      : Boolean       = true,
     val activity  : ActivityLevel = ActivityLevel.SEDENTARY,
 
-    // ── Computed (all nullable — null means "not enough input") ──
+    // ── Computed ──
     val bmi               : Float? = null,
+    val oxfordBmi         : Float? = null,
+    val ponderalIndex     : Float? = null,
     val category          : String = "",
     /** Age-adjusted healthy BMI range. */
     val healthyRange      : Pair<Float, Float> = 18.5f to 24.9f,
+    /** Healthy weight range for this height in current unit. */
+    val weightRange       : Pair<Float, Float>? = null,
     /** Basal Metabolic Rate (kcal/day). */
     val bmr               : Float? = null,
     /** Total Daily Energy Expenditure (kcal/day). */
     val tdee              : Float? = null,
-    /**
-     * Ideal Body Weight in the currently selected unit
-     * (kg when [isKg] = true, lb when false).
-     */
+    /** Ideal Body Weight in the currently selected unit. */
     val ibw               : Float? = null,
     /** Body Fat Percentage (Deurenberg estimate). */
     val bfp               : Float? = null,
-    /**
-     * How far the user's current weight is from IBW,
-     * in the currently selected unit.
-     * Positive = need to lose, negative = need to gain.
-     */
+    /** Lean Body Mass (Boer formula) */
+    val lbm               : Float? = null,
+    /** Body Surface Area (Mosteller formula) */
+    val bsa               : Float? = null,
+    /** Water intake recommendation (liters/day) */
+    val waterIntake       : Float? = null,
+    /** Macronutrients (Grams) */
+    val protein           : Float? = null,
+    val carbs             : Float? = null,
+    val fats              : Float? = null,
+    /** How far the user's current weight is from IBW. */
     val weightDifference  : Float? = null,
 )
 
@@ -74,8 +82,6 @@ class BmiViewModel @Inject constructor() : ViewModel() {
 
     private val _uiState = MutableStateFlow(BmiState())
     val uiState: StateFlow<BmiState> = _uiState.asStateFlow()
-
-    // ── Input handlers ─────────────────────────────────────────
 
     fun onWeightChange(weight: String) {
         val cleaned = weight.filter { it.isDigit() || it == '.' }
@@ -108,16 +114,6 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         _uiState.update { recalculate(it.copy(activity = level)) }
     }
 
-    // ── Calculation pipeline ───────────────────────────────────
-
-    /**
-     * Pure function: given an input [state], compute all derived metrics
-     * and return a fully populated [BmiState].
-     *
-     * Taking the state as a parameter (rather than reading [_uiState.value]
-     * inside the function) makes this deterministic and testable, and
-     * prevents stale-read bugs when called from inside [_uiState.update].
-     */
     private fun recalculate(state: BmiState): BmiState {
         val weightVal = state.weight.toFloatOrNull() ?: 0f
         val ageVal    = state.age.toIntOrNull() ?: 0
@@ -127,20 +123,32 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         else            parseImperialHeight(state.height) * IN_TO_CM
         val heightInM   = heightInCm / 100f
 
-        // Guard: need plausible inputs
         if (weightInKg < 1f || heightInM < 0.3f || ageVal < 2) {
             return state.copy(
-                bmi = null, category = "", bmr = null,
-                tdee = null, ibw = null, bfp = null,
-                weightDifference = null,
+                bmi = null, oxfordBmi = null, ponderalIndex = null,
+                category = "", bmr = null, tdee = null, ibw = null,
+                bfp = null, lbm = null, bsa = null, waterIntake = null,
+                protein = null, carbs = null, fats = null,
+                weightRange = null, weightDifference = null,
             )
         }
 
-        // 1. BMI ─────────────────────────────────────────────────
+        // 1. BMI
         val bmi = weightInKg / heightInM.pow(2)
+        val oxfordBmi = 1.3f * weightInKg / heightInM.pow(2.5f)
+        val ponderalIndex = weightInKg / heightInM.pow(3)
 
-        // 2. Age-adjusted range & category ──────────────────────
-        val range = if (ageVal >= 65) 22.0f to 27.0f else 18.5f to 24.9f
+        // 2. Age-adjusted range & category
+        // Granular age-based ranges for better feedback
+        val range = when {
+            ageVal >= 65 -> 23.0f to 29.0f
+            ageVal >= 55 -> 22.5f to 28.5f
+            ageVal >= 45 -> 22.0f to 28.0f
+            ageVal >= 35 -> 21.0f to 27.0f
+            ageVal >= 25 -> 20.0f to 26.0f
+            else         -> 18.5f to 24.9f
+        }
+        
         val category = when {
             bmi < range.first  -> "Underweight"
             bmi <= range.second-> "Healthy"
@@ -150,56 +158,77 @@ class BmiViewModel @Inject constructor() : ViewModel() {
             else               -> "Obese Class III"
         }
 
-        // 3. BMR — Mifflin-St Jeor equation ─────────────────────
-        //    Men:   10W + 6.25H - 5A + 5
-        //    Women: 10W + 6.25H - 5A - 161
+        // Weight range for height
+        val minWeightKg = range.first * heightInM.pow(2)
+        val maxWeightKg = range.second * heightInM.pow(2)
+        val weightRange = if (state.isKg) minWeightKg to maxWeightKg 
+                         else (minWeightKg * KG_TO_LB) to (maxWeightKg * KG_TO_LB)
+
+        // 3. BMR (Mifflin-St Jeor)
         val bmr = (10f * weightInKg) + (6.25f * heightInCm) -
                 (5f  * ageVal.toFloat()) +
                 if (state.gender == Gender.MALE) 5f else -161f
 
-        // 4. TDEE — BMR × activity multiplier ───────────────────
+        // 4. TDEE
         val tdee = bmr * state.activity.multiplier
+        
+        // Macros (30% protein, 40% carbs, 30% fats)
+        val protein = (tdee * 0.30f) / 4f
+        val carbs   = (tdee * 0.40f) / 4f
+        val fats    = (tdee * 0.30f) / 9f
 
-        // 5. Ideal Body Weight — Devine formula ─────────────────
-        //    Men:   50   + 2.3 × (height_in_inches - 60)
-        //    Women: 45.5 + 2.3 × (height_in_inches - 60)
+        // 5. Ideal Body Weight (Devine)
         val heightInInches  = heightInCm / IN_TO_CM
         val inchesOver5Feet = (heightInInches - 60f).coerceAtLeast(0f)
         val ibwKg = (if (state.gender == Gender.MALE) 50f else 45.5f) +
                 (2.3f * inchesOver5Feet)
-        // Convert to the user's selected unit for display
         val ibwDisplay = if (state.isKg) ibwKg else ibwKg * KG_TO_LB
 
-        // 6. Body Fat % — Deurenberg formula ────────────────────
-        //    (1.20 × BMI) + (0.23 × age) − (10.8 × sex) − 5.4
-        //    sex = 1 for male, 0 for female
+        // 6. Body Fat % (Deurenberg formula)
+        // sex = 1 for male, 0 for female
         val sexFactor = if (state.gender == Gender.MALE) 1f else 0f
-        val bfpRaw = (1.20f * bmi) + (0.23f * ageVal) - (10.8f * sexFactor) - 5.4f
-        // Clamp to physiologically plausible range
+        val bfpRaw = (1.20f * bmi) + (0.23f * ageVal.toFloat()) - (10.8f * sexFactor) - 5.4f
         val bfp = bfpRaw.coerceIn(3f, 60f)
+        
+        // 7. Lean Body Mass (Boer formula)
+        val lbm = if (state.gender == Gender.MALE) {
+            (0.407f * weightInKg) + (0.267f * heightInCm) - 19.2f
+        } else {
+            (0.252f * weightInKg) + (0.473f * heightInCm) - 48.3f
+        }
+        val lbmDisplay = if (state.isKg) lbm else lbm * KG_TO_LB
 
-        // 7. Weight difference from ideal (in selected unit) ────
+        // 8. Body Surface Area (Mosteller)
+        val bsa = sqrt((heightInCm * weightInKg) / 3600f)
+        
+        // 9. Water Intake (Approx 33ml per kg)
+        val waterIntake = weightInKg * 0.033f
+
+        // 10. Weight difference from ideal
         val weightDiff = if (state.isKg) weightInKg - ibwKg
         else            (weightInKg - ibwKg) * KG_TO_LB
 
         return state.copy(
             bmi              = bmi,
+            oxfordBmi        = oxfordBmi,
+            ponderalIndex    = ponderalIndex,
             category         = category,
             healthyRange     = range,
+            weightRange      = weightRange,
             bmr              = bmr,
             tdee             = tdee,
             ibw              = ibwDisplay,
             bfp              = bfp,
+            lbm              = lbmDisplay,
+            bsa              = bsa,
+            waterIntake       = waterIntake,
+            protein          = protein,
+            carbs            = carbs,
+            fats             = fats,
             weightDifference = weightDiff,
         )
     }
 
-    // ── Helpers ────────────────────────────────────────────────
-
-    /**
-     * Parses imperial height strings of the form `5' 11"`, `5'11"`, `5.9`, or plain
-     * feet-as-decimal. Returns the value in **inches**.
-     */
     private fun parseImperialHeight(height: String): Float = try {
         when {
             height.contains('\'') -> {
