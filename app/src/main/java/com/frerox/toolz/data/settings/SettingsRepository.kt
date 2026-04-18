@@ -153,6 +153,9 @@ class SettingsRepository @Inject constructor(
     // Converter Settings
     private val CONVERTER_CUSTOM_OUTPUT_PATH = stringPreferencesKey("converter_custom_output_path")
 
+    // PDF Settings
+    private val PDF_AI_OCR_ENHANCE = booleanPreferencesKey("pdf_ai_ocr_enhance")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -269,6 +272,8 @@ class SettingsRepository @Inject constructor(
     val focusAiCustomInstructions: Flow<String> = dataStore.data.map { it[FOCUS_AI_CUSTOM_INSTRUCTIONS] ?: "" }
 
     val converterCustomOutputPath: Flow<String?> = dataStore.data.map { it[CONVERTER_CUSTOM_OUTPUT_PATH] }
+
+    val pdfAiOcrEnhance: Flow<Boolean> = dataStore.data.map { it[PDF_AI_OCR_ENHANCE] ?: false }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -428,6 +433,10 @@ class SettingsRepository @Inject constructor(
         dataStore.edit {
             if (path == null) it.remove(CONVERTER_CUSTOM_OUTPUT_PATH) else it[CONVERTER_CUSTOM_OUTPUT_PATH] = path
         }
+    }
+
+    suspend fun setPdfAiOcrEnhance(enabled: Boolean) {
+        dataStore.edit { it[PDF_AI_OCR_ENHANCE] = enabled }
     }
 
     suspend fun resetOnboarding() {

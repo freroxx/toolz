@@ -19,14 +19,14 @@ import kotlin.math.abs
 import kotlin.math.sqrt
 
 enum class EquationType {
-    LINEAR, QUADRATIC, CUBIC, SYSTEM2
+    LINEAR, QUADRATIC, CUBIC, QUARTIC, SYSTEM2
 }
 
 data class ConstantItem(val name: String, val value: String, val symbol: String, val description: String)
 
 data class SolverState(
     val selectedType: EquationType = EquationType.LINEAR,
-    val coefficients: Map<String, String> = mapOf("a" to "", "b" to "", "c" to "", "d" to ""),
+    val coefficients: Map<String, String> = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""),
     val result: String = "",
     val steps: List<String> = emptyList(),
     val error: String? = null,
@@ -55,7 +55,7 @@ class EquationSolverViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun onTypeChange(type: EquationType) {
-        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to ""), result = "", steps = emptyList(), error = null) }
+        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""), result = "", steps = emptyList(), error = null) }
     }
 
     fun onCoefficientChange(key: String, value: String) {
@@ -73,10 +73,122 @@ class EquationSolverViewModel @Inject constructor(
                 EquationType.LINEAR -> solveLinear(state)
                 EquationType.QUADRATIC -> solveQuadratic(state)
                 EquationType.CUBIC -> solveCubic(state)
+                EquationType.QUARTIC -> solveQuartic(state)
                 EquationType.SYSTEM2 -> solveSystem2(state)
             }
         } catch (e: Exception) {
             _uiState.update { it.copy(error = "Calculation error. check inputs.") }
+        }
+    }
+
+    private fun solveQuartic(state: SolverState) {
+        val a = parse(state.coefficients["a"] ?: "0")
+        val b = parse(state.coefficients["b"] ?: "0")
+        val c = parse(state.coefficients["c"] ?: "0")
+        val d = parse(state.coefficients["d"] ?: "0")
+        val e = parse(state.coefficients["e"] ?: "0")
+
+        if (a == 0.0) {
+            solveCubic(state.copy(coefficients = mapOf("a" to b.toString(), "b" to c.toString(), "c" to d.toString(), "d" to e.toString())))
+            return
+        }
+
+        // Ferrari's Method for Quartic
+        val steps = mutableListOf(
+            "Equation: ${format(a)}x⁴ + ${format(b)}x³ + ${format(c)}x² + ${format(d)}x + ${format(e)} = 0",
+            "1. Normalize the equation by dividing by a: x⁴ + Bx³ + Cx² + Dx + E = 0"
+        )
+
+        val B = b / a
+        val C = c / a
+        val D = d / a
+        val E = e / a
+
+        steps.add("   B=${format(B)}, C=${format(C)}, D=${format(D)}, E=${format(E)}")
+
+        // Reduced form: y⁴ + py² + qy + r = 0, where x = y - B/4
+        val p = C - 3.0 * B * B / 8.0
+        val q = D - B * C / 2.0 + B * B * B / 8.0
+        val r = E - B * D / 4.0 + B * B * C / 16.0 - 3.0 * B * B * B * B / 256.0
+
+        steps.add("2. Reduce to depressed quartic: y⁴ + py² + qy + r = 0 (y = x + B/4)")
+        steps.add("   p=${format(p)}, q=${format(q)}, r=${format(r)}")
+
+        if (abs(q) < 1e-12) {
+            steps.add("3. q ≈ 0, treating as bi-quadratic equation (y²)² + p(y²) + r = 0")
+            val delta = p * p - 4.0 * r
+            if (delta >= 0) {
+                val z1 = (-p + sqrt(delta)) / 2.0
+                val z2 = (-p - sqrt(delta)) / 2.0
+                val rootsY = mutableListOf<Double>()
+                if (z1 >= 0) { rootsY.add(sqrt(z1)); rootsY.add(-sqrt(z1)) }
+                if (z2 >= 0) { rootsY.add(sqrt(z2)); rootsY.add(-sqrt(z2)) }
+                val realRoots = rootsY.map { it - B / 4.0 }.distinct()
+                val result = if (realRoots.isNotEmpty()) "Real roots: " + realRoots.joinToString(", ") { format(it) } else "No real roots"
+                _uiState.update { it.copy(result = result, steps = steps, error = null) }
+                saveToHistory("Quartic: ${format(a)}x⁴ + ...", result)
+                return
+            }
+        }
+
+        // Resolvent cubic: m³ + (5/2 p)m² + (2p² - r)m + (p³/2 - pr/2 - q²/8) = 0
+        // Standard Ferrari resolvent: 2m³ - pm² - 2rm + (rp - q²/4) = 0 (using m instead of y)
+        // Let's use a simpler resolvent: z³ - pz² - 4rz + (4pr - q²) = 0
+        val ra = -p
+        val rb = -4.0 * r
+        val rc = 4.0 * p * r - q * q
+
+        // Solve resolvent cubic for at least one real root m
+        val m = solveCubicForOneRoot(1.0, ra, rb, rc)
+        steps.add("3. Solve resolvent cubic for m: m ≈ ${format(m)}")
+
+        // Roots of the quartic are roots of two quadratics:
+        // y² ± sqrt(2m - p) y + (m ± q / (2 * sqrt(2m-p))) = 0
+        val sqrt2mp = sqrt(abs(2.0 * m - p))
+        val qPart = if (sqrt2mp > 1e-12) q / (2.0 * sqrt2mp) else 0.0
+
+        // Quadratic 1: y² + sqrt2mp*y + (m - qPart) = 0
+        // Quadratic 2: y² - sqrt2mp*y + (m + qPart) = 0
+        val rootsX = mutableListOf<String>()
+        
+        fun solveQuad(qa: Double, qb: Double, qc: Double) {
+            val d2 = qb * qb - 4.0 * qa * qc
+            if (d2 >= 0) {
+                rootsX.add(format((-qb + sqrt(d2)) / (2.0 * qa) - B / 4.0))
+                rootsX.add(format((-qb - sqrt(d2)) / (2.0 * qa) - B / 4.0))
+            } else {
+                val re = -qb / (2.0 * qa) - B / 4.0
+                val im = sqrt(-d2) / (2.0 * qa)
+                rootsX.add("${format(re)} + ${format(im)}i")
+                rootsX.add("${format(re)} - ${format(im)}i")
+            }
+        }
+
+        solveQuad(1.0, sqrt2mp, m - qPart)
+        solveQuad(1.0, -sqrt2mp, m + qPart)
+
+        val result = "Roots: ${rootsX.joinToString(", ")}"
+        steps.add("4. Solved two quadratics derived from resolvent.")
+        
+        _uiState.update { it.copy(result = result, steps = steps, error = null) }
+        saveToHistory("Quartic: ${format(a)}x⁴ + ...", result)
+    }
+
+    private fun solveCubicForOneRoot(a: Double, b: Double, c: Double, d: Double): Double {
+        val A = b / a
+        val B = c / a
+        val C = d / a
+        val Q = (3 * B - A * A) / 9.0
+        val R = (9 * A * B - 27 * C - 2 * A * A * A) / 54.0
+        val D = Q * Q * Q + R * R
+
+        return if (D >= 0) {
+            val S = cubeRoot(R + sqrt(D))
+            val T = cubeRoot(R - sqrt(D))
+            S + T - A / 3.0
+        } else {
+            val theta = Math.acos(R / sqrt(-Q * Q * Q))
+            2 * sqrt(-Q) * Math.cos(theta / 3.0) - A / 3.0
         }
     }
 

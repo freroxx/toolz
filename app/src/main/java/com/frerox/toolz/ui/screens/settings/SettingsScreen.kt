@@ -67,6 +67,7 @@ fun SettingsScreen(
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
     val backgroundGradientEnabled by viewModel.backgroundGradientEnabled.collectAsState(initial = true)
+    val pdfAiOcrEnhance by viewModel.pdfAiOcrEnhance.collectAsState(initial = false)
 
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
     val showRecentTools by viewModel.showRecentTools.collectAsState(initial = true)
@@ -555,6 +556,15 @@ fun SettingsScreen(
                                 icon = Icons.Rounded.Hearing,
                                 checked = musicAudioFocus,
                                 onCheckedChange = { viewModel.setMusicAudioFocus(it) }
+                            )
+                        }
+                        if (matches(searchQuery, "pdf", "ocr", "enhance", "ai")) {
+                            SettingsToggleItem(
+                                title = "AI OCR Enhance",
+                                subtitle = "Improve text recognition in PDFs using AI",
+                                icon = Icons.Rounded.DocumentScanner,
+                                checked = pdfAiOcrEnhance,
+                                onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) }
                             )
                         }
                     }
