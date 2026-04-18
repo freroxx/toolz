@@ -325,8 +325,72 @@ class PdfViewModel @Inject constructor(
 
     fun deleteFile(file: PdfFile) {
         viewModelScope.launch {
-            repository.deletePdf(file.uri)
-            _rawPdfFiles.value = _rawPdfFiles.value.filter { it.uri != file.uri }
+            if (repository.deletePdf(file.uri)) {
+                _rawPdfFiles.value = _rawPdfFiles.value.filter { it.uri != file.uri }
+            }
+        }
+    }
+
+    fun renameFile(file: PdfFile, newName: String) {
+        viewModelScope.launch {
+            if (repository.renamePdf(file.uri, newName)) {
+                loadPdfFiles()
+            }
+        }
+    }
+
+    fun sharePdf(context: android.content.Context, uri: Uri, title: String) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(intent, "Share $title"))
+    }
+
+    fun printPdf(context: android.content.Context, uri: Uri, title: String) {
+        val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
+        val jobName = "Toolz - $title"
+        
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                printManager.print(jobName, object : android.print.PrintDocumentAdapter() {
+                    override fun onWrite(
+                        pages: Array<out android.print.PageRange>?,
+                        destination: android.os.ParcelFileDescriptor?,
+                        cancellationSignal: android.os.CancellationSignal?,
+                        callback: WriteResultCallback?
+                    ) {
+                        try {
+                            val input = android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd)
+                            val output = java.io.FileOutputStream(destination?.fileDescriptor)
+                            input.copyTo(output)
+                            callback?.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                        } catch (e: Exception) {
+                            callback?.onWriteFailed(e.message)
+                        }
+                    }
+                    override fun onLayout(
+                        oldAttributes: android.print.PrintAttributes?,
+                        newAttributes: android.print.PrintAttributes?,
+                        cancellationSignal: android.os.CancellationSignal?,
+                        callback: LayoutResultCallback?,
+                        extras: android.os.Bundle?
+                    ) {
+                        if (cancellationSignal?.isCanceled == true) {
+                            callback?.onLayoutCancelled()
+                            return
+                        }
+                        val info = android.print.PrintDocumentInfo.Builder(title)
+                            .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .build()
+                        callback?.onLayoutFinished(info, true)
+                    }
+                }, null)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }

@@ -65,7 +65,14 @@ sealed class Screen(val route: String) {
     object MusicPlayer : Screen("music_player?tab={tab}") {
         fun createRoute(tab: Int) = "music_player?tab=$tab"
     }
-    object FileConverter : Screen("file_converter")
+    object FileConverter : Screen("file_converter?uri={uri}&title={title}") {
+        fun createRoute(uri: String? = null, title: String? = null): String {
+            if (uri == null) return "file_converter"
+            val encodedUri = java.net.URLEncoder.encode(uri, "UTF-8")
+            val encodedTitle = title?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: "Document"
+            return "file_converter?uri=$encodedUri&title=$encodedTitle"
+        }
+    }
 
     // System
     object FileCleaner : Screen("file_cleaner")

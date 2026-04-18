@@ -3070,13 +3070,13 @@ fun AudioVisualizerHalo(
                 sum += visualizerData[j]
             }
             val avg = if (chunkSize > 0) sum / chunkSize else 0f
-            // Higher sensitivity and better smoothing
-            smoothedData[i] = smoothedData[i] * 0.12f + avg * 0.88f
+            // Improved reactivity: higher weight for new data and better sensitivity
+            smoothedData[i] = smoothedData[i] * 0.15f + avg * 0.85f
         }
     }
 
     val baseScale by animateFloatAsState(
-        if (isPlaying) 1.02f + (smoothedData.take(12).average().toFloat() / 120f).coerceAtMost(0.15f) else 1f,
+        if (isPlaying) 1.02f + (smoothedData.take(16).average().toFloat() / 80f).coerceAtMost(0.2f) else 1f,
         spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
         label = "baseScale"
     )
@@ -3092,9 +3092,9 @@ fun AudioVisualizerHalo(
         for (i in 0..points) {
             val idx = i % points
             val rawMagnitude = smoothedData.getOrElse(idx) { 0f }
-            // Dynamic sensitivity: boost higher frequencies slightly
-            val freqFactor = 1f + (idx.toFloat() / points) * 0.5f
-            val magnitude = (rawMagnitude * freqFactor / 60f).coerceAtMost(50f)
+            // Dynamic sensitivity: boost higher frequencies for a more dramatic effect
+            val freqFactor = 1f + (idx.toFloat() / points) * 1.5f
+            val magnitude = (rawMagnitude * freqFactor / 32f).coerceAtMost(60f)
             
             val offsetDist = 14.dp.toPx() + magnitude.dp.toPx()
             val angle = i * angleStep

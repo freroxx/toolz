@@ -71,6 +71,7 @@ class SettingsViewModel @Inject constructor(
     val performanceMode = repository.performanceMode
 
     val converterCustomOutputPath = repository.converterCustomOutputPath
+    val pdfAiOcrEnhance = repository.pdfAiOcrEnhance
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
@@ -118,6 +119,8 @@ class SettingsViewModel @Inject constructor(
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
 
     fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
+
+    fun setPdfAiOcrEnhance(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiOcrEnhance(enabled) }
 
     fun resetOnboarding() = viewModelScope.launch {
         repository.setOnboardingCompleted(false)

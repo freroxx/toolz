@@ -155,6 +155,7 @@ fun EquationSolverScreen(
                                 EquationType.LINEAR -> listOf("a", "b")
                                 EquationType.QUADRATIC -> listOf("a", "b", "c")
                                 EquationType.CUBIC -> listOf("a", "b", "c", "d")
+                                EquationType.QUARTIC -> listOf("a", "b", "c", "d", "e")
                                 EquationType.SYSTEM2 -> listOf("a", "b", "c", "d", "e", "f")
                             }
                             
@@ -253,6 +254,7 @@ fun EquationPreview(state: SolverState) {
         EquationType.LINEAR -> "${state.coefficients["a"].orEmpty().ifEmpty { "a" }}x + ${state.coefficients["b"].orEmpty().ifEmpty { "b" }} = 0"
         EquationType.QUADRATIC -> "${state.coefficients["a"].orEmpty().ifEmpty { "a" }}x² + ${state.coefficients["b"].orEmpty().ifEmpty { "b" }}x + ${state.coefficients["c"].orEmpty().ifEmpty { "c" }} = 0"
         EquationType.CUBIC -> "${state.coefficients["a"].orEmpty().ifEmpty { "a" }}x³ + ${state.coefficients["b"].orEmpty().ifEmpty { "b" }}x² + ${state.coefficients["c"].orEmpty().ifEmpty { "c" }}x + ${state.coefficients["d"].orEmpty().ifEmpty { "d" }} = 0"
+        EquationType.QUARTIC -> "${state.coefficients["a"].orEmpty().ifEmpty { "a" }}x⁴ + ${state.coefficients["b"].orEmpty().ifEmpty { "b" }}x³ + ${state.coefficients["c"].orEmpty().ifEmpty { "c" }}x² + ${state.coefficients["d"].orEmpty().ifEmpty { "d" }}x + ${state.coefficients["e"].orEmpty().ifEmpty { "e" }} = 0"
         EquationType.SYSTEM2 -> {
             val s1 = "${state.coefficients["a"].orEmpty().ifEmpty { "a1" }}x + ${state.coefficients["b"].orEmpty().ifEmpty { "b1" }}y = ${state.coefficients["c"].orEmpty().ifEmpty { "c1" }}"
             val s2 = "${state.coefficients["d"].orEmpty().ifEmpty { "a2" }}x + ${state.coefficients["e"].orEmpty().ifEmpty { "b2" }}y = ${state.coefficients["f"].orEmpty().ifEmpty { "c2" }}"

@@ -605,8 +605,23 @@ fun ToolzNavHost(
                 onBack = { navController.popBackStack() }
             )
         }
-        composable(Screen.FileConverter.route) {
-            FileConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        composable(
+            route = "file_converter?uri={uri}&title={title}",
+            arguments = listOf(
+                navArgument("uri") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("title") { type = NavType.StringType; nullable = true; defaultValue = null }
+            )
+        ) { backStackEntry ->
+            val uriString = backStackEntry.arguments?.getString("uri")
+            val title = backStackEntry.arguments?.getString("title") ?: "Document"
+            val uri = uriString?.let { Uri.parse(it) }
+            
+            FileConverterScreen(
+                viewModel = hiltViewModel(),
+                onBack = { navController.popBackStack() },
+                initialUri = uri,
+                initialTitle = title
+            )
         }
         composable(Screen.Flashlight.route) {
             FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -713,6 +728,9 @@ fun ToolzNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToNote = { noteId ->
                     navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId")
+                },
+                onNavigateToConverter = { uri, title ->
+                    navController.navigate(Screen.FileConverter.createRoute(uri, title))
                 }
             )
         }

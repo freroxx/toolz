@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -63,6 +64,7 @@ fun ToolzPdfScreen(
     viewModel: PdfViewModel,
     onNavigateBack: () -> Unit,
     @Suppress("UNUSED_PARAMETER") onNavigateToNote: (Int) -> Unit = {},
+    onNavigateToConverter: ((String, String) -> Unit)? = null,
 ) {
     val uiState       by viewModel.uiState.collectAsStateWithLifecycle()
     val pdfFiles      by viewModel.pdfFiles.collectAsStateWithLifecycle()
@@ -71,11 +73,14 @@ fun ToolzPdfScreen(
     val ocrData       by viewModel.ocrData.collectAsStateWithLifecycle()
     val openTabs      by viewModel.openTabs.collectAsStateWithLifecycle()
     val performanceMode = LocalPerformanceMode.current
+    val context       = LocalContext.current
     val activeTab     = openTabs.find { it.id == activeTabId }
     var showTextSheet by remember { mutableStateOf(false) }
+    var renamingFile by remember { mutableStateOf<PdfFile?>(null) }
+    var newFileName by remember { mutableStateOf("") }
+    var showRenameDialog by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = Color.Transparent,
         topBar = {
             Column(Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
@@ -127,6 +132,56 @@ fun ToolzPdfScreen(
                                         contentDescription = "OCR", modifier = Modifier.size(20.dp))
                                 }
                             }
+
+                            var showMenu by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { showMenu = true }) {
+                                    Icon(Icons.Rounded.MoreVert, "More Options")
+                                }
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false },
+                                    offset = DpOffset(0.dp, 8.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Share PDF", fontWeight = FontWeight.Bold) },
+                                        leadingIcon = { Icon(Icons.Rounded.Share, null, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            activeTab?.uri?.let { viewModel.sharePdf(context, it, activeTab.title) }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Print", fontWeight = FontWeight.Bold) },
+                                        leadingIcon = { Icon(Icons.Rounded.Print, null, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            activeTab?.uri?.let { viewModel.printPdf(context, it, activeTab.title) }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Convert", fontWeight = FontWeight.Bold) },
+                                        leadingIcon = { Icon(Icons.Rounded.Transform, null, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            activeTab?.uri?.let { uri ->
+                                                onNavigateToConverter?.invoke(uri.toString(), activeTab.title)
+                                            }
+                                        }
+                                    )
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    DropdownMenuItem(
+                                        text = { Text("Rename", fontWeight = FontWeight.Bold) },
+                                        leadingIcon = { Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            // TODO: Trigger rename dialog
+                                        }
+                                    )
+                                }
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -149,12 +204,49 @@ fun ToolzPdfScreen(
                     is PdfUiState.Viewer  -> ViewerContent(viewModel, docState, activeTab, ocrData, performanceMode)
                     else                  -> PdfFileListContent(pdfFiles,
                         onFileClick   = { viewModel.openPdf(it.uri, it.name) },
-                        onDeleteClick = { viewModel.deleteFile(it) })
+                        onDeleteClick = { viewModel.deleteFile(it) },
+                        onRenameClick = { 
+                            renamingFile = it
+                            newFileName = it.name.removeSuffix(".pdf")
+                            showRenameDialog = true
+                        }
+                    )
                 }
             }
             activeTab?.let { tab ->
                 if (tab.isOcrActive) OcrProgressOverlay(tab.ocrProgress, performanceMode)
             }
+        }
+        if (showRenameDialog && renamingFile != null) {
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("RENAME PDF", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+                text = {
+                    TextField(
+                        value = newFileName,
+                        onValueChange = { newFileName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.renameFile(renamingFile!!, newFileName)
+                        showRenameDialog = false
+                    }) {
+                        @Suppress("DEPRECATION")
+                        Text("RENAME", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = false }) {
+                        @Suppress("DEPRECATION")
+                        Text("CANCEL", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(0.6f))
+                    }
+                },
+                shape = RoundedCornerShape(28.dp)
+            )
         }
         if (showTextSheet && ocrData != null) {
             OcrTextBottomSheet(
@@ -521,7 +613,12 @@ private fun OcrProgressOverlay(progress: Float, performanceMode: Boolean) {
 }
 
 @Composable
-private fun PdfFileListContent(files: List<PdfFile>, onFileClick: (PdfFile) -> Unit, onDeleteClick: (PdfFile) -> Unit) {
+private fun PdfFileListContent(
+    files: List<PdfFile>,
+    onFileClick: (PdfFile) -> Unit,
+    onDeleteClick: (PdfFile) -> Unit,
+    onRenameClick: (PdfFile) -> Unit
+) {
     if (files.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
@@ -591,7 +688,7 @@ private fun PdfFileListContent(files: List<PdfFile>, onFileClick: (PdfFile) -> U
                         Column(Modifier.weight(1f)) {
                             Text(file.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                             Spacer(Modifier.height(3.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(0.4f), shape = RoundedCornerShape(6.dp)) {
                                     @Suppress("DEPRECATION")
                                     Text("${file.pageCount} pages", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -600,6 +697,7 @@ private fun PdfFileListContent(files: List<PdfFile>, onFileClick: (PdfFile) -> U
                                 Text("%.1f MB".format(file.size / 1048576.0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.5f), fontWeight = FontWeight.Bold)
                             }
                         }
+                        IconButton(onClick = { onRenameClick(file) }) { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.onSurface.copy(0.4f), modifier = Modifier.size(20.dp)) }
                         IconButton(onClick = { onDeleteClick(file) }) { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error.copy(0.6f)) }
                     }
                 }

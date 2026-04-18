@@ -1,10 +1,12 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.hilt.android)
-    alias(libs.plugins.secrets)
 }
 
 android {
@@ -19,6 +21,22 @@ android {
         versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val envFile = rootProject.file(".env")
+        val props = Properties()
+        if (envFile.exists()) {
+            FileInputStream(envFile).use { props.load(it) }
+        }
+
+        val keys = listOf(
+            "GEMINI_DEFAULT", "GROQ_DEFAULT", "OPENROUTER_DEFAULT",
+            "CHATGPT_DEFAULT", "CLAUDE_DEFAULT", "DEEPSEEK_DEFAULT"
+        )
+
+        for (key in keys) {
+            val value = props.getProperty(key) ?: ""
+            buildConfigField("String", key, "\"$value\"")
+        }
     }
 
     configurations.all {
@@ -73,20 +91,6 @@ android {
     }
 }
 
-secrets {
-    // Optionally specify a different file name containing your secrets.
-    // The default is "local.properties"
-    propertiesFileName = "secrets.properties"
-
-    // A properties file, containing default values for secrets, so that,
-    // if a secret is not found in secrets.properties, it'll fall back to here.
-    defaultPropertiesFileName = "secrets.defaults.properties"
-
-    // Configure which keys should be ignored by the plugin by providing regular expressions.
-    // "sdk.dir" is ignored by default.
-    ignoreList.add("keyToIgnore") // Ignore the key "keyToIgnore"
-    ignoreList.add("sdk.*")       // Ignore all keys matching the regexp "sdk.*"
-}
 
 kotlin {
     jvmToolchain(17)

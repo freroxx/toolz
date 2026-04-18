@@ -50,7 +50,9 @@ import java.util.Locale
 @Composable
 fun FileConverterScreen(
     viewModel: FileConverterViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    initialUri: Uri? = null,
+    initialTitle: String? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -58,6 +60,16 @@ fun FileConverterScreen(
     
     var highQuality by remember { mutableStateOf(true) }
     var showAllFormatsSheet by remember { mutableStateOf(false) }
+
+    var showTypePicker by remember { mutableStateOf(false) }
+    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+
+    LaunchedEffect(initialUri) {
+        if (initialUri != null && uiState.selectedFileUri == null) {
+            pendingUri = initialUri
+            showTypePicker = true
+        }
+    }
 
     DisposableEffect(Unit) {
         val receiver = object : android.content.BroadcastReceiver() {
@@ -94,9 +106,6 @@ fun FileConverterScreen(
             context.unregisterReceiver(receiver)
         }
     }
-
-    var showTypePicker by remember { mutableStateOf(false) }
-    var pendingUri by remember { mutableStateOf<Uri?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
