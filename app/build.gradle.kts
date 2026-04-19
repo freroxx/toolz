@@ -158,6 +158,10 @@ dependencies {
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
 
+    // Glance (Widgets)
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
     // Media3
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)

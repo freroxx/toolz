@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -250,68 +250,55 @@
             android:enabled="true"
             android:exported="false" />
 
-        <!-- Widgets -->
-        <receiver android:name=".widget.FlashlightWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/flashlight_widget_info" />
-        </receiver>
+        <!-- ══════════════════════════════════════════════════════ -->
+        <!--  WIDGETS (new suite — Glance + RemoteViews)            -->
+        <!-- ══════════════════════════════════════════════════════ -->
 
-        <receiver android:name=".widget.NotesWidgetProvider"
+        <!-- Music Pill (Glance) -->
+        <receiver android:name=".widget.glance.MusicWidgetReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/notes_widget_info" />
-        </receiver>
-
-        <receiver android:name=".widget.StepWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/step_widget_info" />
-        </receiver>
-
-        <receiver android:name=".widget.CompassWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="android.appwidget.action.APPWIDGET_ENABLED" />
-                <action android:name="android.appwidget.action.APPWIDGET_DISABLED" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/compass_widget_info" />
-        </receiver>
-
-        <receiver android:name=".widget.FlipCoinWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/flip_coin_widget_info" />
-        </receiver>
-
-        <receiver android:name=".widget.MusicWidgetProvider"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="TOGGLE_PLAY" />
-                <action android:name="SKIP_NEXT" />
-                <action android:name="SKIP_PREV" />
+                <action android:name="com.frerox.toolz.WIDGET_MUSIC_TOGGLE" />
+                <action android:name="com.frerox.toolz.WIDGET_MUSIC_NEXT" />
+                <action android:name="com.frerox.toolz.WIDGET_MUSIC_PREV" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/music_widget_info" />
         </receiver>
 
-        <service android:name=".widget.NotesWidgetService"
-            android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <!-- Pomodoro Timer (Glance) -->
+        <receiver android:name=".widget.glance.PomodoroWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.frerox.toolz.WIDGET_POMO_TOGGLE" />
+                <action android:name="com.frerox.toolz.WIDGET_POMO_RESET" />
+                <action android:name="com.frerox.toolz.WIDGET_POMO_SKIP" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/pomodoro_widget_info" />
+        </receiver>
+
+        <!-- Quick Search Bar (Glance) -->
+        <receiver android:name=".widget.glance.SearchBarWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/search_bar_widget_info" />
+        </receiver>
+
+        <!-- Screen Time (RemoteViews) -->
+        <receiver android:name=".widget.ScreenTimeWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/screen_time_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -1,8 +1,6 @@
 package com.frerox.toolz.service
 
 import android.app.PendingIntent
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
@@ -11,16 +9,17 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
-import android.widget.RemoteViews
 import androidx.annotation.OptIn
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.appwidget.updateAll
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
 import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
@@ -28,13 +27,16 @@ import coil3.toBitmap
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.widget.MusicWidgetProvider
-import com.frerox.toolz.widget.WidgetUtils
+import com.frerox.toolz.widget.glance.MusicGlanceWidget
+import com.frerox.toolz.widget.glance.MusicWidgetState
+import com.frerox.toolz.widget.glance.MusicWidgetStateDefinition
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 import kotlin.math.sqrt
 
@@ -244,65 +246,56 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     }
 
     private fun updateWidget(forceBitmapRefresh: Boolean = false) {
-        val appWidgetManager = AppWidgetManager.getInstance(this)
-        val componentName = ComponentName(this, MusicWidgetProvider::class.java)
-        val views = RemoteViews(packageName, R.layout.music_widget)
-
-        WidgetUtils.applyTheme(this, views, settingsRepository)
-
         val currentItem = player.currentMediaItem
-        if (currentItem != null) {
-            views.setTextViewText(R.id.widget_music_title, currentItem.mediaMetadata.title ?: "Unknown Title")
-            views.setTextViewText(R.id.widget_music_artist, currentItem.mediaMetadata.artist ?: "Unknown Artist")
-            
+
+        serviceScope.launch {
+            val artShape = settingsRepository.musicArtShape.first()
+            val artUri   = currentItem?.mediaMetadata?.artworkUri?.toString()
+            val title    = currentItem?.mediaMetadata?.title?.toString() ?: "Not Playing"
+            val artist   = currentItem?.mediaMetadata?.artist?.toString() ?: "Tap to open Toolz"
+
             val duration = player.duration
             val position = player.currentPosition
-            val progress = if (duration > 0) (position * 100 / duration).toInt() else 0
-            views.setProgressBar(R.id.widget_music_progress, 100, progress, false)
-            
-            views.setImageViewResource(R.id.widget_music_play_pause, 
-                if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
+            val progress = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
 
-            serviceScope.launch {
-                val artShape = settingsRepository.musicArtShape.first()
-                val rotationEnabled = settingsRepository.musicRotationEnabled.first()
-                val artUri = currentItem.mediaMetadata.artworkUri?.toString()
-                
-                if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
-                    var bitmap = if (artUri != null) loadBitmap(artUri) else null
-                    if (bitmap == null) {
-                        bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
-                    }
-                    bitmap?.let {
-                        cachedProcessedBitmap = processThumbnail(it, artShape)
-                        lastTrackUri = artUri
-                        lastShape = artShape
-                    }
+            // Load & persist art bitmap to a file for Glance to read
+            if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
+                var bitmap = if (artUri != null) loadBitmap(artUri) else null
+                if (bitmap == null) {
+                    bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
                 }
-
-                cachedProcessedBitmap?.let {
-                    views.setImageViewBitmap(R.id.widget_music_album_art, it)
-                    if (player.isPlaying && rotationEnabled) {
-                        views.setFloat(R.id.widget_music_album_art, "setRotation", currentRotation)
-                    } else {
-                        views.setFloat(R.id.widget_music_album_art, "setRotation", 0f)
-                    }
+                bitmap?.let {
+                    cachedProcessedBitmap = processThumbnail(it, artShape)
+                    lastTrackUri = artUri
+                    lastShape    = artShape
                 }
-                
-                setupIntents(views)
-                appWidgetManager.updateAppWidget(componentName, views)
             }
-        } else {
-            views.setTextViewText(R.id.widget_music_title, "NOT PLAYING")
-            views.setTextViewText(R.id.widget_music_artist, "Tap to open Toolz")
-            views.setProgressBar(R.id.widget_music_progress, 100, 0, false)
-            views.setImageViewResource(R.id.widget_music_play_pause, android.R.drawable.ic_media_play)
-            views.setImageViewResource(R.id.widget_music_album_art, R.drawable.ic_music_note)
-            views.setFloat(R.id.widget_music_album_art, "setRotation", 0f)
-            cachedProcessedBitmap = null
-            lastTrackUri = null
-            setupIntents(views)
-            appWidgetManager.updateAppWidget(componentName, views)
+
+            // Save bitmap to internal storage so Glance can load it
+            val artFilePath = cachedProcessedBitmap?.let { bmp ->
+                try {
+                    val file = File(filesDir, "widget_art.png")
+                    FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 85, it) }
+                    file.absolutePath
+                } catch (_: Exception) { null }
+            }
+
+            // Push state to Glance DataStore using the correct API
+            val glanceIds = GlanceAppWidgetManager(this@MusicPlayerService)
+                .getGlanceIds(MusicGlanceWidget::class.java)
+            glanceIds.forEach { glanceId ->
+                updateAppWidgetState(this@MusicPlayerService, glanceId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[MusicWidgetState.KEY_TITLE]    = title
+                        this[MusicWidgetState.KEY_ARTIST]   = artist
+                        this[MusicWidgetState.KEY_PROGRESS] = progress
+                        this[MusicWidgetState.KEY_PLAYING]  = player.isPlaying
+                        this[MusicWidgetState.KEY_ART_SHAPE]= artShape
+                        if (artFilePath != null) this[MusicWidgetState.KEY_ART_PATH] = artFilePath
+                    }
+                }
+            }
+            MusicGlanceWidget().updateAll(this@MusicPlayerService)
         }
     }
 
@@ -326,24 +319,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         return output
     }
 
-    private fun setupIntents(views: RemoteViews) {
-        val playIntent = Intent(this, MusicWidgetProvider::class.java).apply { action = "TOGGLE_PLAY" }
-        views.setOnClickPendingIntent(R.id.widget_music_play_pause, PendingIntent.getBroadcast(this, 1, playIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-
-        val nextIntent = Intent(this, MusicWidgetProvider::class.java).apply { action = "SKIP_NEXT" }
-        views.setOnClickPendingIntent(R.id.widget_music_next, PendingIntent.getBroadcast(this, 2, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-
-        val prevIntent = Intent(this, MusicWidgetProvider::class.java).apply { action = "SKIP_PREV" }
-        views.setOnClickPendingIntent(R.id.widget_music_prev, PendingIntent.getBroadcast(this, 3, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-
-        val appIntent = Intent(this, MainActivity::class.java).apply {
-            putExtra("navigate_to", "music_player")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val appPendingIntent = PendingIntent.getActivity(this, 0, appIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        views.setOnClickPendingIntent(R.id.widget_music_album_art, appPendingIntent)
-        views.setOnClickPendingIntent(R.id.widget_text_container, appPendingIntent)
-    }
+    // setupIntents no longer needed — Glance handles click actions declaratively
 
     private suspend fun loadBitmap(uri: String): Bitmap? = withContext(Dispatchers.IO) {
         try {
