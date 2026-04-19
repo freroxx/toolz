@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/st_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:background="@drawable/widget_rounded_bg"
+    android:gravity="center_vertical">
+
+    <!-- Ring section -->
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center">
+
+        <ImageView
+            android:id="@+id/st_ring_image"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:adjustViewBounds="true"
+            android:scaleType="fitCenter" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/st_total_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:text="0m" />
+
+            <TextView
+                android:id="@+id/st_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="9sp"
+                android:gravity="center"
+                android:text="Screen Time" />
+
+            <TextView
+                android:id="@+id/st_percent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:text="0%" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- App bars section (shown in expanded 4×2) -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.4"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:paddingStart="10dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TOP APPS"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1"
+            android:alpha="0.5"
+            android:textColor="#FFFFFFFF" />
+
+        <!-- App 1 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="8dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/app1_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/app1_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="10sp" />
+            </LinearLayout>
+            <ProgressBar
+                android:id="@+id/app1_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="2dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_progress_bar" />
+        </LinearLayout>
+
+        <!-- App 2 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/app2_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/app2_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="10sp" />
+            </LinearLayout>
+            <ProgressBar
+                android:id="@+id/app2_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="2dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_progress_bar" />
+        </LinearLayout>
+
+        <!-- App 3 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <TextView
+                    android:id="@+id/app3_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/app3_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="10sp" />
+            </LinearLayout>
+            <ProgressBar
+                android:id="@+id/app3_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="2dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_progress_bar" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
