@@ -1,10 +1,6 @@
 # Toolz
 
 <p align="center">
-  <img src="app/src/main/ic_launcher-playstore.png" alt="Toolz launcher art" width="160" />
-</p>
-
-<p align="center">
   <strong>Your device, fully orchestrated.</strong>
 </p>
 
