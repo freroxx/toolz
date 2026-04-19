@@ -9,10 +9,19 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.appwidget.updateAll
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
+import com.frerox.toolz.widget.glance.PomodoroWidgetState
+import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,10 +96,11 @@ class ToolService : Service() {
             ACTION_TIMER_TOGGLE -> if (_isTimerRunning.value) pauseTimer() else startTimer(_timerRemaining.value)
             ACTION_TIMER_STOP -> resetTimer()
             ACTION_POMODORO_TOGGLE -> {
-                if (_isPomodoroRunning.value) pausePomodoro() 
+                if (_isPomodoroRunning.value) pausePomodoro()
                 else startPomodoro(_pomodoroRemaining.value, pomodoroMode)
             }
             ACTION_POMODORO_STOP -> resetPomodoro()
+            ACTION_POMODORO_SKIP -> skipPomodoro()
             ACTION_TODO_STOP -> stopTodoSession()
             ACTION_DISMISS_ALARM -> {
                 val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
@@ -208,6 +218,7 @@ class ToolService : Service() {
         pomodoroJob = serviceScope.launch {
             while (_pomodoroRemaining.value > 0 && _isPomodoroRunning.value) {
                 _pomodoroRemaining.value = (pomodoroEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+                pushPomodoroWidgetState()
                 delay(1000)
             }
             if (_pomodoroRemaining.value == 0L) {
@@ -215,19 +226,23 @@ class ToolService : Service() {
                 onPomodoroFinished()
             }
         }
+        serviceScope.launch { pushPomodoroWidgetState() }
         startForeground(POMODORO_NOTIFICATION_ID, createPomodoroNotification())
     }
 
     private fun onPomodoroFinished() {
-        val title = if (pomodoroMode == "WORK") "Work Session Finished" else "Break Finished"
-        val message = if (pomodoroMode == "WORK") "Time to take a break!" else "Ready to focus?"
+        val title   = if (pomodoroMode == "WORK") "Work Session Finished" else "Break Finished"
+        val message = if (pomodoroMode == "WORK") "Time to take a break! 🌱" else "Ready to focus? 🔥"
         showAlarmNotification(title, message, POMODORO_ALARM_ID, Screen.Pomodoro.route)
+        vibrateFinish()
+        serviceScope.launch { pushPomodoroWidgetState() }
         updatePomodoroNotification("Session finished!")
     }
 
     fun pausePomodoro() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
+        serviceScope.launch { pushPomodoroWidgetState() }
         updatePomodoroNotification("Paused")
     }
 
@@ -235,6 +250,16 @@ class ToolService : Service() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
         _pomodoroRemaining.value = 0L
+        serviceScope.launch { pushPomodoroWidgetState() }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    /** Skip current Pomodoro session — treated as finished without alarm. */
+    fun skipPomodoro() {
+        _isPomodoroRunning.value = false
+        pomodoroJob?.cancel()
+        _pomodoroRemaining.value = 0L
+        serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
@@ -471,6 +496,49 @@ class ToolService : Service() {
         serviceScope.cancel()
     }
 
+    // ── Glance Widget State Push ───────────────────────────────────────────
+
+    private suspend fun pushPomodoroWidgetState() {
+        try {
+            val totalMs = when (pomodoroMode) {
+                "SHORT_BREAK" -> 5 * 60 * 1000f
+                "LONG_BREAK"  -> 15 * 60 * 1000f
+                else          -> 25 * 60 * 1000f
+            }
+            val glanceIds = GlanceAppWidgetManager(this)
+                .getGlanceIds(PomodoroGlanceWidget::class.java)
+            glanceIds.forEach { glanceId ->
+                updateAppWidgetState(this, glanceId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[PomodoroWidgetState.KEY_MODE]         = pomodoroMode
+                        this[PomodoroWidgetState.KEY_REMAINING_MS] = _pomodoroRemaining.value.toFloat()
+                        this[PomodoroWidgetState.KEY_TOTAL_MS]     = totalMs
+                        this[PomodoroWidgetState.KEY_IS_RUNNING]   = _isPomodoroRunning.value
+                    }
+                }
+            }
+            PomodoroGlanceWidget().updateAll(this)
+        } catch (_: Exception) {}
+    }
+
+    // ── Vibration ─────────────────────────────────────────────────────────
+
+    private fun vibrateFinish() {
+        try {
+            val pattern = longArrayOf(0, 300, 100, 300, 100, 600)
+            if (Build.VERSION.SDK_INT >= 31) {
+                val vm = getSystemService(VibratorManager::class.java)
+                vm?.defaultVibrator?.vibrate(
+                    VibrationEffect.createWaveform(pattern, -1)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                val vib = getSystemService(Vibrator::class.java)
+                vib?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            }
+        } catch (_: Exception) {}
+    }
+
     companion object {
         const val CHANNEL_ID = "tool_service_channel"
         const val ALARM_CHANNEL_ID = "tool_alarm_channel"
@@ -488,9 +556,10 @@ class ToolService : Service() {
         const val ACTION_TIMER_TOGGLE = "com.frerox.toolz.TIMER_TOGGLE"
         const val ACTION_TIMER_STOP = "com.frerox.toolz.TIMER_STOP"
         const val ACTION_POMODORO_TOGGLE = "com.frerox.toolz.POMODORO_TOGGLE"
-        const val ACTION_POMODORO_STOP = "com.frerox.toolz.POMODORO_STOP"
-        const val ACTION_TODO_STOP = "com.frerox.toolz.TODO_STOP"
-        const val ACTION_DISMISS_ALARM = "com.frerox.toolz.DISMISS_ALARM"
+        const val ACTION_POMODORO_STOP   = "com.frerox.toolz.POMODORO_STOP"
+        const val ACTION_POMODORO_SKIP   = "com.frerox.toolz.POMODORO_SKIP"
+        const val ACTION_TODO_STOP       = "com.frerox.toolz.TODO_STOP"
+        const val ACTION_DISMISS_ALARM   = "com.frerox.toolz.DISMISS_ALARM"
         
         const val EXTRA_NOTIFICATION_ID = "notification_id"
     }

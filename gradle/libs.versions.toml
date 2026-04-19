@@ -59,6 +59,7 @@ sqlite = "2.6.2"
 biometric = "1.1.0"
 secretsGradlePlugin = "2.0.1"
 newpipeExtractor = "v0.26.0"
+glance = "1.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -141,6 +142,10 @@ media3-exoplayer-dash = { group = "androidx.media3", name = "media3-exoplayer-da
 
 # NewPipeExtractor
 newpipe-extractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor", version.ref = "newpipeExtractor" }
+
+# Glance
+glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
 
 # FFmpeg & Lottie
 ffmpeg-kit-standard = { group = "io.github.jamaismagic.ffmpeg", name = "ffmpeg-kit-lts-16kb", version.ref = "ffmpegKit" }
