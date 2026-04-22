@@ -36,9 +36,11 @@ sealed class MdSegment {
     data class Code(val language: String, val code: String) : MdSegment()
     data class BulletItem(val content: AnnotatedString, val depth: Int = 0) : MdSegment()
     data class NumberedItem(val index: Int, val content: AnnotatedString) : MdSegment()
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : MdSegment()
     object Divider : MdSegment()
 }
 
+@Composable
 fun parseMarkdownToSegments(raw: String): List<MdSegment> {
     val segments = mutableListOf<MdSegment>()
     val lines    = raw.lines()
@@ -101,6 +103,19 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
             continue
         }
 
+        // Tables
+        if (line.trim().startsWith("|") && i + 1 < lines.size && lines[i + 1].trim().startsWith("|") && lines[i + 1].contains("---")) {
+            val headers = line.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+            i += 2 // skip header and separator
+            val rows = mutableListOf<List<String>>()
+            while (i < lines.size && lines[i].trim().startsWith("|")) {
+                rows.add(lines[i].split("|").map { it.trim() }.filter { it.isNotEmpty() })
+                i++
+            }
+            segments += MdSegment.Table(headers, rows)
+            continue
+        }
+
         // Normal paragraph
         segments += MdSegment.Paragraph(inlineMarkdown(line))
         i++
@@ -108,7 +123,9 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
     return segments
 }
 
+@Composable
 fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    val colorScheme = MaterialTheme.colorScheme
     data class Token(val start: Int, val end: Int, val content: String, val type: String)
     val tokens = mutableListOf<Token>()
 
@@ -138,7 +155,7 @@ fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
         when (tok.type) {
             "bold"   -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(tok.content) }
             "italic" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(tok.content) }
-            "code"   -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color.Black.copy(0.06f))) { append(tok.content) }
+            "code"   -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = colorScheme.onSurface.copy(0.08f), color = colorScheme.primary)) { append(tok.content) }
             "strike" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(tok.content) }
             else     -> append(tok.content)
         }
@@ -148,10 +165,16 @@ fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
 }
 
 @Composable
-fun MarkdownSegment(seg: MdSegment, modifier: Modifier = Modifier, baseFontSize: TextUnit = 16.sp) {
+fun MarkdownSegment(
+    seg: MdSegment,
+    modifier: Modifier = Modifier,
+    baseFontSize: TextUnit = 16.sp,
+    textColor: Color = MaterialTheme.colorScheme.onSurface
+) {
     val bodyStyle = MaterialTheme.typography.bodyMedium.copy(
         fontSize = baseFontSize,
-        lineHeight = (baseFontSize.value * 1.5f).sp
+        lineHeight = (baseFontSize.value * 1.5f).sp,
+        color = textColor
     )
 
     when (seg) {
@@ -161,14 +184,14 @@ fun MarkdownSegment(seg: MdSegment, modifier: Modifier = Modifier, baseFontSize:
                 2 -> (baseFontSize.value * 1.25f).sp to FontWeight.ExtraBold
                 else -> (baseFontSize.value * 1.15f).sp to FontWeight.Bold
             }
-            Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
+            Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, color = textColor, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
         }
         is MdSegment.Paragraph -> {
             Text(seg.content, style = bodyStyle, modifier = modifier)
         }
         is MdSegment.BulletItem -> {
             Row(modifier = modifier.padding(start = (seg.depth * 12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(textColor.copy(alpha = 0.8f), CircleShape))
                 Text(seg.content, style = bodyStyle, modifier = Modifier.weight(1f))
             }
         }
@@ -179,6 +202,33 @@ fun MarkdownSegment(seg: MdSegment, modifier: Modifier = Modifier, baseFontSize:
             }
         }
         is MdSegment.Code -> MarkdownCodeBlock(language = seg.language, code = seg.code, modifier = modifier)
+        is MdSegment.Table -> {
+            Column(modifier = modifier.padding(vertical = 8.dp).horizontalScroll(rememberScrollState())) {
+                Row(modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))) {
+                    seg.headers.forEach { header ->
+                        Text(
+                            text = header,
+                            style = bodyStyle.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(8.dp).widthIn(min = 100.dp),
+                            color = textColor
+                        )
+                    }
+                }
+                seg.rows.forEach { row ->
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f))
+                    Row {
+                        row.forEach { cell ->
+                            Text(
+                                text = cell,
+                                style = bodyStyle,
+                                modifier = Modifier.padding(8.dp).widthIn(min = 100.dp),
+                                color = textColor
+                            )
+                        }
+                    }
+                }
+            }
+        }
         MdSegment.Divider -> HorizontalDivider(modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
     }
 }

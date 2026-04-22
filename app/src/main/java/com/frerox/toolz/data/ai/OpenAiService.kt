@@ -1,5 +1,6 @@
 package com.frerox.toolz.data.ai
 
+import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import retrofit2.http.Body
 import retrofit2.http.Header
@@ -29,6 +30,20 @@ data class OpenAiChoice(
 data class OpenAiResponseMessage(
     val role: String,
     val content: String?,
+    @Json(name = "tool_calls") val toolCalls: List<ToolCall>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class ToolCall(
+    val id: String,
+    val type: String = "function",
+    val function: FunctionCall,
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionCall(
+    val name: String,
+    val arguments: String,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -38,12 +53,18 @@ data class OpenAiResponseMessage(
 @JsonClass(generateAdapter = true)
 data class ClaudeResponse(
     val content: List<ClaudeContentBlock>,
+    val id: String? = null,
+    val role: String? = null,
+    val model: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
 data class ClaudeContentBlock(
-    val text: String,
+    val text: String? = null,
     val type: String,
+    val id: String? = null,
+    val name: String? = null,
+    val input: Map<String, Any>? = null,
 )
 
 // ─────────────────────────────────────────────────────────────

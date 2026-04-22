@@ -249,7 +249,7 @@ class CalendarViewModel @Inject constructor(
                     .first()
 
                 result
-                    .onSuccess { raw -> handleAiSuccess(raw) }
+                    .onSuccess { chunk -> handleAiSuccess(chunk.text) }
                     .onFailure { e   -> handleAiFailure(e.message) }
 
             } catch (e: Exception) {

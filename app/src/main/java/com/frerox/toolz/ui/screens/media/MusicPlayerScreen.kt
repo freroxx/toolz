@@ -21,6 +21,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -94,6 +97,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.util.lerp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import coil3.compose.AsyncImage
@@ -228,7 +232,10 @@ fun MusicPlayerScreen(
                 onSearchChange = { searchQuery = it },
                 onBack = onBack,
                 onAddFolder = { folderLauncher.launch(null) },
-                onRefresh = { viewModel.scanMusic() },
+                onRefresh = { 
+                    if (currentTab == 2) catalogViewModel.loadStorefront()
+                    else viewModel.scanMusic() 
+                },
                 onSort = { viewModel.setSortOrder(it) },
                 onClearSelection = { viewModel.clearSelection() },
                 onMultiAddPlaylist = { showMultiSelectPlaylistPicker = true },
@@ -319,9 +326,6 @@ fun MusicPlayerScreen(
                                 onPlayTrack = { uri, title, artist, thumbUrl, sourceUrl ->
                                     viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
                                 },
-                                onPlayAll = { tracks, startIndex ->
-                                    viewModel.playCatalogTracks(tracks, startIndex)
-                                },
                                 onEnqueue = { track, playNext ->
                                     viewModel.enqueueCatalogTrack(track, playNext)
                                 }
@@ -376,6 +380,14 @@ fun MusicPlayerScreen(
         }
         if (showFullPlayer && state.currentTrack != null) {
             val visualizerData by viewModel.visualizerData.collectAsStateWithLifecycle()
+            val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+            
+            LaunchedEffect(state.showVisualizer) {
+                if (state.showVisualizer && !micPermission.status.isGranted) {
+                    // micPermission.launchPermissionRequest() // Don't auto-request, let user click or handle in settings
+                }
+            }
+
             FullPlayerView(
                 state = state,
                 aiState = aiState,
@@ -402,8 +414,10 @@ fun MusicPlayerScreen(
                 onTogglePip = { viewModel.togglePipEnabled() },
                 onOpenAi = { viewModel.vibrationManager.vibrateClick(); showAiSheet = true },
                 onToggleMusicSettings = { viewModel.toggleMusicSettings() },
-                onSetPlaybackSpeed = { viewModel.setPlaybackSpeed(it) },
-                onSetEqualizerPreset = { viewModel.setEqualizerPreset(it) },
+                onSetPlaybackSpeed = { speed: Float -> viewModel.setPlaybackSpeed(speed) },
+                onSetEqualizerPreset = { preset: String -> viewModel.setEqualizerPreset(preset) },
+                onSetCustomEqualizerGain = { index: Int, gain: Float -> viewModel.setCustomEqualizerGain(index, gain) },
+                onSetVisualizerSensitivity = { sensitivity: Float -> viewModel.setVisualizerSensitivity(sensitivity) },
                 onMoveQueueItem = { from, to -> viewModel.moveQueueItem(from, to) },
                 onRemoveQueueItem = { index -> viewModel.removeQueueItem(index) },
                 onClearQueue = { viewModel.clearQueue() },
@@ -587,38 +601,41 @@ private fun ScreenTopBar(
                             }
                         },
                         actions = {
-                            Box {
-                                androidx.compose.animation.AnimatedVisibility(
-                                    visible = currentTab == 2,
-                                    enter = fadeIn() + scaleIn(),
-                                    exit = fadeOut() + scaleOut()
-                                ) {
+                            when (currentTab) {
+                                0 -> { // Tracks
+                                    IconButton(onClick = onRefresh) {
+                                        Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.onSurface)
+                                    }
+                                    Box {
+                                        IconButton(onClick = { onShowSortMenu(true) }) {
+                                            Icon(Icons.AutoMirrored.Rounded.Sort, null, tint = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                        DropdownMenu(
+                                            expanded = showSortMenu,
+                                            onDismissRequest = { onShowSortMenu(false) },
+                                            shape = RoundedCornerShape(24.dp),
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                        ) {
+                                            SortDropdownItem("By Title", Icons.Rounded.Title) {
+                                                onSort(SortOrder.TITLE); onShowSortMenu(false)
+                                            }
+                                            SortDropdownItem("By Artist", Icons.Rounded.Person) {
+                                                onSort(SortOrder.ARTIST); onShowSortMenu(false)
+                                            }
+                                            SortDropdownItem("By Recent", Icons.Rounded.Schedule) {
+                                                onSort(SortOrder.RECENT); onShowSortMenu(false)
+                                            }
+                                        }
+                                    }
+                                }
+                                1 -> { // Library
                                     IconButton(onClick = onAddFolder) {
                                         Icon(Icons.Rounded.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
-                            }
-                            IconButton(onClick = onRefresh) {
-                                Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                            Box {
-                                IconButton(onClick = { onShowSortMenu(true) }) {
-                                    Icon(Icons.AutoMirrored.Rounded.Sort, null, tint = MaterialTheme.colorScheme.onSurface)
-                                }
-                                DropdownMenu(
-                                    expanded = showSortMenu,
-                                    onDismissRequest = { onShowSortMenu(false) },
-                                    shape = RoundedCornerShape(24.dp),
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ) {
-                                    SortDropdownItem("By Title", Icons.Rounded.Title) {
-                                        onSort(SortOrder.TITLE); onShowSortMenu(false)
-                                    }
-                                    SortDropdownItem("By Artist", Icons.Rounded.Person) {
-                                        onSort(SortOrder.ARTIST); onShowSortMenu(false)
-                                    }
-                                    SortDropdownItem("By Recent", Icons.Rounded.Schedule) {
-                                        onSort(SortOrder.RECENT); onShowSortMenu(false)
+                                2 -> { // Catalog
+                                    IconButton(onClick = onRefresh) {
+                                        Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
                             }
@@ -2515,6 +2532,8 @@ fun FullPlayerView(
     onToggleMusicSettings: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
     onSetEqualizerPreset: (String) -> Unit,
+    onSetCustomEqualizerGain: (Int, Float) -> Unit,
+    onSetVisualizerSensitivity: (Float) -> Unit,
     onMoveQueueItem: (Int, Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
     onClearQueue: () -> Unit,
@@ -2545,6 +2564,8 @@ fun FullPlayerView(
             equalizerPresets = equalizerPresets,
             onSetPlaybackSpeed = onSetPlaybackSpeed,
             onSetEqualizerPreset = onSetEqualizerPreset,
+            onSetCustomEqualizerGain = onSetCustomEqualizerGain,
+            onSetVisualizerSensitivity = onSetVisualizerSensitivity,
             onToggleVisualizer = onToggleVisualizer,
             onDismiss = onToggleMusicSettings
         )
@@ -2695,10 +2716,15 @@ fun FullPlayerView(
                 }
 
                 if (showLyricsCustomization) {
-                    LyricCustomizationDialog(
+                    LyricCustomizationSheet(
                         state = aiState.lyricsState,
                         onDismiss = { showLyricsCustomization = false },
+                        onResetDefaults = {
+                            aiViewModel.setLyricsLayout(LyricsLayout.CENTER)
+                            aiViewModel.setLyricsFont(LyricsFont.SANS_SERIF)
+                        },
                         onToggleSeek = { aiViewModel.toggleSeekEnabled() },
+                        onToggleAlwaysSync = { aiViewModel.toggleAlwaysSync() },
                         onSetLayout = { aiViewModel.setLyricsLayout(it) },
                         onSetFont = { aiViewModel.setLyricsFont(it) }
                     )
@@ -2712,14 +2738,15 @@ fun FullPlayerView(
                     val artMaxSize = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp)
                     val artShape = if (state.artShape == "CIRCLE") CircleShape else RoundedCornerShape(56.dp)
 
-                    if (!state.performanceMode && state.showVisualizer) {
+                    if (state.showVisualizer) {
                         AudioVisualizerHalo(
                             visualizerData = visualizerData,
                             isPlaying = state.isPlaying,
                             artMaxSize = artMaxSize,
                             shape = state.artShape,
                             thumbnailUri = track.thumbnailUri,
-                            rotation = if (state.isPlaying && state.rotationEnabled) rotation else 0f
+                            rotation = if (state.isPlaying && state.rotationEnabled) rotation else 0f,
+                            sensitivity = state.visualizerSensitivity
                         )
                     } else if (!state.performanceMode) {
                         val haloAlpha by animateFloatAsState(if (state.isPlaying) 0.45f else 0.1f, tween(900), label = "hA")
@@ -2903,16 +2930,19 @@ fun FullPlayerView(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 private fun MusicSettingsSheet(
     state: MusicUiState,
     equalizerPresets: List<String>,
     onSetPlaybackSpeed: (Float) -> Unit,
     onSetEqualizerPreset: (String) -> Unit,
+    onSetCustomEqualizerGain: (Int, Float) -> Unit,
+    onSetVisualizerSensitivity: (Float) -> Unit,
     onToggleVisualizer: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -2933,6 +2963,7 @@ private fun MusicSettingsSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 "Music Settings",
@@ -2977,36 +3008,74 @@ private fun MusicSettingsSheet(
             }
 
             Spacer(Modifier.height(24.dp))
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                     .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column {
-                    Text(
-                        "Audio Visualizer",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Show animated halo around art",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            "Audio Visualizer",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Show animated halo around art",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.showVisualizer,
+                        onCheckedChange = { 
+                            if (!state.showVisualizer && !micPermission.status.isGranted) {
+                                micPermission.launchPermissionRequest()
+                            }
+                            onToggleVisualizer() 
+                        }
                     )
                 }
-                Switch(
-                    checked = state.showVisualizer,
-                    onCheckedChange = { onToggleVisualizer() }
-                )
+
+                if (state.showVisualizer) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Sensitivity",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            TextButton(onClick = { onSetVisualizerSensitivity(0.5f) }) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        Slider(
+                            value = state.visualizerSensitivity,
+                            onValueChange = onSetVisualizerSensitivity,
+                            valueRange = 0.1f..1.5f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "Equalizer Presets",
+                "Equalizer",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
@@ -3037,6 +3106,69 @@ private fun MusicSettingsSheet(
                     }
                 }
             }
+
+            if (state.equalizerPreset == "Custom") {
+                Spacer(Modifier.height(16.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val bands = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
+                        state.customEqualizerGains.forEachIndexed { index, gain ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(1f)
+                            ) {
+                                Text(
+                                    "${gain.toInt()}dB",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    // Custom Vertical Slider
+                                    Slider(
+                                        value = gain,
+                                        onValueChange = { onSetCustomEqualizerGain(index, it) },
+                                        valueRange = -15f..15f,
+                                        modifier = Modifier
+                                            .graphicsLayer {
+                                                rotationZ = -90f
+                                                transformOrigin = TransformOrigin.Center
+                                            }
+                                            .width(130.dp),
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = MaterialTheme.colorScheme.primary,
+                                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                                            inactiveTrackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
+                                        )
+                                    )
+                                }
+                                Text(
+                                    bands.getOrNull(index) ?: "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -3048,7 +3180,8 @@ fun AudioVisualizerHalo(
     artMaxSize: Dp,
     shape: String,
     thumbnailUri: String?,
-    rotation: Float = 0f
+    rotation: Float = 0f,
+    sensitivity: Float = 1.0f
 ) {
     val dynamicColors = rememberDynamicColors(thumbnailUri)
     val primary = dynamicColors.primary
@@ -3070,20 +3203,22 @@ fun AudioVisualizerHalo(
                 sum += visualizerData[j]
             }
             val avg = if (chunkSize > 0) sum / chunkSize else 0f
-            // Improved reactivity: higher weight for new data and better sensitivity
-            smoothedData[i] = smoothedData[i] * 0.15f + avg * 0.85f
+            // Improved reactivity: dynamic smoothing based on frequency
+            val smoothingFactor = 0.1f + (i.toFloat() / 64f) * 0.1f
+            smoothedData[i] = lerp(smoothedData[i], avg * sensitivity, 0.6f - smoothingFactor)
         }
     }
 
+    val avgMagnitude = if (smoothedData.isNotEmpty()) smoothedData.take(12).average().toFloat() else 0f
     val baseScale by animateFloatAsState(
-        if (isPlaying) 1.02f + (smoothedData.take(16).average().toFloat() / 80f).coerceAtMost(0.2f) else 1f,
+        if (isPlaying) 1.05f + (avgMagnitude / 40f).coerceAtMost(0.25f) else 1f,
         spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
         label = "baseScale"
     )
 
-    Canvas(modifier = Modifier.size(artMaxSize).scale(baseScale).rotate(rotation)) {
+    Canvas(modifier = Modifier.fillMaxSize().scale(baseScale).rotate(rotation)) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        val radius = size.minDimension / 2f
+        val radius = size.minDimension / 0.45f
         val path = Path()
         
         val points = 64
@@ -3092,36 +3227,16 @@ fun AudioVisualizerHalo(
         for (i in 0..points) {
             val idx = i % points
             val rawMagnitude = smoothedData.getOrElse(idx) { 0f }
-            // Dynamic sensitivity: boost higher frequencies for a more dramatic effect
-            val freqFactor = 1f + (idx.toFloat() / points) * 1.5f
-            val magnitude = (rawMagnitude * freqFactor / 32f).coerceAtMost(60f)
+            // Frequency-based scaling: boost higher frequencies slightly more
+            val freqFactor = 1.2f + (idx.toFloat() / points) * 1.2f
+            val magnitude = (rawMagnitude * freqFactor).coerceAtMost(100f)
             
-            val offsetDist = 14.dp.toPx() + magnitude.dp.toPx()
+            val offsetDist = 10.dp.toPx() + (magnitude * sensitivity).dp.toPx()
             val angle = i * angleStep
             
-            val x: Float
-            val y: Float
-            
-            if (shape == "CIRCLE") {
-                val r = radius + offsetDist
-                x = center.x + kotlin.math.cos(angle.toDouble()).toFloat() * r
-                y = center.y + kotlin.math.sin(angle.toDouble()).toFloat() * r
-            } else {
-                // Square/Rounded mapping matching the 56.dp corner radius
-                val cosA = kotlin.math.cos(angle.toDouble()).toFloat()
-                val sinA = kotlin.math.sin(angle.toDouble()).toFloat()
-                
-                val absCos = kotlin.math.abs(cosA)
-                val absSin = kotlin.math.abs(sinA)
-                
-                // Superellipse-like formula for rounded square
-                val n = 4.5f // exponent for roundness
-                val rBase = radius * (1f / Math.pow((Math.pow(absCos.toDouble(), n.toDouble()) + Math.pow(absSin.toDouble(), n.toDouble())), 1.0/n)).toFloat()
-                
-                val r = rBase + offsetDist
-                x = center.x + cosA * r
-                y = center.y + sinA * r
-            }
+            val r = (size.minDimension / 2.3f) + offsetDist
+            val x = center.x + kotlin.math.cos(angle.toDouble()).toFloat() * r
+            val y = center.y + kotlin.math.sin(angle.toDouble()).toFloat() * r
             
             if (i == 0) {
                 path.moveTo(x, y)
@@ -3879,6 +3994,8 @@ fun MiniPlayer(
             LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
             LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
             LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+            LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.SansSerif
+            LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive
             else -> androidx.compose.ui.text.font.FontFamily.Default
         }
     }
@@ -3986,9 +4103,6 @@ fun MiniPlayer(
                         modifier = Modifier
                             .size(56.dp)
                             .scale(pulseScalePlayer)
-                            .graphicsLayer {
-                                rotationZ = if (rotationEnabled && isPlaying && !performanceMode) artRotation else 0f
-                            }
                             .shadow(if (performanceMode) 2.dp else 6.dp, finalArtShape)
                             .clip(finalArtShape)
                             .then(
@@ -3996,25 +4110,33 @@ fun MiniPlayer(
                                 else Modifier
                             )
                     ) {
-                        AnimatedContent(
-                            targetState = track.thumbnailUri,
-                            transitionSpec = {
-                                if (performanceMode) {
-                                    EnterTransition.None togetherWith ExitTransition.None
-                                } else {
-                                    fadeIn(tween(400)) + scaleIn(initialScale = 0.85f) togetherWith
-                                            fadeOut(tween(400)) + scaleOut(targetScale = 0.85f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    rotationZ = if (rotationEnabled && isPlaying && !performanceMode) artRotation else 0f
                                 }
-                            },
-                            label = "artTransition"
-                        ) { uri ->
-                            AsyncImage(
-                                model = uri,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                error = rememberVectorPainter(Icons.Rounded.MusicNote)
-                            )
+                        ) {
+                            AnimatedContent(
+                                targetState = track.thumbnailUri,
+                                transitionSpec = {
+                                    if (performanceMode) {
+                                        EnterTransition.None togetherWith ExitTransition.None
+                                    } else {
+                                        fadeIn(tween(400)) + scaleIn(initialScale = 0.85f) togetherWith
+                                                fadeOut(tween(400)) + scaleOut(targetScale = 0.85f)
+                                    }
+                                },
+                                label = "artTransition"
+                            ) { uri ->
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                    error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                                )
+                            }
                         }
 
                         if (downloadCount > 0) {
@@ -4035,25 +4157,24 @@ fun MiniPlayer(
 
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 6.dp, y = 6.dp)
+                                    .align(Alignment.Center)
                                     .scale(pulseScale)
-                                    .size(24.dp)
-                                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                                    .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f), CircleShape)
+                                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(
                                     progress = { avgDownloadProgress / 100f },
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(42.dp),
                                     color = MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 2.dp,
+                                    strokeWidth = 3.dp,
                                     trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                                 )
                                 Icon(
                                     imageVector = Icons.Rounded.CloudDownload,
                                     contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
+                                    modifier = Modifier.size(20.dp),
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
@@ -4218,15 +4339,27 @@ fun MiniPlayer(
                                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                                     )
                                 } else {
-                                    Text(
-                                        "♪  Enjoy the music  ♪",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = lyricColor.copy(alpha = 0.35f),
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = fontFamily,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.MusicNote,
+                                            null,
+                                            modifier = Modifier.size(20.dp).alpha(0.35f),
+                                            tint = lyricColor
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            "Enjoy the music",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = lyricColor.copy(alpha = 0.35f),
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = fontFamily,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
                                 }
                             } else {
                                 AnimatedContent(
@@ -4253,15 +4386,27 @@ fun MiniPlayer(
                                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                                         )
                                     } else {
-                                        Text(
-                                            "♪  Enjoy the music  ♪",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = lyricColor.copy(alpha = 0.35f),
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = fontFamily,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.MusicNote,
+                                                null,
+                                                modifier = Modifier.size(20.dp).alpha(0.35f),
+                                                tint = lyricColor
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                "Enjoy the music",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = lyricColor.copy(alpha = 0.35f),
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = fontFamily,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -4513,49 +4658,78 @@ private fun PlaylistPickerRow(playlist: Playlist, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LyricCustomizationDialog(
+fun LyricCustomizationSheet(
     state: AiLyricsState,
     onDismiss: () -> Unit,
+    onResetDefaults: () -> Unit,
     onToggleSeek: () -> Unit,
+    onToggleAlwaysSync: () -> Unit,
     onSetLayout: (LyricsLayout) -> Unit,
     onSetFont: (LyricsFont) -> Unit
 ) {
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            Button(
-                onClick = onDismiss,
-                shape = CircleShape,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("Done", fontWeight = FontWeight.ExtraBold)
-            }
-        },
-        title = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(36.dp, 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth()
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(40.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Settings,
-                            null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Settings,
+                                null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
+                    Text("Lyrics Style", fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
                 }
-                Text("Lyrics Style", fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
+
+                TextButton(
+                    onClick = onResetDefaults,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Reset", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+
+            // Options Group
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Seek toggle
                 Surface(
                     onClick = onToggleSeek,
@@ -4576,89 +4750,123 @@ fun LyricCustomizationDialog(
                         }
                         Switch(
                             checked = state.isSeekEnabled, 
-                            onCheckedChange = { onToggleSeek() },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                            )
+                            onCheckedChange = { onToggleSeek() }
                         )
                     }
                 }
 
-                // Alignment
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Alignment", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                // Always Sync toggle
+                Surface(
+                    onClick = onToggleAlwaysSync,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        LyricsLayout.entries.forEach { layout ->
-                            val selected = state.layout == layout
-                            val icon = when(layout) {
-                                LyricsLayout.LEFT -> Icons.AutoMirrored.Rounded.Notes
-                                LyricsLayout.CENTER -> Icons.Rounded.FormatAlignCenter
-                                LyricsLayout.RIGHT -> Icons.AutoMirrored.Rounded.FormatAlignRight
-                            }
-                            
-                            Surface(
-                                onClick = { onSetLayout(layout) },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f).height(48.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Always Sync", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                            Text("Prioritize synced lyrics over plain text", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = state.alwaysSync,
+                            onCheckedChange = { onToggleAlwaysSync() }
+                        )
+                    }
+                }
+            }
+
+            // Alignment
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Alignment", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LyricsLayout.entries.forEach { layout ->
+                        val selected = state.layout == layout
+                        val icon = when(layout) {
+                            LyricsLayout.LEFT -> Icons.AutoMirrored.Rounded.Notes
+                            LyricsLayout.CENTER -> Icons.Rounded.FormatAlignCenter
+                            LyricsLayout.RIGHT -> Icons.AutoMirrored.Rounded.FormatAlignRight
+                        }
+                        
+                        Surface(
+                            onClick = { onSetLayout(layout) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(horizontal = 4.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(horizontal = 4.dp)
-                                ) {
-                                    Icon(icon, null, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(layout.name.lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                                }
+                                Icon(icon, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(layout.name.lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
                 }
+            }
 
-                // Font
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Font
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text("Typography", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        LyricsFont.entries.forEach { font ->
-                            val selected = state.fontFamily == font
-                            val fontFamily = when(font) {
-                                LyricsFont.SANS_SERIF -> androidx.compose.ui.text.font.FontFamily.Default
-                                LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
-                                LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
-                                LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
-                            }
+                    IconButton(onClick = { /* TODO: Font Picker */ }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    }
+                }
+                
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LyricsFont.entries.forEach { font ->
+                        val selected = state.fontFamily == font
+                        val fontFamily = when(font) {
+                            LyricsFont.SANS_SERIF -> androidx.compose.ui.text.font.FontFamily.Default
+                            LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+                            LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
+                            LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+                            LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.Default // Placeholder
+                            LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive // Placeholder
+                        }
 
-                            Surface(
-                                onClick = { onSetFont(font) },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f).height(48.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        font.name.lowercase().replace("_", " ").split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontFamily = fontFamily
-                                    )
-                                }
+                        Surface(
+                            onClick = { onSetFont(font) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    font.name.lowercase().replace("_", " ").split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } },
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = fontFamily
+                                )
                             }
                         }
                     }
                 }
             }
         }
-    )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

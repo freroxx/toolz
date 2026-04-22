@@ -36,6 +36,7 @@ data class AiMessage(
     val text: String,
     val isUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
+    val searchSources: String? = null,
 )
 
 @Dao
@@ -43,6 +44,9 @@ interface AiDao {
 
     @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC")
     fun getAllChats(): Flow<List<AiChat>>
+
+    @Query("SELECT * FROM ai_chats ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentChats(limit: Int): Flow<List<AiChat>>
 
     @Insert
     suspend fun insertChat(chat: AiChat): Long

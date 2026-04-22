@@ -32,6 +32,15 @@ class LoadingViewModel @Inject constructor(
 
     private fun performInitialization() {
         viewModelScope.launch {
+            val lastLoading = settingsRepository.lastLoadingTime.first()
+            val currentTime = System.currentTimeMillis()
+            val shouldSkipLoading = currentTime - lastLoading < 5 * 60 * 1000 // 5 minutes threshold
+
+            if (shouldSkipLoading) {
+                _isInitialized.value = true
+                return@launch
+            }
+
             val startTime = System.currentTimeMillis()
 
             // 1. Sync AI keys
@@ -56,11 +65,12 @@ class LoadingViewModel @Inject constructor(
 
             // 3. Ensure a minimum loading time for visual consistency if it was too fast
             val elapsedTime = System.currentTimeMillis() - startTime
-            val minLoadingTime = 800L 
+            val minLoadingTime = 1500L // Increased for better visual feedback
             if (elapsedTime < minLoadingTime) {
                 delay(minLoadingTime - elapsedTime)
             }
 
+            settingsRepository.setLastLoadingTime(System.currentTimeMillis())
             _loadingMessage.value = "READY"
             _isInitialized.value = true
         }

@@ -1607,7 +1607,7 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                                 .padding(20.dp)
                         ) {
                             if (tips != null) {
-                                val segments = remember(tips) { parseMarkdownToSegments(tips!!) }
+                                val segments = parseMarkdownToSegments(tips!!)
                                 segments.forEach { seg ->
                                     MarkdownSegment(seg, modifier = Modifier.padding(vertical = 4.dp))
                                 }

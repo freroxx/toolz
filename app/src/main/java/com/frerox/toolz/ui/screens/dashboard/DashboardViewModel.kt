@@ -118,6 +118,12 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    fun togglePinnedTool(route: String) {
+        viewModelScope.launch {
+            settingsRepository.togglePinnedTool(route)
+        }
+    }
+
     private fun performPowerfulSmartSearch(query: String) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
@@ -150,7 +156,8 @@ class DashboardViewModel @Inject constructor(
                 """.trimIndent()
 
                 aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
-                    result.onSuccess { response ->
+                    result.onSuccess { chunk ->
+                        val response = chunk.text
                         val cleanResponse = response.trim().removeSurrounding("\"").removeSurrounding("'")
                         if (cleanResponse != "NONE" && cleanResponse.isNotBlank()) {
                             val routes = cleanResponse.split(",")

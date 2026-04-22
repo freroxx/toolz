@@ -58,7 +58,7 @@ class NowPlayingAiViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.musicLyricsLayout.collect { layoutStr ->
-                val layout = try { LyricsLayout.valueOf(layoutStr) } catch (e: Exception) { LyricsLayout.RIGHT }
+                val layout = try { LyricsLayout.valueOf(layoutStr) } catch (e: Exception) { LyricsLayout.LEFT }
                 _uiState.update { it.copy(lyricsState = it.lyricsState.copy(layout = layout)) }
             }
         }
@@ -71,6 +71,11 @@ class NowPlayingAiViewModel @Inject constructor(
             settingsRepository.musicLyricsFont.collect { fontStr ->
                 val font = try { LyricsFont.valueOf(fontStr) } catch (e: Exception) { LyricsFont.SANS_SERIF }
                 _uiState.update { it.copy(lyricsState = it.lyricsState.copy(fontFamily = font)) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.musicLyricsAlwaysSync.collect { enabled ->
+                _uiState.update { it.copy(lyricsState = it.lyricsState.copy(alwaysSync = enabled)) }
             }
         }
         viewModelScope.launch {
@@ -513,6 +518,14 @@ class NowPlayingAiViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setMusicLyricsFont(font.name)
             _uiState.update { it.copy(lyricsState = it.lyricsState.copy(fontFamily = font)) }
+        }
+    }
+
+    fun toggleAlwaysSync() {
+        viewModelScope.launch {
+            val newState = !_uiState.value.lyricsState.alwaysSync
+            settingsRepository.setMusicLyricsAlwaysSync(newState)
+            _uiState.update { it.copy(lyricsState = it.lyricsState.copy(alwaysSync = newState)) }
         }
     }
 }

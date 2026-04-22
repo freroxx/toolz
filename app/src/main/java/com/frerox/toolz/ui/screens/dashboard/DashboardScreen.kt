@@ -4,8 +4,10 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -126,6 +128,7 @@ fun DashboardScreen(
     val recordingState by recorderViewModel.uiState.collectAsStateWithLifecycle()
 
     val showPillSetting by settingsRepository.showToolzPill.collectAsState(initial = true)
+    val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
     val fillThePillEnabled by settingsRepository.fillThePillEnabled.collectAsState(initial = true)
     val userName by settingsRepository.userName.collectAsState(initial = "")
     val pinnedTools by settingsRepository.pinnedTools.collectAsState(initial = emptySet())
@@ -153,7 +156,9 @@ fun DashboardScreen(
 
     DashboardContent(
         onNavigate = navAction,
+        onTogglePin = viewModel::togglePinnedTool,
         settingsRepository = settingsRepository,
+        hapticEnabled = hapticEnabled,
         performanceMode = performanceMode,
         vibrationManager = vibrationManager,
         userName = userName,
@@ -196,7 +201,9 @@ fun DashboardScreen(
 @Composable
 fun DashboardContent(
     onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit,
     settingsRepository: SettingsRepository,
+    hapticEnabled: Boolean,
     performanceMode: Boolean,
     vibrationManager: VibrationManager?,
     userName: String,
@@ -296,6 +303,7 @@ fun DashboardContent(
                             PinnedToolsSection(
                                 pinnedTools = pinnedTools,
                                 categories = categories,
+                                onTogglePin = onTogglePin,
                                 onNavigate = onNavigate
                             )
                         }
@@ -327,12 +335,18 @@ fun DashboardContent(
                             if (dashboardView == "LIST") {
                                 CategoryList(
                                     items = category.items,
-                                    onNavigate = onNavigate
+                                    vibrationManager = vibrationManager,
+                                    hapticEnabled = hapticEnabled,
+                                    onNavigate = onNavigate,
+                                    onTogglePin = onTogglePin
                                 )
                             } else {
                                 CategoryGrid(
                                     items = category.items,
-                                    onNavigate = onNavigate
+                                    vibrationManager = vibrationManager,
+                                    hapticEnabled = hapticEnabled,
+                                    onNavigate = onNavigate,
+                                    onTogglePin = onTogglePin
                                 )
                             }
                         }
@@ -882,6 +896,7 @@ fun DashboardHeader(userName: String) {
 fun PinnedToolsSection(
     pinnedTools: Set<String>,
     categories: List<ToolCategory>,
+    onTogglePin: (String) -> Unit,
     onNavigate: (String) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -893,7 +908,7 @@ fun PinnedToolsSection(
             items(pinnedTools.toList()) { route ->
                 val tool = categories.flatMap { it.items }.find { it.route == route }
                 if (tool != null) {
-                    PinnedToolItem(tool, onNavigate)
+                    PinnedToolItem(tool, onTogglePin, onNavigate)
                 }
             }
         }
@@ -1016,11 +1031,13 @@ fun QuickNoteItem(note: Note, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-fun PinnedToolItem(tool: ToolItem, onNavigate: (String) -> Unit) {
+fun PinnedToolItem(tool: ToolItem, onTogglePin: (String) -> Unit, onNavigate: (String) -> Unit) {
     Card(
         modifier = Modifier
             .size(width = 160.dp, height = 115.dp)
-            .bouncyClick { onNavigate(tool.route) },
+            .bouncyClick(
+                onLongClick = { onTogglePin(tool.route) }
+            ) { onNavigate(tool.route) },
         shape = RoundedCornerShape(30.dp),
         colors = CardDefaults.cardColors(
             containerColor = tool.color.copy(alpha = 0.15f)
@@ -1129,7 +1146,10 @@ fun CategoryHeader(title: String) {
 @Composable
 fun CategoryGrid(
     items: List<ToolItem>,
-    onNavigate: (String) -> Unit
+    vibrationManager: VibrationManager?,
+    hapticEnabled: Boolean,
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1146,7 +1166,10 @@ fun CategoryGrid(
                     ToolGridItem(
                         item = item,
                         modifier = Modifier.weight(1f),
-                        onNavigate = onNavigate
+                        vibrationManager = vibrationManager,
+                        hapticEnabled = hapticEnabled,
+                        onNavigate = onNavigate,
+                        onTogglePin = onTogglePin
                     )
                 }
                 if (rowItems.size == 1) {
@@ -1161,7 +1184,10 @@ fun CategoryGrid(
 @Composable
 fun CategoryList(
     items: List<ToolItem>,
-    onNavigate: (String) -> Unit
+    vibrationManager: VibrationManager?,
+    hapticEnabled: Boolean,
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1172,22 +1198,40 @@ fun CategoryList(
         items.forEach { item ->
             ToolListItem(
                 item = item,
-                onNavigate = onNavigate
+                vibrationManager = vibrationManager,
+                hapticEnabled = hapticEnabled,
+                onNavigate = onNavigate,
+                onTogglePin = onTogglePin
             )
         }
     }
 }
 
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ToolListItem(
     item: ToolItem,
-    onNavigate: (String) -> Unit
+    vibrationManager: VibrationManager?,
+    hapticEnabled: Boolean,
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit
 ) {
+    val view = LocalView.current
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(80.dp)
-            .bouncyClick { onNavigate(item.route) },
+            .combinedClickable(
+                onClick = { onNavigate(item.route) },
+                onLongClick = {
+                    if (hapticEnabled) {
+                        if (vibrationManager != null) vibrationManager.vibrateLongClick()
+                        else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    onTogglePin(item.route)
+                }
+            ),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
@@ -1241,16 +1285,30 @@ fun ToolListItem(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ToolGridItem(
     item: ToolItem,
     modifier: Modifier = Modifier,
-    onNavigate: (String) -> Unit
+    vibrationManager: VibrationManager?,
+    hapticEnabled: Boolean,
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit
 ) {
+    val view = LocalView.current
     ElevatedCard(
         modifier = modifier
             .height(115.dp)
-            .bouncyClick { onNavigate(item.route) },
+            .combinedClickable(
+                onClick = { onNavigate(item.route) },
+                onLongClick = {
+                    if (hapticEnabled) {
+                        if (vibrationManager != null) vibrationManager.vibrateLongClick()
+                        else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    onTogglePin(item.route)
+                }
+            ),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)

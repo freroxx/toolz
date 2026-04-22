@@ -27,9 +27,8 @@ import coil3.toBitmap
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.widget.WidgetUpdateManager
 import com.frerox.toolz.widget.glance.MusicGlanceWidget
-import com.frerox.toolz.widget.glance.MusicWidgetState
-import com.frerox.toolz.widget.glance.MusicWidgetStateDefinition
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -69,6 +68,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     @Inject
     lateinit var catalogRepository: com.frerox.toolz.data.catalog.CatalogRepository
+
+    @Inject
+    lateinit var widgetUpdateManager: WidgetUpdateManager
 
     private val playerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -280,22 +282,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 } catch (_: Exception) { null }
             }
 
-            // Push state to Glance DataStore using the correct API
-            val glanceIds = GlanceAppWidgetManager(this@MusicPlayerService)
-                .getGlanceIds(MusicGlanceWidget::class.java)
-            glanceIds.forEach { glanceId ->
-                updateAppWidgetState(this@MusicPlayerService, glanceId) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[MusicWidgetState.KEY_TITLE]    = title
-                        this[MusicWidgetState.KEY_ARTIST]   = artist
-                        this[MusicWidgetState.KEY_PROGRESS] = progress
-                        this[MusicWidgetState.KEY_PLAYING]  = player.isPlaying
-                        this[MusicWidgetState.KEY_ART_SHAPE]= artShape
-                        if (artFilePath != null) this[MusicWidgetState.KEY_ART_PATH] = artFilePath
-                    }
-                }
-            }
-            MusicGlanceWidget().updateAll(this@MusicPlayerService)
+            // Push state to Glance DataStore using the WidgetUpdateManager
+            widgetUpdateManager.updateMusicWidget(
+                title = title,
+                artist = artist,
+                progress = progress,
+                isPlaying = player.isPlaying,
+                artShape = artShape,
+                artFilePath = artFilePath
+            )
         }
     }
 

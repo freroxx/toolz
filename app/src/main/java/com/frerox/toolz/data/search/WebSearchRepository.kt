@@ -11,7 +11,9 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 import java.net.InetAddress
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,7 +33,10 @@ class WebSearchRepository @Inject constructor(
     val bookmarks = searchDao.getBookmarks()
     val quickLinks = searchDao.getQuickLinks()
 
-    private val baseClient = OkHttpClient.Builder().build()
+    private val baseClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
 
     private suspend fun getDnsClient(): OkHttpClient {
         val provider = settingsRepository.searchDnsProvider.first()
@@ -95,32 +100,41 @@ class WebSearchRepository @Inject constructor(
 
     suspend fun search(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://html.duckduckgo.com/html/?q=${query.replace(" ", "+")}"
+            val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
+            val url = "https://html.duckduckgo.com/html/?q=$encodedQuery"
             val client = getDnsClient()
             val request = Request.Builder().url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.5")
                 .build()
             
             val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext emptyList()
+
             val html = response.body?.string() ?: return@withContext emptyList()
             val doc = Jsoup.parse(html, url)
 
             val results = mutableListOf<SearchResult>()
-            val elements = doc.select(".result")
+            // Support both standard and mobile layouts
+            val elements = doc.select(".result, .web-result")
 
             for (element in elements) {
-                val titleElement = element.select(".result__title .result__a").first()
-                val snippetElement = element.select(".result__snippet").first()
-                val urlElement = element.select(".result__url").first()
+                val titleElement = element.select(".result__title .result__a, .result__a").first()
+                val snippetElement = element.select(".result__snippet, .result__body, .snippet").first()
+                val urlElement = element.select(".result__url, .result__extras__url").first()
 
-                if (titleElement != null && snippetElement != null) {
+                if (titleElement != null) {
                     val rawUrl = titleElement.attr("href")
+                    if (rawUrl.isNullOrBlank() || rawUrl.startsWith("/")) continue
+                    
                     val cleanUrl = cleanDuckDuckGoUrl(rawUrl)
+                    val snippet = snippetElement?.text() ?: ""
                     
                     results.add(
                         SearchResult(
                             title = titleElement.text(),
-                            snippet = snippetElement.text(),
+                            snippet = snippet,
                             url = cleanUrl,
                             displayUrl = urlElement?.text() ?: cleanUrl
                         )

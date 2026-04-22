@@ -24,7 +24,9 @@ import javax.inject.Inject
 enum class CatalogMode { TRENDING, SEARCH }
 
 data class CatalogUiState(
-    val tracks: List<CatalogTrack> = emptyList(),
+    val quickPicks: List<CatalogTrack> = emptyList(),
+    val trending: List<CatalogTrack> = emptyList(),
+    val tracks: List<CatalogTrack> = emptyList(), // Main results (search or more trending)
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val isResolving: Boolean = false,
@@ -33,7 +35,8 @@ data class CatalogUiState(
     val mode: CatalogMode = CatalogMode.TRENDING,
     val downloadingTracks: Map<String, Float> = emptyMap(),
     val activeDownload: CatalogTrack? = null,
-    val showDownloadPopup: Boolean = false
+    val showDownloadPopup: Boolean = false,
+    val selectedGenre: String? = null
 )
 
 @OptIn(FlowPreview::class)
@@ -93,11 +96,11 @@ class CatalogViewModel @Inject constructor(
                 }
         }
 
-        // Load trending on start
-        loadTrending()
+        // Load initial content
+        loadStorefront()
     }
 
-    fun loadTrending() {
+    fun loadStorefront() {
         currentSearchJob?.cancel()
         currentSearchJob = viewModelScope.launch {
             _uiState.update {
@@ -105,27 +108,52 @@ class CatalogViewModel @Inject constructor(
                     isLoading = true,
                     error = null,
                     mode = CatalogMode.TRENDING,
-                    query = ""
+                    query = "",
+                    selectedGenre = null
                 )
             }
             try {
-                val (tracks, page) = repository.search("trending music ${java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)}")
-                nextPage = page
-                _uiState.update {
-                    it.copy(
-                        tracks = tracks,
-                        isLoading = false,
-                        error = if (tracks.isEmpty()) "No results found" else null
-                    )
+                // Fetch multiple sections in parallel
+                val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                
+                val quickPicksDeferred = viewModelScope.launch {
+                    val (tracks, _) = repository.search("music hits $year")
+                    _uiState.update { it.copy(quickPicks = tracks.take(6)) }
                 }
+
+                val trendingDeferred = viewModelScope.launch {
+                    val (tracks, page) = repository.getTrending()
+                    nextPage = page
+                    _uiState.update { it.copy(trending = tracks, tracks = tracks) }
+                }
+
+                quickPicksDeferred.join()
+                trendingDeferred.join()
+                
+                _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        error = e.localizedMessage ?: "Failed to load trending music"
+                        error = e.localizedMessage ?: "Failed to load storefront"
                     )
                 }
             }
+        }
+    }
+
+    fun loadTrending() {
+        loadStorefront()
+    }
+
+    fun onGenreSelected(genre: String?) {
+        _uiState.update { it.copy(selectedGenre = genre, query = genre ?: "") }
+        if (genre != null) {
+            viewModelScope.launch {
+                performSearch(genre, isNewSearch = true)
+            }
+        } else {
+            loadStorefront()
         }
     }
 
