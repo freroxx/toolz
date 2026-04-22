@@ -3,14 +3,17 @@ package com.frerox.toolz.data.ai
 import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
+import com.frerox.toolz.data.search.SearchResult
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import com.squareup.moshi.FromJson
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonReader
 import com.squareup.moshi.JsonWriter
+import com.squareup.moshi.Moshi
 import com.squareup.moshi.ToJson
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import retrofit2.HttpException
 import java.io.ByteArrayOutputStream
@@ -46,29 +49,40 @@ data class ImageUrl(val url: String)
 
 data class OpenAiMessage(
     val role: String,
-    val content: MessageContent,
+    val content: MessageContent?,
+    @Json(name = "tool_calls") val toolCalls: List<ToolCall>? = null,
+    @Json(name = "tool_call_id") val toolCallId: String? = null,
 )
 
-/**
- * DO NOT add @JsonClass(generateAdapter = true) here.
- *
- * OpenAiRequest contains List<OpenAiMessage>, whose [content] field is
- * serialized by the custom [MessageContentAdapter]. Moshi codegen generates
- * an adapter at compile time that has no awareness of runtime-registered
- * custom adapters, so it fails to serialize [MessageContent].
- *
- * Without the annotation, Moshi uses KotlinJsonAdapterFactory reflection,
- * which looks up registered adapters per field type at runtime and correctly
- * finds [MessageContentAdapter] for the [content] field.
- *
- * @Json annotations are honoured by the reflection adapter, so
- * "max_tokens" and "response_format" still serialize with the right names.
- */
 data class OpenAiRequest(
     val model: String,
     val messages: List<OpenAiMessage>,
     @Json(name = "max_tokens") val maxTokens: Int = 4096,
     @Json(name = "response_format") val responseFormat: ResponseFormat? = null,
+    val tools: List<Tool>? = null,
+    @Json(name = "tool_choice") val toolChoice: String? = null,
+)
+
+data class Tool(
+    val type: String = "function",
+    val function: ToolDefinition,
+)
+
+data class ToolDefinition(
+    val name: String,
+    val description: String,
+    val parameters: ToolParameters,
+)
+
+data class ToolParameters(
+    val type: String = "object",
+    val properties: Map<String, PropertyDefinition>,
+    val required: List<String>,
+)
+
+data class PropertyDefinition(
+    val type: String,
+    val description: String,
 )
 
 // No @JsonClass here — used inside OpenAiRequest, same reasoning applies.
@@ -81,7 +95,11 @@ data class ResponseFormat(val type: String)
 class MessageContentAdapter {
 
     @ToJson
-    fun toJson(writer: JsonWriter, content: MessageContent) {
+    fun toJson(writer: JsonWriter, content: MessageContent?) {
+        if (content == null) {
+            writer.nullValue()
+            return
+        }
         when (content) {
             is MessageContent.Text   -> writer.value(content.value)
             is MessageContent.Blocks -> {
@@ -127,6 +145,12 @@ data class ClaudeImageContent(
     val source: ClaudeImageSource,
 )
 
+data class ClaudeToolResultContent(
+    val type: String = "tool_result",
+    @Json(name = "tool_use_id") val toolUseId: String,
+    val content: String,
+)
+
 data class ClaudeImageSource(
     val type: String = "base64",
     @Json(name = "media_type") val mediaType: String = "image/jpeg",
@@ -154,11 +178,25 @@ data class ClaudeRequest(
     val messages: List<ClaudeMessage>,
     @Json(name = "max_tokens") val maxTokens: Int = 4096,
     val system: String? = null,
+    val tools: List<ClaudeTool>? = null,
+)
+
+data class ClaudeTool(
+    val name: String,
+    val description: String,
+    @Json(name = "input_schema") val inputSchema: ToolParameters,
 )
 
 // ─────────────────────────────────────────────────────────────
 //  Moshi adapter — ClaudeMessage  (String content | Block[] content)
 // ─────────────────────────────────────────────────────────────
+
+data class ClaudeToolUseContent(
+    val type: String = "tool_use",
+    val id: String,
+    val name: String,
+    val input: Map<String, Any>,
+)
 
 class ClaudeMessageAdapter {
 
@@ -185,6 +223,22 @@ class ClaudeMessageAdapter {
                             writer.name("type").value(block.source.type)
                             writer.name("media_type").value(block.source.mediaType)
                             writer.name("data").value(block.source.data)
+                            writer.endObject()
+                        }
+                        is ClaudeToolResultContent -> {
+                            writer.name("type").value(block.type)
+                            writer.name("tool_use_id").value(block.toolUseId)
+                            writer.name("content").value(block.content)
+                        }
+                        is ClaudeToolUseContent -> {
+                            writer.name("type").value(block.type)
+                            writer.name("id").value(block.id)
+                            writer.name("name").value(block.name)
+                            writer.name("input")
+                            writer.beginObject()
+                            block.input.forEach { (k, v) ->
+                                writer.name(k).value(v.toString())
+                            }
                             writer.endObject()
                         }
                     }
@@ -240,13 +294,21 @@ class ClaudeMessageAdapter {
 class AiRepositoryImpl @Inject constructor(
     private val settingsManager: AiSettingsManager,
     private val openAiService: OpenAiService,
+    private val moshi: Moshi
 ) : ChatRepository {
 
     private val systemPrompt =
         "You are a helpful, concise, and accurate AI assistant inside the Toolz productivity app. " +
             "Format code inside markdown fenced code blocks with the language tag. " +
             "Use **bold** for emphasis and keep responses focused and practical. " +
-            "When there is uncertainty, say so plainly instead of guessing."
+            "When there is uncertainty, say so plainly instead of guessing. " +
+            "You are also known as Toolz AI. You have access to a web search tool. " +
+            "If the tool is available, use it to provide accurate, cited information for current events or facts outside your training data. " +
+            "If you cannot find information, admit it rather than hallucinating. " +
+            "When using web search, cite your sources clearly in the text."
+
+    @Inject lateinit var searchBridgeHandler: SearchBridgeHandler
+    @Inject lateinit var settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 
     // ── getChatResponse ───────────────────────────────────────────────────
 
@@ -255,11 +317,14 @@ class AiRepositoryImpl @Inject constructor(
         history: List<AiMessage>,
         image: Bitmap?,
         modelOverride: String?,
-    ): Flow<Result<String>> = flow {
+    ): Flow<Result<ChatRepository.ChatResponseChunk>> = flow {
         val provider = settingsManager.getAiProvider()
         val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
-        emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image))
+        
+        val searchEnabled = settingsRepository.aiSearchEnabled.first()
+        
+        emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image, searchEnabled))
     }
 
     // ── testConnection ────────────────────────────────────────────────────
@@ -270,7 +335,7 @@ class AiRepositoryImpl @Inject constructor(
         }
         emit(
             try {
-                callProvider(
+                val result = callProvider(
                     provider = config.provider,
                     keyState = ResolvedApiKey(
                         value = key,
@@ -280,7 +345,9 @@ class AiRepositoryImpl @Inject constructor(
                     prompt = "Reply with exactly: OK",
                     history = emptyList(),
                     image = null,
+                    searchEnabled = false
                 )
+                result.map { it.text }
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -296,17 +363,18 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> = try {
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> = try {
         if (keyState.value.isBlank()) {
             Result.failure(Exception("No API key available for $provider. Please add your own key in settings."))
         } else if (image != null && !AiSettingsHelper.supportsVision(provider, modelName)) {
             Result.failure(Exception("$provider model '$modelName' does not support image input. Choose a vision-capable model or remove the image."))
         } else {
-            executeProviderCall(provider, keyState.value, modelName, prompt, history, image)
+            executeProviderCall(provider, keyState.value, modelName, prompt, history, image, searchEnabled)
         }
     } catch (e: HttpException) {
         if (e.code() == 401 && (keyState.source == ApiKeySource.REMOTE || keyState.source == ApiKeySource.DEFAULT)) {
-            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image)
+            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image, searchEnabled)
         } else {
             Result.failure(Exception(httpErrorMessage(e, provider, keyState.source)))
         }
@@ -321,13 +389,14 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> = when (provider) {
-        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image)
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> = when (provider) {
+        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image, searchEnabled)
         "ChatGPT",
         "Groq",
         "DeepSeek",
-        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image)
-        "Claude" -> callClaude(apiKey, modelName, prompt, history, image)
+        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled)
+        "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled)
         else -> Result.failure(Exception("Unknown provider: $provider"))
     }
 
@@ -338,7 +407,8 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> {
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> {
         settingsManager.invalidateRemoteKey(provider, failedKey)
         val refreshed = settingsManager.syncRemoteKeys(force = true)
         val refreshedKey = settingsManager.resolveApiKey(provider)
@@ -356,7 +426,7 @@ class AiRepositoryImpl @Inject constructor(
         }
 
         return try {
-            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image)
+            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image, searchEnabled)
         } catch (e: HttpException) {
             if (e.code() == 401) {
                 settingsManager.invalidateRemoteKey(provider, refreshedKey.value)
@@ -375,9 +445,14 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> {
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> {
         val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey)
-        val effectivePrompt = prompt.ifBlank {
+        val effectivePrompt = if (searchEnabled) {
+            "You are also known as Toolz AI. You have access to a web search tool. " +
+            "I have access to a web search tool. If my prompt requires real-time info, I will use it. " +
+            "Current prompt: $prompt"
+        } else prompt.ifBlank {
             if (image != null) "Describe this image in detail and highlight anything important." else "Help me with this task."
         }
         return if (image != null) {
@@ -385,14 +460,16 @@ class AiRepositoryImpl @Inject constructor(
                 image(image)
                 text(effectivePrompt)
             }
-            Result.success(cleanResponseText(generativeModel.generateContent(inputContent).text ?: "No response from Gemini"))
+            val text = generativeModel.generateContent(inputContent).text ?: "No response from Gemini"
+            Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
         } else {
             val chat = generativeModel.startChat(
                 history.map { msg ->
                     content(role = if (msg.isUser) "user" else "model") { text(msg.text) }
                 }
             )
-            Result.success(cleanResponseText(chat.sendMessage(effectivePrompt).text ?: "No response from Gemini"))
+            val text = chat.sendMessage(effectivePrompt).text ?: "No response from Gemini"
+            Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
         }
     }
 
@@ -405,7 +482,8 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> {
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> {
         val completionUrl = AiSettingsHelper.getChatCompletionUrl(provider)
             ?: return Result.failure(Exception("No chat completion URL configured for $provider"))
         val effectivePrompt = prompt.ifBlank {
@@ -435,19 +513,69 @@ class AiRepositoryImpl @Inject constructor(
         }
         messages += OpenAiMessage("user", userContent)
 
-        val request = OpenAiRequest(
+        var request = OpenAiRequest(
             model          = model,
             messages       = messages,
             responseFormat = if (effectivePrompt.contains("JSON", ignoreCase = true)) ResponseFormat("json_object") else null,
+            tools          = if (searchEnabled) listOf(searchBridgeHandler.getToolDefinition()) else null
         )
-        val response = openAiService.getChatCompletion(
+        
+        var response = openAiService.getChatCompletion(
             url = completionUrl,
             authHeader = "Bearer $apiKey",
             referer = if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null,
             title = if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null,
             request = request,
         )
-        return Result.success(cleanResponseText(response.choices.firstOrNull()?.message?.content ?: "No response"))
+
+        val choice = response.choices.firstOrNull() ?: return Result.success(ChatRepository.ChatResponseChunk("No response"))
+        
+        var searchSources: String? = null
+        
+        if (choice.message.toolCalls != null && choice.message.toolCalls.isNotEmpty()) {
+            val toolCalls = choice.message.toolCalls
+            val updatedMessages = messages.toMutableList()
+            
+            // Add the assistant's tool call message
+            updatedMessages += OpenAiMessage(
+                role = "assistant",
+                content = null,
+                toolCalls = toolCalls
+            )
+
+            // Handle tool calls
+            for (toolCall in toolCalls) {
+                val result = searchBridgeHandler.handleToolCall(toolCall)
+                updatedMessages += OpenAiMessage(
+                    role = "tool",
+                    toolCallId = toolCall.id,
+                    content = MessageContent.Text(result)
+                )
+            }
+            
+            // Serialize search sources
+            val sources = searchBridgeHandler.lastSearchResults
+            if (sources.isNotEmpty()) {
+                val sourcesAdapter = moshi.adapter<List<SearchResult>>(
+                    com.squareup.moshi.Types.newParameterizedType(List::class.java, SearchResult::class.java)
+                )
+                searchSources = sourcesAdapter.toJson(sources)
+            }
+
+            // Call again with tool results
+            // Ensure tool_choice is not present when sending back tool results to some providers
+            request = request.copy(messages = updatedMessages, toolChoice = null)
+            response = openAiService.getChatCompletion(
+                url = completionUrl,
+                authHeader = "Bearer $apiKey",
+                referer = if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null,
+                title = if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null,
+                request = request,
+            )
+        }
+
+        val text = response.choices.firstOrNull()?.message?.content ?: "No response"
+        return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text), searchSources))
     }
 
     // ── Claude ────────────────────────────────────────────────────────────
@@ -458,7 +586,8 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-    ): Result<String> {
+        searchEnabled: Boolean
+    ): Result<ChatRepository.ChatResponseChunk> {
         val messages = mutableListOf<ClaudeMessage>()
         val effectivePrompt = prompt.ifBlank {
             if (image != null) "Describe this image in detail and highlight anything important." else "Help me with this task."
@@ -513,18 +642,90 @@ class AiRepositoryImpl @Inject constructor(
             messages.add(0, ClaudeMessage(role = "user", content = "."))
         }
 
-        val request = ClaudeRequest(
+        val claudeTools = if (searchEnabled) {
+            val tool = searchBridgeHandler.getToolDefinition()
+            listOf(ClaudeTool(
+                name = tool.function.name,
+                description = tool.function.description,
+                inputSchema = tool.function.parameters
+            ))
+        } else null
+
+        var request = ClaudeRequest(
             model    = model,
             messages = messages,
             system   = systemPrompt,
+            tools    = claudeTools
         )
-        val response = openAiService.getClaudeCompletion(
+        
+        var response = openAiService.getClaudeCompletion(
             url     = "https://api.anthropic.com/v1/messages",
             apiKey  = apiKey,
             version = "2023-06-01",
             request = request,
         )
-        return Result.success(cleanResponseText(response.content.firstOrNull()?.text ?: "No response from Claude"))
+
+        var searchSources: String? = null
+        val toolUseBlocks = response.content.filter { it.type == "tool_use" }
+
+        if (toolUseBlocks.isNotEmpty()) {
+            val updatedMessages = messages.toMutableList()
+            
+            // Add the assistant's tool use message
+            val assistantContent = response.content.map { block ->
+                when (block.type) {
+                    "text" -> ClaudeTextContent(text = block.text ?: "")
+                    "tool_use" -> ClaudeToolUseContent(
+                        id = block.id ?: "",
+                        name = block.name ?: "",
+                        input = block.input ?: emptyMap()
+                    )
+                    else -> ClaudeTextContent(text = "")
+                }
+            }
+            updatedMessages += ClaudeMessage(role = "assistant", content = assistantContent)
+
+            // Handle tool calls
+            val toolResults = mutableListOf<ClaudeToolResultContent>()
+            for (block in toolUseBlocks) {
+                // Adapt Claude tool_use to ToolCall for SearchBridgeHandler
+                val toolCall = ToolCall(
+                    id = block.id ?: "",
+                    function = FunctionCall(
+                        name = block.name ?: "",
+                        arguments = moshi.adapter(Map::class.java).toJson(block.input)
+                    )
+                )
+                val result = searchBridgeHandler.handleToolCall(toolCall)
+                toolResults += ClaudeToolResultContent(
+                    toolUseId = block.id ?: "",
+                    content = result
+                )
+            }
+            
+            updatedMessages += ClaudeMessage(role = "user", content = toolResults)
+            
+            // Serialize search sources
+            val sources = searchBridgeHandler.lastSearchResults
+            if (sources.isNotEmpty()) {
+                val sourcesAdapter = moshi.adapter<List<SearchResult>>(
+                    com.squareup.moshi.Types.newParameterizedType(List::class.java, SearchResult::class.java)
+                )
+                searchSources = sourcesAdapter.toJson(sources)
+            }
+
+            // Call again with tool results
+            request = request.copy(messages = updatedMessages)
+            response = openAiService.getClaudeCompletion(
+                url     = "https://api.anthropic.com/v1/messages",
+                apiKey  = apiKey,
+                version = "2023-06-01",
+                request = request,
+            )
+        }
+
+        val text = response.content.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
+        return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text), searchSources))
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────

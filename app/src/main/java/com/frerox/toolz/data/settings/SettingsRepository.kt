@@ -110,7 +110,10 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_KEEP_SCREEN_ON_LYRICS = booleanPreferencesKey("music_keep_screen_on_lyrics")
     private val MUSIC_LYRICS_LAYOUT = stringPreferencesKey("music_lyrics_layout") // "LEFT", "CENTER", "RIGHT"
     private val MUSIC_LYRICS_SEEK_ENABLED = booleanPreferencesKey("music_lyrics_seek_enabled")
-    private val MUSIC_LYRICS_FONT = stringPreferencesKey("music_lyrics_font") // "SANS_SERIF", "SERIF", "MONOSPACE", "CURSIVE"
+    private val MUSIC_LYRICS_FONT = stringPreferencesKey("music_lyrics_font") // "SANS_SERIF", "SERIF", "MONOSPACE", "CURSIVE", "DISPLAY", "HANDWRITING"
+    private val MUSIC_LYRICS_ALWAYS_SYNC = booleanPreferencesKey("music_lyrics_always_sync")
+    private val MUSIC_VISUALIZER_SENSITIVITY = floatPreferencesKey("music_visualizer_sensitivity")
+    private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
@@ -155,6 +158,13 @@ class SettingsRepository @Inject constructor(
 
     // PDF Settings
     private val PDF_AI_OCR_ENHANCE = booleanPreferencesKey("pdf_ai_ocr_enhance")
+
+    // AI Search
+    private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
+    private val AI_SEARCH_ICON_VISIBLE = booleanPreferencesKey("ai_search_icon_visible")
+
+    // Loading Screen Persistence
+    private val LAST_LOADING_TIME = longPreferencesKey("last_loading_time")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -231,15 +241,18 @@ class SettingsRepository @Inject constructor(
     val musicShakeSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_SHAKE_SENSITIVITY] ?: 0.3f }
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
     val musicEqualizerPreset: Flow<String> = dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
-    val showMusicVisualizer: Flow<Boolean> = dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: true }
+    val showMusicVisualizer: Flow<Boolean> = dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: false }
     val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
     val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
     val musicAiEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true }
     val musicKeepScreenOnLyrics: Flow<Boolean> = dataStore.data.map { it[MUSIC_KEEP_SCREEN_ON_LYRICS] ?: true }
-    val musicLyricsLayout: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_LAYOUT] ?: "RIGHT" }
+    val musicLyricsLayout: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_LAYOUT] ?: "LEFT" }
     val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
     val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
+    val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: false }
+    val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
+    val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
 
@@ -274,6 +287,11 @@ class SettingsRepository @Inject constructor(
     val converterCustomOutputPath: Flow<String?> = dataStore.data.map { it[CONVERTER_CUSTOM_OUTPUT_PATH] }
 
     val pdfAiOcrEnhance: Flow<Boolean> = dataStore.data.map { it[PDF_AI_OCR_ENHANCE] ?: false }
+
+    val aiSearchEnabled: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false }
+    val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
+
+    val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -382,6 +400,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicLyricsLayout(layout: String) { dataStore.edit { it[MUSIC_LYRICS_LAYOUT] = layout } }
     suspend fun setMusicLyricsSeekEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_SEEK_ENABLED] = enabled } }
     suspend fun setMusicLyricsFont(font: String) { dataStore.edit { it[MUSIC_LYRICS_FONT] = font } }
+    suspend fun setMusicLyricsAlwaysSync(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_ALWAYS_SYNC] = enabled } }
+    suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
+    suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
 
@@ -437,6 +458,18 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setPdfAiOcrEnhance(enabled: Boolean) {
         dataStore.edit { it[PDF_AI_OCR_ENHANCE] = enabled }
+    }
+
+    suspend fun setAiSearchEnabled(enabled: Boolean) {
+        dataStore.edit { it[AI_SEARCH_ENABLED] = enabled }
+    }
+
+    suspend fun setAiSearchIconVisible(visible: Boolean) {
+        dataStore.edit { it[AI_SEARCH_ICON_VISIBLE] = visible }
+    }
+
+    suspend fun setLastLoadingTime(timestamp: Long) {
+        dataStore.edit { it[LAST_LOADING_TIME] = timestamp }
     }
 
     suspend fun resetOnboarding() {

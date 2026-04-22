@@ -19,9 +19,8 @@ import androidx.glance.appwidget.updateAll
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.widget.WidgetUpdateManager
 import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
-import com.frerox.toolz.widget.glance.PomodoroWidgetState
-import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +34,9 @@ class ToolService : Service() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
+
+    @Inject
+    lateinit var widgetUpdateManager: WidgetUpdateManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
@@ -505,19 +507,12 @@ class ToolService : Service() {
                 "LONG_BREAK"  -> 15 * 60 * 1000f
                 else          -> 25 * 60 * 1000f
             }
-            val glanceIds = GlanceAppWidgetManager(this)
-                .getGlanceIds(PomodoroGlanceWidget::class.java)
-            glanceIds.forEach { glanceId ->
-                updateAppWidgetState(this, glanceId) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[PomodoroWidgetState.KEY_MODE]         = pomodoroMode
-                        this[PomodoroWidgetState.KEY_REMAINING_MS] = _pomodoroRemaining.value.toFloat()
-                        this[PomodoroWidgetState.KEY_TOTAL_MS]     = totalMs
-                        this[PomodoroWidgetState.KEY_IS_RUNNING]   = _isPomodoroRunning.value
-                    }
-                }
-            }
-            PomodoroGlanceWidget().updateAll(this)
+            widgetUpdateManager.updatePomodoroWidget(
+                mode = pomodoroMode,
+                remainingMs = _pomodoroRemaining.value.toFloat(),
+                totalMs = totalMs,
+                isRunning = _isPomodoroRunning.value
+            )
         } catch (_: Exception) {}
     }
 

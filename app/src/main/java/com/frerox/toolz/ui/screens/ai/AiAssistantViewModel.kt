@@ -42,6 +42,10 @@ data class AiAssistantUiState(
     val chatSummary       : String?          = null,
     val isSummarizing     : Boolean          = false,
     val isGeneratingTitle : Boolean          = false,
+    val suggestedPrompts  : List<String>     = emptyList(),
+    val isGeneratingPrompts: Boolean         = false,
+    val aiSearchEnabled   : Boolean          = false,
+    val aiSearchIconVisible: Boolean         = true,
 )
 
 data class AiSettingsUiState(
@@ -55,6 +59,8 @@ data class AiSettingsUiState(
     val editingConfig        : AiConfig? = null,
     val selectedIcon         : String    = "AUTO",
     val customIconUri        : String?   = null,
+    val dynamicPromptsEnabled: Boolean   = true,
+    val promptFormat         : String    = "medium",
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -67,7 +73,31 @@ class AiAssistantViewModel @Inject constructor(
     private val chatRepository : ChatRepository,
     private val settingsManager: AiSettingsManager,
     private val openAiService  : OpenAiService,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
 ) : ViewModel() {
+
+    private val premadePrompts = listOf(
+        "Explain quantum computing in simple terms.",
+        "Write a poem about a lonely robot on Mars.",
+        "Give me a recipe for a healthy 15-minute dinner.",
+        "How can I improve my productivity while working from home?",
+        "Tell me a joke about programming.",
+        "What are some interesting facts about the deep ocean?",
+        "Suggest a 3-day itinerary for a trip to Tokyo.",
+        "How do I bake a chocolate cake from scratch?",
+        "What are the best exercises for core strength?",
+        "Explain the concept of 'time dilation' in physics.",
+        "Write a short science fiction story about time travel.",
+        "Give me some tips for learning a new language quickly.",
+        "What are the benefits of meditation?",
+        "How do I start a small herb garden at home?",
+        "Write a formal email requesting a meeting with a manager.",
+        "Summarize the plot of the Great Gatsby.",
+        "What are some creative gift ideas for a 10-year-old?",
+        "How do I change a flat tire on a car?",
+        "Give me a list of must-watch classic movies.",
+        "Explain how a blockchain works."
+    )
 
     private val _uiState         = MutableStateFlow(AiAssistantUiState())
     val uiState: StateFlow<AiAssistantUiState> = _uiState.asStateFlow()
@@ -81,10 +111,12 @@ class AiAssistantViewModel @Inject constructor(
     init {
         loadSettings()
         loadConfigs()
+        observeSearchSettings()
         viewModelScope.launch {
             aiDao.getAllChats().collect { chats -> _uiState.update { it.copy(chats = chats) } }
         }
         createNewChat()
+        refreshPrompts()
     }
 
     private fun loadSettings() {
@@ -95,9 +127,141 @@ class AiAssistantViewModel @Inject constructor(
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = settingsManager.getSelectedModel(provider),
                 isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(provider),
+                dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
+                promptFormat         = settingsManager.getPromptFormat()
             )
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
+    }
+
+    fun toggleDynamicPrompts(enabled: Boolean) {
+        settingsManager.setDynamicPromptsEnabled(enabled)
+        _settingsUiState.update { it.copy(dynamicPromptsEnabled = enabled) }
+        refreshPrompts()
+    }
+
+    fun updatePromptFormat(format: String) {
+        settingsManager.setPromptFormat(format)
+        _settingsUiState.update { it.copy(promptFormat = format) }
+        refreshPrompts()
+    }
+
+    // ── Suggested Prompts ────────────────────────────────────────────────
+
+    fun refreshPrompts() {
+        viewModelScope.launch {
+            if (settingsManager.isDynamicPromptsEnabled()) {
+                generateDynamicPrompts()
+            } else {
+                _uiState.update { it.copy(suggestedPrompts = getFilteredPremadePrompts()) }
+            }
+        }
+    }
+
+    private fun getFilteredPremadePrompts(): List<String> {
+        val neverShow = try { settingsManager.getNeverShowPrompts() } catch (e: Exception) { null } ?: emptyList()
+        val edited = try { settingsManager.getEditedPrompts() } catch (e: Exception) { null } ?: emptyMap()
+        val available = (premadePrompts ?: emptyList()).filter { !neverShow.contains(it) }
+            .map { edited[it] ?: it }
+        return available.shuffled().take(2)
+    }
+
+    private suspend fun generateDynamicPrompts() {
+        val recentChats = try { aiDao.getRecentChats(5).firstOrNull() } catch (e: Exception) { null } ?: emptyList()
+        if (recentChats.isEmpty()) {
+            _uiState.update { it.copy(suggestedPrompts = getFilteredPremadePrompts()) }
+            return
+        }
+
+        _uiState.update { it.copy(isGeneratingPrompts = true) }
+        
+        val groqKey = settingsManager.getApiKey("Groq").ifBlank { settingsManager.getApiKey() }
+        if (groqKey.isBlank()) {
+            _uiState.update { it.copy(isGeneratingPrompts = false, suggestedPrompts = getFilteredPremadePrompts()) }
+            return
+        }
+
+        val topics = recentChats.joinToString(", ") { it.title }
+        val format = settingsManager.getPromptFormat()
+        val lengthDesc = when(format) {
+            "short" -> "very short (3-5 words)"
+            "long" -> "long and detailed (15-25 words)"
+            else -> "medium length (8-12 words)"
+        }
+        val prompt = "Based on these previous chat topics: $topics. Generate 2 suggested prompts for a new chat. The prompts should be $lengthDesc. Reply with ONLY the two prompts, one per line, no numbers, no quotes."
+
+        try {
+            val resp = withContext(Dispatchers.IO) {
+                openAiService.getChatCompletion(
+                    url = GROQ_URL,
+                    authHeader = "Bearer $groqKey",
+                    request = OpenAiRequest(
+                        model = GROQ_MODEL,
+                        messages = listOf(
+                            OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that suggests chat prompts. Reply ONLY with prompts, one per line.")),
+                            OpenAiMessage("user", MessageContent.Text(prompt)),
+                        ),
+                        maxTokens = 60,
+                    )
+                )
+            }
+            val generated = resp.choices.firstOrNull()?.message?.content?.lines()
+                ?.map { it.trim().removePrefix("- ").removePrefix("1. ").removePrefix("2. ").removePrefix("\"").removeSuffix("\"") }
+                ?.filter { it.isNotBlank() }
+                ?.take(2) ?: emptyList()
+
+            val neverShow = try { settingsManager.getNeverShowPrompts() } catch (e: Exception) { null } ?: emptyList()
+            val finalPrompts = if (generated.size < 2) {
+                (generated + getFilteredPremadePrompts()).distinct().take(2)
+            } else {
+                generated
+            }.filter { !neverShow.contains(it) }
+
+            _uiState.update { it.copy(suggestedPrompts = finalPrompts, isGeneratingPrompts = false) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Dynamic prompts failed: ${e.message}")
+            _uiState.update { it.copy(isGeneratingPrompts = false, suggestedPrompts = getFilteredPremadePrompts()) }
+        }
+    }
+
+    fun neverShowPrompt(prompt: String) {
+        settingsManager.addNeverShowPrompt(prompt)
+        refreshPrompts()
+    }
+
+    fun editPrompt(original: String, edited: String) {
+        settingsManager.saveEditedPrompt(original, edited)
+        refreshPrompts()
+    }
+
+    fun resetPrompts() {
+        settingsManager.resetPromptsData()
+        refreshPrompts()
+    }
+
+    private fun observeSearchSettings() {
+        viewModelScope.launch {
+            settingsRepository.aiSearchEnabled.collect { enabled ->
+                _uiState.update { it.copy(aiSearchEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.aiSearchIconVisible.collect { visible ->
+                _uiState.update { it.copy(aiSearchIconVisible = visible) }
+            }
+        }
+    }
+
+    fun toggleAiSearch() {
+        viewModelScope.launch {
+            settingsRepository.setAiSearchEnabled(!_uiState.value.aiSearchEnabled)
+        }
+    }
+    
+    fun setAiSearchIconVisible(visible: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setAiSearchIconVisible(visible)
+        }
     }
 
     private fun loadConfigs() { _uiState.update { it.copy(savedConfigs = settingsManager.getSavedConfigs()) } }
@@ -231,6 +395,7 @@ class AiAssistantViewModel @Inject constructor(
         cancelRequest()
         messagesJob?.cancel()
         _uiState.update { it.copy(currentChatId = null, messages = emptyList(), error = null, quotaExceeded = false, streamingText = "", chatSummary = null) }
+        refreshPrompts()
     }
 
     fun onImageSelected(bitmap: Bitmap?) { _uiState.update { it.copy(selectedImage = bitmap) } }
@@ -280,10 +445,14 @@ class AiAssistantViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null, quotaExceeded = false, selectedImage = null, streamingText = "", keysUnavailable = false) }
 
             val accumulated = StringBuilder()
+            var lastSources: String? = null
 
             chatRepository.getChatResponse(text, history, currentImage).collect { r ->
                 r.onSuccess { chunk ->
-                    accumulated.append(chunk)
+                    accumulated.append(chunk.text)
+                    if (chunk.sources != null) {
+                        lastSources = chunk.sources
+                    }
                     _uiState.update { it.copy(streamingText = accumulated.toString()) }
                 }.onFailure { e ->
                     val msg     = e.message ?: "Unknown error"
@@ -293,7 +462,7 @@ class AiAssistantViewModel @Inject constructor(
             }
 
             if (accumulated.isNotEmpty()) {
-                aiDao.insertMessage(AiMessage(chatId = currentId, text = accumulated.toString(), isUser = false))
+                aiDao.insertMessage(AiMessage(chatId = currentId, text = accumulated.toString(), isUser = false, searchSources = lastSources))
 
                 if (history.isEmpty() && text.isNotBlank()) {
                     generateChatTitle(currentId, text, accumulated.toString())
@@ -430,6 +599,26 @@ Summarize this AI conversation as 3-6 concise bullet points.
     }
 
     fun toggleHistory() { _uiState.update { it.copy(isHistoryOpen = !it.isHistoryOpen) } }
+
+    fun regenerateMessage(messageId: Int) = viewModelScope.launch {
+        val currentMessages = _uiState.value.messages
+        val messageIndex = currentMessages.indexOfFirst { it.id == messageId }
+        if (messageIndex == -1) return@launch
+        
+        val message = currentMessages[messageIndex]
+        if (message.isUser) return@launch
+
+        // Find the last user message before this one
+        val historyBefore = currentMessages.take(messageIndex)
+        val lastUserMessage = historyBefore.lastOrNull { it.isUser } ?: return@launch
+
+        // Remove the message and everything after it
+        val newMessages = currentMessages.take(messageIndex).toMutableList()
+        _uiState.update { it.copy(messages = newMessages) }
+
+        // Trigger send with the last user message text
+        sendMessage(lastUserMessage.text)
+    }
 
     fun deleteChat(chat: AiChat) {
         viewModelScope.launch { aiDao.deleteChat(chat); if (_uiState.value.currentChatId == chat.id) createNewChat() }

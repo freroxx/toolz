@@ -39,7 +39,8 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import android.graphics.RenderEffect as AndroidRenderEffect
 import android.graphics.Shader as AndroidShader
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.util.lerp
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -393,8 +394,9 @@ fun LyricsTab(
         }
     }
 
-    LaunchedEffect(currentLineIndex, state.isAutoScrollEnabled) {
-        if (state.isAutoScrollEnabled && currentLineIndex >= 0) {
+    LaunchedEffect(currentLineIndex, state.isAutoScrollEnabled, state.alwaysSync) {
+        val shouldScroll = state.isAutoScrollEnabled || state.alwaysSync
+        if (shouldScroll && currentLineIndex >= 0) {
             isAutoScrollInFlight.value = true
             if (performanceMode) {
                 listState.scrollToItem(
@@ -413,7 +415,7 @@ fun LyricsTab(
 
     val isScrolling = listState.isScrollInProgress
     LaunchedEffect(isScrolling) {
-        if (isScrolling && !isAutoScrollInFlight.value && state.isAutoScrollEnabled) {
+        if (isScrolling && !isAutoScrollInFlight.value && state.isAutoScrollEnabled && !state.alwaysSync) {
             viewModel.onManualScroll()
         }
     }
@@ -527,7 +529,7 @@ fun LyricsTab(
             }
         }
 
-        if (!state.isLoading && state.isSynced) {
+        if (!state.isLoading && state.isSynced && !state.alwaysSync) {
             val fabScale by animateFloatAsState(
                 if (state.isAutoScrollEnabled) 1f else 1.04f,
                 spring(Spring.DampingRatioMediumBouncy),
@@ -602,6 +604,8 @@ fun SyncedLyricLine(
         LyricsFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
         LyricsFont.MONOSPACE -> androidx.compose.ui.text.font.FontFamily.Monospace
         LyricsFont.CURSIVE -> androidx.compose.ui.text.font.FontFamily.Cursive
+        LyricsFont.DISPLAY -> androidx.compose.ui.text.font.FontFamily.SansSerif
+        LyricsFont.HANDWRITING -> androidx.compose.ui.text.font.FontFamily.Cursive
     }
 
     val primary = MaterialTheme.colorScheme.primary
@@ -696,7 +700,7 @@ fun SyncedLyricLine(
             if (performanceMode) snap() else tween(550),
             label = "lineAnim"
         )
-        val color = if (performanceMode) (if (isCurrent) primary else dim) else lerp(dim, primary, animFrac)
+        val color = if (performanceMode) (if (isCurrent) primary else dim) else lerpColor(dim, primary, animFrac)
         val scale by animateFloatAsState(
             if (isCurrent) 1.05f else 1f,
             if (performanceMode) snap() else spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
@@ -757,7 +761,7 @@ fun WordView(
     val pastColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f) 
 
     val baseColor = if (isPast) pastColor else dim
-    val color = if (performanceMode) (if (isActive) highlightColor else baseColor) else lerp(baseColor, highlightColor, animFrac)
+    val color = if (performanceMode) (if (isActive) highlightColor else baseColor) else lerpColor(baseColor, highlightColor, animFrac)
     val wordScale = if (performanceMode) (if (isActive) 1.15f else 1f) else 1f + (0.18f * animFrac)
 
     Text(

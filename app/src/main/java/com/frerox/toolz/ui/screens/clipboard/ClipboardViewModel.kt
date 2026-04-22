@@ -126,7 +126,8 @@ class ClipboardViewModel @Inject constructor(
                 """.trimIndent()
 
                 aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
-                    result.onSuccess { response ->
+                    result.onSuccess { chunk ->
+                        val response = chunk.text
                         if (response.trim().uppercase() != "NONE") {
                             val ids = response.split(",")
                                 .mapNotNull { it.trim().filter { char -> char.isDigit() }.toIntOrNull() }
@@ -197,7 +198,8 @@ class ClipboardViewModel @Inject constructor(
                 """.trimIndent()
 
                 aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
-                    result.onSuccess { response ->
+                    result.onSuccess { chunk ->
+                        val response = chunk.text
                         val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type
                         val summary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: ""
                         clipboardDao.updateAiDetails(entry.id, summary, category)

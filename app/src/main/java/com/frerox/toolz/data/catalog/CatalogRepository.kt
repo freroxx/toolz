@@ -92,40 +92,14 @@ class CatalogRepository @Inject constructor(
 
     /**
      * Fetch trending/kiosk content as a fallback discovery mechanism.
+     * Modified to use search with "music_songs" filter to ensure only songs are shown.
      */
     suspend fun getTrending(
         page: Page? = null
     ): Pair<List<CatalogTrack>, Page?> = withContext(Dispatchers.IO) {
-        try {
-            val kiosks = youtubeService.kioskList
-            val defaultKioskId = kiosks.defaultKioskId
-            val kioskExtractor = kiosks.getExtractorById(defaultKioskId, page)
-
-            if (page == null) {
-                val kioskInfo = KioskInfo.getInfo(
-                    youtubeService,
-                    kioskExtractor.url
-                )
-                val tracks = kioskInfo.relatedItems
-                    .filterIsInstance<StreamInfoItem>()
-                    .map { it.toCatalogTrack() }
-                Pair(tracks, kioskInfo.nextPage)
-            } else {
-                val moreItems = KioskInfo.getMoreItems(
-                    youtubeService,
-                    kioskExtractor.url,
-                    page
-                )
-                val tracks = moreItems.items
-                    .filterIsInstance<StreamInfoItem>()
-                    .map { it.toCatalogTrack() }
-                Pair(tracks, moreItems.nextPage)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // Fallback to search-based trending
-            search("trending music ${java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)}", page)
-        }
+        // We use search instead of kiosk to strictly enforce the "music_songs" filter
+        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+        search("trending music $year", page)
     }
 
     /**

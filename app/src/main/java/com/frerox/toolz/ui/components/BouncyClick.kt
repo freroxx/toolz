@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.*
@@ -26,6 +27,7 @@ fun Modifier.bouncyClick(
     enabled: Boolean = true,
     scaleDown: Float = 0.94f,
     haptic: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) = composed {
     var buttonState by remember { mutableStateOf(ButtonState.Idle) }
@@ -54,7 +56,7 @@ fun Modifier.bouncyClick(
                 drawRect(color = Color.White.copy(alpha = 0.05f))
             }
         }
-        .clickable(
+        .combinedClickable(
             enabled = enabled,
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
@@ -67,6 +69,14 @@ fun Modifier.bouncyClick(
                     }
                 }
                 onClick()
+            },
+            onLongClick = onLongClick?.let {
+                {
+                    if (haptic && hapticEnabled) {
+                        vibrationManager?.vibrateLongClick() ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    it()
+                }
             }
         )
         .pointerInput(enabled) {

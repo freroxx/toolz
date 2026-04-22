@@ -19,8 +19,9 @@ data class AiLyricsState(
     val isSeekEnabled: Boolean = true,
     val syncedLyrics: List<LyricsLine> = emptyList(),
     val isSynced: Boolean = false,
-    val layout: LyricsLayout = LyricsLayout.RIGHT,
-    val fontFamily: LyricsFont = LyricsFont.SANS_SERIF
+    val layout: LyricsLayout = LyricsLayout.LEFT,
+    val fontFamily: LyricsFont = LyricsFont.SANS_SERIF,
+    val alwaysSync: Boolean = false
 )
 
 enum class LyricsLayout {
@@ -28,7 +29,7 @@ enum class LyricsLayout {
 }
 
 enum class LyricsFont {
-    SANS_SERIF, SERIF, MONOSPACE, CURSIVE
+    SANS_SERIF, SERIF, MONOSPACE, CURSIVE, DISPLAY, HANDWRITING
 }
 
 @Immutable

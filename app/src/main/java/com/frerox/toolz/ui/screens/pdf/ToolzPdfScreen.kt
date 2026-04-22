@@ -484,7 +484,7 @@ fun OcrTextBottomSheet(
                                     }
                                     Spacer(Modifier.height(8.dp))
                                     
-                                    val segments = remember(pdfSummary) { parseMarkdownToSegments(pdfSummary ?: "") }
+                                    val segments = parseMarkdownToSegments(pdfSummary ?: "")
                                     SelectionContainer {
                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             segments.forEach { seg -> MarkdownSegment(seg, baseFontSize = textSize.sp) }
@@ -531,7 +531,7 @@ fun OcrTextBottomSheet(
                             shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                         ) {
-                            val segments = remember(allText) { parseMarkdownToSegments(allText) }
+                            val segments = parseMarkdownToSegments(allText)
                             SelectionContainer {
                                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     segments.forEach { seg -> 

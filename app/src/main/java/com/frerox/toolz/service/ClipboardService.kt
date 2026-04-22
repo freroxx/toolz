@@ -98,8 +98,9 @@ class ClipboardService : Service() {
                 """.trimIndent()
 
                 aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
-                    result.onSuccess { response ->
+                    result.onSuccess { responseChunk ->
                         try {
+                            val response = responseChunk.text
                             val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: currentType
                             val rawSummary = Regex("\"summary\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1)
                             val summary = if (rawSummary == "null" || rawSummary.isNullOrBlank()) null else rawSummary

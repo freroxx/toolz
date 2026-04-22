@@ -1,151 +1,102 @@
 package com.frerox.toolz.ui.screens.ai
 
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.EaseOutBack
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.FactCheck
-import androidx.compose.material.icons.automirrored.rounded.NoteAdd
-import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.frerox.toolz.data.search.SearchResult
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.ai.AiChat
 import com.frerox.toolz.data.ai.AiConfig
 import com.frerox.toolz.data.ai.AiMessage
 import com.frerox.toolz.data.ai.AiSettingsHelper
 import com.frerox.toolz.ui.components.MarkdownSegment
-import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
-import com.frerox.toolz.ui.theme.toolzBackground
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────
-//  Design Constants & Utilities
+//  Design Constants
 // ─────────────────────────────────────────────────────────────
 
 object AiDesign {
-    val CornerLarge = 32.dp
-    val CornerMedium = 24.dp
+    val CornerLarge = 28.dp
+    val CornerMedium = 20.dp
     val CornerSmall = 16.dp
-    val ChatBubblePadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
-    
-    // Glossy glass effect
-    fun glassModifier(color: Color = Color.White.copy(0.08f)) = Modifier
-        .background(color, RoundedCornerShape(CornerMedium))
-        .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(CornerMedium))
-}
+    val ChatBubblePadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
 
-// ─────────────────────────────────────────────────────────────
-//  Expressive Background (Animated Gradient Mesh)
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun ExpressiveBackground(performanceMode: Boolean) {
-    if (performanceMode) {
-        Box(Modifier.fillMaxSize().background(Color(0xFF0F0F0F)))
+    @Composable fun glassColor() = if (isSystemInDarkTheme()) {
+        Color(0xFF2C2C2C).copy(alpha = 0.8f)
     } else {
-        val infiniteTransition = rememberInfiniteTransition(label = "mesh")
-        
-        val color1 = MaterialTheme.colorScheme.primary
-        val color2 = MaterialTheme.colorScheme.tertiary
-        val color3 = MaterialTheme.colorScheme.secondary
-        val darkBg = Color(0xFF0A0A0A)
+        Color(0xFFF5F5F5).copy(alpha = 0.9f)
+    }
 
-        val animOffset by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Reverse),
-            label = "offset"
-        )
-
-        Box(Modifier.fillMaxSize().background(darkBg)) {
-            Canvas(modifier = Modifier.fillMaxSize().blur(80.dp)) {
-                val width = size.width
-                val height = size.height
-                
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(color1.copy(0.4f), Color.Transparent),
-                        center = Offset(width * (0.2f + 0.6f * animOffset), height * (0.3f + 0.4f * (1f - animOffset))),
-                        radius = width * 0.8f
-                    )
-                )
-                
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(color2.copy(0.3f), Color.Transparent),
-                        center = Offset(width * (0.8f - 0.5f * animOffset), height * (0.7f - 0.3f * animOffset)),
-                        radius = width * 0.7f
-                    )
-                )
-
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(color3.copy(0.25f), Color.Transparent),
-                        center = Offset(width * (0.5f + 0.3f * Math.sin(animOffset.toDouble() * Math.PI).toFloat()), height * (0.1f + 0.8f * animOffset)),
-                        radius = width * 0.9f
-                    )
-                )
-            }
-            
-            // Subtle noise/grain overlay
-            Box(Modifier.fillMaxSize().alpha(0.03f).background(Color.Black))
-        }
+    @Composable fun glassBorder() = if (isSystemInDarkTheme()) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        Color.Black.copy(alpha = 0.08f)
+    }
+    
+    @Composable fun surfaceColor() = MaterialTheme.colorScheme.surface
+    @Composable fun cardColor() = MaterialTheme.colorScheme.surfaceContainer
+    @Composable fun textColor(alpha: Float = 1f) = if (isSystemInDarkTheme()) {
+        Color.White.copy(alpha = alpha)
+    } else {
+        Color.Black.copy(alpha = alpha)
     }
 }
 
@@ -153,50 +104,55 @@ fun ExpressiveBackground(performanceMode: Boolean) {
 //  Main Screen
 // ─────────────────────────────────────────────────────────────
 
+@Composable
+fun ExpressiveBackground(performanceMode: Boolean) {
+    if (performanceMode) {
+        Box(Modifier.fillMaxSize().background(AiDesign.surfaceColor()))
+        return
+    }
+    val colors = listOf(
+        MaterialTheme.colorScheme.primary.copy(0.08f),
+        MaterialTheme.colorScheme.secondary.copy(0.05f),
+        MaterialTheme.colorScheme.surface
+    )
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(colors))) {
+        Box(Modifier.fillMaxSize().alpha(0.3f).blur(100.dp)) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(Color.Cyan.copy(0.1f), radius = 600f, center = center.copy(x = 100f, y = 100f))
+                drawCircle(Color.Magenta.copy(0.1f), radius = 800f, center = center.copy(x = size.width - 100f, y = size.height - 100f))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiAssistantScreen(
     viewModel: AiAssistantViewModel = hiltViewModel(),
-    onBack: () -> Unit,
+    onBack: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val settingsUiState by viewModel.settingsUiState.collectAsState()
-    var inputText by remember { mutableStateOf("") }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val settingsUiState by viewModel.settingsUiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val vibration = LocalVibrationManager.current
-    val performanceMode = LocalPerformanceMode.current
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var showSettings by remember { mutableStateOf(false) }
-    var showQuotaDialog by remember { mutableStateOf(false) }
-    var showSummary by remember { mutableStateOf(false) }
+    val vibration = LocalVibrationManager.current
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val performanceMode = false
 
-    // Screen entrance animation state
-    var isStarted by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(100)
-        isStarted = true
-    }
+    var inputText by remember { mutableStateOf("") }
+    var showSettings by remember { mutableStateOf(false) }
+    var showSummary by remember { mutableStateOf(false) }
+    var showQuotaDialog by remember { mutableStateOf(false) }
+    val isStarted = uiState.messages.isNotEmpty() || uiState.isLoading || uiState.streamingText.isNotEmpty()
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let {
-            try {
-                val bmp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, it))
-                else @Suppress("DEPRECATION") MediaStore.Images.Media.getBitmap(context.contentResolver, it)
-                viewModel.onImageSelected(bmp)
-            } catch (e: Exception) { e.printStackTrace() }
-        }
+        uri?.let { context.contentResolver.openInputStream(it)?.use { stream -> viewModel.onImageSelected(android.graphics.BitmapFactory.decodeStream(stream)) } }
     }
-
     val configIconPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { viewModel.updateCustomIcon(it) }
     }
 
-    LaunchedEffect(uiState.messages.size, uiState.isLoading) {
-        if (uiState.messages.isNotEmpty()) scope.launch { listState.animateScrollToItem(uiState.messages.size - 1) }
-    }
     LaunchedEffect(uiState.streamingText) {
         if (uiState.streamingText.isNotEmpty() && uiState.messages.isNotEmpty()) listState.scrollToItem(uiState.messages.size - 1)
     }
@@ -204,15 +160,28 @@ fun AiAssistantScreen(
 
     // Dialogs / Sheets
     if (showSettings) {
-        AiSettingsDialog(state = settingsUiState, savedConfigs = uiState.savedConfigs, onDismiss = { showSettings = false },
-            onProviderChange = viewModel::updateProvider, onApiKeyChange = viewModel::updateApiKey,
-            onModelChange = viewModel::updateModel, onIconChange = viewModel::updateIcon,
+        AiSettingsDialog(
+            state = settingsUiState,
+            savedConfigs = uiState.savedConfigs,
+            onDismiss = { showSettings = false },
+            onProviderChange = viewModel::updateProvider,
+            onApiKeyChange = viewModel::updateApiKey,
+            onModelChange = viewModel::updateModel,
+            onIconChange = viewModel::updateIcon,
             onCustomIconClick = { configIconPicker.launch("image/*") },
             onSave = { viewModel.onSettingsSaveRequest(); showSettings = false },
-            onSaveConfig = viewModel::saveConfig, onDeleteConfig = viewModel::deleteConfig,
-            onEditConfig = viewModel::editConfig, onMoveConfig = viewModel::moveConfig,
-            onTest = viewModel::testConnection, onRefresh = viewModel::refreshRemoteKeys,
-            performanceMode = performanceMode)
+            onSaveConfig = viewModel::saveConfig,
+            onDeleteConfig = viewModel::deleteConfig,
+            onEditConfig = viewModel::editConfig,
+            onMoveConfig = viewModel::moveConfig,
+            onTest = viewModel::testConnection,
+            onRefresh = viewModel::refreshRemoteKeys,
+            performanceMode = performanceMode,
+            onToggleDynamicPrompts = viewModel::toggleDynamicPrompts,
+            onPromptFormatChange = viewModel::updatePromptFormat,
+            aiSearchIconVisible = uiState.aiSearchIconVisible,
+            onSetAiSearchIconVisible = viewModel::setAiSearchIconVisible
+        )
     }
 
     if (showQuotaDialog) {
@@ -221,16 +190,8 @@ fun AiAssistantScreen(
             supportingText = "Switch to ${uiState.suggestedProvider} or use your own API key.",
             primaryButtonText = "SWITCH TO ${uiState.suggestedProvider?.uppercase() ?: "OTHER"}",
             onPrimaryClick = { uiState.suggestedProvider?.let { viewModel.switchProvider(it) }; showQuotaDialog = false },
-            secondaryButtonText = "SETUP MY OWN KEY", onSecondaryClick = { showQuotaDialog = false; showSettings = true },
-            onDismiss = { showQuotaDialog = false })
-    }
-
-    if (uiState.pendingConfig != null) {
-        ModernAiDialog(title = "NEW CHAT REQUIRED", icon = Icons.Rounded.AutoAwesomeMotion, iconColor = MaterialTheme.colorScheme.primary,
-            description = "Switching to ${uiState.pendingConfig?.model}?",
-            supportingText = "To ensure consistency, a new chat will be created with the new model. Your current chat is saved in history.",
-            primaryButtonText = "START NEW CHAT", onPrimaryClick = viewModel::confirmConfigSwitch,
-            secondaryButtonText = "KEEP CURRENT", onSecondaryClick = viewModel::cancelConfigSwitch, onDismiss = viewModel::cancelConfigSwitch)
+            onDismiss = { showQuotaDialog = false }
+        )
     }
 
     if (showSummary) {
@@ -246,7 +207,7 @@ fun AiAssistantScreen(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                drawerContainerColor = Color(0xFF1A1A1A),
+                drawerContainerColor = AiDesign.surfaceColor(),
                 drawerTonalElevation = 0.dp,
                 modifier = Modifier.width(320.dp),
                 drawerShape = RoundedCornerShape(topEnd = AiDesign.CornerLarge, bottomEnd = AiDesign.CornerLarge),
@@ -262,52 +223,44 @@ fun AiAssistantScreen(
         }
     ) {
         Scaffold(
+            modifier = Modifier.imePadding(),
             topBar = {
-                AnimatedVisibility(
-                    visible = isStarted,
-                    enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut()
-                ) {
-                    ChatTopBarRedesign(
-                        settingsUiState = settingsUiState,
-                        uiState = uiState,
-                        performanceMode = performanceMode,
-                        onBack = { vibration?.vibrateClick(); onBack() },
-                        onNewChat = { vibration?.vibrateClick(); viewModel.createNewChat() },
-                        onSettings = { vibration?.vibrateClick(); showSettings = true },
-                        onHistory = { vibration?.vibrateClick(); scope.launch { drawerState.open() } },
-                        onConfigSelect = { vibration?.vibrateClick(); viewModel.onConfigRequest(it) },
-                        onSummarize = {
-                            vibration?.vibrateTick()
-                            showSummary = true
-                            if (uiState.chatSummary == null && !uiState.isSummarizing) viewModel.summarizeChat()
-                        },
-                        onRefreshTitle = { vibration?.vibrateTick(); viewModel.refreshChatTitle() },
-                    )
-                }
+                ChatTopBarRedesign(
+                    settingsUiState = settingsUiState,
+                    uiState = uiState,
+                    performanceMode = performanceMode,
+                    onBack = { vibration?.vibrateClick(); onBack() },
+                    onNewChat = { vibration?.vibrateClick(); viewModel.createNewChat() },
+                    onSettings = { vibration?.vibrateClick(); showSettings = true },
+                    onHistory = { vibration?.vibrateClick(); scope.launch { drawerState.open() } },
+                    onConfigSelect = { vibration?.vibrateClick(); viewModel.onConfigRequest(it) },
+                    onSummarize = {
+                        vibration?.vibrateTick()
+                        showSummary = true
+                        if (uiState.chatSummary == null && !uiState.isSummarizing) viewModel.summarizeChat()
+                    },
+                    onRefreshTitle = { vibration?.vibrateTick(); viewModel.refreshChatTitle() },
+                )
             },
             bottomBar = {
-                AnimatedVisibility(
-                    visible = isStarted,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut()
-                ) {
-                    ChatInputBarRedesign(
-                        inputText = inputText, isLoading = uiState.isLoading, selectedImage = uiState.selectedImage,
-                        supportsVision = AiSettingsHelper.supportsVision(settingsUiState.provider, settingsUiState.selectedModel),
-                        supportsFiles = AiSettingsHelper.supportsFiles(settingsUiState.provider, settingsUiState.selectedModel),
-                        performanceMode = performanceMode,
-                        onInputChange = { inputText = it },
-                        onSend = {
-                            if (inputText.isNotBlank() || uiState.selectedImage != null) {
-                                vibration?.vibrateClick(); viewModel.sendMessage(inputText); inputText = ""
-                            }
-                        },
-                        onCancel = { viewModel.cancelRequest() },
-                        onAttach = { imagePicker.launch("image/*") },
-                        onRemoveImage = { viewModel.onImageSelected(null) },
-                    )
-                }
+                ChatInputBarRedesign(
+                    inputText = inputText, isLoading = uiState.isLoading, selectedImage = uiState.selectedImage,
+                    supportsVision = AiSettingsHelper.supportsVision(settingsUiState.provider, settingsUiState.selectedModel),
+                    supportsFiles = AiSettingsHelper.supportsFiles(settingsUiState.provider, settingsUiState.selectedModel),
+                    performanceMode = performanceMode,
+                    onInputChange = { inputText = it },
+                    onSend = {
+                        if (inputText.isNotBlank() || uiState.selectedImage != null) {
+                            vibration?.vibrateClick(); viewModel.sendMessage(inputText); inputText = ""
+                        }
+                    },
+                    onCancel = { viewModel.cancelRequest() },
+                    onAttach = { imagePicker.launch("image/*") },
+                    onRemoveImage = { viewModel.onImageSelected(null) },
+                    aiSearchEnabled = uiState.aiSearchEnabled,
+                    aiSearchIconVisible = uiState.aiSearchIconVisible,
+                    onToggleAiSearch = viewModel::toggleAiSearch
+                )
             },
             containerColor = Color.Transparent,
         ) { padding ->
@@ -329,26 +282,34 @@ fun AiAssistantScreen(
                     }
 
                     AnimatedContent(
-                        targetState = (uiState.messages.isEmpty() && !uiState.isLoading) to isStarted,
+                        targetState = isStarted,
                         transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(400)) },
                         label = "chat_content",
-                    ) { (showEmpty, started) ->
+                    ) { started ->
                         if (started) {
-                            if (showEmpty) {
-                                EmptyChatStateRedesign(performanceMode = performanceMode, onSuggestionClick = { inputText = it })
-                            } else {
-                                ChatMessageList(
-                                    messages = uiState.messages,
-                                    streamingText = uiState.streamingText,
-                                    isLoading = uiState.isLoading,
-                                    error = uiState.error,
-                                    listState = listState,
-                                    currentConfig = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
-                                    performanceMode = performanceMode,
-                                    onScrollBottom = { scope.launch { listState.animateScrollToItem(uiState.messages.size.coerceAtLeast(1) - 1) } },
-                                    onRetrySync = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
-                                )
-                            }
+                            ChatMessageList(
+                                messages = uiState.messages,
+                                streamingText = uiState.streamingText,
+                                isLoading = uiState.isLoading,
+                                error = uiState.error,
+                                listState = listState,
+                                currentConfig = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
+                                performanceMode = performanceMode,
+                                onRegenerate = { viewModel.regenerateMessage(it) },
+                                onScrollBottom = { scope.launch { listState.animateScrollToItem(uiState.messages.size.coerceAtLeast(1) - 1) } },
+                                onRetrySync = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
+                            )
+                        } else {
+                            EmptyChatStateRedesign(
+                                performanceMode = performanceMode,
+                                onSuggestionClick = { inputText = it },
+                                suggestedPrompts = uiState.suggestedPrompts,
+                                isGeneratingPrompts = uiState.isGeneratingPrompts,
+                                onRefresh = { viewModel.refreshPrompts() },
+                                onNeverShow = { viewModel.neverShowPrompt(it) },
+                                onEdit = { original, edited -> viewModel.editPrompt(original, edited) },
+                                onReset = { viewModel.resetPrompts() }
+                            )
                         }
                     }
                 }
@@ -376,111 +337,36 @@ private fun ChatTopBarRedesign(
     onRefreshTitle: () -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .then(if (performanceMode) Modifier.background(Color(0xFF121212)) else Modifier.statusBarsPadding())
-    ) {
-        CenterAlignedTopAppBar(
-            scrollBehavior = scrollBehavior,
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-            title = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.animateContentSize()) {
-                    val currentChat = uiState.chats.find { it.id == uiState.currentChatId }
-                    val hasMessages = uiState.messages.isNotEmpty()
-
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedContent(
-                            targetState = currentChat?.title ?: "AI Assistant",
-                            transitionSpec = { (slideInVertically { it / 2 } + fadeIn()).togetherWith(slideOutVertically { -it / 2 } + fadeOut()) },
-                            label = "title",
-                        ) { title ->
-                            Text(
-                                title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 200.dp),
-                            )
-                        }
-                        if (hasMessages) {
-                            IconButton(onClick = onRefreshTitle, modifier = Modifier.size(28.dp)) {
-                                if (uiState.isGeneratingTitle && !performanceMode) {
-                                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                                } else {
-                                    Icon(Icons.Rounded.AutoAwesome, "Refresh title", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(.9f))
-                                }
-                            }
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val statusColor by animateColorAsState(
-                            when {
-                                uiState.keysUnavailable -> Color(0xFFFF5252)
-                                uiState.isLoading -> MaterialTheme.colorScheme.primary
-                                else -> Color(0xFF4CAF50)
-                            }, label = "status"
-                        )
-                        Box(Modifier.size(6.dp).background(statusColor, CircleShape))
-
-                        Text(
-                            "${settingsUiState.provider} · ${settingsUiState.selectedModel}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp)) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Color.White)
-                }
-            },
-            actions = {
-                AnimatedVisibility(visible = uiState.messages.isNotEmpty(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-                    IconButton(onClick = onSummarize) { Icon(Icons.Rounded.Summarize, "Summary", tint = Color.White) }
-                }
-                IconButton(onClick = onHistory) { Icon(Icons.Rounded.History, "History", tint = Color.White) }
-                IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = Color.White) }
-            },
-        )
-
-        // Expressive Config Chips
-        AnimatedVisibility(visible = uiState.savedConfigs.isNotEmpty()) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(uiState.savedConfigs) { config ->
-                    val isSelected = settingsUiState.provider == config.provider && settingsUiState.selectedModel == config.model && settingsUiState.apiKey == config.apiKey
-                    val bgColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(0.05f), label = "chipBg")
-                    val contentColor by animateColorAsState(if (isSelected) Color.White else Color.White.copy(0.7f), label = "chipContent")
-
-                    Surface(
-                        onClick = { onConfigSelect(config) },
-                        shape = RoundedCornerShape(AiDesign.CornerSmall),
-                        color = bgColor,
-                        border = if (!isSelected) BorderStroke(1.dp, Color.White.copy(0.1f)) else null,
-                        modifier = Modifier.animateContentSize()
-                    ) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AiAvatar(config, 20.dp, performanceMode = true)
-                            Text(config.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = contentColor)
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(0.1f))
+    val providerColor = when(settingsUiState.provider) {
+        "Gemini" -> Color(0xFF1A73E8)
+        "ChatGPT" -> Color(0xFF10A37F)
+        "Claude" -> Color(0xFFD97757)
+        "DeepSeek" -> Color(0xFF007BFF)
+        else -> MaterialTheme.colorScheme.primary
     }
+
+    CenterAlignedTopAppBar(
+        scrollBehavior = scrollBehavior,
+        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = AiDesign.surfaceColor().copy(0.9f)),
+        title = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onRefreshTitle() }) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = providerColor.copy(0.1f), shape = CircleShape) {
+                        Icon(getIconForConfig(settingsUiState.selectedIcon, settingsUiState.provider), null, Modifier.padding(4.dp).size(14.dp), tint = providerColor)
+                    }
+                    Text(uiState.chats.find { it.id == uiState.currentChatId }?.title ?: "AI Assistant", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = AiDesign.textColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (uiState.isGeneratingTitle) LinearProgressIndicator(Modifier.width(40.dp).height(2.dp).padding(top = 2.dp), color = providerColor, trackColor = Color.Transparent)
+            }
+        },
+        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBackIosNew, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.7f)) } },
+        actions = {
+            IconButton(onClick = onSummarize) { Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = AiDesign.textColor(0.7f)) }
+            IconButton(onClick = onNewChat) { Icon(Icons.Rounded.Add, null, Modifier.size(24.dp), tint = AiDesign.textColor(0.7f)) }
+            IconButton(onClick = onHistory) { Icon(Icons.Rounded.History, null, Modifier.size(22.dp), tint = AiDesign.textColor(0.7f)) }
+            IconButton(onClick = onSettings) { Icon(Icons.Rounded.Tune, null, Modifier.size(22.dp), tint = AiDesign.textColor(0.7f)) }
+        }
+    )
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -500,143 +386,182 @@ private fun ChatInputBarRedesign(
     onCancel: () -> Unit,
     onAttach: () -> Unit,
     onRemoveImage: () -> Unit,
+    aiSearchEnabled: Boolean = false,
+    aiSearchIconVisible: Boolean = true,
+    onToggleAiSearch: () -> Unit = {},
 ) {
-    val hasContent = inputText.isNotBlank() || selectedImage != null
-    val supportsMedia = supportsVision || supportsFiles
     var showMediaMenu by remember { mutableStateOf(false) }
+    val supportsMedia = supportsVision || supportsFiles
+    val isIdle = inputText.isEmpty() && !isLoading && selectedImage == null
+
+    // Idle Glowing Animation
+    val infiniteTransition = rememberInfiniteTransition(label = "input_glow")
+    val glowAlpha by if (isIdle && !performanceMode) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.05f,
+            targetValue = 0.15f,
+            animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
+            label = "glow_alpha"
+        )
+    } else {
+        remember { mutableStateOf(0f) }
+    }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .imePadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, AiDesign.surfaceColor().copy(0.9f), AiDesign.surfaceColor())
+                )
+            )
+            .padding(horizontal = 16.dp)
+            .padding(top = 16.dp, bottom = 12.dp)
     ) {
-        AnimatedVisibility(visible = selectedImage != null, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-            Box(Modifier.padding(start = 12.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(AiDesign.CornerMedium),
-                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                    shadowElevation = 8.dp,
-                    color = Color(0xFF1A1A1A)
-                ) {
-                    AsyncImage(
-                        model = selectedImage,
-                        contentDescription = null,
-                        modifier = Modifier.size(90.dp).clip(RoundedCornerShape(AiDesign.CornerMedium)),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-                IconButton(
-                    onClick = onRemoveImage,
-                    modifier = Modifier.align(Alignment.TopEnd).offset(x = 8.dp, y = (-8).dp).size(28.dp)
-                ) {
-                    Surface(shape = CircleShape, color = Color(0xFFFF5252), shadowElevation = 4.dp) {
-                        Icon(Icons.Rounded.Close, null, Modifier.padding(6.dp).size(14.dp), tint = Color.White)
-                    }
+        AnimatedVisibility(
+            visible = selectedImage != null,
+            enter = scaleIn(tween(400, easing = EaseOutBack)) + fadeIn(),
+            exit = scaleOut(tween(300)) + fadeOut()
+        ) {
+            Box(Modifier.padding(bottom = 12.dp).size(80.dp).clip(RoundedCornerShape(16.dp)).border(1.dp, AiDesign.glassBorder(), RoundedCornerShape(16.dp))) {
+                AsyncImage(model = selectedImage, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                IconButton(onClick = onRemoveImage, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp).background(Color.Black.copy(0.6f), CircleShape)) {
+                    Icon(Icons.Rounded.Close, null, Modifier.size(12.dp), tint = Color.White)
                 }
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 54.dp),
-                shape = RoundedCornerShape(26.dp),
-                color = Color.White.copy(if (performanceMode) 0.12f else 0.08f),
-                border = BorderStroke(1.dp, if (hasContent) MaterialTheme.colorScheme.primary.copy(0.4f) else Color.White.copy(0.1f)),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    if (supportsMedia) {
-                        Box {
-                            IconButton(onClick = { showMediaMenu = true }, modifier = Modifier.size(46.dp)) {
-                                Icon(Icons.Rounded.Add, "Attach", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                            }
-                            DropdownMenu(
-                                expanded = showMediaMenu,
-                                onDismissRequest = { showMediaMenu = false },
-                                offset = androidx.compose.ui.unit.DpOffset(0.dp, (-8).dp),
-                                shape = RoundedCornerShape(20.dp),
-                                containerColor = Color(0xFF222222)
-                            ) {
-                                if (supportsVision) {
-                                    DropdownMenuItem(
-                                        text = { Text("Photo", fontWeight = FontWeight.Medium, color = Color.White) },
-                                        onClick = { showMediaMenu = false; onAttach() },
-                                        leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(20.dp), tint = Color.White.copy(0.7f)) }
-                                    )
-                                }
-                                if (supportsFiles) {
-                                    DropdownMenuItem(
-                                        text = { Text("Document", fontWeight = FontWeight.Medium, color = Color.White) },
-                                        onClick = { showMediaMenu = false },
-                                        leadingIcon = { Icon(Icons.Rounded.Description, null, Modifier.size(20.dp), tint = Color.White.copy(0.7f)) }
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        Spacer(Modifier.width(12.dp))
-                    }
-
-                    TextField(
-                        value = inputText,
-                        onValueChange = onInputChange,
-                        placeholder = { Text("Ask anything...", color = Color.White.copy(.4f)) },
-                        modifier = Modifier.weight(1f),
-                        colors = TextFieldDefaults.colors(
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            cursorColor = MaterialTheme.colorScheme.primary,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        maxLines = 6,
-                        textStyle = MaterialTheme.typography.bodyLarge,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { if (!isLoading && hasContent) onSend() }),
-                    )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 54.dp),
+            shape = RoundedCornerShape(26.dp),
+            color = AiDesign.surfaceColor(),
+            tonalElevation = 8.dp,
+            shadowElevation = if (performanceMode) 0.dp else 4.dp,
+            border = BorderStroke(
+                width = 1.dp,
+                brush = if (isIdle && !performanceMode) {
+                    Brush.sweepGradient(listOf(MaterialTheme.colorScheme.primary.copy(glowAlpha), Color.Transparent, MaterialTheme.colorScheme.primary.copy(glowAlpha)))
+                } else {
+                    SolidColor(AiDesign.glassBorder())
                 }
-            }
-
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.height(54.dp)) {
-                AnimatedContent(targetState = isLoading, label = "send_btn") { loading ->
-                    if (loading) {
-                        FilledIconButton(
-                            onClick = onCancel,
-                            modifier = Modifier.size(54.dp),
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFFF5252).copy(0.2f))
-                        ) {
-                            Icon(Icons.Rounded.Stop, "Cancel", tint = Color(0xFFFF5252))
+            )
+        ) {
+            Row(
+                Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (supportsMedia) {
+                    Box {
+                        IconButton(onClick = { showMediaMenu = true }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Rounded.Add, "Attach", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                         }
-                    } else {
-                        val scale by animateFloatAsState(if (hasContent) 1f else 0.9f, label = "scale")
-                        val containerColor by animateColorAsState(if (hasContent) MaterialTheme.colorScheme.primary else Color.White.copy(0.1f), label = "btnColor")
-                        val contentColor by animateColorAsState(if (hasContent) Color.White else Color.White.copy(0.3f), label = "btnContent")
-
-                        FilledIconButton(
-                            onClick = { if (hasContent) onSend() },
-                            enabled = hasContent,
-                            modifier = Modifier.size(54.dp).scale(scale),
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = containerColor,
-                                contentColor = contentColor
-                            )
+                        DropdownMenu(
+                            expanded = showMediaMenu,
+                            onDismissRequest = { showMediaMenu = false },
+                            offset = androidx.compose.ui.unit.DpOffset(0.dp, (-8).dp),
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = AiDesign.surfaceColor()
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.Send, "Send", modifier = Modifier.size(24.dp))
+                            if (supportsVision) {
+                                DropdownMenuItem(
+                                    text = { Text("Photo", fontWeight = FontWeight.Medium) },
+                                    onClick = { showMediaMenu = false; onAttach() },
+                                    leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(20.dp)) }
+                                )
+                            }
+                            if (supportsFiles) {
+                                DropdownMenuItem(
+                                    text = { Text("Document", fontWeight = FontWeight.Medium) },
+                                    onClick = { showMediaMenu = false },
+                                    leadingIcon = { Icon(Icons.Rounded.Description, null, Modifier.size(20.dp)) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                TextField(
+                    value = inputText,
+                    onValueChange = onInputChange,
+                    placeholder = { Text("Message...", color = AiDesign.textColor(0.4f), fontSize = 16.sp) },
+                    modifier = Modifier.weight(1f),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                        focusedTextColor = AiDesign.textColor(),
+                        unfocusedTextColor = AiDesign.textColor()
+                    ),
+                    maxLines = 5,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    trailingIcon = {
+                        if (aiSearchIconVisible) {
+                            val searchIconColor by animateColorAsState(
+                                targetValue = if (aiSearchEnabled) MaterialTheme.colorScheme.primary else AiDesign.textColor(0.3f),
+                                label = "search_icon_color"
+                            )
+                            val searchScale by animateFloatAsState(
+                                targetValue = if (aiSearchEnabled) 1.2f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                                label = "search_scale"
+                            )
+
+                            IconButton(onClick = onToggleAiSearch) {
+                                Icon(
+                                    imageVector = if (aiSearchEnabled) Icons.Rounded.Language else Icons.Rounded.PublicOff,
+                                    contentDescription = "Web Search",
+                                    tint = searchIconColor,
+                                    modifier = Modifier.size(20.dp).graphicsLayer {
+                                        scaleX = searchScale
+                                        scaleY = searchScale
+                                    }
+                                )
+                            }
+                        }
+                    }
+                )
+
+                Box(Modifier.padding(end = 4.dp), contentAlignment = Alignment.Center) {
+                    AnimatedContent(
+                        targetState = isLoading,
+                        transitionSpec = {
+                            (scaleIn(tween(300, easing = EaseOutBack)) + fadeIn())
+                                .togetherWith(scaleOut(tween(200)) + fadeOut())
+                        },
+                        label = "send_stop_transition"
+                    ) { loading ->
+                        if (loading) {
+                            IconButton(
+                                onClick = onCancel,
+                                modifier = Modifier.size(42.dp).background(MaterialTheme.colorScheme.error.copy(0.1f), CircleShape)
+                            ) {
+                                Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            }
+                        } else {
+                            val canSend = inputText.isNotBlank() || selectedImage != null
+                            val sendBtnColor by animateColorAsState(
+                                targetValue = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(0.05f),
+                                label = "send_btn_color"
+                            )
+                            IconButton(
+                                onClick = onSend,
+                                enabled = canSend,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .background(sendBtnColor, CircleShape)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.ArrowUpward,
+                                    null,
+                                    tint = if (canSend) Color.White else AiDesign.textColor(0.2f),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -645,121 +570,148 @@ private fun ChatInputBarRedesign(
     }
 }
 
+
 // ─────────────────────────────────────────────────────────────
-//  Chat Bubble Redesign
+//  Components
 // ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ChatBubble(
     message: AiMessage,
     currentConfig: AiConfig?,
     performanceMode: Boolean,
+    onRegenerate: (Int) -> Unit
 ) {
-    val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    val vibration = LocalVibrationManager.current
-    var isCopied by remember { mutableStateOf(false) }
-    var showActions by remember { mutableStateOf(false) }
+    val isUser = message.isUser
+    val segments = parseMarkdownToSegments(message.text)
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    
+    var showMessageActions by remember { mutableStateOf(false) }
+    var showSourcesSheet by remember { mutableStateOf(false) }
 
-    val segments = remember(message.text) { parseMarkdownToSegments(message.text) }
-
-    val entranceScale = remember { Animatable(if (performanceMode) 1f else 0.85f) }
-    val entranceAlpha = remember { Animatable(if (performanceMode) 1f else 0f) }
-
-    LaunchedEffect(message.id) {
-        if (!performanceMode) {
-            launch { entranceScale.animateTo(1f, spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow)) }
-            launch { entranceAlpha.animateTo(1f, tween(300)) }
+    val sources = remember(message.searchSources) {
+        if (message.searchSources.isNullOrBlank()) {
+            emptyList<SearchResult>()
+        } else {
+            try {
+                val moshi = Moshi.Builder().build()
+                val listType = Types.newParameterizedType(List::class.java, SearchResult::class.java)
+                val adapter = moshi.adapter<List<SearchResult>>(listType)
+                adapter.fromJson(message.searchSources) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = entranceScale.value
-                scaleY = entranceScale.value
-                alpha = entranceAlpha.value
-            }
-            .padding(vertical = 4.dp),
-        horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start,
-    ) {
-        if (message.isUser) {
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(
-                    topStart = AiDesign.CornerMedium,
-                    topEnd = AiDesign.CornerMedium,
-                    bottomStart = AiDesign.CornerMedium,
-                    bottomEnd = 6.dp
-                ),
+    if (showMessageActions) {
+        ModalBottomSheet(
+            onDismissRequest = { showMessageActions = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
                 modifier = Modifier
-                    .widthIn(max = 300.dp)
-                    .pointerInput(Unit) { detectTapGestures(onLongPress = { vibration?.vibrateLongClick(); showActions = true }) },
-                shadowElevation = 4.dp
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 32.dp)
             ) {
                 Text(
-                    text = message.text,
-                    modifier = Modifier.padding(AiDesign.ChatBubblePadding),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White,
-                    lineHeight = 24.sp
+                    text = "Message Actions",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                ActionRow(
+                    icon = Icons.Rounded.ContentCopy,
+                    label = "Copy Text",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(message.text))
+                        showMessageActions = false
+                    }
+                )
+                
+                if (!isUser) {
+                    ActionRow(
+                        icon = Icons.Rounded.Refresh,
+                        label = "Regenerate",
+                        color = MaterialTheme.colorScheme.primary,
+                        onClick = {
+                            onRegenerate(message.id)
+                            showMessageActions = false
+                        }
+                    )
+                }
+
+                ActionRow(
+                    icon = Icons.Rounded.Share,
+                    label = "Share",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, message.text)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Share via"))
+                        showMessageActions = false
+                    }
                 )
             }
-        } else {
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth(0.95f)
+        }
+    }
+
+    if (showSourcesSheet && sources.isNotEmpty()) {
+        ModalBottomSheet(
+            onDismissRequest = { showSourcesSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 32.dp)
             ) {
-                AiAvatar(config = currentConfig, size = 34.dp, modifier = Modifier.offset(y = 4.dp), performanceMode = performanceMode)
-
-                Surface(
-                    color = Color.White.copy(if (performanceMode) 0.12f else 0.08f),
-                    shape = RoundedCornerShape(
-                        topStart = 6.dp,
-                        topEnd = AiDesign.CornerMedium,
-                        bottomStart = AiDesign.CornerMedium,
-                        bottomEnd = AiDesign.CornerMedium
-                    ),
-                    border = BorderStroke(1.dp, Color.White.copy(0.1f)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .pointerInput(Unit) { detectTapGestures(onLongPress = { vibration?.vibrateLongClick(); showActions = true }) },
+                Text(
+                    text = "Search Sources",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.padding(AiDesign.ChatBubblePadding)) {
-                        SelectionContainer {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                segments.forEach { seg -> 
-                                    CompositionLocalProvider(LocalContentColor provides Color.White) {
-                                        MarkdownSegment(seg)
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(
-                            Modifier.padding(top = 10.dp).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
+                    items(sources) { source ->
+                        Surface(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
+                                context.startActivity(intent)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
                         ) {
-                            AnimatedVisibility(visible = isCopied) {
-                                Text("Copied", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50), modifier = Modifier.padding(end = 8.dp))
-                            }
-                            IconButton(
-                                onClick = {
-                                    vibration?.vibrateClick();
-                                    clipboard.setText(AnnotatedString(message.text));
-                                    isCopied = true;
-                                    scope.launch { delay(2000); isCopied = false }
-                                },
-                                modifier = Modifier.size(28.dp).background(Color.White.copy(0.1f), CircleShape),
-                            ) {
-                                Icon(
-                                    imageVector = if (isCopied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint = if (isCopied) Color(0xFF4CAF50) else Color.White.copy(0.6f)
+                            Column(Modifier.padding(16.dp)) {
+                                Text(
+                                    text = source.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = source.snippet,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = source.displayUrl,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -769,95 +721,255 @@ fun ChatBubble(
         }
     }
 
-    if (showActions) {
-        MessageActionsSheet(message.text, message.isUser, { showActions = false },
-            { clipboard.setText(AnnotatedString(message.text)); isCopied = true; scope.launch { delay(2000); isCopied = false }; showActions = false })
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Empty State Redesign
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun EmptyChatStateRedesign(performanceMode: Boolean, onSuggestionClick: (String) -> Unit) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    AnimatedVisibility(
+        visible = true,
+        enter = fadeIn(tween(600, easing = EaseOutBack)) + slideInVertically(
+            initialOffsetY = { 40 },
+            animationSpec = tween(600, easing = EaseOutBack)
+        ),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Box(Modifier.size(220.dp), contentAlignment = Alignment.Center) {
-            if (!performanceMode) {
-                val inf = rememberInfiniteTransition(label = "hero")
-                val pulse by inf.animateFloat(0.85f, 1.15f, infiniteRepeatable(tween(4000, easing = FastOutSlowInEasing), RepeatMode.Reverse), "pulse")
-                val rotate by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(40000, easing = LinearEasing)), "rot")
-
-                Box(Modifier.size(200.dp).scale(pulse).alpha(0.1f).background(Brush.radialGradient(listOf(primaryColor, Color.Transparent)), CircleShape))
-                Box(Modifier.size(160.dp).rotate(rotate).alpha(0.15f).drawBehind {
-                    drawCircle(
-                        Brush.sweepGradient(listOf(primaryColor, tertiaryColor, secondaryColor, primaryColor)),
-                        style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                    )
-                })
-            }
-
-            Surface(
-                Modifier.size(90.dp),
-                shape = CircleShape,
-                color = primaryColor,
-                shadowElevation = 12.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+        ) {
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 16.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(42.dp), tint = Color.White)
-                }
-            }
-        }
+                if (!isUser) AiAvatar(currentConfig, 32.dp, performanceMode = performanceMode)
 
-        Spacer(Modifier.height(32.dp))
-        Text("AI Assistant", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
-        Text("Ready to help you with anything.", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(.6f))
-
-        Spacer(Modifier.height(48.dp))
-
-        // Updated Suggestions: Only 2 and better prompts
-        val suggestions = listOf(
-            Triple(Icons.Rounded.TipsAndUpdates, "Creative writing: Tell me a story about a futuristic city.", primaryColor),
-            Triple(Icons.Rounded.Code, "Coding help: How do I implement a recursive function in Kotlin?", secondaryColor),
-        )
-
-        Column(Modifier.padding(horizontal = 24.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            suggestions.forEach { (icon, text, color) ->
                 Surface(
-                    onClick = { onSuggestionClick(text) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(AiDesign.CornerMedium),
-                    color = Color.White.copy(0.05f),
-                    border = BorderStroke(1.dp, Color.White.copy(0.1f))
+                    shape = RoundedCornerShape(
+                        topStart = if (isUser) 24.dp else 4.dp,
+                        topEnd = if (isUser) 4.dp else 24.dp,
+                        bottomStart = 24.dp,
+                        bottomEnd = 24.dp
+                    ),
+                    color = if (isUser) MaterialTheme.colorScheme.primary else AiDesign.glassColor(),
+                    border = if (isUser) null else BorderStroke(1.dp, AiDesign.glassBorder()),
+                    shadowElevation = if (performanceMode) 0.dp else 4.dp,
+                    modifier = Modifier.combinedClickable(
+                        onLongClick = { showMessageActions = true },
+                        onClick = { /* Standard tap - could toggle timestamp or something */ }
+                    )
                 ) {
-                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Box(Modifier.size(40.dp).background(color.copy(.15f), CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(icon, null, Modifier.size(20.dp), tint = color)
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        segments.forEach { seg ->
+                            MarkdownSegment(
+                                seg = seg,
+                                baseFontSize = 15.sp,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()
+                            )
                         }
-                        Text(text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.weight(1f))
-                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(18.dp), tint = Color.White.copy(.3f))
+
+                        if (sources.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                thickness = 0.5.dp,
+                                color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.15f)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Sources",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else AiDesign.textColor(0.6f)
+                                )
+                                TextButton(
+                                    onClick = { showSourcesSheet = true },
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.height(24.dp),
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Text("See all", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                sources.take(3).forEach { source ->
+                                    SourceChip(
+                                        source = source,
+                                        isUser = isUser
+                                    ) {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
+                                        context.startActivity(intent)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        Spacer(Modifier.height(80.dp))
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  ChatMessageList & Streaming Components
-// ─────────────────────────────────────────────────────────────
+@Composable
+fun SourceChip(source: SearchResult, isUser: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isUser) {
+            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        border = BorderStroke(
+            0.5.dp, 
+            (if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline).copy(alpha = 0.2f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Link,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = source.title,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 120.dp),
+                color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
 
 @Composable
-private fun ChatMessageList(
+fun EmptyChatStateRedesign(
+    performanceMode: Boolean,
+    onSuggestionClick: (String) -> Unit,
+    suggestedPrompts: List<String>,
+    isGeneratingPrompts: Boolean,
+    onRefresh: () -> Unit,
+    onNeverShow: (String) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onReset: () -> Unit,
+) {
+    var showPromptActions by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Surface(Modifier.size(80.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(0.1f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("How can I help you today?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = AiDesign.textColor())
+        Spacer(Modifier.height(40.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("SUGGESTED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+            Row {
+                IconButton(onClick = onReset) { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = AiDesign.textColor(0.4f)) }
+                IconButton(onClick = onRefresh, enabled = !isGeneratingPrompts) {
+                    if (isGeneratingPrompts) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp), tint = AiDesign.textColor(0.4f))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            suggestedPrompts.forEach { prompt ->
+                Surface(
+                    onClick = { onSuggestionClick(prompt) },
+                    shape = RoundedCornerShape(AiDesign.CornerMedium),
+                    color = AiDesign.glassColor(),
+                    border = BorderStroke(1.dp, AiDesign.glassBorder())
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(prompt, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.8f))
+                        IconButton(onClick = { showPromptActions = prompt }, Modifier.size(24.dp)) { Icon(Icons.Rounded.MoreVert, null, Modifier.size(16.dp), tint = AiDesign.textColor(0.4f)) }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showPromptActions != null) {
+        PromptActionSheet(
+            prompt = showPromptActions!!,
+            onDismiss = { showPromptActions = null },
+            onNeverShow = { onNeverShow(it); showPromptActions = null },
+            onEdit = { old, new -> onEdit(old, new); showPromptActions = null },
+            onCopy = { /* handle copy */ },
+            onRefresh = { onRefresh(); showPromptActions = null }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PromptActionSheet(
+    prompt: String,
+    onDismiss: () -> Unit,
+    onNeverShow: (String) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onCopy: (String) -> Unit,
+    onRefresh: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    var isEditing by remember { mutableStateOf(false) }
+    var editedText by remember { mutableStateOf(prompt) }
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = AiDesign.surfaceColor()) {
+        Column(Modifier.padding(bottom = 32.dp).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (isEditing) {
+                OutlinedTextField(
+                    value = editedText, onValueChange = { editedText = it },
+                    Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = AiDesign.textColor(), unfocusedTextColor = AiDesign.textColor())
+                )
+                Button(onClick = { onEdit(prompt, editedText) }, Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Save Changes") }
+            } else {
+                Text(prompt, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = AiDesign.textColor(), modifier = Modifier.padding(bottom = 16.dp))
+                ActionRow(Icons.Rounded.ContentCopy, "Copy Prompt", MaterialTheme.colorScheme.primary) { 
+                    clipboard.setText(AnnotatedString(prompt))
+                    onDismiss() 
+                }
+                ActionRow(Icons.Rounded.Edit, "Edit Prompt", MaterialTheme.colorScheme.secondary) { isEditing = true }
+                ActionRow(Icons.Rounded.Refresh, "Get New Suggestions", MaterialTheme.colorScheme.tertiary) { onRefresh() }
+                ActionRow(Icons.Rounded.VisibilityOff, "Never Show This", MaterialTheme.colorScheme.error) { onNeverShow(prompt) }
+            }
+        }
+    }
+}
+
+@Composable
+fun ActionRow(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(12.dp), color = Color.Transparent) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(Modifier.size(36.dp).background(color.copy(0.1f), CircleShape), contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(18.dp), tint = color) }
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = AiDesign.textColor())
+        }
+    }
+}
+
+@Composable
+fun ChatMessageList(
     messages: List<AiMessage>,
     streamingText: String,
     isLoading: Boolean,
@@ -865,202 +977,125 @@ private fun ChatMessageList(
     listState: LazyListState,
     currentConfig: AiConfig?,
     performanceMode: Boolean,
+    onRegenerate: (Int) -> Unit,
     onScrollBottom: () -> Unit,
     onRetrySync: () -> Unit,
 ) {
-    val isAtBottom by remember {
-        derivedStateOf {
-            val v = listState.layoutInfo.visibleItemsInfo; val l = v.lastOrNull() ?: return@derivedStateOf true
-            l.index >= listState.layoutInfo.totalItemsCount - 2
-        }
-    }
-
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val colors = listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)
+                val stops = floatArrayOf(0f, 0.05f, 0.95f, 1f)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colorStops = stops.zip(colors).toTypedArray(),
+                        startY = 0f,
+                        endY = size.height
+                    ),
+                    blendMode = BlendMode.DstIn
+                )
+            }
+    ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 24.dp)
         ) {
-            items(messages, key = { it.id }) { msg ->
-                ChatBubble(message = msg, currentConfig = currentConfig, performanceMode = performanceMode)
-            }
-            if (isLoading && streamingText.isNotEmpty()) {
-                item(key = "streaming") { StreamingBubble(text = streamingText, config = currentConfig, performanceMode = performanceMode) }
-            }
-            if (isLoading && streamingText.isEmpty()) {
-                item(key = "typing") { TypingIndicator(config = currentConfig, performanceMode = performanceMode) }
-            }
-            if (error != null) {
-                item(key = "error") { ErrorMessage(error = error, onRetrySync = onRetrySync) }
-            }
-            item { Spacer(Modifier.height(16.dp)) }
-        }
-
-        AnimatedVisibility(
-            visible = !isAtBottom && messages.isNotEmpty(),
-            enter = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
-            exit = scaleOut() + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp),
-        ) {
-            FilledIconButton(
-                onClick = onScrollBottom,
-                modifier = Modifier.size(44.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(0.15f), contentColor = Color.White)
-            ) {
-                Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(24.dp))
-            }
+            items(messages) { ChatBubble(it, currentConfig, performanceMode, onRegenerate) }
+            if (streamingText.isNotEmpty()) item { StreamingBubble(streamingText, currentConfig, performanceMode) }
+            if (isLoading && streamingText.isEmpty()) item { TypingIndicator(currentConfig, performanceMode) }
+            if (error != null) item { ErrorMessage(error, onRetrySync) }
+            item { Spacer(Modifier.height(100.dp)) }
         }
     }
 }
 
 @Composable
-private fun StreamingBubble(text: String, config: AiConfig?, performanceMode: Boolean) {
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth(.95f)) {
-        AiAvatar(config, 34.dp, modifier = Modifier.offset(y = 4.dp), performanceMode = performanceMode)
-        Surface(
-            color = Color.White.copy(if (performanceMode) 0.12f else 0.08f),
-            shape = RoundedCornerShape(6.dp, AiDesign.CornerMedium, AiDesign.CornerMedium, AiDesign.CornerMedium),
-            border = BorderStroke(1.dp, Color.White.copy(0.1f)),
-            modifier = Modifier.weight(1f),
-        ) {
-            Column(Modifier.padding(AiDesign.ChatBubblePadding)) {
-                val segs = remember(text) { parseMarkdownToSegments(text) }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { 
-                    segs.forEach { seg -> 
-                        CompositionLocalProvider(LocalContentColor provides Color.White) {
-                            MarkdownSegment(seg) 
-                        }
-                    } 
-                }
+fun StreamingBubble(text: String, currentConfig: AiConfig?, performanceMode: Boolean) {
+    ChatBubble(
+        message = AiMessage(chatId = 0, text = text, isUser = false), 
+        currentConfig = currentConfig, 
+        performanceMode = performanceMode, 
+        onRegenerate = {}
+    )
+}
 
-                if (!performanceMode) {
-                    val inf = rememberInfiniteTransition(label = "cursor")
-                    val alpha by inf.animateFloat(0.2f, 1f, infiniteRepeatable(tween(400), RepeatMode.Reverse), "a")
-                    Box(Modifier.padding(top = 6.dp).size(2.dp, 16.dp).alpha(alpha).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.dp)))
-                }
-            }
+@Composable
+fun AiAvatar(config: AiConfig?, size: Dp, modifier: Modifier = Modifier, performanceMode: Boolean) {
+    val color = when(config?.provider) {
+        "Gemini" -> Color(0xFF1A73E8)
+        "ChatGPT" -> Color(0xFF10A37F)
+        "Claude" -> Color(0xFFD97757)
+        "DeepSeek" -> Color(0xFF007BFF)
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Surface(modifier.size(size), shape = CircleShape, color = color.copy(0.1f), border = BorderStroke(1.dp, color.copy(0.2f))) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(getIconForConfig(config?.iconRes ?: "AUTO", config?.provider ?: ""), null, Modifier.size(size * 0.6f), tint = color)
         }
     }
 }
 
 @Composable
-fun AiAvatar(config: AiConfig?, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier, performanceMode: Boolean = false) {
-    val gradient = Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (!performanceMode) {
-            val inf = rememberInfiniteTransition(label = "avatar_glow")
-            val glowScale by inf.animateFloat(1f, 1.3f, infiniteRepeatable(tween(2500), RepeatMode.Reverse), label = "s")
-            Box(Modifier.size(size).scale(glowScale).alpha(0.1f).background(MaterialTheme.colorScheme.primary, CircleShape))
-        }
-
-        Surface(modifier = Modifier.size(size), shape = CircleShape, shadowElevation = 4.dp, color = Color(0xFF1A1A1A)) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.background(gradient)) {
-                if (config?.customIconUri != null) {
-                    AsyncImage(
-                        model = config.customIconUri,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    val icon = if (config != null) getIconForConfig(config.iconRes, config.provider) else Icons.Rounded.AutoAwesome
-                    Icon(icon, null, Modifier.size(size * .55f), tint = Color.White)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TypingIndicator(config: AiConfig?, performanceMode: Boolean = false) {
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        AiAvatar(config, 34.dp, modifier = Modifier.offset(y = 4.dp), performanceMode = performanceMode)
-        Surface(
-            color = Color.White.copy(if (performanceMode) 0.12f else 0.08f),
-            shape = RoundedCornerShape(6.dp, AiDesign.CornerMedium, AiDesign.CornerMedium, AiDesign.CornerMedium),
-            border = BorderStroke(1.dp, Color.White.copy(0.1f))
-        ) {
-            Box(Modifier.padding(horizontal = 22.dp, vertical = 18.dp)) {
-                TypingIndicatorDots(color = MaterialTheme.colorScheme.primary)
-            }
+fun TypingIndicator(currentConfig: AiConfig?, performanceMode: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        AiAvatar(currentConfig, 32.dp, performanceMode = performanceMode)
+        Surface(shape = RoundedCornerShape(4.dp, AiDesign.CornerMedium, AiDesign.CornerMedium, AiDesign.CornerMedium), color = AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            TypingIndicatorDots(MaterialTheme.colorScheme.primary)
         }
     }
 }
 
 @Composable
 fun TypingIndicatorDots(color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        val inf = rememberInfiniteTransition(label = "dots")
-        for (i in 0..2) {
-            val animAlpha by inf.animateFloat(
-                initialValue = 0.3f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(600, delayMillis = i * 200),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "dot_$i"
-            )
-            Box(Modifier.size(8.dp).alpha(animAlpha).background(color, CircleShape))
-        }
+    val transition = rememberInfiniteTransition()
+    val dotAlpha1 by transition.animateFloat(0.2f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse))
+    val dotAlpha2 by transition.animateFloat(0.2f, 1f, infiniteRepeatable(tween(600, 200), RepeatMode.Reverse))
+    val dotAlpha3 by transition.animateFloat(0.2f, 1f, infiniteRepeatable(tween(600, 400), RepeatMode.Reverse))
+
+    Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.size(6.dp).background(color.copy(dotAlpha1), CircleShape))
+        Box(Modifier.size(6.dp).background(color.copy(dotAlpha2), CircleShape))
+        Box(Modifier.size(6.dp).background(color.copy(dotAlpha3), CircleShape))
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Helpers & Bottom Sheets
-// ─────────────────────────────────────────────────────────────
-
-fun getIconForConfig(iconType: String, provider: String): ImageVector = when (iconType) {
-    "GEMINI"   -> Icons.Rounded.AutoAwesome
-    "CHATGPT"  -> Icons.Rounded.Psychology
-    "GROQ"     -> Icons.Rounded.Bolt
-    "CLAUDE"   -> Icons.AutoMirrored.Rounded.FactCheck
-    "DEEPSEEK" -> Icons.Rounded.Cyclone
-    "BOT"      -> Icons.Rounded.SmartToy
-    "SPARKLE"  -> Icons.Rounded.AutoAwesome
-    "BRAIN"    -> Icons.Rounded.PsychologyAlt
-    else       -> when (provider) {
-        "Gemini"     -> Icons.Rounded.AutoAwesome
-        "ChatGPT"    -> Icons.Rounded.Psychology
-        "Groq"       -> Icons.Rounded.Bolt
-        "Claude"     -> Icons.AutoMirrored.Rounded.FactCheck
-        "DeepSeek"   -> Icons.Rounded.Cyclone
-        "OpenRouter" -> Icons.Rounded.Hub
-        else         -> Icons.Rounded.SmartToy
+fun getIconForConfig(selected: String, provider: String): ImageVector = when(selected) {
+    "GEMINI" -> Icons.Rounded.AutoAwesome
+    "CHATGPT" -> Icons.Rounded.Chat
+    "GROQ" -> Icons.Rounded.Bolt
+    "CLAUDE" -> Icons.Rounded.HistoryEdu
+    "DEEPSEEK" -> Icons.Rounded.Troubleshoot
+    "BOT" -> Icons.Rounded.SmartToy
+    "SPARKLE" -> Icons.Rounded.AutoFixHigh
+    else -> when(provider) {
+        "Gemini" -> Icons.Rounded.AutoAwesome
+        "Groq" -> Icons.Rounded.Bolt
+        "Claude" -> Icons.Rounded.HistoryEdu
+        "DeepSeek" -> Icons.Rounded.Troubleshoot
+        else -> Icons.Rounded.Chat
     }
 }
 
 @Composable
-private fun KeysUnavailableBanner(isSyncing: Boolean, onRetrySync: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        color = Color(0xFFFF5252).copy(0.2f),
-        shape = RoundedCornerShape(AiDesign.CornerMedium),
-        border = BorderStroke(1.dp, Color(0xFFFF5252).copy(.3f)),
-        shadowElevation = 4.dp
-    ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(Modifier.size(36.dp).background(Color(0xFFFF5252).copy(.15f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.KeyOff, null, Modifier.size(18.dp), tint = Color(0xFFFF5252))
+fun KeysUnavailableBanner(isSyncing: Boolean, onRetrySync: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer, border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(0.2f))) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Rounded.VpnKeyOff, null, tint = MaterialTheme.colorScheme.error)
+            Column(Modifier.weight(1f)) {
+                Text("API Keys Unavailable", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text("Shared keys could not be synced. Check your connection.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(0.7f))
             }
-            Text("API keys required", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.White)
-            Button(
-                onClick = { if (!isSyncing) onRetrySync() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                if (isSyncing) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
-                else Icon(Icons.Rounded.Sync, null, Modifier.size(14.dp), tint = Color.White)
-                Spacer(Modifier.width(6.dp))
-                Text(if (isSyncing) "Syncing" else "Retry", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
+            IconButton(onClick = onRetrySync, enabled = !isSyncing) {
+                if (isSyncing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.error)
+                else Icon(Icons.Rounded.Sync, null, tint = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -1068,65 +1103,26 @@ private fun KeysUnavailableBanner(isSyncing: Boolean, onRetrySync: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChatSummarySheet(
-    summary: String?,
-    isSummarizing: Boolean,
-    onDismiss: () -> Unit,
-    onRefresh: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A1A1A),
-        shape = RoundedCornerShape(topStart = AiDesign.CornerLarge, topEnd = AiDesign.CornerLarge),
-        dragHandle = {
-            Box(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(40.dp, 4.dp).background(Color.White.copy(.2f), CircleShape))
-            }
-        }
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 48.dp).navigationBarsPadding()) {
+fun ChatSummarySheet(summary: String?, isSummarizing: Boolean, onDismiss: () -> Unit, onRefresh: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AiDesign.surfaceColor()) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val inf = rememberInfiniteTransition(label = "spark")
-                    val rot by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(4000, easing = LinearEasing)), label = "r")
-                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(20.dp).rotate(if (isSummarizing) rot else 0f), tint = MaterialTheme.colorScheme.primary)
-                    Text("Chat Summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!isSummarizing) {
-                        IconButton(onClick = onRefresh, modifier = Modifier.size(40.dp).background(Color.White.copy(0.05f), CircleShape)) {
-                            Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp), tint = Color.White)
-                        }
-                    }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Rounded.Close, null, Modifier.size(18.dp), tint = Color.White.copy(.6f))
-                    }
+                Text("CHAT SUMMARY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                IconButton(onClick = onRefresh, enabled = !isSummarizing) {
+                    if (isSummarizing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Rounded.Refresh, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.5f))
                 }
             }
-
-            Spacer(Modifier.height(24.dp))
-
-            AnimatedContent(targetState = isSummarizing, transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) }, label = "sumContent") { loading ->
-                if (loading) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        TypingIndicatorDots(color = MaterialTheme.colorScheme.primary)
-                        Text("Distilling conversation...", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(.7f))
-                    }
-                } else {
-                    if (summary != null) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(.1f),
-                                shape = RoundedCornerShape(AiDesign.CornerMedium),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(.2f)),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(summary, modifier = Modifier.padding(24.dp), style = MaterialTheme.typography.bodyLarge, lineHeight = 28.sp, color = Color.White)
-                            }
-                            Text("Powered by Llama 3.3", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(.4f), modifier = Modifier.padding(start = 12.dp))
-                        }
-                    }
+            Spacer(Modifier.height(16.dp))
+            if (isSummarizing && summary == null) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(Modifier.size(32.dp))
+                    Text("Analyzing conversation...", Modifier.padding(top = 16.dp), color = AiDesign.textColor(0.6f))
                 }
+            } else if (summary != null) {
+                Text(summary, style = MaterialTheme.typography.bodyLarge, color = AiDesign.textColor(), lineHeight = 26.sp)
+            } else {
+                Text("No summary available.", color = AiDesign.textColor(0.4f))
             }
         }
     }
@@ -1134,50 +1130,20 @@ private fun ChatSummarySheet(
 
 @Composable
 fun AiHistoryDrawer(chats: List<AiChat>, currentChatId: Int?, onChatSelect: (Int) -> Unit, onNewChat: () -> Unit, onDeleteChat: (AiChat) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    val filtered = remember(chats, query) { if (query.isBlank()) chats else chats.filter { it.title.contains(query, true) } }
-    val grouped = remember(filtered) { filtered.groupBy { it.chatGroup() }.toSortedMap(compareBy { it.ordinal }) }
-
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(24.dp)) {
-            Text("History", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = onNewChat,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(AiDesign.CornerMedium),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.NoteAdd, null); Spacer(Modifier.width(10.dp))
-                Text("New Chat", fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(AiDesign.CornerSmall),
-                placeholder = { Text("Search chats...", color = Color.White.copy(0.4f)) },
-                leadingIcon = { Icon(Icons.Rounded.Search, null, tint = Color.White.copy(0.6f)) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color.White.copy(0.05f),
-                    focusedContainerColor = Color.White.copy(0.08f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White.copy(0.1f),
-                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(0.5f)
-                )
-            )
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("HISTORY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 16.dp))
+        Button(onClick = onNewChat, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)) {
+            Icon(Icons.Rounded.Add, null)
+            Spacer(Modifier.width(8.dp))
+            Text("New Conversation", fontWeight = FontWeight.Bold)
         }
-
-        HorizontalDivider(color = Color.White.copy(0.1f))
-
-        LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (grouped.isEmpty()) {
-                item { Column(Modifier.fillMaxWidth().padding(top = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Rounded.ChatBubbleOutline, null, Modifier.size(48.dp).alpha(.2f), tint = Color.White); Spacer(Modifier.height(16.dp)); Text("Empty history", color = Color.White.copy(0.3f)) } }
-            } else {
-                grouped.forEach { (group, groupChats) ->
-                    item { Text(group.label().uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary.copy(.8f), modifier = Modifier.padding(start = 12.dp, top = 16.dp, bottom = 8.dp)) }
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val groups = listOf(ChatGroup.TODAY, ChatGroup.YESTERDAY, ChatGroup.THIS_WEEK, ChatGroup.OLDER)
+            groups.forEach { group ->
+                val groupChats = chats.filter { it.chatGroup() == group }
+                if (groupChats.isNotEmpty()) {
+                    item { Text(group.name.replace("_", " "), Modifier.padding(top = 16.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = AiDesign.textColor(0.4f)) }
                     items(groupChats, key = { it.id }) { chat ->
                         val isSelected = chat.id == currentChatId
                         Surface(
@@ -1188,9 +1154,9 @@ fun AiHistoryDrawer(chats: List<AiChat>, currentChatId: Int?, onChatSelect: (Int
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(Modifier.padding(horizontal = 12.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Icon(if (isSelected) Icons.Rounded.ChatBubble else Icons.Rounded.ChatBubbleOutline, null, tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(0.5f), modifier = Modifier.size(18.dp))
-                                Text(chat.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) Color.White else Color.White.copy(0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                IconButton(onClick = { onDeleteChat(chat) }, Modifier.size(32.dp)) { Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp), tint = Color.White.copy(.3f)) }
+                                Icon(if (isSelected) Icons.Rounded.ChatBubble else Icons.Rounded.ChatBubbleOutline, null, tint = if (isSelected) MaterialTheme.colorScheme.primary else AiDesign.textColor(0.5f), modifier = Modifier.size(18.dp))
+                                Text(chat.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) AiDesign.textColor() else AiDesign.textColor(0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                IconButton(onClick = { onDeleteChat(chat) }, Modifier.size(32.dp)) { Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp), tint = AiDesign.textColor(.3f)) }
                             }
                         }
                     }
@@ -1206,8 +1172,8 @@ fun ModernAiDialog(title: String, icon: ImageVector, iconColor: Color, descripti
         Surface(
             Modifier.padding(28.dp).fillMaxWidth(), 
             shape = RoundedCornerShape(AiDesign.CornerLarge), 
-            color = Color(0xFF1E1E1E),
-            border = BorderStroke(1.dp, Color.White.copy(0.1f)),
+            color = AiDesign.surfaceColor(),
+            border = BorderStroke(1.dp, AiDesign.glassBorder()),
             shadowElevation = 24.dp
         ) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1217,16 +1183,16 @@ fun ModernAiDialog(title: String, icon: ImageVector, iconColor: Color, descripti
                 Spacer(Modifier.height(26.dp))
                 Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = iconColor, letterSpacing = 2.sp)
                 Spacer(Modifier.height(14.dp))
-                Text(description, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, color = Color.White)
+                Text(description, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, color = AiDesign.textColor())
                 Spacer(Modifier.height(10.dp))
-                Text(supportingText, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = Color.White.copy(.6f), lineHeight = 22.sp)
+                Text(supportingText, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = AiDesign.textColor(.6f), lineHeight = 22.sp)
                 Spacer(Modifier.height(34.dp))
                 Button(onClick = onPrimaryClick, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(22.dp), colors = ButtonDefaults.buttonColors(containerColor = iconColor)) { Text(primaryButtonText, fontWeight = FontWeight.Black, color = Color.White) }
                 if (secondaryButtonText != null && onSecondaryClick != null) {
                     Spacer(Modifier.height(14.dp))
-                    OutlinedButton(onClick = onSecondaryClick, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, Color.White.copy(0.2f))) { Text(secondaryButtonText, fontWeight = FontWeight.Bold, color = Color.White.copy(0.8f)) }
+                    OutlinedButton(onClick = onSecondaryClick, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, AiDesign.glassBorder())) { Text(secondaryButtonText, fontWeight = FontWeight.Bold, color = AiDesign.textColor(0.8f)) }
                 }
-                TextButton(onClick = onDismiss, Modifier.padding(top = 10.dp)) { Text("Dismiss", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(0.4f)) }
+                TextButton(onClick = onDismiss, Modifier.padding(top = 10.dp)) { Text("Dismiss", style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.4f)) }
             }
         }
     }
@@ -1240,7 +1206,11 @@ fun AiSettingsDialog(
     onCustomIconClick: () -> Unit,
     onSave: () -> Unit, onSaveConfig: (String) -> Unit, onDeleteConfig: (AiConfig) -> Unit, onEditConfig: (AiConfig) -> Unit,
     @Suppress("UNUSED_PARAMETER") onMoveConfig: (Int, Int) -> Unit, onTest: () -> Unit, onRefresh: () -> Unit,
-    performanceMode: Boolean
+    performanceMode: Boolean,
+    onToggleDynamicPrompts: (Boolean) -> Unit,
+    onPromptFormatChange: (String) -> Unit,
+    aiSearchIconVisible: Boolean,
+    onSetAiSearchIconVisible: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var configName by remember(state.editingConfig) { mutableStateOf(state.editingConfig?.name ?: "") }
@@ -1252,10 +1222,10 @@ fun AiSettingsDialog(
     AlertDialog(
         onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false),
         modifier = Modifier.padding(16.dp).fillMaxWidth(),
-        containerColor = Color(0xFF1A1A1A), shape = RoundedCornerShape(AiDesign.CornerLarge),
+        containerColor = AiDesign.surfaceColor(), shape = RoundedCornerShape(AiDesign.CornerLarge),
         title = {
             Column {
-                Text("AI Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
+                Text("AI Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = AiDesign.textColor())
                 Spacer(Modifier.height(16.dp))
                 PrimaryTabRow(
                     selectedTabIndex = activeTab,
@@ -1275,8 +1245,8 @@ fun AiSettingsDialog(
                         Tab(
                             selected = activeTab == i, 
                             onClick = { activeTab = i }, 
-                            unselectedContentColor = Color.White.copy(0.5f), 
-                            selectedContentColor = Color.White
+                            unselectedContentColor = AiDesign.textColor(0.5f), 
+                            selectedContentColor = AiDesign.textColor()
                         ) { 
                             Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(icon, null, Modifier.size(16.dp))
@@ -1313,37 +1283,37 @@ fun AiSettingsDialog(
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                                 selectedLabelColor = Color.White,
-                                                labelColor = Color.White.copy(0.6f),
-                                                containerColor = Color.White.copy(0.05f)
+                                                labelColor = AiDesign.textColor(0.6f),
+                                                containerColor = AiDesign.glassColor()
                                             ),
-                                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = state.provider == p, borderColor = Color.White.copy(0.1f), selectedBorderColor = Color.Transparent)
+                                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = state.provider == p, borderColor = AiDesign.glassBorder(), selectedBorderColor = Color.Transparent)
                                         )
                                     }
                                 }
                             }
                             SettingsSection("Model") {
-                                Surface(onClick = { showModelMenu = true }, shape = RoundedCornerShape(AiDesign.CornerSmall), color = Color.White.copy(0.05f), border = BorderStroke(1.dp, Color.White.copy(0.1f))) {
+                                Surface(onClick = { showModelMenu = true }, shape = RoundedCornerShape(AiDesign.CornerSmall), color = AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                                     Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text(state.selectedModel, fontWeight = FontWeight.Bold, color = Color.White)
-                                        Icon(Icons.Rounded.UnfoldMore, null, tint = Color.White.copy(0.7f))
+                                        Text(state.selectedModel, fontWeight = FontWeight.Bold, color = AiDesign.textColor())
+                                        Icon(Icons.Rounded.UnfoldMore, null, tint = AiDesign.textColor(0.7f))
                                     }
                                 }
-                                DropdownMenu(expanded = showModelMenu, onDismissRequest = { showModelMenu = false }, containerColor = Color(0xFF222222)) {
-                                    AiSettingsHelper.getModels(state.provider).forEach { m -> DropdownMenuItem(text = { Text(m, color = Color.White) }, onClick = { onModelChange(m); showModelMenu = false }) }
+                                DropdownMenu(expanded = showModelMenu, onDismissRequest = { showModelMenu = false }, containerColor = AiDesign.cardColor()) {
+                                    AiSettingsHelper.getModels(state.provider).forEach { m -> DropdownMenuItem(text = { Text(m, color = AiDesign.textColor()) }, onClick = { onModelChange(m); showModelMenu = false }) }
                                 }
                             }
                             SettingsSection("API Key") {
                                 OutlinedTextField(
                                     value = state.apiKey, onValueChange = onApiKeyChange, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(AiDesign.CornerSmall),
-                                    placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(state.provider), color = Color.White.copy(0.3f)) },
-                                    trailingIcon = { if (state.apiKey.isNotEmpty()) IconButton(onClick = { onApiKeyChange("") }) { Icon(Icons.Rounded.Close, null, tint = Color.White.copy(0.6f)) } },
+                                    placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(state.provider), color = AiDesign.textColor(0.3f)) },
+                                    trailingIcon = { if (state.apiKey.isNotEmpty()) IconButton(onClick = { onApiKeyChange("") }) { Icon(Icons.Rounded.Close, null, tint = AiDesign.textColor(0.6f)) } },
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        unfocusedBorderColor = Color.White.copy(0.1f),
+                                        focusedTextColor = AiDesign.textColor(),
+                                        unfocusedTextColor = AiDesign.textColor(),
+                                        unfocusedBorderColor = AiDesign.glassBorder(),
                                         focusedBorderColor = MaterialTheme.colorScheme.primary.copy(0.5f),
-                                        unfocusedContainerColor = Color.White.copy(0.02f),
-                                        focusedContainerColor = Color.White.copy(0.05f)
+                                        unfocusedContainerColor = AiDesign.glassColor(),
+                                        focusedContainerColor = AiDesign.glassColor()
                                     ),
                                     supportingText = {
                                         if (state.apiKey.isEmpty() && state.isRemoteKeyAvailable) Text("Using shared key (limited quota)", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -1355,16 +1325,93 @@ fun AiSettingsDialog(
                                 }
                             }
 
+                            SettingsSection("Suggested Prompts") {
+                                Row(
+                                    Modifier.fillMaxWidth().background(AiDesign.glassColor(), RoundedCornerShape(AiDesign.CornerSmall)).border(1.dp, AiDesign.glassBorder(), RoundedCornerShape(AiDesign.CornerSmall)).padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Dynamic Prompts", fontWeight = FontWeight.Bold, color = AiDesign.textColor())
+                                        Text("Generate suggestions based on chat history", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.6f))
+                                    }
+                                    Switch(
+                                        checked = state.dynamicPromptsEnabled,
+                                        onCheckedChange = onToggleDynamicPrompts,
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                            uncheckedThumbColor = AiDesign.textColor(0.6f),
+                                            uncheckedTrackColor = AiDesign.glassColor(),
+                                            uncheckedBorderColor = AiDesign.glassBorder()
+                                        )
+                                    )
+                                }
+
+                                if (state.dynamicPromptsEnabled) {
+                                    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("Prompt Format", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                        Row(
+                                            Modifier.fillMaxWidth().background(AiDesign.glassColor(), RoundedCornerShape(12.dp)).padding(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            listOf("short", "medium", "long").forEach { format ->
+                                                val isSelected = state.promptFormat == format
+                                                Surface(
+                                                    onClick = { onPromptFormatChange(format) },
+                                                    modifier = Modifier.weight(1f).height(36.dp),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            format.replaceFirstChar { it.uppercase() },
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor(0.7f)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            SettingsSection("Advanced") {
+                                Row(
+                                    Modifier.fillMaxWidth().background(AiDesign.glassColor(), RoundedCornerShape(AiDesign.CornerSmall)).border(1.dp, AiDesign.glassBorder(), RoundedCornerShape(AiDesign.CornerSmall)).padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Search Toggle Icon", fontWeight = FontWeight.Bold, color = AiDesign.textColor())
+                                        Text("Show web search toggle in chat input", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.6f))
+                                    }
+                                    Switch(
+                                        checked = aiSearchIconVisible,
+                                        onCheckedChange = onSetAiSearchIconVisible,
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                            uncheckedThumbColor = AiDesign.textColor(0.6f),
+                                            uncheckedTrackColor = AiDesign.glassColor(),
+                                            uncheckedBorderColor = AiDesign.glassBorder()
+                                        )
+                                    )
+                                }
+                            }
+
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(onClick = onTest, Modifier.weight(1f).height(48.dp), enabled = !state.isTesting, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
                                     if (state.isTesting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Text("Test Connection", fontWeight = FontWeight.Bold)
                                 }
-                                IconButton(onClick = onRefresh, Modifier.size(48.dp).background(Color.White.copy(0.05f), RoundedCornerShape(14.dp))) { Icon(Icons.Rounded.Sync, null, tint = Color.White) }
+                                IconButton(onClick = onRefresh, Modifier.size(48.dp).background(AiDesign.glassColor(), RoundedCornerShape(14.dp))) { Icon(Icons.Rounded.Sync, null, tint = AiDesign.textColor()) }
                             }
 
                             if (state.testResult != null) {
                                 Surface(color = if (state.testResult.startsWith("✓")) Color(0xFF4CAF50).copy(.15f) else Color(0xFFFF5252).copy(.15f), shape = RoundedCornerShape(12.dp)) {
-                                    Text(state.testResult, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = Color.White)
+                                    Text(state.testResult, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = AiDesign.textColor())
                                 }
                             }
 
@@ -1378,7 +1425,16 @@ fun AiSettingsDialog(
                                         value = configName, onValueChange = { configName = it }, 
                                         Modifier.fillMaxWidth(), label = { Text("Preset Name") }, 
                                         shape = RoundedCornerShape(14.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, unfocusedBorderColor = Color.White.copy(0.1f))
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = AiDesign.textColor(),
+                                            unfocusedTextColor = AiDesign.textColor(),
+                                            unfocusedBorderColor = AiDesign.glassBorder(),
+                                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                            unfocusedContainerColor = AiDesign.glassColor(),
+                                            focusedContainerColor = AiDesign.glassColor(),
+                                            unfocusedLabelColor = AiDesign.textColor(0.5f),
+                                            focusedLabelColor = MaterialTheme.colorScheme.primary
+                                        )
                                     )
                                     
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1389,21 +1445,27 @@ fun AiSettingsDialog(
                                                 onClick = onCustomIconClick, 
                                                 modifier = Modifier.size(48.dp), 
                                                 shape = RoundedCornerShape(14.dp), 
-                                                color = if (state.selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primaryContainer else Color.White.copy(0.05f),
-                                                border = if (state.selectedIcon == "CUSTOM") BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+                                                color = if (state.selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(),
+                                                border = if (state.selectedIcon == "CUSTOM") BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, AiDesign.glassBorder())
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     if (state.customIconUri != null) {
                                                         AsyncImage(model = state.customIconUri, contentDescription = null, modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
                                                     } else {
-                                                        Icon(Icons.Rounded.AddAPhoto, null, Modifier.size(20.dp), tint = Color.White)
+                                                        Icon(Icons.Rounded.AddAPhoto, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.7f))
                                                     }
                                                 }
                                             }
 
                                             listOf("AUTO","GEMINI","CHATGPT","GROQ","CLAUDE","DEEPSEEK","BOT","SPARKLE").forEach { ik ->
-                                                Surface(onClick = { onIconChange(ik) }, modifier = Modifier.size(48.dp), shape = RoundedCornerShape(14.dp), color = if (state.selectedIcon == ik) MaterialTheme.colorScheme.primaryContainer else Color.White.copy(0.05f), border = if (state.selectedIcon == ik) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null) {
-                                                    Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig(ik, state.provider), null, Modifier.size(24.dp), tint = Color.White) }
+                                                Surface(
+                                                    onClick = { onIconChange(ik) }, 
+                                                    modifier = Modifier.size(48.dp), 
+                                                    shape = RoundedCornerShape(14.dp), 
+                                                    color = if (state.selectedIcon == ik) MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), 
+                                                    border = if (state.selectedIcon == ik) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, AiDesign.glassBorder())
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig(ik, state.provider), null, Modifier.size(24.dp), tint = if (state.selectedIcon == ik) MaterialTheme.colorScheme.onPrimaryContainer else AiDesign.textColor()) }
                                                 }
                                             }
                                         }
@@ -1417,16 +1479,16 @@ fun AiSettingsDialog(
                             if (savedConfigs.isEmpty()) {
                                 item { 
                                     Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Rounded.Bookmarks, null, Modifier.size(48.dp).alpha(0.2f), tint = Color.White)
-                                        Text("No presets saved", color = Color.White.copy(0.4f), modifier = Modifier.padding(top = 8.dp))
+                                        Icon(Icons.Rounded.Bookmarks, null, Modifier.size(48.dp).alpha(0.2f), tint = AiDesign.textColor())
+                                        Text("No presets saved", color = AiDesign.textColor(0.4f), modifier = Modifier.padding(top = 8.dp))
                                     }
                                 }
                             }
                             items(savedConfigs) { config ->
-                                Surface(Modifier.fillMaxWidth(), RoundedCornerShape(AiDesign.CornerSmall), Color.White.copy(0.05f), border = BorderStroke(1.dp, Color.White.copy(0.1f))) {
+                                Surface(Modifier.fillMaxWidth(), RoundedCornerShape(AiDesign.CornerSmall), AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         AiAvatar(config, 40.dp, performanceMode = true)
-                                        Column(Modifier.weight(1f)) { Text(config.name, fontWeight = FontWeight.Bold, color = Color.White); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(.6f)) }
+                                        Column(Modifier.weight(1f)) { Text(config.name, fontWeight = FontWeight.Bold, color = AiDesign.textColor()); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.6f)) }
                                         IconButton(onClick = { onEditConfig(config); activeTab = 0 }) { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary) }
                                         IconButton(onClick = { onDeleteConfig(config) }) { Icon(Icons.Rounded.DeleteOutline, null, tint = Color(0xFFFF5252)) }
                                     }
@@ -1438,7 +1500,7 @@ fun AiSettingsDialog(
             }
         },
         confirmButton = { Button(onClick = onSave, shape = RoundedCornerShape(14.dp)) { Text("Apply", fontWeight = FontWeight.Black) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = Color.White.copy(0.6f)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = AiDesign.textColor(0.6f)) } },
     )
     if (showTutorial) GuideDialog { showTutorial = false }
 }
@@ -1456,84 +1518,34 @@ private fun SettingsSection(label: String, content: @Composable ColumnScope.() -
 fun GuideDialog(onDismiss: () -> Unit) {
     val providers = AiSettingsHelper.providers
     val pagerState = rememberPagerState { providers.size }
-    AlertDialog(
-        onDismissRequest = onDismiss, containerColor = Color(0xFF1E1E1E), shape = RoundedCornerShape(AiDesign.CornerLarge),
-        title = { Text("Setup Guide", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleLarge, color = Color.White) },
-        text = {
-            Column(Modifier.fillMaxWidth().height(360.dp)) {
-                HorizontalPager(state = pagerState, Modifier.fillMaxWidth().weight(1f)) { page ->
-                    val p = providers[page]
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-                        AiAvatar(null, 64.dp, performanceMode = true)
-                        Spacer(Modifier.height(16.dp))
-                        Text(p, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                        Text(AiSettingsHelper.detailedInfo[p] ?: "", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.7f), modifier = Modifier.padding(16.dp))
-                        HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.White.copy(0.1f))
-                        (AiSettingsHelper.tutorials[p] ?: emptyList()).forEachIndexed { i, step ->
-                            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.Top) {
-                                Text("${i + 1}.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(28.dp))
-                                Text(step, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.8f), modifier = Modifier.weight(1f))
-                            }
-                        }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = RoundedCornerShape(AiDesign.CornerLarge), color = AiDesign.surfaceColor()) {
+            Column(Modifier.padding(24.dp)) {
+                Text("Setup Guide", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(16.dp))
+                HorizontalPager(state = pagerState, modifier = Modifier.height(300.dp)) { page ->
+                    val provider = providers[page]
+                    Column {
+                        Text(provider, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(8.dp))
+                        Text(AiSettingsHelper.getApiKeyPlaceholder(provider), color = AiDesign.textColor(0.7f))
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.Center) {
-                    repeat(providers.size) { i -> Box(Modifier.padding(4.dp).size(if (pagerState.currentPage == i) 10.dp else 6.dp).background(if (pagerState.currentPage == i) MaterialTheme.colorScheme.primary else Color.White.copy(0.2f), CircleShape)) }
-                }
-            }
-        },
-        confirmButton = { Button(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) { Text("Got it") } }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MessageActionsSheet(messageText: String, isUser: Boolean, onDismiss: () -> Unit, onCopy: () -> Unit) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1A1A1A),
-        shape = RoundedCornerShape(topStart = AiDesign.CornerLarge, topEnd = AiDesign.CornerLarge)
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp).navigationBarsPadding()) {
-            Text("Options", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.padding(bottom = 24.dp))
-            Surface(onClick = onCopy, shape = RoundedCornerShape(AiDesign.CornerMedium), color = Color.White.copy(0.05f), border = BorderStroke(1.dp, Color.White.copy(0.1f))) {
-                Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Copy Message", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-            if (!isUser) {
-                Spacer(Modifier.height(12.dp))
-                Surface(onClick = { /* share */ onDismiss() }, shape = RoundedCornerShape(AiDesign.CornerMedium), color = Color.White.copy(0.05f), border = BorderStroke(1.dp, Color.White.copy(0.1f))) {
-                    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Icon(Icons.Rounded.Share, null, tint = MaterialTheme.colorScheme.secondary)
-                        Text("Share Response", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
+                Button(onClick = onDismiss, Modifier.fillMaxWidth()) { Text("Got it") }
             }
         }
     }
 }
 
 @Composable
-fun ErrorMessage(error: String, onRetrySync: () -> Unit) {
-    Surface(
-        color = Color(0xFFFF5252).copy(0.15f),
-        shape = RoundedCornerShape(AiDesign.CornerMedium),
-        modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(1.dp, Color(0xFFFF5252).copy(.2f)),
-        shadowElevation = 2.dp
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Rounded.ErrorOutline, null, tint = Color(0xFFFF5252))
-                Text(error, style = MaterialTheme.typography.bodyMedium, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            }
-            if (error.contains("key", true) || error.contains("sync", true)) {
-                Button(onClick = onRetrySync, modifier = Modifier.align(Alignment.End), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)), shape = RoundedCornerShape(12.dp)) {
-                    Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Retry Sync")
-                }
-            }
+fun ErrorMessage(error: String, onRetry: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 12.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer.copy(0.4f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(0.2f))) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+            Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            IconButton(onClick = onRetry) { Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.error) }
         }
     }
 }
+
+

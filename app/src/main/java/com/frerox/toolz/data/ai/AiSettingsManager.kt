@@ -27,6 +27,10 @@ class AiSettingsManager @Inject constructor(
     companion object {
         const val DEFAULT_PROVIDER = "Groq"
         private const val KEY_SAVED_CONFIGS = "saved_configs"
+        private const val KEY_DYNAMIC_PROMPTS = "dynamic_prompts_enabled"
+        private const val KEY_NEVER_SHOW_PROMPTS = "never_show_prompts"
+        private const val KEY_EDITED_PROMPTS = "edited_prompts"
+        private const val KEY_PROMPT_FORMAT = "prompt_format"
         private fun userKey(p: String) = "api_key_user_$p"
         private fun remoteKey(p: String) = "api_key_remote_$p"
     }
@@ -34,6 +38,51 @@ class AiSettingsManager @Inject constructor(
     private val prefs: SharedPreferences by lazy { buildPrefs() }
     private val configListAdapter by lazy {
         moshi.adapter<List<AiConfig>>(Types.newParameterizedType(List::class.java, AiConfig::class.java))
+    }
+    private val stringListAdapter by lazy {
+        moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+    }
+    private val mapAdapter by lazy {
+        moshi.adapter<Map<String, String>>(Types.newParameterizedType(Map::class.java, String::class.java, String::class.java))
+    }
+
+    // ── Settings ───────────────────────────────────────────────────────────
+
+    fun isDynamicPromptsEnabled(): Boolean = prefs.getBoolean(KEY_DYNAMIC_PROMPTS, true)
+    fun setDynamicPromptsEnabled(enabled: Boolean) = prefs.edit().putBoolean(KEY_DYNAMIC_PROMPTS, enabled).apply()
+
+    fun getPromptFormat(): String = prefs.getString(KEY_PROMPT_FORMAT, "medium") ?: "medium"
+    fun setPromptFormat(format: String) = prefs.edit().putString(KEY_PROMPT_FORMAT, format).apply()
+
+    fun getNeverShowPrompts(): List<String> {
+        val json = prefs.getString(KEY_NEVER_SHOW_PROMPTS, null) ?: return emptyList()
+        return try { stringListAdapter.fromJson(json) ?: emptyList() } catch (e: Exception) { emptyList() }
+    }
+
+    fun addNeverShowPrompt(prompt: String) {
+        val list = getNeverShowPrompts().toMutableList()
+        if (!list.contains(prompt)) {
+            list.add(prompt)
+            prefs.edit().putString(KEY_NEVER_SHOW_PROMPTS, stringListAdapter.toJson(list)).apply()
+        }
+    }
+
+    fun getEditedPrompts(): Map<String, String> {
+        val json = prefs.getString(KEY_EDITED_PROMPTS, null) ?: return emptyMap()
+        return try { mapAdapter.fromJson(json) ?: emptyMap() } catch (e: Exception) { emptyMap() }
+    }
+
+    fun saveEditedPrompt(original: String, edited: String) {
+        val map = getEditedPrompts().toMutableMap()
+        map[original] = edited
+        prefs.edit().putString(KEY_EDITED_PROMPTS, mapAdapter.toJson(map)).apply()
+    }
+
+    fun resetPromptsData() {
+        prefs.edit()
+            .remove(KEY_NEVER_SHOW_PROMPTS)
+            .remove(KEY_EDITED_PROMPTS)
+            .apply()
     }
 
     private fun buildPrefs(): SharedPreferences = try {

@@ -71,10 +71,10 @@ class TipCalculatorViewModel @Inject constructor(
             
             chatRepository.getChatResponse(prompt, emptyList(), modelOverride = "llama-3.3-70b-versatile")
                 .collect { result ->
-                    result.onSuccess { response ->
+                    result.onSuccess { chunk ->
                         try {
                             // Simple manual parse if needed, but let's assume it returns clean JSON as requested
-                            val json = response.trim()
+                            val json = chunk.text.trim()
                             val code = json.substringAfter("\"code\":").substringAfter("\"").substringBefore("\"")
                             val symbol = json.substringAfter("\"symbol\":").substringAfter("\"").substringBefore("\"")
                             if (code.length == 3) {

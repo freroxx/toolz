@@ -70,7 +70,7 @@ data class MusicUiState(
     val folders: Map<String, List<MusicTrack>> = emptyMap(),
     val selectedTracks: Set<String> = emptySet(),
     val isSelectionMode: Boolean = false,
-    val showVisualizer: Boolean = true,
+    val showVisualizer: Boolean = false,
     val artShape: String = "CIRCLE",
     val rotationEnabled: Boolean = true,
     val hapticEnabled: Boolean = true,
@@ -86,7 +86,9 @@ data class MusicUiState(
     val isResolvingCatalog: Boolean = false,
     val playbackSpeed: Float = 1.0f,
     val equalizerPreset: String = "Normal",
-    val equalizerPresets: List<String> = listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Dance", "Heavy Metal", "Hip Hop", "Flat"),
+    val equalizerPresets: List<String> = listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Dance", "Heavy Metal", "Hip Hop", "Flat", "Custom"),
+    val customEqualizerGains: List<Float> = List(5) { 0f },
+    val visualizerSensitivity: Float = 1.0f,
     val showMusicSettings: Boolean = false
 )
 
@@ -309,6 +311,11 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
+                if (show && player.isPlaying) {
+                    startVisualizer()
+                } else if (!show) {
+                    stopVisualizer()
+                }
             }
         }
 
@@ -349,8 +356,28 @@ class MusicPlayerViewModel @Inject constructor(
 
         viewModelScope.launch {
             settingsRepository.musicEqualizerPreset.collect { preset ->
-                applyEqualizerPreset(preset)
                 _uiState.update { it.copy(equalizerPreset = preset) }
+                applyEqualizerPreset(preset)
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicCustomEqualizer.collect { data ->
+                if (data.isNotBlank()) {
+                    val gains = data.split(",").mapNotNull { it.toFloatOrNull() }
+                    if (gains.size >= 5) {
+                        _uiState.update { it.copy(customEqualizerGains = gains) }
+                        if (_uiState.value.equalizerPreset == "Custom") {
+                            applyCustomEqualizer(gains)
+                        }
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.musicVisualizerSensitivity.collect { sens ->
+                _uiState.update { it.copy(visualizerSensitivity = sens) }
             }
         }
 
@@ -564,9 +591,12 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     private fun startVisualizer() {
-        if (visualizer != null || player.audioSessionId == 0) return
+        if (visualizer != null || !_uiState.value.showVisualizer) return
+        val sessionId = player.audioSessionId
+        if (sessionId == 0) return
+        
         try {
-            visualizer = Visualizer(player.audioSessionId).apply {
+            visualizer = Visualizer(sessionId).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
@@ -586,12 +616,13 @@ class MusicPlayerViewModel @Inject constructor(
                                 for (j in startBin until endBin) {
                                     val r = it[j * 2].toInt()
                                     val im = it[j * 2 + 1].toInt()
-                                    sum += Math.sqrt((r * r + im * im).toDouble()).toFloat()
+                                    val magnitude = Math.hypot(r.toDouble(), im.toDouble()).toFloat()
+                                    sum += magnitude
                                 }
                                 
                                 val avg = if (endBin > startBin) sum / (endBin - startBin) else 0f
                                 // Apply sensitivity boost and scaling
-                                magnitudes[i] = (avg * (1f + i * 0.02f) * 0.5f).coerceIn(0f, 100f)
+                                magnitudes[i] = (avg * (1f + i * 0.05f) * 2.5f).coerceIn(0f, 100f)
                             }
                             _visualizerData.value = magnitudes
                         }
@@ -613,7 +644,47 @@ class MusicPlayerViewModel @Inject constructor(
         _visualizerData.value = FloatArray(0)
     }
 
+    // Duplicate removed: setEqualizerPreset(preset: String)
+
+
+    fun setCustomEqualizerGain(band: Int, gain: Float) {
+        val currentGains = _uiState.value.customEqualizerGains.toMutableList()
+        if (band in currentGains.indices) {
+            currentGains[band] = gain
+            _uiState.update { it.copy(customEqualizerGains = currentGains) }
+            viewModelScope.launch {
+                settingsRepository.setMusicCustomEqualizer(currentGains.joinToString(","))
+            }
+            if (_uiState.value.equalizerPreset == "Custom") {
+                applyCustomEqualizer(currentGains)
+            }
+        }
+    }
+
+    private fun applyCustomEqualizer(gains: List<Float>) {
+        val eq = equalizer ?: return
+        try {
+            gains.forEachIndexed { index, gain ->
+                if (index < eq.numberOfBands) {
+                    val level = (gain * 1500).toInt().coerceIn(-1500, 1500)
+                    eq.setBandLevel(index.toShort(), level.toShort())
+                }
+            }
+        } catch (e: Exception) {}
+    }
+
+    fun setVisualizerSensitivity(sensitivity: Float) {
+        viewModelScope.launch {
+            settingsRepository.setMusicVisualizerSensitivity(sensitivity)
+            _uiState.update { it.copy(visualizerSensitivity = sensitivity) }
+        }
+    }
+
     private fun applyEqualizerPreset(preset: String) {
+        if (preset == "Custom") {
+            applyCustomEqualizer(_uiState.value.customEqualizerGains)
+            return
+        }
         val eq = equalizer ?: return
         try {
             val numPresets = eq.numberOfPresets

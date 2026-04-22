@@ -52,7 +52,7 @@ class CaffeinateRepository @Inject constructor(
             result.onSuccess { response ->
                 try {
                     // Clean-up response: some models wrap in markdown blocks
-                    val cleanedResponse = response.trim()
+                    val cleanedResponse = response.text.trim()
                         .removePrefix("```json")
                         .removePrefix("```")
                         .removeSuffix("```")

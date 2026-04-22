@@ -21,7 +21,12 @@ interface ChatRepository {
         history: List<AiMessage>,
         image: Bitmap? = null,
         modelOverride: String? = null,
-    ): Flow<Result<String>>
+    ): Flow<Result<ChatResponseChunk>>
+
+    data class ChatResponseChunk(
+        val text: String,
+        val sources: String? = null
+    )
 
     /**
      * Tests the connection for the given [config] without writing any state.
