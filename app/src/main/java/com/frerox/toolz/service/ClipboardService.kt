@@ -10,10 +10,12 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
@@ -122,14 +124,13 @@ class ClipboardService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service creating")
-        createNotificationChannel()
+        NotificationHelper.createAllChannels(this)
         
-        // "Silent" notification - Min importance and not showing in status bar if possible
         val notification = createNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(NotificationHelper.ID_CLIPBOARD, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(NotificationHelper.ID_CLIPBOARD, notification)
         }
         
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -170,30 +171,13 @@ class ClipboardService : Service() {
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "System Background Process",
-                NotificationManager.IMPORTANCE_MIN // MIN means no sound, no vibration, might not show icon
-            ).apply {
-                description = "Handles background intelligence features"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_SECRET
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
     private fun createNotification(): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(null)
-            .setContentText(null)
-            .setSmallIcon(android.R.color.transparent) // Transparent icon to be less visible
+        return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_CLIPBOARD)
+            .setContentTitle("Clipboard Monitoring")
+            .setContentText("AI Background Processing Active")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
@@ -201,8 +185,6 @@ class ClipboardService : Service() {
 
     companion object {
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
-        const val CHANNEL_ID = "clipboard_silent_channel"
-        const val NOTIFICATION_ID = 3001
         const val MAX_ENTRIES = 150
     }
 }

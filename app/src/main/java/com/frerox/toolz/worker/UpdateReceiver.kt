@@ -8,8 +8,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.screens.utils.InstallHelper
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,12 +59,7 @@ class UpdateReceiver : BroadcastReceiver() {
 
     private fun showReadyToInstallNotification(context: Context, apkFile: File) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "app_updates"
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "App Updates", NotificationManager.IMPORTANCE_HIGH)
-            notificationManager.createNotificationChannel(channel)
-        }
+        NotificationHelper.createAllChannels(context)
 
         val installIntent = Intent(context, UpdateReceiver::class.java).apply {
             action = "com.frerox.toolz.INSTALL_UPDATE"
@@ -70,20 +67,16 @@ class UpdateReceiver : BroadcastReceiver() {
         }
         val installPendingIntent = PendingIntent.getBroadcast(context, 0, installIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val laterIntent = Intent() // Just dismisses
-        val laterPendingIntent = PendingIntent.getBroadcast(context, 1, laterIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setContentTitle("Update Ready")
-            .setContentText("Would you like to update?")
+        val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Update Ready to Install")
+            .setContentText("Tap to complete the update process.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SYSTEM)
             .setAutoCancel(true)
-            .addAction(com.frerox.toolz.R.drawable.ic_launcher_foreground, "Yes", installPendingIntent)
-            .addAction(com.frerox.toolz.R.drawable.ic_launcher_foreground, "Later", laterPendingIntent)
+            .addAction(android.R.drawable.ic_menu_upload, "Install Now", installPendingIntent)
             .build()
 
-        notificationManager.notify(1002, notification)
+        notificationManager.notify(NotificationHelper.ID_UPDATE_READY, notification)
     }
 }

@@ -55,4 +55,16 @@ interface MusicDao {
 
     @Query("UPDATE music_tracks SET playCount = playCount + 1, lastPlayed = :timestamp WHERE sourceUrl = :sourceUrl")
     suspend fun incrementPlayCountBySourceUrl(sourceUrl: String, timestamp: Long)
+
+    @Query("SELECT * FROM music_tracks")
+    suspend fun getAllTracksSync(): List<MusicTrack>
+
+    @Query("SELECT * FROM playlists")
+    suspend fun getAllPlaylistsSync(): List<Playlist>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTracks(tracks: List<MusicTrack>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlaylists(playlists: List<Playlist>)
 }

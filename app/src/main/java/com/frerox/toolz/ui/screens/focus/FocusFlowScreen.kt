@@ -230,8 +230,8 @@ fun FocusFlowScreen(
                         if (performanceMode) Modifier
                         else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)
                     ),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 // ── Permission banner ──────────────────────────────────────
                 if (!canDrawOverlays || !isAccessibilityEnabled) {
@@ -1020,6 +1020,10 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
     val hours     = totalTime / 3_600_000
     val minutes   = (totalTime % 3_600_000) / 60_000
 
+    val toolzTime      = stats.filter { it.category == AppCategory.TOOLZ }.sumOf { it.usageTimeMillis }
+    val distractionTime = stats.filter { it.category == AppCategory.DISTRACTION }.sumOf { it.usageTimeMillis }
+    val otherTime      = (totalTime - toolzTime - distractionTime).coerceAtLeast(0)
+
     Surface(
         modifier = Modifier.fillMaxWidth().bouncyClick { onClick() },
         shape    = RoundedCornerShape(24.dp),
@@ -1027,17 +1031,21 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)),
     ) {
         Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Rounded.Timeline, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
-                Text(
-                    "WEEKLY SCREEN TIME",
-                    style         = MaterialTheme.typography.labelMedium,
-                    fontWeight    = FontWeight.Black,
-                    color         = MaterialTheme.colorScheme.secondary,
-                    letterSpacing = 1.sp,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.Timeline, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                    @Suppress("DEPRECATION")
+                    Text(
+                        "WEEKLY FOCUS",
+                        style         = MaterialTheme.typography.labelMedium,
+                        fontWeight    = FontWeight.Black,
+                        color         = MaterialTheme.colorScheme.secondary,
+                        letterSpacing = 1.sp,
+                    )
+                }
+                Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f))
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
                 style      = MaterialTheme.typography.headlineLarge,
@@ -1045,26 +1053,31 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(18.dp))
 
-            val toolzTime      = stats.filter { it.category == AppCategory.TOOLZ }.sumOf { it.usageTimeMillis }
-            val distractionTime = stats.filter { it.category == AppCategory.DISTRACTION }.sumOf { it.usageTimeMillis }
-
             // Stacked bar
             if (totalTime > 0) {
                 val toolzFraction      = (toolzTime.toFloat() / totalTime).coerceIn(0f, 1f)
                 val distractionFraction = (distractionTime.toFloat() / totalTime).coerceIn(0f, 1f)
-                val otherFraction       = (1f - toolzFraction - distractionFraction).coerceAtLeast(0f)
+                val otherFraction       = (otherTime.toFloat() / totalTime).coerceIn(0f, 1f)
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(12.dp))
                 ) {
                     if (toolzFraction > 0f) {
-                        Box(Modifier.fillMaxHeight().weight(toolzFraction).background(MaterialTheme.colorScheme.primary))
+                        Box(Modifier.fillMaxHeight().weight(toolzFraction).background(MaterialTheme.colorScheme.primary)) {
+                            if (toolzFraction > 0.15f) {
+                                Text("${(toolzFraction*100).toInt()}%", modifier = Modifier.align(Alignment.Center), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                            }
+                        }
                     }
                     if (distractionFraction > 0f) {
-                        Box(Modifier.fillMaxHeight().weight(distractionFraction).background(MaterialTheme.colorScheme.error))
+                        Box(Modifier.fillMaxHeight().weight(distractionFraction).background(MaterialTheme.colorScheme.error)) {
+                            if (distractionFraction > 0.15f) {
+                                Text("${(distractionFraction*100).toInt()}%", modifier = Modifier.align(Alignment.Center), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                            }
+                        }
                     }
                     if (otherFraction > 0f) {
                         Box(Modifier.fillMaxHeight().weight(otherFraction).background(MaterialTheme.colorScheme.outlineVariant.copy(0.4f)))
@@ -1074,16 +1087,17 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(7.dp))
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.outlineVariant.copy(0.3f))
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 LegendItem("Productive", MaterialTheme.colorScheme.primary)
                 LegendItem("Distraction", MaterialTheme.colorScheme.error)
+                LegendItem("Other", MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }

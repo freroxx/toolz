@@ -9,7 +9,9 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.data.todo.TaskDao
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,18 +54,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
             val task = taskDao.getTaskById(taskId) ?: return@launch
             
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channelId = "task_reminders"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    channelId,
-                    "Task Reminders",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Notifications for upcoming task deadlines"
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
+            NotificationHelper.createAllChannels(context)
 
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -86,8 +77,8 @@ class TaskReminderReceiver : BroadcastReceiver() {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            val notification = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_TASK_REMINDERS)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("Task Due Soon")
                 .setContentText(task.title)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)

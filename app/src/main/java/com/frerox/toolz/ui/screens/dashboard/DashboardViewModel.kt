@@ -13,6 +13,8 @@ import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.util.OfflineManager
+import com.frerox.toolz.util.OfflineState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -26,7 +28,8 @@ class DashboardViewModel @Inject constructor(
     private val noteDao: NoteDao,
     private val taskDao: TaskDao,
     private val settingsRepository: SettingsRepository,
-    private val updateRepository: UpdateRepository
+    private val updateRepository: UpdateRepository,
+    private val offlineManager: OfflineManager
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -38,7 +41,24 @@ class DashboardViewModel @Inject constructor(
     private val _aiSuggestedRoutes = MutableStateFlow<List<String>>(emptyList())
     val aiSuggestedRoutes = _aiSuggestedRoutes.asStateFlow()
 
-    val categories = getDashboardCategories()
+    val offlineState = offlineManager.offlineState
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), OfflineState.ONLINE)
+
+    val categories = offlineState.map { state ->
+        val baseCategories = getDashboardCategories()
+        if (state == OfflineState.OFFLINE) {
+            baseCategories.map { category ->
+                category.copy(
+                    items = category.items.filter { item ->
+                        item.route != Screen.AiAssistant.route && 
+                        item.route != Screen.Search.route
+                    }
+                )
+            }.filter { it.items.isNotEmpty() }
+        } else {
+            baseCategories
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), getDashboardCategories())
 
     private val _localSearchResults = MutableStateFlow<List<ToolItem>>(emptyList())
     val localSearchResults = _localSearchResults.asStateFlow()
@@ -86,7 +106,7 @@ class DashboardViewModel @Inject constructor(
             _localSearchResults.value = emptyList()
             return
         }
-        val allTools = categories.flatMap { it.items }
+        val allTools = categories.value.flatMap { it.items }
         _localSearchResults.value = allTools.filter { 
             it.title.contains(query, ignoreCase = true) || 
             it.description.contains(query, ignoreCase = true)
@@ -112,24 +132,32 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    fun addRecentTool(route: String) {
-        viewModelScope.launch {
-            settingsRepository.addRecentTool(route)
-        }
-    }
-
     fun togglePinnedTool(route: String) {
         viewModelScope.launch {
             settingsRepository.togglePinnedTool(route)
         }
     }
 
+    fun addRecentTool(route: String) {
+        viewModelScope.launch {
+            settingsRepository.addRecentTool(route)
+        }
+    }
+
+    fun toggleOfflineMode(enabled: Boolean) {
+        viewModelScope.launch {
+            offlineManager.setOfflineMode(enabled)
+        }
+    }
+
     private fun performPowerfulSmartSearch(query: String) {
+        if (offlineState.value == OfflineState.OFFLINE) return
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             _isAiSearching.value = true
             try {
-                val toolsContext = categories.flatMap { it.items }.joinToString("\n") { 
+                val allCategories = categories.value
+                val toolsContext = allCategories.flatMap { it.items }.joinToString("\n") {
                     "- ${it.title}: ${it.description} (Route: ${it.route})" 
                 }
                 

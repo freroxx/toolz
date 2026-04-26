@@ -34,4 +34,10 @@ interface NotificationDao {
 
     @Query("SELECT DISTINCT packageName FROM notifications")
     fun getDistinctPackages(): Flow<List<String>>
+
+    @Query("SELECT * FROM notifications")
+    suspend fun getAllNotificationsSync(): List<NotificationEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNotifications(entries: List<NotificationEntry>)
 }

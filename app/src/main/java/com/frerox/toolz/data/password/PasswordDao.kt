@@ -28,4 +28,10 @@ interface PasswordDao {
 
     @Delete
     suspend fun deletePassword(password: PasswordEntity)
+
+    @Query("SELECT * FROM passwords")
+    suspend fun getAllPasswordsSync(): List<PasswordEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPasswords(passwords: List<PasswordEntity>)
 }

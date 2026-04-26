@@ -294,21 +294,23 @@ class ClaudeMessageAdapter {
 class AiRepositoryImpl @Inject constructor(
     private val settingsManager: AiSettingsManager,
     private val openAiService: OpenAiService,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 ) : ChatRepository {
 
     private val systemPrompt =
         "You are a helpful, concise, and accurate AI assistant inside the Toolz productivity app. " +
             "Format code inside markdown fenced code blocks with the language tag. " +
-            "Use **bold** for emphasis and keep responses focused and practical. " +
             "When there is uncertainty, say so plainly instead of guessing. " +
             "You are also known as Toolz AI. You have access to a web search tool. " +
-            "If the tool is available, use it to provide accurate, cited information for current events or facts outside your training data. " +
-            "If you cannot find information, admit it rather than hallucinating. " +
-            "When using web search, cite your sources clearly in the text."
+            "When web search is enabled, ALWAYS use it for current events, facts, or any information outside your training data. " +
+            "USE THE PROVIDED WEB_SEARCH TOOL DEFINITION. DO NOT type out <function> tags yourself. " +
+            "CRITICAL: When the user asks to search for something, extract ONLY the core subject and use it as your search query. " +
+            "I will provide you with search results; use them to provide a comprehensive, cited response. " +
+            "DO NOT say you are unable to find information if search results are provided. " +
+            "When using web search, cite your sources clearly in the text with [Title](URL) format."
 
     @Inject lateinit var searchBridgeHandler: SearchBridgeHandler
-    @Inject lateinit var settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 
     // ── getChatResponse ───────────────────────────────────────────────────
 
@@ -318,6 +320,10 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
         modelOverride: String?,
     ): Flow<Result<ChatRepository.ChatResponseChunk>> = flow {
+        if (settingsRepository.offlineModeEnabled.first()) {
+            emit(Result.failure(Exception("AI Assistant is unavailable in offline mode.")))
+            return@flow
+        }
         val provider = settingsManager.getAiProvider()
         val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
@@ -520,51 +526,89 @@ class AiRepositoryImpl @Inject constructor(
             tools          = if (searchEnabled) listOf(searchBridgeHandler.getToolDefinition()) else null
         )
         
-        var response = openAiService.getChatCompletion(
-            url = completionUrl,
-            authHeader = "Bearer $apiKey",
-            referer = if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null,
-            title = if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null,
-            request = request,
-        )
+        var response = try {
+            openAiService.getChatCompletion(
+                url = completionUrl,
+                authHeader = "Bearer $apiKey",
+                referer = if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null,
+                title = if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null,
+                request = request,
+            )
+        } catch (e: HttpException) {
+            if (e.code() == 400 && provider == "Groq") {
+                val errorBody = e.response()?.errorBody()?.string() ?: ""
+                var failedGen = ""
+                try {
+                    val map = moshi.adapter(Map::class.java).fromJson(errorBody)
+                    val err = map?.get("error") as? Map<*, *>
+                    failedGen = err?.get("failed_generation")?.toString() ?: ""
+                } catch (_: Exception) { }
+                
+                if (failedGen.isNotBlank()) {
+                    if (failedGen.contains("web_search") || failedGen.contains("query")) {
+                        failedGen = "<function=web_search>$failedGen</function>"
+                    }
+                    OpenAiResponse(
+                        choices = listOf(OpenAiChoice(
+                            message = OpenAiResponseMessage(role = "assistant", content = failedGen)
+                        ))
+                    )
+                } else throw e
+            } else throw e
+        }
 
         val choice = response.choices.firstOrNull() ?: return Result.success(ChatRepository.ChatResponseChunk("No response"))
         
         var searchSources: String? = null
+        val toolCalls = choice.message.toolCalls ?: mutableListOf()
+        val updatedMessages = messages.toMutableList()
+
+        // Check for pseudo-tool calls in the content (e.g. DeepSeek's <function=web_search>{...}</function>)
+        val initialContent = choice.message.content ?: ""
+        val pseudoMatch = Regex("<function\\\\?web_search\\s*(\\{.*?\\})</function>", RegexOption.DOT_MATCHES_ALL).find(initialContent)
         
-        if (choice.message.toolCalls != null && choice.message.toolCalls.isNotEmpty()) {
-            val toolCalls = choice.message.toolCalls
-            val updatedMessages = messages.toMutableList()
-            
-            // Add the assistant's tool call message
+        if (pseudoMatch != null || toolCalls.isNotEmpty()) {
+            // If it's a pseudo call, we need to manually trigger the tool and clean the content
+            val actualToolCalls = if (pseudoMatch != null) {
+                listOf(ToolCall(
+                    id = "pseudo_call_${System.currentTimeMillis()}",
+                    function = FunctionCall("web_search", pseudoMatch.groupValues[1])
+                ))
+            } else toolCalls
+
+            // Add the assistant's message, stripping actual tool calls to avoid strict JSON validation errors on follow-up
+            val cleanContent = choice.message.content?.replace(Regex("<function\\\\?web_search\\s*\\{.*?\\}</function>", RegexOption.DOT_MATCHES_ALL), "")?.trim() ?: ""
             updatedMessages += OpenAiMessage(
                 role = "assistant",
-                content = null,
-                toolCalls = toolCalls
+                content = MessageContent.Text(if (cleanContent.isNotBlank()) cleanContent else "I am searching the web for you...")
             )
 
             // Handle tool calls
-            for (toolCall in toolCalls) {
+            var combinedResults = ""
+            for (toolCall in actualToolCalls) {
                 val result = searchBridgeHandler.handleToolCall(toolCall)
-                updatedMessages += OpenAiMessage(
-                    role = "tool",
-                    toolCallId = toolCall.id,
-                    content = MessageContent.Text(result)
-                )
+                combinedResults += "$result\n\n"
             }
             
+            // Add results as a User message to completely sidestep any provider tool implementation bugs
+            updatedMessages += OpenAiMessage(
+                role = "user",
+                content = MessageContent.Text(combinedResults.trim())
+            )
+            
             // Serialize search sources
-            val sources = searchBridgeHandler.lastSearchResults
-            if (sources.isNotEmpty()) {
+            val foundSources = searchBridgeHandler.lastSearchResults
+            if (foundSources.isNotEmpty()) {
                 val sourcesAdapter = moshi.adapter<List<SearchResult>>(
                     com.squareup.moshi.Types.newParameterizedType(List::class.java, SearchResult::class.java)
                 )
-                searchSources = sourcesAdapter.toJson(sources)
+                searchSources = sourcesAdapter.toJson(foundSources)
             }
 
             // Call again with tool results
-            // Ensure tool_choice is not present when sending back tool results to some providers
-            request = request.copy(messages = updatedMessages, toolChoice = null)
+            // NOTE: We MUST omit 'tools' and 'tool_choice' to force the model to provide a FINAL text response.
+            request = request.copy(messages = updatedMessages, toolChoice = null, tools = null)
+            
             response = openAiService.getChatCompletion(
                 url = completionUrl,
                 authHeader = "Bearer $apiKey",
@@ -574,7 +618,8 @@ class AiRepositoryImpl @Inject constructor(
             )
         }
 
-        val text = response.choices.firstOrNull()?.message?.content ?: "No response"
+        val finalChoice = response.choices.firstOrNull() ?: return Result.success(ChatRepository.ChatResponseChunk("No response"))
+        val text = finalChoice.message.content ?: "No response"
         return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text), searchSources))
     }
 
@@ -743,7 +788,9 @@ class AiRepositoryImpl @Inject constructor(
         }
 
     private fun cleanResponseText(text: String): String =
-        text.replace("\uFEFF", "").trim()
+        text.replace("\uFEFF", "")
+            .replace(Regex("<function\\\\?web_search\\s*\\{.*?\\}</function>", RegexOption.DOT_MATCHES_ALL), "")
+            .trim()
 
     private fun httpErrorMessage(
         e: HttpException,

@@ -81,6 +81,14 @@ import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.service.StepCounterService
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import com.frerox.toolz.ui.components.OfflineTransitionOverlay
+import com.frerox.toolz.util.OfflineManager
+import com.frerox.toolz.util.OfflineState
+import kotlinx.coroutines.delay
 import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
@@ -105,6 +113,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var aiSettingsManager: AiSettingsManager
+
+    @Inject
+    lateinit var offlineManager: OfflineManager
 
     private val currentIntentState = mutableStateOf<Intent?>(null)
     private val currentIntentVersion = mutableStateOf(0L)
@@ -138,6 +149,30 @@ class MainActivity : AppCompatActivity() {
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
 
+            val offlineState by offlineManager.offlineState.collectAsState(initial = OfflineState.ONLINE)
+
+            var offlineOverlayVisible by remember { mutableStateOf(false) }
+            var offlineOverlayReady by remember { mutableStateOf(false) }
+            var lastOfflineState by remember { mutableStateOf(offlineState) }
+
+            LaunchedEffect(offlineState) {
+                if (offlineState != lastOfflineState) {
+                    offlineOverlayReady = false
+                    offlineOverlayVisible = true
+                    delay(1200)
+                    offlineOverlayReady = true
+                    delay(1000)
+                    offlineOverlayVisible = false
+                    lastOfflineState = offlineState
+                }
+            }
+
+            val blurAnim by animateFloatAsState(
+                targetValue = if (offlineOverlayVisible) 30f else 0f,
+                animationSpec = tween(600),
+                label = "blur"
+            )
+
             ToolzTheme(
                 darkTheme = isDark,
                 dynamicColor = dynamicColor,
@@ -149,33 +184,49 @@ class MainActivity : AppCompatActivity() {
                 hapticIntensity = hapticIntensity,
                 vibrationManager = vibrationManager
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .toolzBackground()
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = Color.Transparent
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .toolzBackground()
+                            .graphicsLayer {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !performanceMode && blurAnim > 0f) {
+                                    renderEffect = RenderEffect
+                                        .createBlurEffect(blurAnim, blurAnim, Shader.TileMode.CLAMP)
+                                        .asComposeRenderEffect()
+                                }
+                            }
                     ) {
-                        val navController = rememberNavController()
-                        val pdfViewModel: PdfViewModel = hiltViewModel()
-                        val incomingIntent = currentIntentState.value
-                        val incomingIntentVersion = currentIntentVersion.value
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = Color.Transparent
+                        ) {
+                            val navController = rememberNavController()
+                            val pdfViewModel: PdfViewModel = hiltViewModel()
+                            val incomingIntent = currentIntentState.value
+                            val incomingIntentVersion = currentIntentVersion.value
 
-                        ToolzNavHost(
-                            navController = navController,
-                            settingsRepository = settingsRepository,
-                            aiSettingsManager = aiSettingsManager,
-                            pdfViewModel = pdfViewModel,
-                            performanceMode = performanceMode,
-                            backgroundGradientEnabled = backgroundGradientEnabled,
-                            incomingIntent = incomingIntent,
-                            incomingIntentVersion = incomingIntentVersion,
-                        )
+                            ToolzNavHost(
+                                navController = navController,
+                                settingsRepository = settingsRepository,
+                                aiSettingsManager = aiSettingsManager,
+                                pdfViewModel = pdfViewModel,
+                                performanceMode = performanceMode,
+                                backgroundGradientEnabled = backgroundGradientEnabled,
+                                incomingIntent = incomingIntent,
+                                incomingIntentVersion = incomingIntentVersion,
+                            )
 
-                        UpdateOverlay(settingsRepository)
+                            UpdateOverlay(settingsRepository)
+                        }
                     }
+
+                    OfflineTransitionOverlay(
+                        state = offlineState,
+                        visible = offlineOverlayVisible,
+                        isReady = offlineOverlayReady,
+                        performanceMode = performanceMode
+                    )
                 }
             }
         }
@@ -545,7 +596,10 @@ fun ToolzNavHost(
         }
 
         composable(Screen.AiAssistant.route) {
-            AiAssistantScreen(onBack = { navController.popBackStack() })
+            AiAssistantScreen(
+                onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.Timer.route) {

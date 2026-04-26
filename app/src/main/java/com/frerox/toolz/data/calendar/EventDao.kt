@@ -26,4 +26,10 @@ interface EventDao {
 
     @Query("SELECT * FROM events ORDER BY timestamp ASC")
     fun getAllEvents(): Flow<List<EventEntry>>
+
+    @Query("SELECT * FROM events")
+    suspend fun getAllEventsSync(): List<EventEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEvents(events: List<EventEntry>)
 }

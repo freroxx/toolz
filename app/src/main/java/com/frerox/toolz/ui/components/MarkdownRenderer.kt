@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,7 +41,6 @@ sealed class MdSegment {
     object Divider : MdSegment()
 }
 
-@Composable
 fun parseMarkdownToSegments(raw: String): List<MdSegment> {
     val segments = mutableListOf<MdSegment>()
     val lines    = raw.lines()
@@ -82,7 +82,7 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         if (line.matches(Regex("^(\\s*)[\\-\\*\\+] .+"))) {
             val depth   = line.indexOfFirst { !it.isWhitespace() } / 2
             val content = line.trim().drop(2)
-            segments += MdSegment.BulletItem(inlineMarkdown(content), depth)
+            segments += MdSegment.BulletItem(inlineMarkdownNoCompose(content), depth)
             i++
             continue
         }
@@ -92,7 +92,7 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         if (numberedMatch != null) {
             val idx     = numberedMatch.groupValues[1].toIntOrNull() ?: 1
             val content = numberedMatch.groupValues[2]
-            segments += MdSegment.NumberedItem(idx, inlineMarkdown(content))
+            segments += MdSegment.NumberedItem(idx, inlineMarkdownNoCompose(content))
             i++
             continue
         }
@@ -117,21 +117,25 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         }
 
         // Normal paragraph
-        segments += MdSegment.Paragraph(inlineMarkdown(line))
+        segments += MdSegment.Paragraph(inlineMarkdownNoCompose(line))
         i++
     }
     return segments
 }
 
-@Composable
-fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
-    val colorScheme = MaterialTheme.colorScheme
-    data class Token(val start: Int, val end: Int, val content: String, val type: String)
+fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedString {
+    data class Token(val start: Int, val end: Int, val content: String, val type: String, val url: String? = null)
     val tokens = mutableListOf<Token>()
 
     fun scan(regex: String, type: String) {
         Regex(regex).findAll(text).forEach { m ->
-            tokens += Token(m.range.first, m.range.last + 1, m.groupValues.getOrElse(1) { m.value }, type)
+            val start = m.range.first
+            val end = m.range.last + 1
+            if (type == "link") {
+                tokens += Token(start, end, m.groupValues[1], "link", m.groupValues[2])
+            } else {
+                tokens += Token(start, end, m.groupValues.getOrElse(1) { m.value }, type)
+            }
         }
     }
 
@@ -139,6 +143,8 @@ fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
     scan("""\*(.+?)\*""", "italic")
     scan("""`(.+?)`""", "code")
     scan("""~~(.+?)~~""", "strike")
+
+    scan("""\[(.+?)\]\((.+?)\)""", "link")
 
     val clean = mutableListOf<Token>()
     var cursor = 0
@@ -155,8 +161,15 @@ fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
         when (tok.type) {
             "bold"   -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(tok.content) }
             "italic" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(tok.content) }
-            "code"   -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = colorScheme.onSurface.copy(0.08f), color = colorScheme.primary)) { append(tok.content) }
+            "code"   -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color.Black.copy(0.08f), color = Color(0xFF2962FF))) { append(tok.content) }
             "strike" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(tok.content) }
+            "link"   -> {
+                pushStringAnnotation(tag = "URL", annotation = tok.url ?: "")
+                withStyle(SpanStyle(color = Color(0xFF2962FF), textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold)) {
+                    append(tok.content)
+                }
+                pop()
+            }
             else     -> append(tok.content)
         }
         cursor = tok.end
@@ -169,7 +182,8 @@ fun MarkdownSegment(
     seg: MdSegment,
     modifier: Modifier = Modifier,
     baseFontSize: TextUnit = 16.sp,
-    textColor: Color = MaterialTheme.colorScheme.onSurface
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    onLinkClick: (String) -> Unit = {}
 ) {
     val bodyStyle = MaterialTheme.typography.bodyMedium.copy(
         fontSize = baseFontSize,
@@ -187,18 +201,48 @@ fun MarkdownSegment(
             Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, color = textColor, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
         }
         is MdSegment.Paragraph -> {
-            Text(seg.content, style = bodyStyle, modifier = modifier)
+            ClickableText(
+                text = seg.content,
+                style = bodyStyle,
+                modifier = modifier,
+                onClick = { offset ->
+                    seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()?.let { annotation ->
+                            onLinkClick(annotation.item)
+                        }
+                }
+            )
         }
         is MdSegment.BulletItem -> {
             Row(modifier = modifier.padding(start = (seg.depth * 12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(textColor.copy(alpha = 0.8f), CircleShape))
-                Text(seg.content, style = bodyStyle, modifier = Modifier.weight(1f))
+                ClickableText(
+                    text = seg.content,
+                    style = bodyStyle,
+                    modifier = Modifier.weight(1f),
+                    onClick = { offset ->
+                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                            .firstOrNull()?.let { annotation ->
+                                onLinkClick(annotation.item)
+                            }
+                    }
+                )
             }
         }
         is MdSegment.NumberedItem -> {
             Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${seg.index}.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, style = bodyStyle, modifier = Modifier.widthIn(min = (baseFontSize.value * 1.2f).dp))
-                Text(seg.content, style = bodyStyle, modifier = Modifier.weight(1f))
+                ClickableText(
+                    text = seg.content,
+                    style = bodyStyle,
+                    modifier = Modifier.weight(1f),
+                    onClick = { offset ->
+                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                            .firstOrNull()?.let { annotation ->
+                                onLinkClick(annotation.item)
+                            }
+                    }
+                )
             }
         }
         is MdSegment.Code -> MarkdownCodeBlock(language = seg.language, code = seg.code, modifier = modifier)

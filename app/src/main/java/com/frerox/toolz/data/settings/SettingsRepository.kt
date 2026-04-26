@@ -4,6 +4,7 @@ import android.media.RingtoneManager
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -43,12 +44,14 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_ADBLOCK_ENABLED = booleanPreferencesKey("search_adblock_enabled")
     private val SEARCH_DNS_PROVIDER = stringPreferencesKey("search_dns_provider") // "DEFAULT", "ADGUARD", "CLOUDFLARE", "GOOGLE", "CUSTOM"
     private val SEARCH_CUSTOM_DNS = stringPreferencesKey("search_custom_dns")
+    private val SEARCH_CUSTOM_DNS_SECONDARY = stringPreferencesKey("search_custom_dns_secondary")
     private val SEARCH_RECENT_DNS = stringSetPreferencesKey("search_recent_dns")
 
     val searchFirstTime: Flow<Boolean> = dataStore.data.map { it[SEARCH_FIRST_TIME] ?: true }
     val searchAdBlockEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_ENABLED] ?: true }
     val searchDnsProvider: Flow<String> = dataStore.data.map { it[SEARCH_DNS_PROVIDER] ?: "ADGUARD" }
     val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
+    val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
 
     suspend fun setSearchFirstTime(isFirstTime: Boolean) {
@@ -72,6 +75,10 @@ class SettingsRepository @Inject constructor(
                 pref[SEARCH_RECENT_DNS] = if (updated.size > 5) updated.takeLast(5).toSet() else updated.toSet()
             }
         }
+    }
+    
+    suspend fun setCustomDnsSecondary(dns: String) {
+        dataStore.edit { it[SEARCH_CUSTOM_DNS_SECONDARY] = dns }
     }
     
     suspend fun removeRecentDns(dns: String) {
@@ -126,6 +133,7 @@ class SettingsRepository @Inject constructor(
     private val FILL_THE_PILL_ENABLED = booleanPreferencesKey("fill_the_pill_enabled")
     private val PILL_TODO_ENABLED = booleanPreferencesKey("pill_todo_enabled")
     private val PILL_FOCUS_ENABLED = booleanPreferencesKey("pill_focus_enabled")
+    private val BACKUP_FREQUENCY = stringPreferencesKey("backup_frequency")
 
     // Onboarding
     private val USER_NAME = stringPreferencesKey("user_name")
@@ -162,6 +170,9 @@ class SettingsRepository @Inject constructor(
     // AI Search
     private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
     private val AI_SEARCH_ICON_VISIBLE = booleanPreferencesKey("ai_search_icon_visible")
+
+    // Offline Mode
+    private val OFFLINE_MODE_ENABLED = booleanPreferencesKey("offline_mode_enabled")
 
     // Loading Screen Persistence
     private val LAST_LOADING_TIME = longPreferencesKey("last_loading_time")
@@ -245,7 +256,12 @@ class SettingsRepository @Inject constructor(
     val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
     val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
-    val musicAiEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true }
+    val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
+
+    val musicAiEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
     val musicKeepScreenOnLyrics: Flow<Boolean> = dataStore.data.map { it[MUSIC_KEEP_SCREEN_ON_LYRICS] ?: true }
     val musicLyricsLayout: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_LAYOUT] ?: "LEFT" }
     val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
@@ -262,6 +278,7 @@ class SettingsRepository @Inject constructor(
     val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: true }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
     val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: false }
+    val backupFrequency: Flow<String> = dataStore.data.map { it[BACKUP_FREQUENCY] ?: "Never" }
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
@@ -286,9 +303,16 @@ class SettingsRepository @Inject constructor(
 
     val converterCustomOutputPath: Flow<String?> = dataStore.data.map { it[CONVERTER_CUSTOM_OUTPUT_PATH] }
 
-    val pdfAiOcrEnhance: Flow<Boolean> = dataStore.data.map { it[PDF_AI_OCR_ENHANCE] ?: false }
+    val pdfAiOcrEnhance: Flow<Boolean> = combine(
+        dataStore.data.map { it[PDF_AI_OCR_ENHANCE] ?: false },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
 
-    val aiSearchEnabled: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false }
+    val aiSearchEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
+
     val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
 
     val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
@@ -412,6 +436,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }
     suspend fun setPillTodoEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TODO_ENABLED] = enabled } }
     suspend fun setPillFocusEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FOCUS_ENABLED] = enabled } }
+    suspend fun setBackupFrequency(freq: String) { dataStore.edit { it[BACKUP_FREQUENCY] = freq } }
 
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
@@ -466,6 +491,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiSearchIconVisible(visible: Boolean) {
         dataStore.edit { it[AI_SEARCH_ICON_VISIBLE] = visible }
+    }
+
+    suspend fun setOfflineModeEnabled(enabled: Boolean) {
+        dataStore.edit { it[OFFLINE_MODE_ENABLED] = enabled }
     }
 
     suspend fun setLastLoadingTime(timestamp: Long) {

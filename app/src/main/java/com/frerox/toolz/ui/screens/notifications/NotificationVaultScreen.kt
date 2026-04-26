@@ -86,6 +86,7 @@ fun NotificationVaultScreen(
     var showVaultSettings by remember { mutableStateOf(false) }
     
     var isPermissionGranted by remember { mutableStateOf(true) }
+    var showExportMenu by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -101,7 +102,7 @@ fun NotificationVaultScreen(
             CenterAlignedTopAppBar(
                 title = { 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("NOTIFICATION VAULT", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
+                        Text("NOTIFS VAULT", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                             val alpha by infiniteTransition.animateFloat(
@@ -113,7 +114,7 @@ fun NotificationVaultScreen(
                             Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
                             Spacer(Modifier.width(6.dp))
                             @Suppress("DEPRECATION")
-                            Text("ANTI-RECALL ENGINE ACTIVE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            Text("CAPTURING NOTIFICATIONS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                 },
@@ -129,6 +130,12 @@ fun NotificationVaultScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showExportMenu = true },
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.FileUpload, contentDescription = "Export Logs")
+                    }
                     IconButton(
                         onClick = { 
                             vibrationManager?.vibrateClick()
@@ -156,6 +163,26 @@ fun NotificationVaultScreen(
                     selectedCategory = selectedCategory,
                     onCategorySelect = { viewModel.setCategory(it) }
                 )
+
+                val dateFilters = listOf("Anytime", "Today", "Yesterday", "Last 7 Days")
+                val selectedDateFilter by viewModel.selectedDateFilter.collectAsState()
+                
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(dateFilters) { filter ->
+                        FilterChip(
+                            selected = selectedDateFilter == filter,
+                            onClick = { 
+                                vibrationManager?.vibrateTick()
+                                viewModel.setDateFilter(filter) 
+                            },
+                            label = { Text(filter) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
 
                 if (!isPermissionGranted) {
                     Surface(
@@ -197,7 +224,7 @@ fun NotificationVaultScreen(
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize()
                                     .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 itemsIndexed(notifications, key = { _, item -> item.id }) { index, notification ->
@@ -380,6 +407,30 @@ fun NotificationVaultScreen(
             VaultSettingsDialog(
                 viewModel = viewModel,
                 onDismiss = { showVaultSettings = false }
+            )
+        }
+
+        if (showExportMenu) {
+            AlertDialog(
+                onDismissRequest = { showExportMenu = false },
+                title = { Text("EXPORT LOGS", fontWeight = FontWeight.Black) },
+                text = { Text("Choose a format to export your captured notifications.") },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { 
+                            viewModel.exportLogs(context, "JSON")
+                            showExportMenu = false 
+                        }) { Text("JSON") }
+                        Button(onClick = { 
+                            viewModel.exportLogs(context, "TXT")
+                            showExportMenu = false 
+                        }) { Text("TXT") }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExportMenu = false }) { Text("CANCEL") }
+                },
+                shape = RoundedCornerShape(28.dp)
             )
         }
     }

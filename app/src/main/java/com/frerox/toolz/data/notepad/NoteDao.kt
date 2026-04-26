@@ -14,6 +14,15 @@ interface NoteDao {
     @Delete
     suspend fun deleteNote(note: Note)
 
+    @Delete
+    suspend fun deleteNotes(notes: List<Note>)
+
     @Query("UPDATE notes SET isPinned = :isPinned WHERE id = :noteId")
     suspend fun updatePinned(noteId: Int, isPinned: Boolean)
+
+    @Query("SELECT * FROM notes")
+    suspend fun getAllNotesSync(): List<Note>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNotes(notes: List<Note>)
 }

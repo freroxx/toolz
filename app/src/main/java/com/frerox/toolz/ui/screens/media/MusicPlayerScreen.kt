@@ -319,17 +319,27 @@ fun MusicPlayerScreen(
                                 onFolderClick = { name, tracks -> selectedFolderTracks = name to tracks },
                                 onAddFolder = { folderLauncher.launch(null) }
                             )
-                            2 -> CatalogContent(
-                                catalogViewModel = catalogViewModel,
-                                musicRepository = viewModel.repository,
-                                localTracks = state.tracks,
-                                onPlayTrack = { uri, title, artist, thumbUrl, sourceUrl ->
-                                    viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
-                                },
-                                onEnqueue = { track, playNext ->
-                                    viewModel.enqueueCatalogTrack(track, playNext)
+                            2 -> if (state.isOnline) {
+                                CatalogContent(
+                                    catalogViewModel = catalogViewModel,
+                                    musicRepository = viewModel.repository,
+                                    localTracks = state.tracks,
+                                    onPlayTrack = { uri, title, artist, thumbUrl, sourceUrl ->
+                                        viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
+                                    },
+                                    onEnqueue = { track, playNext ->
+                                        viewModel.enqueueCatalogTrack(track, playNext)
+                                    }
+                                )
+                            } else {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Rounded.CloudOff, null, modifier = Modifier.size(64.dp).alpha(0.1f))
+                                        Spacer(Modifier.height(16.dp))
+                                        Text("Catalog unavailable in offline mode", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                 }
@@ -800,16 +810,20 @@ private fun ScreenBottomBar(
             }
 
             // Custom TabRow
-            val tabs = listOf(
-                "Tracks" to Icons.Rounded.MusicNote,
-                "Library" to Icons.AutoMirrored.Rounded.PlaylistPlay,
-                "Catalog" to if (downloadCount > 0) Icons.Rounded.CloudDownload else Icons.Rounded.Cloud
-            )
+            val tabs = remember(state.isOnline, downloadCount) {
+                listOfNotNull(
+                    "Tracks" to Icons.Rounded.MusicNote,
+                    "Library" to Icons.AutoMirrored.Rounded.PlaylistPlay,
+                    if (state.isOnline) ("Catalog" to (if (downloadCount > 0) Icons.Rounded.CloudDownload else Icons.Rounded.Cloud)) else null
+                )
+            }
 
             PillTabRow(
                 tabs = tabs,
                 selectedTab = currentTab.coerceAtMost(tabs.size - 1),
-                onTabChange = onTabChange
+                onTabChange = { 
+                    if (it < tabs.size) onTabChange(it) 
+                }
             )
         }
     }

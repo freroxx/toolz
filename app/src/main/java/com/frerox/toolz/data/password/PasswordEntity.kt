@@ -13,5 +13,6 @@ data class PasswordEntity(
     val strength: Int, // 0-4
     val pwnedCount: Int? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val lastUsedAt: Long = System.currentTimeMillis()
+    val lastUsedAt: Long = System.currentTimeMillis(),
+    val passwordHistory: List<String> = emptyList()
 )

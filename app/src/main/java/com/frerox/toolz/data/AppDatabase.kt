@@ -3,12 +3,12 @@ package com.frerox.toolz.data
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import com.frerox.toolz.data.CommonConverters
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.music.MusicDao
-import com.frerox.toolz.data.music.MusicConverters
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistory
@@ -62,10 +62,10 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
         BookmarkEntry::class,
         QuickLinkEntry::class
     ], 
-    version = 32,
+    version = 34,
     exportSchema = false
 )
-@TypeConverters(MusicConverters::class, TodoConverters::class)
+@TypeConverters(CommonConverters::class, TodoConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun musicDao(): MusicDao

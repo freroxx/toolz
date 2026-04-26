@@ -46,6 +46,7 @@ data class AiAssistantUiState(
     val isGeneratingPrompts: Boolean         = false,
     val aiSearchEnabled   : Boolean          = false,
     val aiSearchIconVisible: Boolean         = true,
+    val loadingPhaseText  : String           = "",
 )
 
 data class AiSettingsUiState(
@@ -107,6 +108,7 @@ class AiAssistantViewModel @Inject constructor(
 
     private var messagesJob        : Job? = null
     private var activeInferenceJob : Job? = null
+    private var loadingPhaseJob    : Job? = null
 
     init {
         loadSettings()
@@ -402,7 +404,8 @@ class AiAssistantViewModel @Inject constructor(
 
     fun cancelRequest() {
         activeInferenceJob?.cancel(); activeInferenceJob = null
-        _uiState.update { it.copy(isLoading = false, streamingText = "") }
+        loadingPhaseJob?.cancel(); loadingPhaseJob = null
+        _uiState.update { it.copy(isLoading = false, streamingText = "", loadingPhaseText = "") }
     }
 
     // ── Send message ───────────────────────────────────────────────────────
@@ -442,7 +445,19 @@ class AiAssistantViewModel @Inject constructor(
 
             aiDao.insertMessage(AiMessage(chatId = currentId, text = text, isUser = true))
 
-            _uiState.update { it.copy(isLoading = true, error = null, quotaExceeded = false, selectedImage = null, streamingText = "", keysUnavailable = false) }
+            val webSearchEnabled = _uiState.value.aiSearchEnabled
+            _uiState.update { it.copy(isLoading = true, error = null, quotaExceeded = false, selectedImage = null, streamingText = "", keysUnavailable = false, loadingPhaseText = if (webSearchEnabled) "Surfing the web" else "Analyzing") }
+            
+            loadingPhaseJob?.cancel()
+            loadingPhaseJob = viewModelScope.launch {
+                val phases = if (webSearchEnabled) listOf("Surfing the web", "Working", "Finalizing response") else listOf("Analyzing", "Working", "Finalizing response")
+                var current = 0
+                while(true) {
+                    kotlinx.coroutines.delay(2000L)
+                    current = (current + 1).coerceAtMost(phases.lastIndex)
+                    _uiState.update { s -> s.copy(loadingPhaseText = phases[current]) }
+                }
+            }
 
             val accumulated = StringBuilder()
             var lastSources: String? = null
@@ -469,7 +484,8 @@ class AiAssistantViewModel @Inject constructor(
                 }
             }
 
-            _uiState.update { it.copy(isLoading = false, streamingText = "") }
+            loadingPhaseJob?.cancel()
+            _uiState.update { it.copy(isLoading = false, streamingText = "", loadingPhaseText = "") }
         }
     }
 

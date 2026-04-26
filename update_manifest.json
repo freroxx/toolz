@@ -1,23 +1,23 @@
 {
-  "versionName": "1.0.6",
-  "versionCode": 7,
-  "changelog": "Smart search, New dashboard, Better Performance, Music Player enhancements, AI visualizer colors, and Random Engine improvements.",
+  "versionName": "1.0.7",
+  "versionCode": 8,
+    "changelog": "Web search revamp, New PDF reader features, Offline Mode, Music Player fix and improvements, New AI assistant, and MORE!",
   "releases": [
     {
       "abi": "arm64-v8a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-arm64-v8a.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.7/toolz-arm64-v8a.apk"
     },
     {
       "abi": "armeabi-v7a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-armeabi-v7a.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.7/toolz-armeabi-v7a.apk"
     },
     {
       "abi": "x86_64",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-x86_64.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.7/toolz-x86_64.apk"
     },
     {
       "abi": "x86",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.6/toolz-x86.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.7/toolz-x86.apk"
     }
   ]
 }

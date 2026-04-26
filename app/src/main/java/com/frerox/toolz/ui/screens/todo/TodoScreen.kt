@@ -199,9 +199,9 @@ fun TodoScreen(
                 LazyVerticalStaggeredGrid(
                     columns = StaggeredGridCells.Fixed(1),
                     modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 100.dp),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalItemSpacing = 12.dp
+                    verticalItemSpacing = 16.dp
                 ) {
                     if (state.tasks.isEmpty() && state.completedToday.isEmpty()) {
                         item(span = StaggeredGridItemSpan.FullLine) {
@@ -427,7 +427,7 @@ fun TaskSummaryHeader(activeCount: Int, completedToday: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(horizontal = 24.dp, vertical = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SummaryCard(

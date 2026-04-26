@@ -20,6 +20,7 @@ import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
@@ -38,6 +39,7 @@ class FormulaOcrProcessor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val openAiService    : OpenAiService,
     private val aiSettingsManager: AiSettingsManager,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 ) {
 
     private val recognizers = mutableMapOf<OcrLanguage, TextRecognizer>()
@@ -318,6 +320,7 @@ class FormulaOcrProcessor @Inject constructor(
     }
 
     suspend fun runAiCleaner(rawText: String, language: OcrLanguage): String? {
+        if (settingsRepository.offlineModeEnabled.first()) return null
         val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
         if (key.isBlank()) return null
         val truncated = if (rawText.length > 10_000) rawText.take(10_000) + "…" else rawText
@@ -352,6 +355,7 @@ class FormulaOcrProcessor @Inject constructor(
     }
 
     suspend fun summarizePdf(text: String): String? {
+        if (settingsRepository.offlineModeEnabled.first()) return null
         val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
         if (key.isBlank()) return null
         val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text

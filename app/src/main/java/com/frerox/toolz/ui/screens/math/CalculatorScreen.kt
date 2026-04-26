@@ -339,9 +339,9 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         userScrollEnabled = false
     ) {
         items(buttons) { btn ->
@@ -380,13 +380,13 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
 fun ScientificKeypad(viewModel: CalculatorViewModel) {
     val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
+    val state by viewModel.uiState.collectAsState()
     
     // Popular scientific layout: Functions in upper grid, basic keys below
-    // We use a no-gap grid approach
     val functions = listOf(
         "sin", "cos", "tan", "log", "ln",
         "√", "xⁿ", "π", "e", "(",
-        ")", "deg", "2nd", "inv", "abs"
+        ")", "deg", "inv", "abs", "CONST"
     )
     
     val basics = listOf(
@@ -397,6 +397,8 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
         "0", ".", "!", "="
     )
 
+    var showConstants by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // Functions Grid (Top half, smaller buttons, tight)
         LazyVerticalGrid(
@@ -406,7 +408,7 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
         ) {
             items(functions) { btn ->
                 ScientificFunctionButton(
-                    text = if (btn == "deg") (if (viewModel.uiState.collectAsState().value.isDegreeMode) "DEG" else "RAD") else btn,
+                    text = if (btn == "deg") (if (state.isDegreeMode) "DEG" else "RAD") else btn,
                     onClick = {
                         if (hapticEnabled) vibrationManager?.vibrateTick()
                         when (btn) {
@@ -415,6 +417,7 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
                             "π" -> viewModel.onDigit("π")
                             "e" -> viewModel.onDigit("e")
                             "(", ")" -> viewModel.onOperator(btn)
+                            "CONST" -> showConstants = true
                             else -> viewModel.onFunction(btn)
                         }
                     }
@@ -453,6 +456,64 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
             }
         }
     }
+
+    if (showConstants) {
+        ConstantsDialog(
+            onDismiss = { showConstants = false },
+            onSelect = { value ->
+                viewModel.onDigit(value)
+                showConstants = false
+            }
+        )
+    }
+}
+
+@Composable
+fun ConstantsDialog(onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    val constants = listOf(
+        "π" to "3.14159265",
+        "e" to "2.71828182",
+        "φ" to "1.61803398",
+        "c" to "299792458",
+        "G" to "6.6743e-11",
+        "h" to "6.62607e-34",
+        "k" to "1.38064e-23",
+        "NA" to "6.02214e23",
+        "R" to "8.31446"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Scientific Constants", fontWeight = FontWeight.Black) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                constants.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        row.forEach { (name, value) ->
+                            Button(
+                                onClick = { onSelect(value) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(name, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                    Text(
+                                        text = value.take(6) + "...",
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.alpha(0.7f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        shape = RoundedCornerShape(28.dp)
+    )
 }
 
 @Composable
