@@ -1,4 +1,4 @@
-﻿package com.frerox.toolz.ui.screens.focus
+package com.frerox.toolz.ui.screens.focus
 
 import android.Manifest
 import android.content.Context
@@ -129,6 +129,12 @@ class CaffeinateViewModel @Inject constructor(
     fun toggleAppAutoEnable(app: CaffeinateApp) {
         viewModelScope.launch {
             repository.updateAppAutoEnable(app, !app.isAutoEnabled)
+        }
+    }
+
+    fun manualAddAppToCategory(packageName: String, category: String) {
+        viewModelScope.launch {
+            repository.manualAddApp(packageName, category)
         }
     }
 }
