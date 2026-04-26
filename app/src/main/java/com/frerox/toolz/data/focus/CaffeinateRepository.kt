@@ -34,12 +34,24 @@ class CaffeinateRepository @Inject constructor(
 
         if (installedApps.isEmpty()) return@withContext
 
+        // Pre-categorize locally to ensure we have something if AI fails
+        val localEntities = installedApps.map { (name, pkg) ->
+            CaffeinateApp(
+                packageName = pkg,
+                appName = name,
+                category = localCategorize(name, pkg)
+            )
+        }
+        caffeinateDao.insertApps(localEntities)
+
         val appNames = installedApps.map { it.first }.joinToString(", ")
         val prompt = """
             Categorize the following list of Android apps into exactly one of these categories: 
-            'Gaming', 'School', 'Work', 'Social Media', 'Reading', 'Utility', 'Other'.
-            Return ONLY a raw JSON array of objects with keys "name", "package", and "category".
-            Do not include any other text, markdown blocks, or explanations.
+            'Gaming', 'Social', 'Work', 'Reading', 'Video', 'Utility', 'Other'.
+            
+            Return ONLY a raw JSON array of objects. 
+            Format: [{"name": "App Name", "package": "com.pkg", "category": "Category"}]
+            
             Apps: $appNames
         """.trimIndent()
 
@@ -51,7 +63,6 @@ class CaffeinateRepository @Inject constructor(
         ).collect { result ->
             result.onSuccess { response ->
                 try {
-                    // Clean-up response: some models wrap in markdown blocks
                     val cleanedResponse = response.text.trim()
                         .removePrefix("```json")
                         .removePrefix("```")
@@ -88,12 +99,35 @@ class CaffeinateRepository @Inject constructor(
         }
     }
 
+    private fun localCategorize(name: String, pkg: String): String {
+        val lower = name.lowercase() + " " + pkg.lowercase()
+        return when {
+            lower.contains("game") || lower.contains("play") || lower.contains("pubg") -> "Gaming"
+            lower.contains("social") || lower.contains("insta") || lower.contains("face") || lower.contains("twitter") || lower.contains("messeng") -> "Social"
+            lower.contains("work") || lower.contains("office") || lower.contains("slack") || lower.contains("team") || lower.contains("meet") -> "Work"
+            lower.contains("read") || lower.contains("book") || lower.contains("kindle") || lower.contains("news") -> "Reading"
+            lower.contains("video") || lower.contains("tube") || lower.contains("netflix") || lower.contains("prime") -> "Video"
+            else -> "Utility"
+        }
+    }
+
     suspend fun updateAppAutoEnable(app: CaffeinateApp, isEnabled: Boolean) {
         caffeinateDao.updateApp(app.copy(isAutoEnabled = isEnabled))
     }
 
     suspend fun getAutoEnabledPackages(): Set<String> {
         return caffeinateDao.getAutoEnabledApps().map { it.packageName }.toSet()
+    }
+
+    suspend fun manualAddApp(packageName: String, category: String) = withContext(Dispatchers.IO) {
+        val pm = context.packageManager
+        try {
+            val info = pm.getApplicationInfo(packageName, 0)
+            val name = pm.getApplicationLabel(info).toString()
+            caffeinateDao.insertApps(listOf(CaffeinateApp(packageName, name, category, true)))
+        } catch (e: Exception) {
+            Log.e(TAG, "Manual add failed", e)
+        }
     }
 }
 

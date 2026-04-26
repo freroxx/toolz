@@ -1,4 +1,4 @@
-﻿package com.frerox.toolz
+package com.frerox.toolz
 
 import android.Manifest
 import android.content.Intent
@@ -756,6 +756,7 @@ fun ToolzNavHost(
                 onPlayAudio = { uri ->
                     val track = musicViewModel.uiState.value.tracks.find { it.uri == uri }
                     track?.let { musicViewModel.playTrack(it) }
+                    navController.navigate(Screen.MusicPlayer.route)
                 },
                 onViewPdf = { uri ->
                     pdfViewModel.openPdf(Uri.parse(uri))

@@ -17,6 +17,11 @@ import android.util.Log
 import android.widget.RemoteViews
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.focus.UsageStatsRepository
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -27,6 +32,14 @@ import kotlin.math.roundToInt
 //  Shows a ring indicator of total screen time vs 4h daily goal,
 //  plus a mini bar chart of the top 3 apps.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface WidgetEntryPoint {
+    fun usageStatsRepository(): UsageStatsRepository
+}
 
 class ScreenTimeWidgetProvider : AppWidgetProvider() {
 
@@ -117,9 +130,15 @@ class ScreenTimeWidgetProvider : AppWidgetProvider() {
     private data class UsageResult(val totalMs: Long, val topApps: List<Pair<String, Long>>)
 
     private fun loadTodayUsage(context: Context): UsageResult {
-        val statsManager = context.getSystemService(Context.USAGE_STATS_SERVICE)
-                as? UsageStatsManager ?: return UsageResult(0L, emptyList())
-        val pm  = context.packageManager
+        val repository = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            WidgetEntryPoint::class.java
+        ).usageStatsRepository()
+
+        if (!repository.hasUsageStatsPermission()) {
+            return UsageResult(0L, emptyList())
+        }
+
         val now = System.currentTimeMillis()
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -129,68 +148,12 @@ class ScreenTimeWidgetProvider : AppWidgetProvider() {
         }
         val startTime = cal.timeInMillis
 
-        return try {
-            val stats = statsManager.queryAndAggregateUsageStats(startTime, now)
-            val excluded = setOf("android", "com.android.systemui")
-            
-            // Detect the currently active foreground session.
-            // Only add delta time when the system hasn't yet flushed this resume event.
-            val ongoingSessions = mutableMapOf<String, Long>()
-            val recentEvents = statsManager.queryEvents(now - 600_000L, now)
-            val lastResumed = mutableMapOf<String, Long>()
-            val lastPaused  = mutableMapOf<String, Long>()
-            while (recentEvents.hasNextEvent()) {
-                val ev = android.app.usage.UsageEvents.Event()
-                recentEvents.getNextEvent(ev)
-                when (ev.eventType) {
-                    android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ->
-                        lastResumed[ev.packageName] = ev.timeStamp
-                    android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
-                    android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED ->
-                        lastPaused[ev.packageName] = ev.timeStamp
-                }
-            }
-            lastResumed.forEach { (pkg, resumeTime) ->
-                val pauseTime = lastPaused[pkg] ?: 0L
-                if (resumeTime > pauseTime) {
-                    val ongoingMs = now - resumeTime
-                    if (ongoingMs > 0L) {
-                        val aggregateLastUsed = stats[pkg]?.lastTimeUsed ?: 0L
-                        if (aggregateLastUsed < resumeTime) {
-                            ongoingSessions[pkg] = ongoingMs
-                        }
-                    }
-                }
-            }
+        val appList = repository.queryDailyByEvents(startTime, now)
 
-            val appList = stats.asSequence()
-                .filter { (pkg, usage) ->
-                    val ms = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
-                    val isToolz = pkg == context.packageName
-                    (ms > 5_000L || isToolz) && 
-                    pkg !in excluded &&
-                    (isToolz || pm.getLaunchIntentForPackage(pkg) != null)
-                }
-                .mapNotNull { (pkg, usage) ->
-                    val ms = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
-                    val name = try {
-                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                    } catch (_: Exception) {
-                        if (pkg == context.packageName) "Toolz" else return@mapNotNull null
-                    }
-                    name to ms
-                }
-                .sortedByDescending { it.second }
-                .toList()
-
-            UsageResult(
-                totalMs = appList.sumOf { it.second },
-                topApps = appList.take(3),
-            )
-        } catch (e: Exception) {
-            Log.e("ScreenTimeWidget", "Error querying usage stats", e)
-            UsageResult(0L, emptyList())
-        }
+        return UsageResult(
+            totalMs = appList.sumOf { it.usageTimeMillis },
+            topApps = appList.take(3).map { it.appName to it.usageTimeMillis },
+        )
     }
 
     // ── Dynamic Colors (API 31+) ─────────────────────────────────────────────

@@ -82,6 +82,9 @@ class NotepadViewModel @Inject constructor(
     private val _isAiStyling     = MutableStateFlow(false)
     val isAiStyling: StateFlow<Boolean> = _isAiStyling.asStateFlow()
 
+    private val _isFocusMode = MutableStateFlow(false)
+    val isFocusMode: StateFlow<Boolean> = _isFocusMode.asStateFlow()
+
     private var lastDeletedNote: Note? = null
     private var lastDeletedNotes: List<Note>? = null
 
@@ -305,6 +308,10 @@ Examples:
 
     fun clearAiStyle() {
         _aiStyle.value = null
+    }
+
+    fun toggleFocusMode() {
+        _isFocusMode.value = !_isFocusMode.value
     }
 
     // ── Private helpers ────────────────────────────────────────────────────

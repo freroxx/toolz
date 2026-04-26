@@ -598,25 +598,27 @@ fun CategoryManagerUI(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(MaterialTheme.colorScheme.secondary.copy(0.1f), RoundedCornerShape(12.dp)),
+                                .size(44.dp)
+                                .background(MaterialTheme.colorScheme.secondary.copy(0.12f), RoundedCornerShape(14.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 when(category.uppercase()) {
                                     "WORK", "PRODUCTIVITY" -> Icons.Rounded.Work
-                                    "ENTERTAINMENT" -> Icons.Rounded.Movie
+                                    "VIDEO", "ENTERTAINMENT" -> Icons.Rounded.Movie
                                     "SOCIAL" -> Icons.Rounded.Public
-                                    "GAMES" -> Icons.Rounded.SportsEsports
+                                    "GAMING", "GAMES" -> Icons.Rounded.SportsEsports
+                                    "READING" -> Icons.Rounded.MenuBook
+                                    "UTILITY" -> Icons.Rounded.Build
                                     else -> Icons.Rounded.Category
                                 },
                                 null,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(20.dp),
                                 tint = MaterialTheme.colorScheme.secondary
                             )
                         }
                         Spacer(Modifier.width(16.dp))
-                        Text(category, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                        Text(category.uppercase(), fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
                         Icon(
                             if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
                             null,

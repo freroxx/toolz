@@ -53,6 +53,7 @@ import com.frerox.toolz.ui.components.MarkdownSegment
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -111,11 +112,19 @@ fun NotepadScreen(
         }
     }
 
-    val filteredNotes = remember(notes, searchQuery) {
+    var selectedCategory by remember { mutableStateOf("All") }
+
+    val filteredNotes = remember(notes, searchQuery, selectedCategory) {
         notes
             .filter {
-                it.title.contains(searchQuery, true) ||
-                        it.content.contains(searchQuery, true)
+                (it.title.contains(searchQuery, true) || it.content.contains(searchQuery, true)) &&
+                when (selectedCategory) {
+                    "Pinned" -> it.isPinned
+                    "Audio"  -> it.attachedAudioUri != null
+                    "PDFs"   -> it.attachedPdfUri != null
+                    "Images" -> it.attachedImageUri != null
+                    else     -> true
+                }
             }
             .sortedWith(
                 compareByDescending<Note> { it.isPinned }
@@ -127,42 +136,50 @@ fun NotepadScreen(
         containerColor = Color.Transparent,
         snackbarHost   = { SnackbarHost(snackbar) },
         topBar         = {
-            Column(Modifier.background(Color.Transparent).statusBarsPadding()) {
-                CenterAlignedTopAppBar(
-                    title = {
+            Column(
+                Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.surface,
+                                MaterialTheme.colorScheme.surface.copy(0.95f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .statusBarsPadding()
+            ) {
+                // Header
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
                         AnimatedContent(
                             targetState = isSelectionMode,
                             transitionSpec = { fadeIn() togetherWith fadeOut() },
                             label = "title"
                         ) { selecting ->
                             Text(
-                                if (selecting) "${selectedNoteIds.size} SELECTED" else "NOTEPAD",
+                                if (selecting) "${selectedNoteIds.size} SELECTED" else "MY NOTES",
                                 fontWeight    = FontWeight.Black,
-                                style         = MaterialTheme.typography.labelMedium,
-                                letterSpacing = 3.sp,
-                                color         = MaterialTheme.colorScheme.primary,
+                                style         = MaterialTheme.typography.headlineMedium,
+                                letterSpacing = (-1).sp,
+                                color         = MaterialTheme.colorScheme.onSurface,
                             )
                         }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick  = {
-                                vibration?.vibrateClick()
-                                if (isSelectionMode) selectedNoteIds = emptySet()
-                                else onBack()
-                            },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        ) {
-                            Icon(
-                                if (isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
-                                if (isSelectionMode) "Cancel Selection" else "Back"
-                            )
-                        }
-                    },
-                    actions = {
+                        Text(
+                            "${notes.size} total notes",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(0.4f),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (isSelectionMode) {
                             IconButton(
                                 onClick = {
@@ -183,58 +200,131 @@ fun NotepadScreen(
                                     }
                                 },
                                 modifier = Modifier
-                                    .padding(8.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(MaterialTheme.colorScheme.errorContainer),
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(16.dp)),
                             ) {
                                 Icon(Icons.Rounded.Delete, "Delete Selected", tint = MaterialTheme.colorScheme.error)
                             }
+                            IconButton(
+                                onClick = { selectedNoteIds = emptySet() },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp)),
+                            ) {
+                                Icon(Icons.Rounded.Close, "Cancel")
+                            }
+                        } else {
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp)),
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                            }
                         }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                )
-                // Search field
-                OutlinedTextField(
-                    value         = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder   = { Text("Search notes…") },
-                    modifier      = Modifier
+                    }
+                }
+
+                // Glassy Search Bar
+                Surface(
+                    modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    leadingIcon   = {
-                        Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
-                    },
-                    trailingIcon  = if (searchQuery.isNotEmpty()) { {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(0.6f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.1f))
+                ) {
+                    TextField(
+                        value         = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder   = { 
+                            Text(
+                                "Search your thoughts…", 
+                                color = MaterialTheme.colorScheme.onSurface.copy(0.3f),
+                                style = MaterialTheme.typography.bodyMedium
+                            ) 
+                        },
+                        modifier      = Modifier.fillMaxWidth(),
+                        leadingIcon   = {
+                            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        },
+                        trailingIcon  = if (searchQuery.isNotEmpty()) { {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
+                            }
+                        }} else null,
+                        singleLine    = true,
+                        colors        = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                // Filter Chips
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                        .fadingEdge(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)), 24.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val categories = listOf("All", "Pinned", "Audio", "PDFs", "Images")
+                    
+                    categories.forEach { category ->
+                        val selected = selectedCategory == category
+                        Surface(
+                            onClick = { vibration?.vibrateTick(); selectedCategory = category },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh.copy(0.4f),
+                            border = BorderStroke(1.dp, if (selected) Color.Transparent else MaterialTheme.colorScheme.outlineVariant.copy(0.1f))
+                        ) {
+                            Text(
+                                category.uppercase(),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(0.6f),
+                                letterSpacing = 1.sp
+                            )
                         }
-                    }} else null,
-                    shape         = RoundedCornerShape(28.dp),
-                    singleLine    = true,
-                    colors        = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor  = MaterialTheme.colorScheme.surfaceContainerLow,
-                        focusedContainerColor    = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedBorderColor     = Color.Transparent,
-                        focusedBorderColor       = MaterialTheme.colorScheme.primary.copy(0.4f),
-                    ),
-                )
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color     = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
-                    modifier  = Modifier.padding(top = 4.dp),
-                )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick        = { vibration?.vibrateClick(); noteToEdit = null; showEditor = true },
-                modifier       = Modifier.padding(bottom = 12.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor   = MaterialTheme.colorScheme.onPrimary,
-                shape          = RoundedCornerShape(22.dp),
-                icon           = { Icon(Icons.Rounded.Add, null, Modifier.size(24.dp)) },
-                text           = { Text("NEW NOTE", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            )
+            Surface(
+                onClick = { vibration?.vibrateClick(); noteToEdit = null; showEditor = true },
+                modifier = Modifier
+                    .padding(bottom = 16.dp, end = 8.dp)
+                    .height(64.dp)
+                    .widthIn(min = 160.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primary,
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Add, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                    Text(
+                        "NEW NOTE", 
+                        fontWeight = FontWeight.Black, 
+                        letterSpacing = 0.5.sp, 
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
         },
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
@@ -243,49 +333,49 @@ fun NotepadScreen(
                 .fillMaxSize()
                 .toolzBackground()
                 .padding(top = padding.calculateTopPadding())
-                .then(
-                    if (performanceMode) Modifier
-                    else Modifier.fadingEdge(
-                        Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 16.dp
-                    )
-                )
         ) {
-            if (filteredNotes.isEmpty()) {
-                NotesEmptyState(isSearching = searchQuery.isNotEmpty())
-            } else {
-                LazyVerticalStaggeredGrid(
-                    columns             = StaggeredGridCells.Fixed(2),
-                    modifier            = Modifier.fillMaxSize(),
-                    contentPadding      = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalItemSpacing = 16.dp,
-                ) {
-                    itemsIndexed(filteredNotes, key = { _, n -> n.id }) { _, note ->
-                        NoteCard(
-                            note                  = note,
-                            isSelected            = note.id in selectedNoteIds,
-                            isPlaying             = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
-                            currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
-                            onClick               = {
-                                if (isSelectionMode) {
-                                    vibration?.vibrateTick()
-                                    selectedNoteIds = if (note.id in selectedNoteIds) {
-                                        selectedNoteIds - note.id
+            AnimatedContent(
+                targetState = selectedCategory,
+                transitionSpec = {
+                    (fadeIn(tween(400)) + scaleIn(initialScale = 0.92f, animationSpec = spring(Spring.DampingRatioLowBouncy))) togetherWith
+                    fadeOut(tween(300))
+                },
+                label = "categorySwitch"
+            ) { targetCategory ->
+                if (filteredNotes.isEmpty()) {
+                    NotesEmptyState(isSearching = searchQuery.isNotEmpty(), selectedCategory = targetCategory)
+                } else {
+                    LazyVerticalStaggeredGrid(
+                        columns             = StaggeredGridCells.Fixed(2),
+                        modifier            = Modifier.fillMaxSize(),
+                        contentPadding      = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalItemSpacing = 16.dp,
+                    ) {
+                        itemsIndexed(filteredNotes, key = { _, n -> n.id }) { _, note ->
+                            NoteCard(
+                                note                  = note,
+                                isSelected            = note.id in selectedNoteIds,
+                                isPlaying             = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
+                                currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
+                                onClick               = {
+                                    if (isSelectionMode) {
+                                        vibration?.vibrateTick()
+                                        selectedNoteIds = if (note.id in selectedNoteIds) {
+                                            selectedNoteIds - note.id
+                                        } else {
+                                            selectedNoteIds + note.id
+                                        }
                                     } else {
-                                        selectedNoteIds + note.id
+                                        vibration?.vibrateClick()
+                                        noteToEdit = note
+                                        showEditor = true
                                     }
-                                } else {
-                                    vibration?.vibrateClick()
-                                    noteToEdit = note
-                                    showEditor = false
-                                }
-                            },
-                            onLongClick = {
-                                if (!isSelectionMode) {
+                                },
+                                onLongClick           = {
                                     vibration?.vibrateLongClick()
-                                    selectedNoteIds = setOf(note.id)
-                                }
-                            },
+                                    selectedNoteIds = selectedNoteIds + note.id
+                                },
                             onDelete = {
                                 if (!isSelectionMode) {
                                     vibration?.vibrateLongClick()
@@ -321,6 +411,7 @@ fun NotepadScreen(
             }
         }
     }
+}
 
     // ── Overlay layer ──────────────────────────────────────────────────────
 
@@ -385,40 +476,41 @@ fun NotepadScreen(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun NotesEmptyState(isSearching: Boolean) {
+private fun NotesEmptyState(isSearching: Boolean, selectedCategory: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier            = Modifier.padding(40.dp),
         ) {
             Surface(
-                modifier = Modifier.size(100.dp),
-                shape    = RoundedCornerShape(32.dp),
-                color    = MaterialTheme.colorScheme.primaryContainer.copy(0.35f),
-                border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(0.15f)),
+                modifier = Modifier.size(120.dp),
+                shape    = RoundedCornerShape(40.dp),
+                color    = MaterialTheme.colorScheme.primaryContainer.copy(0.25f),
+                border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(0.1f)),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        if (isSearching) Icons.Rounded.SearchOff else Icons.Rounded.EditNote,
+                        if (isSearching) Icons.Rounded.SearchOff else Icons.Rounded.NoteAdd,
                         null,
-                        modifier = Modifier.size(44.dp),
-                        tint     = MaterialTheme.colorScheme.primary,
+                        Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(0.6f)
                     )
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
             Text(
-                if (isSearching) "No matches" else "No notes yet",
-                style      = MaterialTheme.typography.titleMedium,
+                if (isSearching) "No matches found" else if (selectedCategory != "All") "No $selectedCategory yet" else "Your thoughts await",
+                style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
+                color      = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
-                if (isSearching) "Try a different search term."
-                else "Tap + to create your first note.",
-                style     = MaterialTheme.typography.bodyMedium,
-                color     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
-                textAlign = TextAlign.Center,
+                if (isSearching) "Try a different search term" else "Tap the '+' button to start writing your masterpiece.",
+                style      = MaterialTheme.typography.bodyMedium,
+                color      = MaterialTheme.colorScheme.onSurface.copy(0.4f),
+                textAlign  = TextAlign.Center,
+                lineHeight = 22.sp
             )
         }
     }
@@ -457,15 +549,15 @@ fun NoteCard(
                          else BorderStroke(1.dp, onColor.copy(alpha = 0.08f)),
     ) {
         Box {
-            Column(Modifier.padding(16.dp)) {
+            Column(Modifier.padding(20.dp)) {
                 // Title + pin
                 Row(
-                    verticalAlignment = Alignment.Top,
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
                         note.title.ifEmpty { "Untitled" },
-                        style      = MaterialTheme.typography.titleSmall,
+                        style      = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color      = onColor,
                         modifier   = Modifier.weight(1f),
@@ -473,109 +565,84 @@ fun NoteCard(
                         overflow   = TextOverflow.Ellipsis,
                     )
                     if (note.isPinned) {
-                        Icon(
-                            Icons.Rounded.PushPin, null,
-                            modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = -15f },
-                            tint     = onColor.copy(0.7f),
-                        )
+                        Surface(
+                            color = onColor.copy(0.1f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.PushPin, null,
+                                    modifier = Modifier.size(12.dp).graphicsLayer { rotationZ = -15f },
+                                    tint     = onColor,
+                                )
+                            }
+                        }
                     }
                 }
 
                 if (note.content.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
                     Text(
                         note.content,
-                        style     = MaterialTheme.typography.bodySmall.copy(
+                        style     = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = noteFontFamily(note.fontStyle),
                             fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
                             fontStyle  = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                            lineHeight = 18.sp,
+                            lineHeight = 20.sp,
+                            letterSpacing = 0.2.sp
                         ),
-                        color     = onColor.copy(0.7f),
-                        maxLines  = 7,
+                        color     = onColor.copy(0.75f),
+                        maxLines  = 6,
                         overflow  = TextOverflow.Ellipsis,
                     )
                 }
 
-                // PDF preview thumbnail
-                if (note.attachedPdfUri != null) {
-                    Spacer(Modifier.height(10.dp))
-                    PdfPreview(
-                        uri      = note.attachedPdfUri,
-                        modifier = Modifier.height(90.dp).fillMaxWidth(),
-                    )
-                }
-
-                // Image attachment preview
-                if (note.attachedImageUri != null) {
-                    Spacer(Modifier.height(10.dp))
-                    AsyncImage(
-                        model      = note.attachedImageUri,
-                        contentDescription = null,
-                        modifier   = Modifier
-                            .height(120.dp)
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-
-                // Attachment pills
+                // Previews / Attachments
                 if (note.attachedAudioUri != null || note.attachedPdfUri != null || note.attachedImageUri != null) {
-                    Spacer(Modifier.height(10.dp))
-                    if (note.attachedAudioUri != null) {
-                        MusicPill(
-                            title         = note.attachedAudioName ?: "Audio",
-                            isPlaying     = isPlaying,
-                            thumbnail     = currentTrackThumbnail,
-                            containerColor = onColor.copy(0.12f),
-                            contentColor  = onColor,
-                            onClick       = onPlayAudio,
-                            compact       = true,
-                        )
-                    }
-                    if (note.attachedPdfUri != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Surface(
-                            onClick = onViewPdf,
-                            color   = onColor.copy(0.12f),
-                            shape   = RoundedCornerShape(14.dp),
-                            border  = BorderStroke(1.dp, onColor.copy(0.08f)),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(Icons.Rounded.Description, null, Modifier.size(13.dp), tint = onColor)
-                                Spacer(Modifier.width(5.dp))
-                                Text("PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor)
-                            }
+                    Spacer(Modifier.height(16.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Image Preview
+                        note.attachedImageUri?.let { uri ->
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 140.dp)
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop
+                            )
                         }
-                    }
-                    if (note.attachedImageUri != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Surface(
-                            color   = onColor.copy(0.12f),
-                            shape   = RoundedCornerShape(14.dp),
-                            border  = BorderStroke(1.dp, onColor.copy(0.08f)),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(Icons.Rounded.Image, null, Modifier.size(13.dp), tint = onColor)
-                                Spacer(Modifier.width(5.dp))
-                                Text("IMAGE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor)
-                            }
+
+                        // PDF Preview
+                        note.attachedPdfUri?.let { uri ->
+                            PdfPreview(
+                                uri = uri,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(90.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                            )
+                        }
+
+                        // Music Pill
+                        note.attachedAudioUri?.let { uri ->
+                            MusicPill(
+                                title = note.attachedAudioName ?: "Attached Audio",
+                                isPlaying = isPlaying,
+                                thumbnail = if (isPlaying) currentTrackThumbnail else null,
+                                containerColor = onColor.copy(0.08f),
+                                contentColor = onColor,
+                                onClick = onPlayAudio,
+                                compact = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(20.dp))
 
                 // Footer
                 Row(
@@ -584,21 +651,22 @@ fun NoteCard(
                     verticalAlignment     = Alignment.CenterVertically,
                 ) {
                     Text(
-                        SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(note.timestamp)),
+                        SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(note.timestamp)).uppercase(),
                         style      = MaterialTheme.typography.labelSmall,
-                        color      = onColor.copy(0.45f),
-                        fontWeight = FontWeight.SemiBold,
+                        color      = onColor.copy(0.4f),
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        IconButton(onClick = onTogglePin, Modifier.size(28.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconButton(onClick = onTogglePin, Modifier.size(24.dp)) {
                             Icon(
                                 Icons.Rounded.PushPin, null,
-                                modifier = Modifier.size(13.dp),
-                                tint     = onColor.copy(if (note.isPinned) 0.9f else 0.2f),
+                                modifier = Modifier.size(16.dp),
+                                tint     = onColor.copy(if (note.isPinned) 1f else 0.2f),
                             )
                         }
-                        IconButton(onClick = onDelete, Modifier.size(28.dp)) {
-                            Icon(Icons.Rounded.Delete, null, Modifier.size(13.dp), tint = onColor.copy(0.2f))
+                        IconButton(onClick = onDelete, Modifier.size(24.dp)) {
+                            Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp), tint = onColor.copy(0.2f))
                         }
                     }
                 }
@@ -679,12 +747,13 @@ fun NoteViewerSheet(
                     verticalAlignment     = Alignment.CenterVertically,
                 ) {
                     Text(
-                        SimpleDateFormat("MMM dd, yyyy  HH:mm", Locale.getDefault()).format(Date(note.timestamp)),
+                        SimpleDateFormat("MMMM dd, yyyy · HH:mm", Locale.getDefault()).format(Date(note.timestamp)).uppercase(),
                         style      = MaterialTheme.typography.labelSmall,
-                        color      = onColor.copy(0.5f),
-                        fontWeight = FontWeight.SemiBold,
+                        color      = onColor.copy(0.4f),
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // AI Summarize
                         ViewerActionButton(
                             icon    = Icons.Rounded.AutoAwesome,
@@ -697,34 +766,48 @@ fun NoteViewerSheet(
                                 showSummary = true
                             },
                         )
-                        // Pin
-                        ViewerActionButton(
-                            icon    = Icons.Rounded.PushPin,
-                            tint    = onColor.copy(if (note.isPinned) 1f else 0.4f),
-                            bgAlpha = if (note.isPinned) 0.2f else 0.1f,
-                            bgColor = onColor,
-                            onClick = { vibration?.vibrateTick(); viewModel.togglePin(note) },
-                        )
                         // Edit
                         ViewerActionButton(
                             icon    = Icons.Rounded.Edit,
                             tint    = onColor,
-                            bgAlpha = 0.12f,
+                            bgAlpha = 0.15f,
                             bgColor = onColor,
                             onClick = { vibration?.vibrateClick(); onEdit() },
                         )
-                        // Delete
-                        ViewerActionButton(
-                            icon    = Icons.Rounded.Delete,
-                            tint    = onColor.copy(0.7f),
-                            bgAlpha = 0.1f,
-                            bgColor = onColor,
-                            onClick = { vibration?.vibrateLongClick(); viewModel.deleteNote(note); onDismiss() },
-                        )
+                        // More options
+                        var showMoreMenu by remember { mutableStateOf(false) }
+                        Box {
+                            ViewerActionButton(
+                                icon    = Icons.Rounded.MoreVert,
+                                tint    = onColor,
+                                bgAlpha = 0.1f,
+                                bgColor = onColor,
+                                onClick = { vibration?.vibrateTick(); showMoreMenu = true },
+                            )
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false },
+                                containerColor = noteColor.copy(0.95f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("PIN NOTE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall) },
+                                    leadingIcon = { Icon(Icons.Rounded.PushPin, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = { viewModel.togglePin(note); showMoreMenu = false },
+                                    colors = MenuDefaults.itemColors(textColor = onColor, leadingIconColor = onColor)
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("DELETE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall) },
+                                    leadingIcon = { Icon(Icons.Rounded.Delete, null, modifier = Modifier.size(18.dp)) },
+                                    onClick = { viewModel.deleteNote(note); onDismiss(); showMoreMenu = false },
+                                    colors = MenuDefaults.itemColors(textColor = onColor, leadingIconColor = onColor)
+                                )
+                            }
+                        }
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(16.dp))
 
                 // ── Stats + utility bar ──────────────────────────────────
                 val wordCount = remember(note.content) {
@@ -735,70 +818,56 @@ fun NoteViewerSheet(
                 val context    = LocalContext.current
 
                 Surface(
-                    color  = onColor.copy(0.07f),
-                    shape  = RoundedCornerShape(14.dp),
+                    color  = onColor.copy(0.08f),
+                    shape  = RoundedCornerShape(18.dp),
                     border = BorderStroke(1.dp, onColor.copy(0.06f)),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(
                         Modifier
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
                             .horizontalScroll(rememberScrollState()),
                         verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
                         // Word count
                         NoteStatChip("$wordCount words", Icons.Rounded.TextFields, onColor)
                         NoteStatChip("$charCount chars", Icons.Rounded.Tag, onColor)
-                        NoteStatChip("~$readMin min read", Icons.Rounded.Schedule, onColor)
+                        NoteStatChip("~$readMin min", Icons.Rounded.Schedule, onColor)
 
                         Spacer(Modifier.weight(1f))
 
-                        // Copy content
-                        Surface(
-                            onClick = {
-                                vibration?.vibrateClick()
-                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                        as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(
-                                    android.content.ClipData.newPlainText("Note", note.content)
-                                )
-                            },
-                            color  = onColor.copy(0.1f),
-                            shape  = RoundedCornerShape(10.dp),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        // Actions
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                onClick = {
+                                    vibration?.vibrateClick()
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                            as android.content.ClipboardManager
+                                    clipboard.setPrimaryClip(
+                                        android.content.ClipData.newPlainText("Note", note.content)
+                                    )
+                                },
+                                color  = onColor.copy(0.12f),
+                                shape  = RoundedCornerShape(12.dp),
                             ) {
-                                Icon(Icons.Rounded.ContentCopy, null, Modifier.size(12.dp), tint = onColor)
-                                Text("Copy", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = onColor)
+                                Icon(Icons.Rounded.ContentCopy, null, Modifier.padding(8.dp).size(16.dp), tint = onColor)
                             }
-                        }
-
-                        // Share
-                        Surface(
-                            onClick = {
-                                vibration?.vibrateClick()
-                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(android.content.Intent.EXTRA_SUBJECT, note.title.ifEmpty { "Note" })
-                                    putExtra(android.content.Intent.EXTRA_TEXT,
-                                        "${note.title.ifEmpty { "Note" }}\n\n${note.content}")
-                                }
-                                context.startActivity(android.content.Intent.createChooser(intent, "Share note"))
-                            },
-                            color  = onColor.copy(0.1f),
-                            shape  = RoundedCornerShape(10.dp),
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            Surface(
+                                onClick = {
+                                    vibration?.vibrateClick()
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_SUBJECT, note.title.ifEmpty { "Note" })
+                                        putExtra(android.content.Intent.EXTRA_TEXT,
+                                            "${note.title.ifEmpty { "Note" }}\n\n${note.content}")
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(intent, "Share note"))
+                                },
+                                color  = onColor.copy(0.12f),
+                                shape  = RoundedCornerShape(12.dp),
                             ) {
-                                Icon(Icons.Rounded.Share, null, Modifier.size(12.dp), tint = onColor)
-                                Text("Share", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = onColor)
+                                Icon(Icons.Rounded.Share, null, Modifier.padding(8.dp).size(16.dp), tint = onColor)
                             }
                         }
                     }
@@ -809,6 +878,7 @@ fun NoteViewerSheet(
             Column(
                 Modifier
                     .weight(1f)
+                    .fadingEdges(top = 16.dp, bottom = 40.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 40.dp),
             ) {
@@ -825,6 +895,7 @@ fun NoteViewerSheet(
                     Row(
                         Modifier
                             .padding(bottom = 24.dp)
+                            .fadingEdge(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)), 20.dp)
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -833,20 +904,20 @@ fun NoteViewerSheet(
                                 title          = note.attachedAudioName ?: "Audio",
                                 isPlaying      = isPlaying,
                                 thumbnail      = currentTrackThumbnail,
-                                containerColor = onColor.copy(0.12f),
+                                containerColor = onColor.copy(0.08f),
                                 contentColor   = onColor,
                                 onClick        = { vibration?.vibrateClick(); onPlayAudio(uri) },
                                 compact        = false,
                                 musicViewModel = musicViewModel,
-                                modifier       = Modifier.widthIn(max = 260.dp),
+                                modifier       = Modifier.widthIn(max = 280.dp),
                             )
                         }
                         note.attachedPdfUri?.let { uri ->
                             Surface(
                                 onClick = { vibration?.vibrateClick(); onViewPdf(uri) },
-                                color   = onColor.copy(0.12f),
+                                color   = onColor.copy(0.08f),
                                 shape   = RoundedCornerShape(24.dp),
-                                border  = BorderStroke(1.dp, onColor.copy(0.1f)),
+                                border  = BorderStroke(1.dp, onColor.copy(0.12f)),
                             ) {
                                 Row(
                                     Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
@@ -909,34 +980,6 @@ fun NoteViewerSheet(
     }
 }
 
-@Composable
-private fun NoteStatChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) {
-    Row(
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(icon, null, Modifier.size(11.dp), tint = tint.copy(0.5f))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = tint.copy(0.6f), fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun ViewerActionButton(
-    icon: ImageVector,
-    tint: Color,
-    bgAlpha: Float,
-    bgColor: Color,
-    onClick: () -> Unit,
-) {
-    IconButton(
-        onClick  = onClick,
-        modifier = Modifier
-            .size(40.dp)
-            .background(bgColor.copy(bgAlpha), CircleShape),
-    ) {
-        Icon(icon, null, Modifier.size(18.dp), tint = tint)
-    }
-}
 
 // ─────────────────────────────────────────────────────────────
 //  AI Summary bottom sheet
@@ -1064,6 +1107,7 @@ fun NoteEditorDialog(
 
     var title             by remember { mutableStateOf(note?.title    ?: "") }
     var content           by remember { mutableStateOf(note?.content  ?: "") }
+    val isFocusMode by viewModel.isFocusMode.collectAsState()
     var selectedColor     by remember { mutableIntStateOf(note?.color ?: 0xFFFFF9C4.toInt()) }
     var fontStyle         by remember { mutableStateOf(note?.fontStyle ?: "DEFAULT") }
     var fontSize          by remember { mutableFloatStateOf(note?.fontSize ?: 17f) }
@@ -1111,82 +1155,96 @@ fun NoteEditorDialog(
         Surface(Modifier.fillMaxSize(), color = bgColor) {
             Column(Modifier.statusBarsPadding()) {
                 // ── Top bar ──────────────────────────────────────────────
-                CenterAlignedTopAppBar(
-                    title = {
-                        Text(
-                            if (note == null) "NEW NOTE" else "EDIT NOTE",
-                            color         = onBgColor,
-                            fontWeight    = FontWeight.Black,
-                            style         = MaterialTheme.typography.labelMedium,
-                            letterSpacing = 2.sp,
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { vibration?.vibrateClick(); onDismiss() }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = onBgColor)
-                        }
-                    },
-                    actions = {
-                        // AI \"Choose the Look\" button
-                        IconButton(
-                            onClick  = {
-                                vibration?.vibrateClick()
-                                if (content.isNotBlank() || title.isNotBlank()) {
-                                    val tempNote = (note ?: Note(title = title, content = content, color = selectedColor)).copy(title = title, content = content)
-                                    viewModel.suggestStyleForNote(tempNote)
-                                }
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(onBgColor.copy(0.12f), CircleShape),
-                        ) {
-                            if (isAiStyling) {
-                                CircularProgressIndicator(
-                                    modifier     = Modifier.size(16.dp),
-                                    strokeWidth  = 2.dp,
-                                    color        = onBgColor,
-                                )
-                            } else {
-                                Icon(Icons.Rounded.AutoAwesome, "AI Look", Modifier.size(18.dp), tint = onBgColor)
+                AnimatedVisibility(
+                    visible = !isFocusMode,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                if (note == null) "NEW NOTE" else "EDIT NOTE",
+                                color         = onBgColor,
+                                fontWeight    = FontWeight.Black,
+                                style         = MaterialTheme.typography.labelMedium,
+                                letterSpacing = 2.sp,
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { vibration?.vibrateClick(); onDismiss() }) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = onBgColor)
                             }
-                        }
-                        // Attach
-                        IconButton(
-                            onClick = { vibration?.vibrateClick(); showAttachMenu = true },
-                            modifier = Modifier.padding(horizontal = 2.dp),
-                        ) {
-                            Icon(Icons.Rounded.AttachFile, null, tint = onBgColor)
-                        }
-                        // Save
-                        TextButton(
-                            onClick  = {
-                                vibration?.vibrateClick()
-                                onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName, attachedImageUri)
-                            },
-                            modifier = Modifier.padding(end = 8.dp),
-                        ) {
+                        },
+                        actions = {
+                            // Focus Mode Toggle
                             Surface(
-                                color  = onBgColor.copy(0.15f),
-                                shape  = RoundedCornerShape(14.dp),
-                                border = BorderStroke(1.dp, onBgColor.copy(0.1f)),
+                                onClick = { vibration?.vibrateClick(); viewModel.toggleFocusMode() },
+                                modifier = Modifier.size(42.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = onBgColor.copy(0.08f),
+                                border = BorderStroke(1.dp, onBgColor.copy(0.05f))
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.FilterCenterFocus, "Focus Mode", Modifier.size(20.dp), tint = onBgColor)
+                                }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            // AI "Choose the Look" button
+                            Surface(
+                                onClick  = {
+                                    vibration?.vibrateClick()
+                                    if (content.isNotBlank() || title.isNotBlank()) {
+                                        val tempNote = (note ?: Note(title = title, content = content, color = selectedColor)).copy(title = title, content = content)
+                                        viewModel.suggestStyleForNote(tempNote)
+                                    }
+                                },
+                                modifier = Modifier.size(42.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = onBgColor.copy(0.08f),
+                                border = BorderStroke(1.dp, onBgColor.copy(0.05f))
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (isAiStyling) {
+                                        CircularProgressIndicator(
+                                            modifier     = Modifier.size(18.dp),
+                                            strokeWidth  = 2.5.dp,
+                                            color        = onBgColor,
+                                        )
+                                    } else {
+                                        Icon(Icons.Rounded.AutoAwesome, "AI Look", Modifier.size(20.dp), tint = onBgColor)
+                                    }
+                                }
+                            }
+                            // Save
+                            Spacer(Modifier.width(12.dp))
+                            Surface(
+                                onClick  = {
+                                    vibration?.vibrateClick()
+                                    onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName, attachedImageUri)
+                                },
+                                modifier = Modifier.padding(end = 16.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = onBgColor,
+                                shadowElevation = 4.dp
                             ) {
                                 Text(
                                     "SAVE",
-                                    modifier      = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                    modifier      = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
                                     fontWeight    = FontWeight.Black,
-                                    color         = onBgColor,
+                                    color         = bgColor,
+                                    style         = MaterialTheme.typography.labelLarge,
                                     letterSpacing = 1.sp,
                                 )
                             }
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                )
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                    )
+                }
 
                 Column(
                     Modifier
                         .weight(1f)
-                        .padding(horizontal = 20.dp),
+                        .padding(horizontal = 24.dp),
                 ) {
                     // ── AI style preview banner ──────────────────────────────
                     AnimatedVisibility(
@@ -1218,33 +1276,35 @@ fun NoteEditorDialog(
                     }
 
                     // ── Title field ─────────────────────────────────────────
-                    TextField(
-                        value         = title,
-                        onValueChange = { title = it },
-                        placeholder   = {
-                            Text(
-                                "Title",
-                                style      = MaterialTheme.typography.headlineMedium,
-                                color      = onBgColor.copy(0.3f),
+                    AnimatedVisibility(visible = !isFocusMode) {
+                        TextField(
+                            value         = title,
+                            onValueChange = { title = it },
+                            placeholder   = {
+                                Text(
+                                    "Note Title",
+                                    style      = MaterialTheme.typography.headlineLarge,
+                                    color      = onBgColor.copy(0.2f),
+                                    fontWeight = FontWeight.Black,
+                                )
+                            },
+                            modifier  = Modifier.fillMaxWidth().padding(top = 16.dp),
+                            textStyle = MaterialTheme.typography.headlineLarge.copy(
                                 fontWeight = FontWeight.Black,
-                            )
-                        },
-                        modifier  = Modifier.fillMaxWidth(),
-                        textStyle = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Black,
-                            color      = onBgColor,
-                        ),
-                        colors    = transparentTextFieldColors(onBgColor),
-                        singleLine = true,
-                    )
+                                color      = onBgColor,
+                            ),
+                            colors    = transparentTextFieldColors(onBgColor),
+                            singleLine = true,
+                        )
+                    }
 
-                    // ── Attachment chips ────────────────────────────────────
-                    AnimatedVisibility(visible = attachedAudioUri != null || attachedPdfUri != null || attachedImageUri != null) {
+                    // ── Attachment row ────────────────────────────────────
+                    AnimatedVisibility(visible = !isFocusMode && (attachedAudioUri != null || attachedPdfUri != null || attachedImageUri != null)) {
                         Row(
                             Modifier
-                                .padding(vertical = 8.dp)
+                                .padding(vertical = 12.dp)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             attachedAudioUri?.let {
                                 AttachmentChip(
@@ -1273,113 +1333,157 @@ fun NoteEditorDialog(
                         }
                     }
 
-                    // ── Formatting toolbar — animated buttons ────────────────────
+                    // ── Formatting toolbar — modern floating feel ────────────────────
                     Surface(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        shape    = RoundedCornerShape(22.dp),
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        shape    = RoundedCornerShape(24.dp),
                         color    = onBgColor.copy(0.08f),
-                        border   = BorderStroke(1.dp, onBgColor.copy(0.05f)),
+                        border   = BorderStroke(1.dp, onBgColor.copy(0.06f)),
                     ) {
                         Row(
                             Modifier
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
                                 .horizontalScroll(rememberScrollState()),
                             verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            // Bold — spring scale on toggle
-                            val boldScale by animateFloatAsState(
-                                if (isBold) 1.18f else 1f,
-                                spring(Spring.DampingRatioMediumBouncy),
-                                label = "boldScale",
-                            )
-                            Box(Modifier.scale(boldScale)) {
-                                FormatButton(Icons.Rounded.FormatBold, isBold, onBgColor) {
-                                    vibration?.vibrateTick(); isBold = !isBold
-                                }
+                            FormatButton(Icons.Rounded.FormatBold, isBold, onBgColor) {
+                                vibration?.vibrateTick(); isBold = !isBold
                             }
-                            // Italic — spring scale on toggle
-                            val italicScale by animateFloatAsState(
-                                if (isItalic) 1.18f else 1f,
-                                spring(Spring.DampingRatioMediumBouncy),
-                                label = "italicScale",
-                            )
-                            Box(Modifier.scale(italicScale)) {
-                                FormatButton(Icons.Rounded.FormatItalic, isItalic, onBgColor) {
-                                    vibration?.vibrateTick(); isItalic = !isItalic
-                                }
+                            FormatButton(Icons.Rounded.FormatItalic, isItalic, onBgColor) {
+                                vibration?.vibrateTick(); isItalic = !isItalic
                             }
+                            
                             ToolbarDivider(onBgColor)
+                            
+                            // Quick Attach Actions
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                QuickAttachButton(Icons.Rounded.MusicNote, onBgColor, "Audio") {
+                                    vibration?.vibrateClick(); showTrackPicker = true
+                                }
+                                QuickAttachButton(Icons.Rounded.Description, onBgColor, "PDF") {
+                                    vibration?.vibrateClick(); showPdfPicker = true
+                                }
+                                QuickAttachButton(Icons.Rounded.Image, onBgColor, "Image") {
+                                    vibration?.vibrateClick(); imagePicker.launch("image/*")
+                                }
+                            }
+                            
+                            ToolbarDivider(onBgColor)
+                            
                             FontStyleSelector(fontStyle, onBgColor, vibration) { fontStyle = it }
+                            
                             ToolbarDivider(onBgColor)
+                            
                             FontSizeControl(fontSize, onBgColor) { fontSize = it }
+
+                            if (isFocusMode) {
+                                ToolbarDivider(onBgColor)
+                                IconButton(onClick = { vibration?.vibrateClick(); viewModel.toggleFocusMode() }) {
+                                    Icon(Icons.Rounded.Close, null, tint = onBgColor)
+                                }
+                            }
                         }
                     }
 
 
                     // ── Colour picker ────────────────────────────────────────
-                    Row(
-                        Modifier
-                            .padding(vertical = 8.dp)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment     = Alignment.CenterVertically,
-                    ) {
-                        IconButton(
-                            onClick  = { vibration?.vibrateClick(); showCustomColor = true },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(onBgColor.copy(0.1f)),
+                    AnimatedVisibility(visible = !isFocusMode) {
+                        Row(
+                            Modifier
+                                .padding(vertical = 12.dp)
+                                .fadingEdge(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent)), 24.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment     = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Rounded.Palette, null, Modifier.size(18.dp), tint = onBgColor)
-                        }
-                        noteColors.forEach { argb ->
-                            val c  = Color(argb)
-                            val sel = selectedColor == argb
-                            Box(
-                                modifier = Modifier
-                                    .size(if (sel) 36.dp else 30.dp)
-                                    .clip(CircleShape)
-                                    .background(c)
-                                    .border(
-                                        if (sel) 2.5.dp else 1.dp,
-                                        if (sel) onBgColor else onBgColor.copy(0.12f),
-                                        CircleShape,
-                                    )
-                                    .clickable { vibration?.vibrateTick(); selectedColor = argb },
-                                contentAlignment = Alignment.Center,
+                            Surface(
+                                onClick  = { vibration?.vibrateClick(); showCustomColor = true },
+                                modifier = Modifier.size(42.dp),
+                                shape    = RoundedCornerShape(14.dp),
+                                color    = onBgColor.copy(0.1f),
+                                border   = BorderStroke(1.dp, onBgColor.copy(0.08f)),
                             ) {
-                                if (sel) Icon(Icons.Rounded.Check, null, Modifier.size(16.dp), tint = noteContentColor(c))
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Palette, null, Modifier.size(20.dp), tint = onBgColor)
+                                }
+                            }
+                            noteColors.forEach { argb ->
+                                val c   = Color(argb)
+                                val sel = selectedColor == argb
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(c)
+                                        .border(
+                                            if (sel) 2.dp else 1.dp,
+                                            if (sel) onBgColor else onBgColor.copy(0.15f),
+                                            RoundedCornerShape(14.dp),
+                                        )
+                                        .clickable { vibration?.vibrateTick(); selectedColor = argb },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (sel) Icon(Icons.Rounded.Check, null, Modifier.size(20.dp), tint = noteContentColor(c))
+                                }
                             }
                         }
                     }
 
                     // ── Content field ────────────────────────────────────────
-                    TextField(
-                        value         = content,
-                        onValueChange = { content = it },
-                        placeholder   = {
-                            Text(
-                                "Write your thoughts…",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = onBgColor.copy(0.3f),
-                            )
-                        },
-                        modifier  = Modifier.fillMaxWidth().weight(1f),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            fontFamily = noteFontFamily(fontStyle),
-                            fontSize   = fontSize.sp,
-                            fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
-                            fontStyle  = if (isItalic) FontStyle.Italic else FontStyle.Normal,
-                            color      = onBgColor,
-                            lineHeight = (fontSize * 1.65f).sp,
-                        ),
-                        colors = transparentTextFieldColors(onBgColor),
-                    )
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        TextField(
+                            value         = content,
+                            onValueChange = { content = it },
+                            placeholder   = {
+                                Text(
+                                    "Start typing your masterpiece…",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = onBgColor.copy(0.2f),
+                                )
+                            },
+                            modifier  = Modifier.fillMaxSize(),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                fontFamily = noteFontFamily(fontStyle),
+                                fontSize   = fontSize.sp,
+                                fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
+                                fontStyle  = if (isItalic) FontStyle.Italic else FontStyle.Normal,
+                                color      = onBgColor,
+                                lineHeight = (fontSize * 1.65f).sp,
+                            ),
+                            colors = transparentTextFieldColors(onBgColor),
+                        )
+
+                        // ── Disable Focus Button ────────────────────────────────
+                        if (isFocusMode) {
+                            Surface(
+                                onClick = { vibration?.vibrateClick(); viewModel.toggleFocusMode() },
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(16.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = onBgColor.copy(0.15f),
+                                border = BorderStroke(1.dp, onBgColor.copy(0.1f))
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Close, null, Modifier.size(16.dp), tint = onBgColor)
+                                    Text("DISABLE FOCUS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onBgColor)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
 
         // ── Bottom sheets & dialogs ────────────────────────────────────────
 
@@ -1417,8 +1521,11 @@ fun NoteEditorDialog(
                 onColorSelected = { selectedColor = it; showCustomColor = false },
             )
         }
-    }
-}
+        }
+
+
+
+
 
 // ─────────────────────────────────────────────────────────────
 //  AI style preview banner
@@ -1512,12 +1619,19 @@ private fun AiStyleBanner(
 
 @Composable
 private fun FormatButton(icon: ImageVector, active: Boolean, tint: Color, onClick: () -> Unit) {
-    IconButton(onClick = onClick, Modifier.size(38.dp)) {
-        Icon(
-            icon, null,
-            Modifier.size(20.dp),
-            tint = if (active) MaterialTheme.colorScheme.primary else tint.copy(0.6f),
-        )
+    Surface(
+        onClick = onClick,
+        color   = if (active) tint.copy(0.15f) else Color.Transparent,
+        shape   = CircleShape,
+        modifier = Modifier.size(38.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                icon, null,
+                Modifier.size(18.dp),
+                tint = if (active) tint else tint.copy(0.5f),
+            )
+        }
     }
 }
 
@@ -1701,8 +1815,37 @@ fun MusicPill(
                 )
             }
 
-            // Play/pause or animated bars
-            if (!compact) {
+            // Play/pause button or animated bars
+            if (compact) {
+                IconButton(
+                    onClick = { vibration?.vibrateClick(); musicViewModel.togglePlayPause() },
+                    modifier = Modifier.size(32.dp).background(contentColor.copy(0.1f), CircleShape)
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        Modifier.size(16.dp),
+                        tint = contentColor
+                    )
+                }
+                if (isPlaying) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        Modifier.height(14.dp).padding(end = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                        verticalAlignment     = Alignment.Bottom,
+                    ) {
+                        barHeights.forEach { h ->
+                            Box(
+                                Modifier
+                                    .width(2.5.dp)
+                                    .height(h.dp)
+                                    .background(contentColor, RoundedCornerShape(1.5.dp))
+                            )
+                        }
+                    }
+                }
+            } else {
                 Spacer(Modifier.width(8.dp))
                 IconButton(
                     onClick  = { vibration?.vibrateClick(); musicViewModel.togglePlayPause() },
@@ -1713,23 +1856,27 @@ fun MusicPill(
                         null, Modifier.size(20.dp), tint = contentColor,
                     )
                 }
-            } else if (isPlaying) {
-                Spacer(Modifier.width(6.dp))
-                Row(
-                    Modifier.height(14.dp).padding(end = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.5.dp),
-                    verticalAlignment     = Alignment.Bottom,
-                ) {
-                    barHeights.forEach { h ->
-                        Box(
-                            Modifier
-                                .width(2.5.dp)
-                                .height(h.dp)
-                                .background(contentColor, RoundedCornerShape(1.5.dp))
-                        )
-                    }
-                }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickAttachButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = color.copy(0.06f),
+        border = BorderStroke(1.dp, color.copy(0.08f)),
+        modifier = Modifier.size(36.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, null, Modifier.size(18.dp), tint = color.copy(0.8f))
         }
     }
 }
@@ -1835,46 +1982,129 @@ fun AttachmentTypeItem(title: String, desc: String, icon: ImageVector, color: Co
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachmentPickerDialog(
-    title    : String,
-    items    : List<Pair<String, String>>,
-    onDismiss: () -> Unit,
-    onSelect : (String, String) -> Unit,
+    title     : String,
+    items     : List<Pair<String, String>>,
+    onDismiss : () -> Unit,
+    onSelect  : (String, String) -> Unit,
+    musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
-    val vibration = LocalVibrationManager.current
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val musicState by musicViewModel.uiState.collectAsState()
+    val vibration  = LocalVibrationManager.current
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties       = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Surface(
-            Modifier.padding(28.dp).fillMaxWidth().heightIn(max = 500.dp),
-            shape          = RoundedCornerShape(28.dp),
-            color          = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .padding(28.dp)
+                .fillMaxWidth()
+                .heightIn(max = 500.dp),
+            shape    = RoundedCornerShape(28.dp),
+            color    = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 8.dp,
         ) {
-            Column(Modifier.padding(22.dp)) {
-                Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                Spacer(Modifier.height(16.dp))
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(24.dp)) {
+                @Suppress("DEPRECATION")
+                Text(
+                    title,
+                    style         = MaterialTheme.typography.labelSmall,
+                    fontWeight    = FontWeight.Black,
+                    color         = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.5.sp,
+                    modifier      = Modifier.padding(bottom = 16.dp)
+                )
+
+                LazyColumn(
+                    modifier            = Modifier.weight(1f).fadingEdges(top = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     items(items) { (name, uri) ->
+                        val isMusic = title.contains("AUDIO", ignoreCase = true)
+                        val track = if (isMusic) musicState.tracks.find { it.uri == uri } else null
+                        val isPlaying = isMusic && musicState.isPlaying && musicState.currentTrack?.uri == uri
+
+                        val inf = rememberInfiniteTransition(label = "rot")
+                        val rotationRaw by inf.animateFloat(
+                            0f, 360f,
+                            infiniteRepeatable(tween(10000, easing = LinearEasing)),
+                            label = "pickerRot"
+                        )
+                        val rotation = if (isPlaying) rotationRaw else 0f
+
                         Surface(
-                            onClick  = { vibration?.vibrateClick(); onSelect(name, uri) },
-                            shape    = RoundedCornerShape(18.dp),
-                            color    = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { vibration?.vibrateClick(); onSelect(name, uri) },
+                            shape   = RoundedCornerShape(20.dp),
+                            color   = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            border  = BorderStroke(1.dp, if (isPlaying) MaterialTheme.colorScheme.primary.copy(0.3f) else Color.Transparent)
                         ) {
-                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                Surface(Modifier.size(38.dp), RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(0.4f)) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            if (title.contains("AUDIO", ignoreCase = true)) Icons.Rounded.MusicNote else Icons.Rounded.Description,
-                                            null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary,
+                            Row(
+                                Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                // Thumbnail / Icon
+                                Surface(
+                                    modifier = Modifier.size(46.dp).graphicsLayer { rotationZ = rotation },
+                                    shape    = CircleShape,
+                                    color    = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                ) {
+                                    if (track?.thumbnailUri != null) {
+                                        AsyncImage(
+                                            model = track.thumbnailUri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                if (isMusic) Icons.Rounded.MusicNote else Icons.Rounded.Description,
+                                                null,
+                                                Modifier.size(20.dp),
+                                                tint = MaterialTheme.colorScheme.primary.copy(0.6f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        track?.title ?: name,
+                                        style      = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Black,
+                                        maxLines   = 1,
+                                        overflow   = TextOverflow.Ellipsis
+                                    )
+                                    if (isMusic) {
+                                        Text(
+                                            track?.artist ?: "Unknown Artist",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-                                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+
+                                if (isPlaying) {
+                                    Icon(
+                                        Icons.Rounded.VolumeUp,
+                                        null,
+                                        Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
-                TextButton(onClick = { vibration?.vibrateClick(); onDismiss() }, modifier = Modifier.align(Alignment.End)) {
+
+                Spacer(Modifier.height(16.dp))
+                TextButton(
+                    onClick  = { vibration?.vibrateClick(); onDismiss() },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    @Suppress("DEPRECATION")
                     Text("CANCEL", fontWeight = FontWeight.Black)
                 }
             }
@@ -1954,6 +2184,54 @@ private fun transparentTextFieldColors(cursorColor: Color): TextFieldColors {
         unfocusedIndicatorColor = Color.Transparent,
         cursorColor             = cursorColor,
     )
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Premium helper components
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+fun AttachmentIndicator(icon: ImageVector, color: Color) {
+    Surface(
+        color = color.copy(0.1f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.size(24.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, null, modifier = Modifier.size(12.dp), tint = color)
+        }
+    }
+}
+
+@Composable
+fun ViewerActionButton(icon: ImageVector, tint: Color, bgAlpha: Float, bgColor: Color, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color   = bgColor.copy(bgAlpha),
+        shape   = CircleShape,
+        modifier = Modifier.size(42.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, null, modifier = Modifier.size(20.dp), tint = tint)
+        }
+    }
+}
+
+@Composable
+fun NoteStatChip(text: String, icon: ImageVector, color: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(icon, null, modifier = Modifier.size(14.dp), tint = color.copy(0.5f))
+        Text(
+            text.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = color.copy(0.7f),
+            letterSpacing = 0.5.sp
+        )
+    }
 }
 
 // Reference to VibrationManager for FontStyleSelector parameter type
