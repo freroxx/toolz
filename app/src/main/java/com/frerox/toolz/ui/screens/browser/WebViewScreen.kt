@@ -197,19 +197,22 @@ fun WebViewScreen(
                                     // Block specific domains based on DNS provider selected
                                     // AdGuard DNS known blocklists or patterns
                                     val adguardBlocked = listOf(
-                                        "ads.", "googleads", "doubleclick", "adservice", "analytics", "tracking",
-                                        "googlesyndication.com", "adnxs.com", "outbrain.com", "taboola.com",
-                                        "adform.net", "adroll.com", "quantserve.com", "scorecardresearch.com",
-                                        "zedo.com", "advertising.com", "amazon-adsystem.com", "casalemedia.com",
-                                        "criteo.com", "pubmatic.com", "rubiconproject.com", "yieldmo.com",
-                                        "ad-delivery.net", "adgrx.com", "adhigh.net", "adlightning.com",
-                                        "ad-score.com", "ad-sys.com", "adtech.de", "ad-traffic.com"
+                                        "ads.", "googleads", "doubleclick", "adservice", "analytics.", "tracking", ".track", 
+                                        "googlesyndication.com", "adnxs.com", "outbrain.com", "taboola.com", "popads.net",
+                                        "adform.net", "adroll.com", "quantserve.com", "scorecardresearch.com", "moatads.com",
+                                        "zedo.com", "advertising.com", "amazon-adsystem.com", "casalemedia.com", "mathtag.com",
+                                        "criteo.com", "pubmatic.com", "rubiconproject.com", "yieldmo.com", "revcontent.com",
+                                        "ad-delivery.net", "adgrx.com", "adhigh.net", "adlightning.com", "popcash.net",
+                                        "ad-score.com", "ad-sys.com", "adtech.de", "ad-traffic.com", "adsco.re", "exelator.com",
+                                        "facebook.com/tr", "pixel.facebook.com", "static.ads-twitter.com", "ads-api.twitter.com",
+                                        "googletagservices.com", "googletagmanager.com", "pagead2.googlesyndication.com",
+                                        "ad.doubleclick.net", "google-analytics.com", "clarity.ms", "hotjar.com"
                                     )
                                     
                                     val isBlocked = when (currentDnsProvider) {
                                         "ADGUARD" -> adguardBlocked.any { host.contains(it) } || host.endsWith(".adguard.com")
-                                        "CLOUDFLARE" -> host.contains("analytics") || host.contains("tracking")
-                                        "GOOGLE" -> host.contains("doubleclick") || host.contains("googleads")
+                                        "CLOUDFLARE" -> (host.contains("analytics") || host.contains("tracking") || host.contains("clarity")) && !host.contains("google")
+                                        "GOOGLE" -> host.contains("doubleclick") || host.contains("googleads") || host.contains("googlesyndication")
                                         "CUSTOM" -> host.contains(currentCustomDns) && currentCustomDns.isNotEmpty()
                                         else -> adguardBlocked.any { host.contains(it) }
                                     }

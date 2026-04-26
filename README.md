@@ -16,7 +16,7 @@
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white" />
 </p>
 
-Toolz currently targets Android 12 and above, ships from this repository as version `1.0.6`, and combines 30+ precision instruments into a single Compose-first experience. Many tools work locally on-device, while connected features like AI, web search, music catalog downloads, and update checks use the internet when needed.
+Toolz currently targets Android 12 and above, ships from this repository as version `1.0.7`, and combines 30+ precision instruments into a single Compose-first experience. Many tools work locally on-device, while connected features like AI, web search, music catalog downloads, and update checks use the internet when needed.
 
 ## Why Toolz
 
@@ -76,7 +76,7 @@ Toolz is designed to feel like a real daily driver, not a demo shelf.
 Toolz is distributed through GitHub Releases:
 
 - Releases page: [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- Current repo version: `1.0.6`
+- Current repo version: `1.0.7`
 
 Download the APK that matches your device:
 

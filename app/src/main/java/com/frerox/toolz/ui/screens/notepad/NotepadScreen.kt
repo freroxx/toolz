@@ -3,6 +3,8 @@ package com.frerox.toolz.ui.screens.notepad
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -47,9 +49,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.ui.components.MarkdownSegment
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -92,6 +96,9 @@ fun NotepadScreen(
     var showEditor    by remember { mutableStateOf(false) }
     var noteToEdit    by remember { mutableStateOf<Note?>(null) }
     var searchQuery   by remember { mutableStateOf("") }
+    var selectedNoteIds by remember { mutableStateOf(setOf<Int>()) }
+    val isSelectionMode by remember { derivedStateOf { selectedNoteIds.isNotEmpty() } }
+
     val snackbar      = remember { SnackbarHostState() }
     val scope         = rememberCoroutineScope()
 
@@ -123,23 +130,65 @@ fun NotepadScreen(
             Column(Modifier.background(Color.Transparent).statusBarsPadding()) {
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            "NOTEPAD",
-                            fontWeight    = FontWeight.Black,
-                            style         = MaterialTheme.typography.labelMedium,
-                            letterSpacing = 3.sp,
-                            color         = MaterialTheme.colorScheme.primary,
-                        )
+                        AnimatedContent(
+                            targetState = isSelectionMode,
+                            transitionSpec = { fadeIn() togetherWith fadeOut() },
+                            label = "title"
+                        ) { selecting ->
+                            Text(
+                                if (selecting) "${selectedNoteIds.size} SELECTED" else "NOTEPAD",
+                                fontWeight    = FontWeight.Black,
+                                style         = MaterialTheme.typography.labelMedium,
+                                letterSpacing = 3.sp,
+                                color         = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(
-                            onClick  = { vibration?.vibrateClick(); onBack() },
+                            onClick  = {
+                                vibration?.vibrateClick()
+                                if (isSelectionMode) selectedNoteIds = emptySet()
+                                else onBack()
+                            },
                             modifier = Modifier
                                 .padding(8.dp)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                            Icon(
+                                if (isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
+                                if (isSelectionMode) "Cancel Selection" else "Back"
+                            )
+                        }
+                    },
+                    actions = {
+                        if (isSelectionMode) {
+                            IconButton(
+                                onClick = {
+                                    vibration?.vibrateLongClick()
+                                    val notesToDelete = notes.filter { it.id in selectedNoteIds }
+                                    viewModel.deleteNotes(notesToDelete)
+                                    selectedNoteIds = emptySet()
+                                    scope.launch {
+                                        val r = snackbar.showSnackbar(
+                                            "${notesToDelete.size} notes deleted",
+                                            actionLabel = "UNDO",
+                                            duration = SnackbarDuration.Short,
+                                        )
+                                        if (r == SnackbarResult.ActionPerformed) {
+                                            vibration?.vibrateTick()
+                                            viewModel.undoDelete()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.errorContainer),
+                            ) {
+                                Icon(Icons.Rounded.Delete, "Delete Selected", tint = MaterialTheme.colorScheme.error)
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -207,36 +256,58 @@ fun NotepadScreen(
                 LazyVerticalStaggeredGrid(
                     columns             = StaggeredGridCells.Fixed(2),
                     modifier            = Modifier.fillMaxSize(),
-                    contentPadding      = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalItemSpacing = 12.dp,
+                    contentPadding      = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalItemSpacing = 16.dp,
                 ) {
                     itemsIndexed(filteredNotes, key = { _, n -> n.id }) { _, note ->
                         NoteCard(
                             note                  = note,
+                            isSelected            = note.id in selectedNoteIds,
                             isPlaying             = musicState.isPlaying && musicState.currentTrack?.uri == note.attachedAudioUri,
                             currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                             onClick               = {
-                                vibration?.vibrateClick()
-                                noteToEdit = note
-                                showEditor = false
+                                if (isSelectionMode) {
+                                    vibration?.vibrateTick()
+                                    selectedNoteIds = if (note.id in selectedNoteIds) {
+                                        selectedNoteIds - note.id
+                                    } else {
+                                        selectedNoteIds + note.id
+                                    }
+                                } else {
+                                    vibration?.vibrateClick()
+                                    noteToEdit = note
+                                    showEditor = false
+                                }
+                            },
+                            onLongClick = {
+                                if (!isSelectionMode) {
+                                    vibration?.vibrateLongClick()
+                                    selectedNoteIds = setOf(note.id)
+                                }
                             },
                             onDelete = {
-                                vibration?.vibrateLongClick()
-                                viewModel.deleteNote(note)
-                                scope.launch {
-                                    val r = snackbar.showSnackbar(
-                                        "Note deleted",
-                                        actionLabel  = "UNDO",
-                                        duration     = SnackbarDuration.Short,
-                                    )
-                                    if (r == SnackbarResult.ActionPerformed) {
-                                        vibration?.vibrateTick()
-                                        viewModel.undoDelete()
+                                if (!isSelectionMode) {
+                                    vibration?.vibrateLongClick()
+                                    viewModel.deleteNote(note)
+                                    scope.launch {
+                                        val r = snackbar.showSnackbar(
+                                            "Note deleted",
+                                            actionLabel = "UNDO",
+                                            duration = SnackbarDuration.Short,
+                                        )
+                                        if (r == SnackbarResult.ActionPerformed) {
+                                            vibration?.vibrateTick()
+                                            viewModel.undoDelete()
+                                        }
                                     }
                                 }
                             },
-                            onTogglePin = { vibration?.vibrateTick(); viewModel.togglePin(note) },
+                            onTogglePin = { 
+                                if (!isSelectionMode) {
+                                    vibration?.vibrateTick(); viewModel.togglePin(note) 
+                                }
+                            },
                             onPlayAudio = { vibration?.vibrateClick(); note.attachedAudioUri?.let { onPlayAudio(it) } },
                             onViewPdf   = { vibration?.vibrateClick(); note.attachedPdfUri?.let  { onViewPdf(it)   } },
                             modifier    = Modifier.animateItem(
@@ -259,8 +330,8 @@ fun NotepadScreen(
             note      = null,
             viewModel = viewModel,
             onDismiss = { showEditor = false },
-            onSave    = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName ->
-                viewModel.addNote(title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName)
+            onSave    = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName, imageUri ->
+                viewModel.addNote(title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName, imageUri)
                 showEditor = false
             },
         )
@@ -285,7 +356,7 @@ fun NotepadScreen(
                 note      = note,
                 viewModel = viewModel,
                 onDismiss = { showEditor = false },
-                onSave    = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName ->
+                onSave    = { title, content, color, fontStyle, fontSize, bold, italic, pdfUri, audioUri, audioName, imageUri ->
                     val updated = note.copy(
                         title             = title,
                         content           = content,
@@ -297,6 +368,7 @@ fun NotepadScreen(
                         attachedPdfUri    = pdfUri,
                         attachedAudioUri  = audioUri,
                         attachedAudioName = audioName,
+                        attachedImageUri  = imageUri,
                         timestamp         = System.currentTimeMillis(),
                     )
                     viewModel.updateNote(updated)
@@ -359,9 +431,11 @@ private fun NotesEmptyState(isSearching: Boolean) {
 @Composable
 fun NoteCard(
     note                  : Note,
+    isSelected            : Boolean = false,
     isPlaying             : Boolean,
     currentTrackThumbnail : String?,
     onClick               : () -> Unit,
+    onLongClick           : () -> Unit = {},
     onDelete              : () -> Unit,
     onTogglePin           : () -> Unit,
     onPlayAudio           : () -> Unit,
@@ -375,122 +449,174 @@ fun NoteCard(
     Surface(
         modifier       = modifier
             .fillMaxWidth()
-            .bouncyClick(onClick = onClick),
+            .bouncyClick(onClick = onClick, onLongClick = onLongClick),
         shape          = RoundedCornerShape(28.dp),
         color          = noteColor,
         shadowElevation = if (performanceMode) 0.dp else 4.dp,
-        border         = BorderStroke(1.dp, onColor.copy(alpha = 0.08f)),
+        border         = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+                         else BorderStroke(1.dp, onColor.copy(alpha = 0.08f)),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            // Title + pin
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    note.title.ifEmpty { "Untitled" },
-                    style      = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Black,
-                    color      = onColor,
-                    modifier   = Modifier.weight(1f),
-                    maxLines   = 2,
-                    overflow   = TextOverflow.Ellipsis,
-                )
-                if (note.isPinned) {
-                    Icon(
-                        Icons.Rounded.PushPin, null,
-                        modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = -15f },
-                        tint     = onColor.copy(0.7f),
+        Box {
+            Column(Modifier.padding(16.dp)) {
+                // Title + pin
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        note.title.ifEmpty { "Untitled" },
+                        style      = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        color      = onColor,
+                        modifier   = Modifier.weight(1f),
+                        maxLines   = 2,
+                        overflow   = TextOverflow.Ellipsis,
+                    )
+                    if (note.isPinned) {
+                        Icon(
+                            Icons.Rounded.PushPin, null,
+                            modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = -15f },
+                            tint     = onColor.copy(0.7f),
+                        )
+                    }
+                }
+
+                if (note.content.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        note.content,
+                        style     = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = noteFontFamily(note.fontStyle),
+                            fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle  = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
+                            lineHeight = 18.sp,
+                        ),
+                        color     = onColor.copy(0.7f),
+                        maxLines  = 7,
+                        overflow  = TextOverflow.Ellipsis,
                     )
                 }
-            }
 
-            if (note.content.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    note.content,
-                    style     = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = noteFontFamily(note.fontStyle),
-                        fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
-                        fontStyle  = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                        lineHeight = 18.sp,
-                    ),
-                    color     = onColor.copy(0.7f),
-                    maxLines  = 7,
-                    overflow  = TextOverflow.Ellipsis,
-                )
-            }
-
-            // PDF preview thumbnail
-            if (note.attachedPdfUri != null) {
-                Spacer(Modifier.height(10.dp))
-                PdfPreview(
-                    uri      = note.attachedPdfUri,
-                    modifier = Modifier.height(90.dp).fillMaxWidth(),
-                )
-            }
-
-            // Attachment pills
-            if (note.attachedAudioUri != null || note.attachedPdfUri != null) {
-                Spacer(Modifier.height(10.dp))
-                if (note.attachedAudioUri != null) {
-                    MusicPill(
-                        title         = note.attachedAudioName ?: "Audio",
-                        isPlaying     = isPlaying,
-                        thumbnail     = currentTrackThumbnail,
-                        containerColor = onColor.copy(0.12f),
-                        contentColor  = onColor,
-                        onClick       = onPlayAudio,
-                        compact       = true,
-                    )
-                }
+                // PDF preview thumbnail
                 if (note.attachedPdfUri != null) {
-                    Spacer(Modifier.height(6.dp))
-                    Surface(
-                        onClick = onViewPdf,
-                        color   = onColor.copy(0.12f),
-                        shape   = RoundedCornerShape(14.dp),
-                        border  = BorderStroke(1.dp, onColor.copy(0.08f)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
+                    Spacer(Modifier.height(10.dp))
+                    PdfPreview(
+                        uri      = note.attachedPdfUri,
+                        modifier = Modifier.height(90.dp).fillMaxWidth(),
+                    )
+                }
+
+                // Image attachment preview
+                if (note.attachedImageUri != null) {
+                    Spacer(Modifier.height(10.dp))
+                    AsyncImage(
+                        model      = note.attachedImageUri,
+                        contentDescription = null,
+                        modifier   = Modifier
+                            .height(120.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+
+                // Attachment pills
+                if (note.attachedAudioUri != null || note.attachedPdfUri != null || note.attachedImageUri != null) {
+                    Spacer(Modifier.height(10.dp))
+                    if (note.attachedAudioUri != null) {
+                        MusicPill(
+                            title         = note.attachedAudioName ?: "Audio",
+                            isPlaying     = isPlaying,
+                            thumbnail     = currentTrackThumbnail,
+                            containerColor = onColor.copy(0.12f),
+                            contentColor  = onColor,
+                            onClick       = onPlayAudio,
+                            compact       = true,
+                        )
+                    }
+                    if (note.attachedPdfUri != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Surface(
+                            onClick = onViewPdf,
+                            color   = onColor.copy(0.12f),
+                            shape   = RoundedCornerShape(14.dp),
+                            border  = BorderStroke(1.dp, onColor.copy(0.08f)),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Icon(Icons.Rounded.Description, null, Modifier.size(13.dp), tint = onColor)
-                            Spacer(Modifier.width(5.dp))
-                            Text("PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor)
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(Icons.Rounded.Description, null, Modifier.size(13.dp), tint = onColor)
+                                Spacer(Modifier.width(5.dp))
+                                Text("PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor)
+                            }
+                        }
+                    }
+                    if (note.attachedImageUri != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Surface(
+                            color   = onColor.copy(0.12f),
+                            shape   = RoundedCornerShape(14.dp),
+                            border  = BorderStroke(1.dp, onColor.copy(0.08f)),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(Icons.Rounded.Image, null, Modifier.size(13.dp), tint = onColor)
+                                Spacer(Modifier.width(5.dp))
+                                Text("IMAGE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Footer
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(note.timestamp)),
+                        style      = MaterialTheme.typography.labelSmall,
+                        color      = onColor.copy(0.45f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        IconButton(onClick = onTogglePin, Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Rounded.PushPin, null,
+                                modifier = Modifier.size(13.dp),
+                                tint     = onColor.copy(if (note.isPinned) 0.9f else 0.2f),
+                            )
+                        }
+                        IconButton(onClick = onDelete, Modifier.size(28.dp)) {
+                            Icon(Icons.Rounded.Delete, null, Modifier.size(13.dp), tint = onColor.copy(0.2f))
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            // Footer
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically,
-            ) {
-                Text(
-                    SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(note.timestamp)),
-                    style      = MaterialTheme.typography.labelSmall,
-                    color      = onColor.copy(0.45f),
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    IconButton(onClick = onTogglePin, Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Rounded.PushPin, null,
-                            modifier = Modifier.size(13.dp),
-                            tint     = onColor.copy(if (note.isPinned) 0.9f else 0.2f),
-                        )
-                    }
-                    IconButton(onClick = onDelete, Modifier.size(28.dp)) {
-                        Icon(Icons.Rounded.Delete, null, Modifier.size(13.dp), tint = onColor.copy(0.2f))
-                    }
+            if (isSelected) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    shape    = CircleShape,
+                    color    = MaterialTheme.colorScheme.primary,
+                    border   = BorderStroke(2.dp, Color.White),
+                ) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        null,
+                        modifier = Modifier.size(18.dp).padding(2.dp),
+                        tint     = MaterialTheme.colorScheme.onPrimary,
+                    )
                 }
             }
         }
@@ -695,7 +821,7 @@ fun NoteViewerSheet(
                 )
 
                 // Attachments row
-                if (note.attachedAudioUri != null || note.attachedPdfUri != null) {
+                if (note.attachedAudioUri != null || note.attachedPdfUri != null || note.attachedImageUri != null) {
                     Row(
                         Modifier
                             .padding(bottom = 24.dp)
@@ -728,11 +854,24 @@ fun NoteViewerSheet(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     Icon(Icons.Rounded.Description, null, Modifier.size(20.dp), tint = onColor)
+                                    @Suppress("DEPRECATION")
                                     Text("VIEW PDF", style = MaterialTheme.typography.labelLarge, color = onColor, fontWeight = FontWeight.Black)
                                 }
                             }
                         }
                     }
+                }
+
+                note.attachedImageUri?.let { uri ->
+                    AsyncImage(
+                        model    = uri,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 20.dp)
+                            .clip(RoundedCornerShape(24.dp)),
+                        contentScale = ContentScale.FillWidth,
+                    )
                 }
 
                 note.attachedPdfUri?.let { uri ->
@@ -743,17 +882,17 @@ fun NoteViewerSheet(
                 }
 
                 // Note content
-                Text(
-                    note.content,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontFamily = noteFontFamily(note.fontStyle),
-                        fontSize   = note.fontSize.sp,
-                        fontWeight = if (note.isBold) FontWeight.Bold else FontWeight.Normal,
-                        fontStyle  = if (note.isItalic) FontStyle.Italic else FontStyle.Normal,
-                        lineHeight = (note.fontSize * 1.65f).sp,
-                    ),
-                    color = onColor.copy(0.88f),
-                )
+                val segments = remember(note.content) { parseMarkdownToSegments(note.content) }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    segments.forEach { seg ->
+                        MarkdownSegment(
+                            seg = seg,
+                            baseFontSize = note.fontSize.sp,
+                            textColor = onColor.copy(0.88f),
+                            onLinkClick = { /* Handle link click if needed */ }
+                        )
+                    }
+                }
             }
         }
     }
@@ -919,7 +1058,7 @@ fun NoteEditorDialog(
     note      : Note?,
     viewModel : NotepadViewModel,
     onDismiss : () -> Unit,
-    onSave    : (String, String, Int, String, Float, Boolean, Boolean, String?, String?, String?) -> Unit,
+    onSave    : (String, String, Int, String, Float, Boolean, Boolean, String?, String?, String?, String?) -> Unit,
 ) {
     val vibration = LocalVibrationManager.current
 
@@ -933,6 +1072,7 @@ fun NoteEditorDialog(
     var attachedPdfUri    by remember { mutableStateOf(note?.attachedPdfUri) }
     var attachedAudioUri  by remember { mutableStateOf(note?.attachedAudioUri) }
     var attachedAudioName by remember { mutableStateOf(note?.attachedAudioName) }
+    var attachedImageUri  by remember { mutableStateOf(note?.attachedImageUri) }
 
     val availableTracks by viewModel.availableTracks.collectAsStateWithLifecycle()
     val availablePdfs   by viewModel.availablePdfs.collectAsStateWithLifecycle()
@@ -944,6 +1084,12 @@ fun NoteEditorDialog(
     var showPdfPicker       by remember { mutableStateOf(false) }
     var showCustomColor     by remember { mutableStateOf(false) }
     var showAiStylePreview  by remember { mutableStateOf(false) }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { attachedImageUri = it.toString() }
+    }
 
     val bgColor   = Color(selectedColor)
     val onBgColor = noteContentColor(bgColor)
@@ -1015,7 +1161,7 @@ fun NoteEditorDialog(
                         TextButton(
                             onClick  = {
                                 vibration?.vibrateClick()
-                                onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName)
+                                onSave(title, content, selectedColor, fontStyle, fontSize, isBold, isItalic, attachedPdfUri, attachedAudioUri, attachedAudioName, attachedImageUri)
                             },
                             modifier = Modifier.padding(end = 8.dp),
                         ) {
@@ -1093,7 +1239,7 @@ fun NoteEditorDialog(
                     )
 
                     // ── Attachment chips ────────────────────────────────────
-                    AnimatedVisibility(visible = attachedAudioUri != null || attachedPdfUri != null) {
+                    AnimatedVisibility(visible = attachedAudioUri != null || attachedPdfUri != null || attachedImageUri != null) {
                         Row(
                             Modifier
                                 .padding(vertical = 8.dp)
@@ -1114,6 +1260,14 @@ fun NoteEditorDialog(
                                     icon     = Icons.Rounded.Description,
                                     color    = onBgColor,
                                     onDelete = { vibration?.vibrateTick(); attachedPdfUri = null },
+                                )
+                            }
+                            attachedImageUri?.let {
+                                AttachmentChip(
+                                    label    = "Image",
+                                    icon     = Icons.Rounded.Image,
+                                    color    = onBgColor,
+                                    onDelete = { vibration?.vibrateTick(); attachedImageUri = null },
                                 )
                             }
                         }
@@ -1234,6 +1388,7 @@ fun NoteEditorDialog(
                 onDismiss     = { showAttachMenu = false },
                 onPickAudio   = { showTrackPicker = true; showAttachMenu = false },
                 onPickPdf     = { showPdfPicker   = true; showAttachMenu = false },
+                onPickImage   = { imagePicker.launch("image/*"); showAttachMenu = false },
             )
         }
 
@@ -1431,6 +1586,7 @@ private fun AttachmentMenuSheet(
     onDismiss  : () -> Unit,
     onPickAudio: () -> Unit,
     onPickPdf  : () -> Unit,
+    onPickImage: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1438,10 +1594,13 @@ private fun AttachmentMenuSheet(
         shape            = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
     ) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).padding(bottom = 40.dp).navigationBarsPadding()) {
+            @Suppress("DEPRECATION")
             Text("ATTACH", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 16.dp))
             AttachmentTypeItem("Music / Audio", "Attach a track or voice memo", Icons.Rounded.MusicNote,     Color(0xFFFF4081)) { onPickAudio() }
             Spacer(Modifier.height(12.dp))
             AttachmentTypeItem("PDF Document",  "Attach a document reference", Icons.Rounded.Description, Color(0xFF2196F3)) { onPickPdf()   }
+            Spacer(Modifier.height(12.dp))
+            AttachmentTypeItem("Image",         "Attach a photo or graphic", Icons.Rounded.Image,       Color(0xFF4CAF50)) { onPickImage() }
         }
     }
 }

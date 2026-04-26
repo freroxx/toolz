@@ -84,6 +84,7 @@ class PdfViewModel @Inject constructor(
     val sortOrder = _sortOrder.asStateFlow()
 
     val performanceMode = settingsRepository.performanceMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val offlineModeEnabled = settingsRepository.offlineModeEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val bitmapCache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 1024 / (if (performanceMode.value) 16 else 8)).toInt()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024

@@ -1,13 +1,20 @@
 package com.frerox.toolz.ui.screens.notifications
 
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.data.notifications.NotificationRepository
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.squareup.moshi.Moshi
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 data class AppDetails(
@@ -20,7 +27,8 @@ data class AppDetails(
 @HiltViewModel
 class NotificationVaultViewModel @Inject constructor(
     private val repository: NotificationRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val moshi: Moshi
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -28,6 +36,9 @@ class NotificationVaultViewModel @Inject constructor(
 
     private val _selectedCategory = MutableStateFlow("All")
     val selectedCategory = _selectedCategory.asStateFlow()
+
+    private val _selectedDateFilter = MutableStateFlow("Anytime")
+    val selectedDateFilter = _selectedDateFilter.asStateFlow()
 
     val hiddenApps = settingsRepository.hiddenNotificationApps
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
@@ -46,14 +57,24 @@ class NotificationVaultViewModel @Inject constructor(
         repository.allNotifications,
         _searchQuery,
         _selectedCategory,
-        hiddenApps
-    ) { list, query, category, hidden ->
+        hiddenApps,
+        selectedDateFilter
+    ) { list, query, category, hidden, dateFilter ->
+        val now = System.currentTimeMillis()
+        val dayMillis = 24 * 60 * 60 * 1000L
+        
         list.filter { 
             !hidden.contains(it.packageName) &&
             (category == "All" || it.category == category) &&
             (query.isEmpty() || it.appName.contains(query, ignoreCase = true) || 
              (it.title?.contains(query, ignoreCase = true) == true) || 
-             (it.text?.contains(query, ignoreCase = true) == true))
+             (it.text?.contains(query, ignoreCase = true) == true)) &&
+            when(dateFilter) {
+                "Today" -> it.timestamp >= now - dayMillis
+                "Yesterday" -> it.timestamp >= now - 2 * dayMillis && it.timestamp < now - dayMillis
+                "Last 7 Days" -> it.timestamp >= now - 7 * dayMillis
+                else -> true
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -63,6 +84,10 @@ class NotificationVaultViewModel @Inject constructor(
 
     fun setCategory(category: String) {
         _selectedCategory.value = category
+    }
+
+    fun setDateFilter(filter: String) {
+        _selectedDateFilter.value = filter
     }
 
     fun deleteNotification(id: Long) {
@@ -117,6 +142,34 @@ class NotificationVaultViewModel @Inject constructor(
     fun mapAppToCategory(packageName: String, category: String) {
         viewModelScope.launch {
             settingsRepository.setAppCategoryMapping(packageName, category)
+        }
+    }
+
+    fun exportLogs(context: android.content.Context, format: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val data = notifications.value
+                val content = if (format == "JSON") {
+                    val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, NotificationEntry::class.java)
+                    val adapter = moshi.adapter<List<NotificationEntry>>(listType)
+                    adapter.toJson(data)
+                } else {
+                    data.joinToString("\n\n") { 
+                        "[${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(it.timestamp))}] " +
+                        "${it.appName}: ${it.title} - ${it.text}"
+                    }
+                }
+
+                val fileName = "toolz_notifications_${System.currentTimeMillis()}.${format.lowercase()}"
+                val file = File(File(context.getExternalFilesDir(null), "Exports").apply { mkdirs() }, fileName)
+                file.writeText(content)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Logs exported to: ${file.name}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 }

@@ -43,8 +43,22 @@ class SearchBridgeHandler @Inject constructor(
                 val args = try {
                     adapter.fromJson(toolCall.function.arguments)
                 } catch (_: Exception) {
-                    // Fallback for when arguments are passed as a plain string by some providers
-                    mapOf("query" to toolCall.function.arguments)
+                    val raw = toolCall.function.arguments.trim()
+                    if (raw.startsWith("{") && raw.contains("\"query\"")) {
+                        val queryStart = raw.indexOf("\"query\"")
+                        val colon = raw.indexOf(":", queryStart)
+                        val quote = raw.indexOf("\"", colon)
+                        if (quote != -1) {
+                            var extracted = raw.substring(quote + 1)
+                            extracted = extracted.replace(Regex("\",\\s*\"max_results\"\\s*:\\s*\\d+\\s*\\}*\$"), "")
+                            extracted = extracted.removeSuffix("}").trim().removeSuffix("\"")
+                            mapOf("query" to extracted)
+                        } else {
+                            mapOf("query" to raw)
+                        }
+                    } else {
+                        mapOf("query" to raw)
+                    }
                 }
                 val query = args?.get("query")?.toString() ?: return "Error: Missing query parameter"
                 
@@ -59,11 +73,12 @@ class SearchBridgeHandler @Inject constructor(
                 _lastSearchResults.addAll(results.take(maxResults))
 
                 if (results.isEmpty()) {
-                    "No results found for '$query'. The search might have failed or no relevant information was found."
+                    "No results found for '$query'. The search might have failed or no relevant information was found. Inform the user you tried searching but couldn't find matches."
                 } else {
-                    results.take(maxResults).joinToString("\n\n") { result ->
-                        "Title: ${result.title}\nSnippet: ${result.snippet}\nURL: ${result.url}"
+                    val contextText = results.take(maxResults).joinToString("\n\n") { result ->
+                        "SOURCE: ${result.title}\nURL: ${result.url}\nCONTENT: ${result.snippet}"
                     }
+                    "Search results for '$query':\n\n$contextText\n\nPlease use the provided information to answer accurately. Always cite sources."
                 }
             } catch (e: Exception) {
                 "Search failed: ${e.message ?: "Unknown error"}. Please inform the user that you couldn't access the web right now."

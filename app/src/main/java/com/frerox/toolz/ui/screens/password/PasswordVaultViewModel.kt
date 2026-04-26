@@ -126,10 +126,17 @@ class PasswordVaultViewModel @Inject constructor(
 
     fun updatePassword(entity: PasswordEntity) {
         viewModelScope.launch {
+            val oldEntity = passwordDao.getPasswordById(entity.id)
+            var newHistory = entity.passwordHistory
+            if (oldEntity != null && oldEntity.password != entity.password) {
+                newHistory = (listOf(oldEntity.password) + oldEntity.passwordHistory).take(10)
+            }
+
             val pwnedCount = if (entity.password.isNotEmpty()) PwnedCheck.isPwned(entity.password) else null
             val updatedEntity = entity.copy(
                 strength = if (entity.password.isNotEmpty()) PasswordGenerator.calculateStrength(entity.password) else 0,
-                pwnedCount = pwnedCount
+                pwnedCount = pwnedCount,
+                passwordHistory = newHistory
             )
             passwordDao.updatePassword(updatedEntity)
         }

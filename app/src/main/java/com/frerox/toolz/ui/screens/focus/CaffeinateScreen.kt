@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.lerp as colorLerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -55,6 +57,21 @@ fun CaffeinateScreen(
     val vibrationManager = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
     val primaryColorInt = MaterialTheme.colorScheme.primary.toArgb()
+
+    var isRainbowMode by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isRunning) {
+        if (isRunning) {
+            while (true) {
+                delay(50000L) // Wait 50s
+                isRainbowMode = true
+                delay(10000L) // Stay rainbow for 10s
+                isRainbowMode = false
+            }
+        } else {
+            isRainbowMode = false
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -109,7 +126,7 @@ fun CaffeinateScreen(
                     .fillMaxSize()
                     .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
@@ -126,6 +143,7 @@ fun CaffeinateScreen(
             // Liquid Toggle Button
             LiquidToggleButton(
                 isRunning = isRunning,
+                isRainbow = isRainbowMode,
                 onClick = {
                     vibrationManager?.vibrateClick()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission) {
@@ -231,6 +249,7 @@ fun PermissionBanner(onAuthorize: () -> Unit) {
 @Composable
 fun LiquidToggleButton(
     isRunning: Boolean,
+    isRainbow: Boolean = false,
     onClick: () -> Unit
 ) {
     val transition = updateTransition(isRunning, label = "liquid_toggle")
@@ -239,23 +258,59 @@ fun LiquidToggleButton(
         label = "level"
     ) { if (it) 1f else 0f }
 
+    val rainbowIntensity by animateFloatAsState(
+        targetValue = if (isRainbow) 1f else 0f,
+        animationSpec = tween(1500),
+        label = "rainbow_intensity"
+    )
+
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val waveOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(2500, easing = LinearEasing), RepeatMode.Restart),
         label = "wave_offset"
     )
     val waveOffset2 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
         label = "wave_offset_2"
     )
+    val waveOffset3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * PI.toFloat(),
+        animationSpec = infiniteRepeatable(tween(3200, easing = LinearEasing), RepeatMode.Restart),
+        label = "wave_offset_3"
+    )
+
+    // Bubble system
+    val bubbleCount = 8
+    val bubbles = List(bubbleCount) { index ->
+        val duration = remember { (2000..4000).random() }
+        val delay = remember { (0..2000).random() }
+        val startX = remember { (20..220).random().toFloat() }
+        
+        val progress by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(duration, delayMillis = delay, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "bubble_$index"
+        )
+        Triple(startX, progress, index)
+    }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    val rainbowColors = listOf(
+        Color(0xFFFF5252), Color(0xFFFFEB3B), Color(0xFF4CAF50),
+        Color(0xFF2196F3), Color(0xFF9C27B0), Color(0xFFFF5252)
+    )
 
     val infiniteGlow = rememberInfiniteTransition(label = "glow_inf")
     val infiniteAlpha by infiniteGlow.animateFloat(
@@ -275,7 +330,8 @@ fun LiquidToggleButton(
                 if (isRunning) {
                     drawCircle(
                         Brush.radialGradient(
-                            colors = listOf(primaryColor.copy(glowAlpha), Color.Transparent),
+                            colors = if (isRainbow) listOf(Color.White.copy(glowAlpha * 0.5f), Color.Transparent)
+                                     else listOf(primaryColor.copy(glowAlpha), Color.Transparent),
                             center = center,
                             radius = size.width * 0.8f
                         )
@@ -286,10 +342,16 @@ fun LiquidToggleButton(
             .border(
                 BorderStroke(
                     width = 6.dp,
-                    brush = Brush.sweepGradient(
-                        colors = if (isRunning) listOf(primaryColor, secondaryColor, primaryColor)
-                        else listOf(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.outlineVariant)
-                    )
+                    brush = if (isRunning) {
+                        if (rainbowIntensity > 0.01f) {
+                            Brush.sweepGradient(
+                                colors = rainbowColors.map { 
+                                    colorLerp(primaryColor, it, rainbowIntensity)
+                                }
+                            )
+                        }
+                        else Brush.sweepGradient(colors = listOf(primaryColor, secondaryColor, primaryColor))
+                    } else Brush.sweepGradient(colors = listOf(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.outlineVariant))
                 ),
                 CircleShape
             )
@@ -301,11 +363,11 @@ fun LiquidToggleButton(
             val height = size.height
             val fillHeight = height * (1f - liquidLevel)
 
-            // 1. Deepest wave (Tertiary)
+            // 1. Deepest wave (Tertiary/Rainbow)
             val pathDeep = Path().apply {
                 moveTo(0f, fillHeight)
                 for (x in 0..width.toInt()) {
-                    val y = fillHeight + (sin((x.toFloat() / width * 2f * PI.toFloat()) + waveOffset2 * 0.8f) * 12f * liquidLevel)
+                    val y = fillHeight + (sin((x.toFloat() / width * 2f * PI.toFloat()) + waveOffset3) * 14f * liquidLevel)
                     lineTo(x.toFloat(), y)
                 }
                 lineTo(width, height)
@@ -313,11 +375,11 @@ fun LiquidToggleButton(
                 close()
             }
 
-            // 2. Middle wave (Secondary)
+            // 2. Middle wave (Secondary/Rainbow)
             val pathRear = Path().apply {
                 moveTo(0f, fillHeight)
                 for (x in 0..width.toInt()) {
-                    val y = fillHeight + (sin((x.toFloat() / width * 2.5f * PI.toFloat()) + waveOffset2) * 10f * liquidLevel)
+                    val y = fillHeight + (sin((x.toFloat() / width * 2.5f * PI.toFloat()) + waveOffset2) * 11f * liquidLevel)
                     lineTo(x.toFloat(), y)
                 }
                 lineTo(width, height)
@@ -325,11 +387,11 @@ fun LiquidToggleButton(
                 close()
             }
 
-            // 3. Top wave (Primary)
+            // 3. Top wave (Primary/Rainbow)
             val pathFront = Path().apply {
                 moveTo(0f, fillHeight)
                 for (x in 0..width.toInt()) {
-                    val y = fillHeight + (sin((x.toFloat() / width * 1.8f * PI.toFloat()) + waveOffset) * 16f * liquidLevel)
+                    val y = fillHeight + (sin((x.toFloat() / width * 1.8f * PI.toFloat()) + waveOffset) * 18f * liquidLevel)
                     lineTo(x.toFloat(), y)
                 }
                 lineTo(width, height)
@@ -340,21 +402,48 @@ fun LiquidToggleButton(
             clipPath(Path().apply { addOval(Rect(0f, 0f, width, height)) }) {
                 drawPath(
                     path = pathDeep,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(tertiaryColor.copy(0.3f), tertiaryColor.copy(0.1f))
-                    )
+                    brush = if (rainbowIntensity > 0f) {
+                        Brush.verticalGradient(listOf(
+                            colorLerp(tertiaryColor.copy(0.3f), Color(0xFFFF5252).copy(0.3f), rainbowIntensity),
+                            colorLerp(tertiaryColor.copy(0.1f), Color(0xFFFFEB3B).copy(0.1f), rainbowIntensity)
+                        ))
+                    } else Brush.verticalGradient(colors = listOf(tertiaryColor.copy(0.3f), tertiaryColor.copy(0.1f)))
                 )
+                
+                // Bubbles (Drawn between waves for depth)
+                if (isRunning) {
+                    bubbles.forEach { (startX, progress, index) ->
+                        val bubbleY = height - (progress * height * liquidLevel)
+                        if (bubbleY > fillHeight - 20f) {
+                            val bubbleX = startX.dp.toPx() + sin(progress * 10f + index) * 10f
+                            val bubbleAlpha = (1f - progress).coerceIn(0f, 0.4f) * liquidLevel
+                            drawCircle(
+                                color = Color.White,
+                                radius = (4.dp.toPx() + (index % 3).dp.toPx()) * (1f - progress * 0.5f),
+                                center = Offset(bubbleX, bubbleY),
+                                alpha = bubbleAlpha
+                            )
+                        }
+                    }
+                }
+
                 drawPath(
                     path = pathRear,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(secondaryColor.copy(0.5f), primaryColor.copy(0.3f))
-                    )
+                    brush = if (rainbowIntensity > 0f) {
+                        Brush.verticalGradient(listOf(
+                            colorLerp(secondaryColor.copy(0.5f), Color(0xFF4CAF50).copy(0.5f), rainbowIntensity),
+                            colorLerp(primaryColor.copy(0.3f), Color(0xFF2196F3).copy(0.3f), rainbowIntensity)
+                        ))
+                    } else Brush.verticalGradient(colors = listOf(secondaryColor.copy(0.5f), primaryColor.copy(0.3f)))
                 )
                 drawPath(
                     path = pathFront,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(primaryColor.copy(0.9f), secondaryColor)
-                    )
+                    brush = if (rainbowIntensity > 0f) {
+                        Brush.verticalGradient(listOf(
+                            colorLerp(primaryColor.copy(0.9f), Color(0xFF2196F3).copy(0.9f), rainbowIntensity),
+                            colorLerp(secondaryColor, Color(0xFF9C27B0), rainbowIntensity)
+                        ))
+                    } else Brush.verticalGradient(colors = listOf(primaryColor.copy(0.9f), secondaryColor))
                 )
             }
         }

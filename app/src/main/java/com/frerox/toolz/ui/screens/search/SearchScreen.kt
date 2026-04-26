@@ -2,6 +2,7 @@ package com.frerox.toolz.ui.screens.search
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -9,12 +10,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -37,6 +42,8 @@ import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
+import com.frerox.toolz.ui.components.dragDropItem
+import com.frerox.toolz.ui.components.rememberDragDropState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -200,18 +207,28 @@ fun SearchScreen(
                         onActiveChange = { viewModel.onActiveChange(it) },
                         placeholder = { Text("Search or type URL", color = MaterialTheme.colorScheme.outline) },
                         leadingIcon = {
-                            IconButton(onClick = if (uiState.active) { { viewModel.onActiveChange(false) } } else onBackClick) {
+                            IconButton(onClick = if (uiState.active) { { viewModel.onActiveChange(false) } } else if (uiState.results.isNotEmpty()) { { viewModel.onQueryChange(""); viewModel.onSearch("") } } else onBackClick) {
                                 Icon(
-                                    imageVector = if (uiState.active) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Search,
+                                    imageVector = if (uiState.active) Icons.AutoMirrored.Filled.ArrowBack else if (uiState.results.isNotEmpty()) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Search,
                                     contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = if (uiState.isIncognito) Color(0xFF9C27B0) else MaterialTheme.colorScheme.primary
                                 )
                             }
                         },
                         trailingIcon = {
-                            if (uiState.query.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.onQueryChange("") }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (uiState.query.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.onQueryChange("") }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
+                                }
+                                IconButton(onClick = { viewModel.toggleIncognito(!uiState.isIncognito) }) {
+                                    Icon(
+                                        if (uiState.isIncognito) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = "Incognito",
+                                        tint = if (uiState.isIncognito) Color(0xFF9C27B0) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
                         },
@@ -254,14 +271,18 @@ fun SearchScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             AnimatedContent(
-                targetState = uiState.isLoading to uiState.results.isEmpty(),
+                targetState = Triple(uiState.isLoading, uiState.results.isEmpty(), uiState.query.isNotEmpty() || uiState.error != null),
                 transitionSpec = {
-                    fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                    fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
                 },
                 label = "SearchContent"
-            ) { (isLoading, resultsEmpty) ->
+            ) { (isLoading, resultsEmpty, queryNotEmpty) ->
                 if (isLoading) {
                     SearchShimmer()
+                } else if (uiState.error != null) {
+                    EmptySearchState(onRetry = { viewModel.onSearch(uiState.query) })
+                } else if (resultsEmpty && queryNotEmpty) {
+                    EmptySearchState(onRetry = { viewModel.onSearch(uiState.query) })
                 } else if (resultsEmpty) {
                     StartPage(
                         history = history,
@@ -281,15 +302,16 @@ fun SearchScreen(
                         onRemoveQuickLink = { viewModel.removeQuickLink(it) },
                         onEditQuickLink = { editingQuickLink = it },
                         onFillQuery = { viewModel.onQueryChange(it) },
-                        onSeeAllBookmarks = { showBookmarksAll = true }
+                        onSeeAllBookmarks = { showBookmarksAll = true },
+                        onReorder = { from, to -> viewModel.reorderQuickLinks(from, to) }
                     )
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        contentPadding = PaddingValues(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(uiState.results, key = { it.url }) { result ->
+                        itemsIndexed(uiState.results, key = { index, result -> "${result.url}_$index" }) { _, result ->
                             SearchResultCard(
                                 result = result,
                                 onClick = { onResultClick(result.url) },
@@ -299,6 +321,67 @@ fun SearchScreen(
                                     placementSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
                                 )
                             )
+                        }
+
+                        if (uiState.canLoadMore) {
+                            if (uiState.results.size <= 100) {
+                                item {
+                                    LaunchedEffect(uiState.results.size) {
+                                        viewModel.loadMore()
+                                    }
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                    }
+                                }
+                            } else {
+                                item {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        if (uiState.isLoadingMore) {
+                                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Button(
+                                                onClick = { viewModel.loadMore() },
+                                                shape = RoundedCornerShape(20.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurface)
+                                            ) {
+                                                Text("Load more")
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                "Results tend to be less accurate as you load more",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (uiState.results.isNotEmpty() && !uiState.isLoading) {
+                            item {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    FilledTonalButton(onClick = { onBackClick() }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Go Back")
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(
+                                        "You've reached the bottom. Congrats, web explorer !",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -326,48 +409,60 @@ fun StartPage(
     onRemoveQuickLink: (Long) -> Unit,
     onEditQuickLink: (QuickLinkEntry) -> Unit,
     onFillQuery: (String) -> Unit,
-    onSeeAllBookmarks: () -> Unit
+    onSeeAllBookmarks: () -> Unit,
+    onReorder: (Int, Int) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(bottom = 32.dp, start = 24.dp, end = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
+                    .padding(vertical = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Surface(
-                    modifier = Modifier.size(72.dp),
-                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.size(80.dp),
+                    shape = RoundedCornerShape(28.dp),
                     color = MaterialTheme.colorScheme.primary,
-                    tonalElevation = 8.dp
+                    tonalElevation = 12.dp,
+                    shadowElevation = 8.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.Public,
                             contentDescription = null,
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier.size(44.dp),
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 Text(
                     "Toolz Search",
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    letterSpacing = (-1).sp
                 )
-                Text(
-                    "Private & Secure Browsing",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                    fontWeight = FontWeight.Medium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.VerifiedUser, 
+                        null, 
+                        tint = MaterialTheme.colorScheme.primary, 
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Private & Secure Browsing",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 
@@ -426,7 +521,7 @@ fun StartPage(
         }
 
         item {
-            QuickLinksSection(quickLinks, onQueryClick, onAddQuickLink, onRemoveQuickLink, onEditQuickLink)
+            QuickLinksSection(quickLinks, onQueryClick, onAddQuickLink, onRemoveQuickLink, onEditQuickLink, onReorder)
         }
 
         if (history.isNotEmpty()) {
@@ -492,8 +587,14 @@ fun QuickLinksSection(
     onQueryClick: (String) -> Unit,
     onAddQuickLink: () -> Unit,
     onRemoveQuickLink: (Long) -> Unit,
-    onEditQuickLink: (QuickLinkEntry) -> Unit
+    onEditQuickLink: (QuickLinkEntry) -> Unit,
+    onReorder: (Int, Int) -> Unit
 ) {
+    val listState = rememberLazyListState()
+    val dragDropState = rememberDragDropState(listState) { from, to ->
+        onReorder(from, to)
+    }
+
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -518,16 +619,20 @@ fun QuickLinksSection(
         }
         
         LazyRow(
+            state = listState,
             modifier = Modifier.fillMaxWidth().animateContentSize(),
             contentPadding = PaddingValues(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            items(quickLinks) { link ->
+            itemsIndexed(quickLinks, key = { _, link -> link.id }) { index, link ->
                 QuickLinkItem(
                     link,
                     onClick = { onQueryClick(link.url) },
                     onEdit = { onEditQuickLink(link) },
-                    onDelete = { onRemoveQuickLink(link.id) }
+                    onDelete = { onRemoveQuickLink(link.id) },
+                    modifier = Modifier
+                        .dragDropItem(index, dragDropState)
+                        .zIndex(if (dragDropState.draggingItemIndex == index) 1f else 0f)
                 )
             }
             if (quickLinks.isEmpty()) {
@@ -551,10 +656,16 @@ fun QuickLinksSection(
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun QuickLinkItem(link: QuickLinkEntry, onClick: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+fun QuickLinkItem(
+    link: QuickLinkEntry, 
+    onClick: () -> Unit, 
+    onEdit: () -> Unit, 
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     var showMenu by remember { mutableStateOf(false) }
 
-    Box {
+    Box(modifier = modifier) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
@@ -888,44 +999,55 @@ fun SearchResultCard(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)),
+        shadowElevation = 2.dp,
         tonalElevation = 1.dp
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 FaviconDisplay(
                     url = result.url,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = result.displayUrl,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = result.title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    lineHeight = 22.sp,
+                    fontSize = 18.sp
+                ),
                 color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.ExtraBold,
+                fontWeight = FontWeight.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = result.snippet,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 20.sp
-            )
+            if (result.snippet.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = result.snippet,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        lineHeight = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    ),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -989,40 +1111,95 @@ fun AddQuickLinkDialog(
 
 @Composable
 fun SearchShimmer() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(5) {
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth().height(120.dp),
-                shape = RoundedCornerShape(24.dp)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
             ) {
-                Box(modifier = Modifier.fillMaxSize())
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(24.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(0.1f)))
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.width(120.dp).height(12.dp).background(MaterialTheme.colorScheme.onSurface.copy(0.1f), RoundedCornerShape(4.dp)))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Box(Modifier.fillMaxWidth(0.7f).height(20.dp).background(MaterialTheme.colorScheme.onSurface.copy(0.1f), RoundedCornerShape(4.dp)))
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.fillMaxWidth().height(14.dp).background(MaterialTheme.colorScheme.onSurface.copy(0.05f), RoundedCornerShape(4.dp)))
+                    Spacer(Modifier.height(4.dp))
+                    Box(Modifier.fillMaxWidth(0.9f).height(14.dp).background(MaterialTheme.colorScheme.onSurface.copy(0.05f), RoundedCornerShape(4.dp)))
+                }
             }
         }
     }
 }
 
 @Composable
-fun EmptySearchState() {
+fun EmptySearchState(onRetry: (() -> Unit)? = null) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            Icons.Default.Public,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        Surface(
+            modifier = Modifier.size(100.dp),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.SearchOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
         Text(
-            "Browse the web anonymously",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.outline
+            "No results found",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "We couldn't find anything matching your search. Try different keywords or check your connection.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        if (onRetry != null) {
+            Spacer(modifier = Modifier.height(32.dp))
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(24.dp),
+                contentPadding = PaddingValues(horizontal = 32.dp, vertical = 12.dp)
+            ) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Try Again")
+            }
+        }
     }
 }

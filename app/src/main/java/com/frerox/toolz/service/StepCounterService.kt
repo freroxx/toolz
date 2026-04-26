@@ -18,6 +18,7 @@ import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepRepository
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -81,7 +82,7 @@ class StepCounterService : Service(), SensorEventListener {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                NOTIFICATION_ID, 
+                NotificationHelper.ID_STEP_COUNTER, 
                 createNotification(),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
@@ -90,7 +91,7 @@ class StepCounterService : Service(), SensorEventListener {
                 }
             )
         } else {
-            startForeground(NOTIFICATION_ID, createNotification())
+            startForeground(NotificationHelper.ID_STEP_COUNTER, createNotification())
         }
         
         registerSensor()
@@ -138,17 +139,6 @@ class StepCounterService : Service(), SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun createNotification(): Notification {
-        val channelId = "step_counter_channel"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId, "Health tracking", NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows your daily step progress"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.StepCounter.route)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -161,13 +151,12 @@ class StepCounterService : Service(), SensorEventListener {
             runBlocking { stepRepository.currentSteps.first() }
         } catch (e: Exception) { 0 }
         
-        val builder = NotificationCompat.Builder(this, channelId)
+        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_STEP_COUNTER)
             .setContentTitle("Step Counter")
-            .setSmallIcon(android.R.drawable.ic_menu_directions) 
+            .setSmallIcon(R.drawable.ic_launcher_foreground) 
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
-            .setOnlyAlertOnce(true)
 
         if (isNotificationEnabled) {
             builder.setContentText("$steps / $currentGoal steps")
@@ -182,16 +171,12 @@ class StepCounterService : Service(), SensorEventListener {
     private fun updateNotification() {
         val notification = createNotification()
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification)
+        manager.notify(NotificationHelper.ID_STEP_COUNTER, notification)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         sensorManager?.unregisterListener(this)
         serviceScope.cancel()
-    }
-
-    companion object {
-        private const val NOTIFICATION_ID = 1001
     }
 }

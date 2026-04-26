@@ -92,6 +92,7 @@ fun SettingsScreen(
 
     val userName by viewModel.userName.collectAsState(initial = "")
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
+    val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
 
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
     val musicShakeSensitivity by viewModel.musicShakeSensitivity.collectAsState(initial = 0.3f)
@@ -120,6 +121,12 @@ fun SettingsScreen(
             )
             viewModel.setConverterCustomOutputPath(it.toString())
         }
+    }
+
+    val backupPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.restoreBackup(it) }
     }
 
     if (showResetDialog) {
@@ -214,7 +221,7 @@ fun SettingsScreen(
                         .weight(1f)
                         .fadingEdges(top = 16.dp, bottom = 16.dp)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp),
+                        .padding(horizontal = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Spacer(Modifier.height(8.dp))
@@ -226,6 +233,70 @@ fun SettingsScreen(
                         isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
                         onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
                     ) {
+                        if (matches(searchQuery, "offline", "local", "internet", "network")) {
+                            SettingsToggleItem(
+                                title = "Offline Mode",
+                                subtitle = "Force local operation and hide AI features",
+                                icon = Icons.Rounded.CloudOff,
+                                checked = offlineModeEnabled,
+                                onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
+                            )
+                        }
+                        if (matches(searchQuery, "backup", "restore", "data", "save", "json")) {
+                            val currentFreq by viewModel.backupFrequency.collectAsState(initial = "Never")
+                            SettingsItem(
+                                title = "Backup & Restore",
+                                subtitle = "Securely export your data and settings",
+                                icon = Icons.Rounded.Backup,
+                            ) {
+                                Column(modifier = Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { 
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.createBackup() 
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("BACKUP")
+                                        }
+                                        Button(
+                                            onClick = { 
+                                                vibrationManager?.vibrateClick()
+                                                backupPicker.launch("application/json")
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        ) {
+                                            Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("IMPORT")
+                                        }
+                                    }
+
+                                    @Suppress("DEPRECATION")
+                                    Text("AUTOMATIC BACKUP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf("Never", "Daily", "Weekly", "Monthly").forEach { freq ->
+                                            val isSelected = currentFreq == freq
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = { 
+                                                    vibrationManager?.vibrateTick()
+                                                    viewModel.setBackupFrequency(freq) 
+                                                },
+                                                label = { Text(freq) },
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if (matches(searchQuery, "update", "auto", "version")) {
                             SettingsToggleItem(
                                 title = "Automatic Updates",
@@ -252,7 +323,7 @@ fun SettingsScreen(
                         }
                         if (matches(searchQuery, "converter", "output", "path", "folder", "save")) {
                             SettingsItem(
-                                title = "Converter Output Folder",
+                                title = "Output Folder",
                                 subtitle = if (converterCustomPath == null) "Default: Downloads/Toolz" else "Custom folder selected",
                                 icon = Icons.Rounded.FolderSpecial,
                                 onClick = { folderLauncher.launch(null) }

@@ -216,8 +216,8 @@ fun ClipboardScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     groups.forEach { group ->
                         item(key = "header_${group.label}") {

@@ -83,6 +83,7 @@ class NotepadViewModel @Inject constructor(
     val isAiStyling: StateFlow<Boolean> = _isAiStyling.asStateFlow()
 
     private var lastDeletedNote: Note? = null
+    private var lastDeletedNotes: List<Note>? = null
 
     init { loadPdfs() }
 
@@ -105,6 +106,7 @@ class NotepadViewModel @Inject constructor(
         attachedPdfUri   : String? = null,
         attachedAudioUri : String? = null,
         attachedAudioName: String? = null,
+        attachedImageUri : String? = null,
     ) {
         viewModelScope.launch {
             noteDao.insertNote(
@@ -119,6 +121,7 @@ class NotepadViewModel @Inject constructor(
                     attachedPdfUri    = attachedPdfUri,
                     attachedAudioUri  = attachedAudioUri,
                     attachedAudioName = attachedAudioName,
+                    attachedImageUri  = attachedImageUri,
                 )
             )
         }
@@ -131,15 +134,29 @@ class NotepadViewModel @Inject constructor(
     fun deleteNote(note: Note) {
         viewModelScope.launch {
             lastDeletedNote = note
+            lastDeletedNotes = null
             noteDao.deleteNote(note)
         }
     }
 
-    fun undoDelete() {
-        val note = lastDeletedNote ?: return
+    fun deleteNotes(notes: List<Note>) {
         viewModelScope.launch {
-            noteDao.insertNote(note)
+            lastDeletedNotes = notes
             lastDeletedNote = null
+            noteDao.deleteNotes(notes)
+        }
+    }
+
+    fun undoDelete() {
+        viewModelScope.launch {
+            lastDeletedNote?.let {
+                noteDao.insertNote(it)
+                lastDeletedNote = null
+            }
+            lastDeletedNotes?.let { notes ->
+                notes.forEach { noteDao.insertNote(it) }
+                lastDeletedNotes = null
+            }
         }
     }
 

@@ -10,7 +10,9 @@ import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,7 +57,7 @@ class VoiceRecorderService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        NotificationHelper.createAllChannels(this)
     }
 
     fun startRecording() {
@@ -92,7 +94,7 @@ class VoiceRecorderService : Service() {
             _durationMillis.value = 0L
             startTime = SystemClock.elapsedRealtime()
             startTimer()
-            startForeground(NOTIFICATION_ID, createNotification())
+            startForeground(NotificationHelper.ID_VOICE_RECORDER, createNotification())
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -167,20 +169,6 @@ class VoiceRecorderService : Service() {
         this.gainLevel = level
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Voice Recording",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                setShowBadge(false)
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.VoiceRecorder.route)
@@ -194,12 +182,11 @@ class VoiceRecorderService : Service() {
         val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
         val stopPI = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_VOICE_RECORDER)
             .setContentTitle(if (_isPaused.value) "Recording Paused" else "Recording Audio...")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
-            .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setShowWhen(false)
             .setColor(0xFFE91E63.toInt())
@@ -207,6 +194,7 @@ class VoiceRecorderService : Service() {
         if (!_isPaused.value) {
             builder.setUsesChronometer(true)
             builder.setWhen(System.currentTimeMillis() - (_durationMillis.value))
+            builder.setContentText("Recording in progress")
         } else {
             builder.setContentText("Duration: ${formatDuration(_durationMillis.value)}")
         }
@@ -231,7 +219,7 @@ class VoiceRecorderService : Service() {
 
     private fun updateNotification() {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, createNotification())
+        manager.notify(NotificationHelper.ID_VOICE_RECORDER, createNotification())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -249,8 +237,6 @@ class VoiceRecorderService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "voice_recorder_channel"
-        private const val NOTIFICATION_ID = 3001
         const val ACTION_STOP = "com.frerox.toolz.action.STOP_RECORDING"
         const val ACTION_PAUSE = "com.frerox.toolz.action.PAUSE_RECORDING"
         const val ACTION_RESUME = "com.frerox.toolz.action.RESUME_RECORDING"

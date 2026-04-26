@@ -17,8 +17,8 @@ android {
         applicationId = "com.frerox.toolz"
         minSdk = 31
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.0.6"
+        versionCode = 8
+        versionName = "1.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -140,6 +140,7 @@ dependencies {
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.dnsoverhttps)
     implementation(libs.moshi.kotlin)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)

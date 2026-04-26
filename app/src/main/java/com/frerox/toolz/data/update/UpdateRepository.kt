@@ -9,7 +9,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -112,12 +114,7 @@ class UpdateRepository @Inject constructor(
 
     private fun showUpdateNotification(version: String) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "app_updates"
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "App Updates", NotificationManager.IMPORTANCE_HIGH)
-            notificationManager.createNotificationChannel(channel)
-        }
+        NotificationHelper.createAllChannels(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -126,17 +123,17 @@ class UpdateRepository @Inject constructor(
         
         val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Engine Patch: $version")
-            .setContentText("A new high-performance update is ready for deployment.")
+        val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("New Update Available: $version")
+            .setContentText("A new version of Toolz is ready for deployment.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_SYSTEM)
             .build()
 
-        notificationManager.notify(1001, notification)
+        notificationManager.notify(NotificationHelper.ID_APP_UPDATE, notification)
     }
 
     fun getCurrentVersionName(): String {

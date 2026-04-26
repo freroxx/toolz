@@ -17,5 +17,6 @@ data class Note(
     val isItalic: Boolean = false,
     val attachedPdfUri: String? = null,
     val attachedAudioUri: String? = null,
-    val attachedAudioName: String? = null
+    val attachedAudioName: String? = null,
+    val attachedImageUri: String? = null
 )

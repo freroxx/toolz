@@ -36,6 +36,8 @@ import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.MusicPlayerService
+import com.frerox.toolz.util.OfflineManager
+import com.frerox.toolz.util.OfflineState
 import com.frerox.toolz.util.VibrationManager
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -102,6 +104,7 @@ data class QueueEntry(
 class MusicPlayerViewModel @Inject constructor(
     val repository: MusicRepository,
     private val settingsRepository: SettingsRepository,
+    private val offlineManager: OfflineManager,
     val vibrationManager: VibrationManager,
     val player: ExoPlayer,
     @param:ApplicationContext private val context: Context
@@ -400,8 +403,8 @@ class MusicPlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            observeConnectivity().collect { online ->
-                _uiState.update { it.copy(isOnline = online) }
+            offlineManager.offlineState.collect { state ->
+                _uiState.update { it.copy(isOnline = state == OfflineState.ONLINE) }
             }
         }
 
@@ -489,30 +492,6 @@ class MusicPlayerViewModel @Inject constructor(
         
         if (player.isPlaying) {
             startProgressUpdate()
-        }
-    }
-
-    private fun observeConnectivity(): Flow<Boolean> = callbackFlow {
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                trySend(true)
-            }
-            override fun onLost(network: Network) {
-                trySend(false)
-            }
-        }
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager.registerNetworkCallback(request, callback)
-        
-        val current = connectivityManager.activeNetwork?.let {
-            connectivityManager.getNetworkCapabilities(it)
-        }?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ?: false
-        trySend(current)
-        
-        awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
         }
     }
 

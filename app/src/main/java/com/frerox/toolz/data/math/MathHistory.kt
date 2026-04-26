@@ -25,4 +25,10 @@ interface MathHistoryDao {
 
     @Query("DELETE FROM math_history")
     suspend fun clearAll()
+
+    @Query("SELECT * FROM math_history")
+    suspend fun getAllHistorySync(): List<MathHistory>
+
+    @Insert
+    suspend fun insertHistories(entries: List<MathHistory>)
 }

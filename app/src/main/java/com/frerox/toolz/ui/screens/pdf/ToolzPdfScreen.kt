@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.widget.Toast
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.animation.*
@@ -72,6 +74,7 @@ fun ToolzPdfScreen(
     val docState      by viewModel.docState.collectAsStateWithLifecycle()
     val ocrData       by viewModel.ocrData.collectAsStateWithLifecycle()
     val openTabs      by viewModel.openTabs.collectAsStateWithLifecycle()
+    val offlineMode   by viewModel.offlineModeEnabled.collectAsStateWithLifecycle()
     val performanceMode = LocalPerformanceMode.current
     val context       = LocalContext.current
     val activeTab     = openTabs.find { it.id == activeTabId }
@@ -79,6 +82,7 @@ fun ToolzPdfScreen(
     var renamingFile by remember { mutableStateOf<PdfFile?>(null) }
     var newFileName by remember { mutableStateOf("") }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var invertColors by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -177,7 +181,19 @@ fun ToolzPdfScreen(
                                         leadingIcon = { Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(20.dp)) },
                                         onClick = {
                                             showMenu = false
-                                            // TODO: Trigger rename dialog
+                                            activeTab?.let { tab ->
+                                                renamingFile = pdfFiles.find { it.uri == tab.uri }
+                                                newFileName = tab.title.removeSuffix(".pdf")
+                                                showRenameDialog = true
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (invertColors) "Light Mode" else "Dark Mode", fontWeight = FontWeight.Bold) },
+                                        leadingIcon = { Icon(if (invertColors) Icons.Rounded.LightMode else Icons.Rounded.DarkMode, null, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            invertColors = !invertColors
                                         }
                                     )
                                 }
@@ -201,7 +217,7 @@ fun ToolzPdfScreen(
             ) { state ->
                 when (state) {
                     is PdfUiState.Loading, is PdfUiState.Idle -> PdfLoadingScreen()
-                    is PdfUiState.Viewer  -> ViewerContent(viewModel, docState, activeTab, ocrData, performanceMode)
+                    is PdfUiState.Viewer  -> ViewerContent(viewModel, docState, activeTab, ocrData, performanceMode, invertColors)
                     else                  -> PdfFileListContent(pdfFiles,
                         onFileClick   = { viewModel.openPdf(it.uri, it.name) },
                         onDeleteClick = { viewModel.deleteFile(it) },
@@ -254,6 +270,7 @@ fun ToolzPdfScreen(
                 viewModel       = viewModel,
                 onDismiss       = { showTextSheet = false; viewModel.clearSummary() },
                 performanceMode = performanceMode,
+                offlineMode     = offlineMode
             )
         }
     }
@@ -263,6 +280,7 @@ fun ToolzPdfScreen(
 private fun ViewerContent(
     viewModel: PdfViewModel, docState: DocumentState,
     activeTab: PdfWorkspaceTab?, ocrData: OcrDocumentData?, performanceMode: Boolean,
+    invertColors: Boolean = false,
 ) {
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -312,7 +330,7 @@ private fun ViewerContent(
             ) {
                 items(docState.totalPages) { i ->
                     PageContainer(i, viewModel, ocrData?.pages?.find { it.pageIndex == i },
-                        activeTab?.lastTool ?: PdfToolMode.NAVIGATE, performanceMode)
+                        activeTab?.lastTool ?: PdfToolMode.NAVIGATE, performanceMode, invertColors)
                 }
             }
         }
@@ -345,6 +363,7 @@ private fun ViewerContent(
 private fun PageContainer(
     pageIndex: Int, viewModel: PdfViewModel, ocrPageData: OcrPageData?,
     activeTool: PdfToolMode, performanceMode: Boolean,
+    invertColors: Boolean = false,
 ) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(pageIndex) { bitmap = viewModel.getPageBitmap(pageIndex) }
@@ -357,7 +376,26 @@ private fun PageContainer(
     ) {
         Box(Modifier.fillMaxSize()) {
             bitmap?.let { bmp ->
-                Image(bmp.asImageBitmap(), "Page ${pageIndex+1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                val colorFilter = if (invertColors) {
+                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+                        androidx.compose.ui.graphics.ColorMatrix(
+                            floatArrayOf(
+                                -1f, 0f, 0f, 0f, 255f,
+                                0f, -1f, 0f, 0f, 255f,
+                                0f, 0f, -1f, 0f, 255f,
+                                0f, 0f, 0f, 1f, 0f
+                            )
+                        )
+                    )
+                } else null
+
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Page ${pageIndex+1}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                    colorFilter = colorFilter
+                )
                 if (activeTool == PdfToolMode.OCR && ocrPageData != null)
                     OcrOverlay(ocrPageData, bmp.width, bmp.height)
             } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -399,17 +437,26 @@ private fun OcrOverlay(ocrPageData: OcrPageData, bitmapWidth: Int, bitmapHeight:
 fun OcrTextBottomSheet(
     ocrData: OcrDocumentData, viewModel: PdfViewModel,
     onDismiss: () -> Unit, performanceMode: Boolean,
+    offlineMode: Boolean
 ) {
     val context       = LocalContext.current
     val pdfSummary    by viewModel.pdfSummary.collectAsStateWithLifecycle()
     val isSummarizing by viewModel.isSummarizing.collectAsStateWithLifecycle()
     var textSize      by remember { mutableFloatStateOf(16f) }
+    var searchQuery   by remember { mutableStateOf("") }
 
     val allText = remember(ocrData) {
         ocrData.pages.joinToString("\n\n") { page ->
             if (page.fullText != null) page.fullText else {
                 "--- PAGE ${page.pageIndex + 1} ---\n" + page.blocks.joinToString("\n") { it.text }
             }
+        }
+    }
+
+    val filteredText = remember(allText, searchQuery) {
+        if (searchQuery.isBlank()) allText
+        else {
+            allText.split("\n\n").filter { it.contains(searchQuery, ignoreCase = true) }.joinToString("\n\n")
         }
     }
 
@@ -444,6 +491,28 @@ fun OcrTextBottomSheet(
                 ) { Icon(Icons.Rounded.ContentCopy, "Copy All", tint = MaterialTheme.colorScheme.onPrimaryContainer) }
             }
 
+            // Search Bar for Extracted Text
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                placeholder = { Text("Search in text…") },
+                leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                trailingIcon = if (searchQuery.isNotEmpty()) { {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Rounded.Close, null)
+                    }
+                } } else null,
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                )
+            )
+
             // Scrollable content area
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -451,65 +520,136 @@ fun OcrTextBottomSheet(
                 contentPadding = PaddingValues(bottom = 24.dp)
             ) {
                 // AI Summarize section
-                item {
-                    AnimatedContent(
-                        targetState = when { isSummarizing -> "loading"; pdfSummary != null -> "done"; else -> "idle" },
-                        transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) },
-                        label = "sumState",
-                    ) { state ->
-                        when (state) {
-                            "loading" -> Surface(
-                                color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.35f),
-                                shape  = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.tertiary)
-                                    Text("Summarising with AI…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer, fontWeight = FontWeight.Black)
+                if (!offlineMode) {
+                    item {
+                        AnimatedContent(
+                            targetState = when {
+                                isSummarizing -> "loading"; pdfSummary != null -> "done"; else -> "idle"
+                            },
+                            transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) },
+                            label = "sumState",
+                        ) { state ->
+                            when (state) {
+                                "loading" -> Surface(
+                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(0.35f),
+                                    shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            Modifier.size(18.dp),
+                                            strokeWidth = 2.5.dp,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                        Text(
+                                            "Summarising with AI…",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
                                 }
-                            }
-                            "done" -> Surface(
-                                color  = MaterialTheme.colorScheme.tertiaryContainer.copy(0.25f), shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.2f)),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
-                                        @Suppress("DEPRECATION")
-                                        Text("AI SUMMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-                                        TextButton(onClick = { viewModel.clearSummary() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                "done" -> Surface(
+                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(0.25f),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.2f)),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Column(Modifier.padding(16.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.AutoAwesome,
+                                                null,
+                                                Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.tertiary
+                                            )
                                             @Suppress("DEPRECATION")
-                                            Text("Dismiss", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f), fontWeight = FontWeight.Black)
+                                            Text(
+                                                "AI SUMMARY",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Black,
+                                                color = MaterialTheme.colorScheme.tertiary,
+                                                letterSpacing = 1.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(
+                                                onClick = { viewModel.clearSummary() },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                            ) {
+                                                @Suppress("DEPRECATION")
+                                                Text(
+                                                    "Dismiss",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
                                         }
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    
-                                    val segments = parseMarkdownToSegments(pdfSummary ?: "")
-                                    SelectionContainer {
-                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            segments.forEach { seg -> MarkdownSegment(seg, baseFontSize = textSize.sp) }
+                                        Spacer(Modifier.height(8.dp))
+
+                                        val segments = parseMarkdownToSegments(pdfSummary ?: "")
+                                        SelectionContainer {
+                                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                segments.forEach { seg ->
+                                                    MarkdownSegment(
+                                                        seg,
+                                                        baseFontSize = textSize.sp
+                                                    )
+                                                }
+                                            }
                                         }
-                                    }
-                                    
-                                    Spacer(Modifier.height(10.dp))
-                                    @Suppress("DEPRECATION")
-                                    Text("Groq · llama-3.3-70b-versatile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(0.4f), fontWeight = FontWeight.Black)
-                                }
-                            }
-                            else -> Surface(
-                                onClick  = { viewModel.summarizePdf(allText) },
-                                color    = MaterialTheme.colorScheme.tertiaryContainer.copy(0.2f), shape = RoundedCornerShape(20.dp),
-                                border   = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.18f)),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.tertiary)
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Summarise with AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onTertiaryContainer)
+
+                                        Spacer(Modifier.height(10.dp))
                                         @Suppress("DEPRECATION")
-                                        Text("Key points via Groq llama-3.3-70b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(0.7f), fontWeight = FontWeight.Bold)
+                                        Text(
+                                            "Groq · llama-3.3-70b-versatile",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                            fontWeight = FontWeight.Black
+                                        )
                                     }
-                                    Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary.copy(0.6f))
+                                }
+                                else -> Surface(
+                                    onClick = { viewModel.summarizePdf(allText) },
+                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(0.2f),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(0.18f)),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                "Summarise with AI",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Black,
+                                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                            )
+                                            @Suppress("DEPRECATION")
+                                            Text(
+                                                "Key points via Groq llama-3.3-70b",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Icon(
+                                            Icons.Rounded.ChevronRight,
+                                            null,
+                                            Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -531,14 +671,24 @@ fun OcrTextBottomSheet(
                             shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
                         ) {
-                            val segments = parseMarkdownToSegments(allText)
+                            val segments = parseMarkdownToSegments(filteredText)
                             SelectionContainer {
                                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    segments.forEach { seg -> 
-                                        MarkdownSegment(
-                                            seg, 
-                                            baseFontSize = textSize.sp
-                                        ) 
+                                    if (segments.isEmpty() && searchQuery.isNotEmpty()) {
+                                        Text(
+                                            "No matches found for \"$searchQuery\"",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textAlign = TextAlign.Center
+                                        )
+                                    } else {
+                                        segments.forEach { seg -> 
+                                            MarkdownSegment(
+                                                seg, 
+                                                baseFontSize = textSize.sp
+                                            ) 
+                                        }
                                     }
                                 }
                             }

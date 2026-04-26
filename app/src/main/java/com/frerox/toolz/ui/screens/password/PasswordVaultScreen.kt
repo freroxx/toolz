@@ -339,7 +339,7 @@ fun PasswordVaultScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .fadingEdges(top = 16.dp, bottom = 32.dp),
-                                contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 140.dp),
+                                contentPadding = PaddingValues(24.dp, 12.dp, 24.dp, 140.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 categorizedPasswords.forEach { (category, list) ->
@@ -940,6 +940,32 @@ fun CredentialCard(
                                 Icon(Icons.Rounded.LockOpen, contentDescription = null)
                                 Spacer(Modifier.width(12.dp))
                                 Text("Set Password", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        if (password.passwordHistory.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            @Suppress("DEPRECATION")
+                            Text("PASSWORD HISTORY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                password.passwordHistory.forEach { oldPass ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(oldPass, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                            IconButton(onClick = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                clipboardManager.setText(AnnotatedString(oldPass))
+                                                Toast.makeText(context, "Old password copied", Toast.LENGTH_SHORT).show()
+                                            }, modifier = Modifier.size(24.dp)) {
+                                                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 

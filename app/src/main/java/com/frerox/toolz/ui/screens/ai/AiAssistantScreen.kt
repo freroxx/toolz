@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -129,6 +130,7 @@ fun ExpressiveBackground(performanceMode: Boolean) {
 @Composable
 fun AiAssistantScreen(
     viewModel: AiAssistantViewModel = hiltViewModel(),
+    onNavigateToBrowser: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -144,6 +146,8 @@ fun AiAssistantScreen(
     var showSettings by remember { mutableStateOf(false) }
     var showSummary by remember { mutableStateOf(false) }
     var showQuotaDialog by remember { mutableStateOf(false) }
+    var selectedMessageForActions by remember { mutableStateOf<AiMessage?>(null) }
+    var selectedMessageForSources by remember { mutableStateOf<AiMessage?>(null) }
     val isStarted = uiState.messages.isNotEmpty() || uiState.isLoading || uiState.streamingText.isNotEmpty()
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -200,6 +204,22 @@ fun AiAssistantScreen(
             isSummarizing = uiState.isSummarizing,
             onDismiss = { showSummary = false; viewModel.clearChatSummary() },
             onRefresh = { viewModel.summarizeChat() },
+        )
+    }
+
+    if (selectedMessageForActions != null) {
+        MessageActionsSheet(
+            message = selectedMessageForActions!!,
+            onDismiss = { selectedMessageForActions = null },
+            onRegenerate = { viewModel.regenerateMessage(it); selectedMessageForActions = null }
+        )
+    }
+
+    if (selectedMessageForSources != null) {
+        MessageSourcesSheet(
+            message = selectedMessageForSources!!,
+            onDismiss = { selectedMessageForSources = null },
+            onLinkClick = onNavigateToBrowser
         )
     }
 
@@ -296,8 +316,12 @@ fun AiAssistantScreen(
                                 currentConfig = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
                                 performanceMode = performanceMode,
                                 onRegenerate = { viewModel.regenerateMessage(it) },
+                                onLinkClick = onNavigateToBrowser,
+                                onLongPress = { selectedMessageForActions = it },
+                                onShowSources = { selectedMessageForSources = it },
                                 onScrollBottom = { scope.launch { listState.animateScrollToItem(uiState.messages.size.coerceAtLeast(1) - 1) } },
                                 onRetrySync = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
+                                loadingPhaseText = uiState.loadingPhaseText,
                             )
                         } else {
                             EmptyChatStateRedesign(
@@ -581,142 +605,30 @@ fun ChatBubble(
     message: AiMessage,
     currentConfig: AiConfig?,
     performanceMode: Boolean,
-    onRegenerate: (Int) -> Unit
+    onRegenerate: (Int) -> Unit,
+    onLinkClick: (String) -> Unit,
+    onLongPress: (AiMessage) -> Unit,
+    onShowSources: (AiMessage) -> Unit
 ) {
     val isUser = message.isUser
     val segments = parseMarkdownToSegments(message.text)
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     
-    var showMessageActions by remember { mutableStateOf(false) }
-    var showSourcesSheet by remember { mutableStateOf(false) }
-
     val sources = remember(message.searchSources) {
         if (message.searchSources.isNullOrBlank()) {
             emptyList<SearchResult>()
         } else {
             try {
-                val moshi = Moshi.Builder().build()
+                // Use a Moshi instance with Kotlin Json Adapter
+                val moshi = Moshi.Builder()
+                    .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                    .build()
                 val listType = Types.newParameterizedType(List::class.java, SearchResult::class.java)
                 val adapter = moshi.adapter<List<SearchResult>>(listType)
                 adapter.fromJson(message.searchSources) ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
-            }
-        }
-    }
-
-    if (showMessageActions) {
-        ModalBottomSheet(
-            onDismissRequest = { showMessageActions = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            dragHandle = { BottomSheetDefaults.DragHandle() }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 32.dp)
-            ) {
-                Text(
-                    text = "Message Actions",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                
-                ActionRow(
-                    icon = Icons.Rounded.ContentCopy,
-                    label = "Copy Text",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    onClick = {
-                        clipboardManager.setText(AnnotatedString(message.text))
-                        showMessageActions = false
-                    }
-                )
-                
-                if (!isUser) {
-                    ActionRow(
-                        icon = Icons.Rounded.Refresh,
-                        label = "Regenerate",
-                        color = MaterialTheme.colorScheme.primary,
-                        onClick = {
-                            onRegenerate(message.id)
-                            showMessageActions = false
-                        }
-                    )
-                }
-
-                ActionRow(
-                    icon = Icons.Rounded.Share,
-                    label = "Share",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, message.text)
-                        }
-                        context.startActivity(Intent.createChooser(intent, "Share via"))
-                        showMessageActions = false
-                    }
-                )
-            }
-        }
-    }
-
-    if (showSourcesSheet && sources.isNotEmpty()) {
-        ModalBottomSheet(
-            onDismissRequest = { showSourcesSheet = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 32.dp)
-            ) {
-                Text(
-                    text = "Search Sources",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(sources) { source ->
-                        Surface(
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
-                                context.startActivity(intent)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
-                        ) {
-                            Column(Modifier.padding(16.dp)) {
-                                Text(
-                                    text = source.title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = source.snippet,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = source.displayUrl,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -753,7 +665,7 @@ fun ChatBubble(
                     border = if (isUser) null else BorderStroke(1.dp, AiDesign.glassBorder()),
                     shadowElevation = if (performanceMode) 0.dp else 4.dp,
                     modifier = Modifier.combinedClickable(
-                        onLongClick = { showMessageActions = true },
+                        onLongClick = { onLongPress(message) },
                         onClick = { /* Standard tap - could toggle timestamp or something */ }
                     )
                 ) {
@@ -763,7 +675,8 @@ fun ChatBubble(
                                 seg = seg,
                                 baseFontSize = 15.sp,
                                 modifier = Modifier.padding(vertical = 4.dp),
-                                textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()
+                                textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor(),
+                                onLinkClick = onLinkClick
                             )
                         }
 
@@ -774,43 +687,13 @@ fun ChatBubble(
                                 thickness = 0.5.dp,
                                 color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.15f)
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Sources",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else AiDesign.textColor(0.6f)
-                                )
-                                TextButton(
-                                    onClick = { showSourcesSheet = true },
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.height(24.dp),
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
-                                    )
-                                ) {
-                                    Text("See all", style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                sources.take(3).forEach { source ->
-                                    SourceChip(
-                                        source = source,
-                                        isUser = isUser
-                                    ) {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
-                                        context.startActivity(intent)
-                                    }
-                                }
-                            }
+                            SourcesPill(
+                                sources = sources,
+                                isUser = isUser,
+                                onClick = { onShowSources(message) }
+                            )
+                            // Extra padding after pill
+                            Spacer(Modifier.height(4.dp))
                         }
                     }
                 }
@@ -820,40 +703,56 @@ fun ChatBubble(
 }
 
 @Composable
-fun SourceChip(source: SearchResult, isUser: Boolean = false, onClick: () -> Unit) {
+fun SourcesPill(sources: List<SearchResult>, isUser: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        color = if (isUser) {
-            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f)
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        },
-        border = BorderStroke(
-            0.5.dp, 
-            (if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline).copy(alpha = 0.2f)
-        )
+        shape = RoundedCornerShape(20.dp),
+        color = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(0.5.dp, (if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline).copy(alpha = 0.2f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Link,
-                contentDescription = null,
-                modifier = Modifier.size(12.dp),
-                tint = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+                sources.take(4).forEach { source ->
+                    SourceFavicon(url = source.url, size = 18.dp)
+                }
+            }
             Text(
-                text = source.title,
+                text = "${sources.size} sources",
                 style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 120.dp),
+                fontWeight = FontWeight.Bold,
                 color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
             )
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
+    }
+}
+
+@Composable
+fun SourceFavicon(url: String, size: Dp) {
+    val domain = try { java.net.URI(url).host?.removePrefix("www.") ?: "" } catch (_: Exception) { "" }
+    val faviconUrl = "https://www.google.com/s2/favicons?sz=64&domain=$domain"
+    
+    Surface(
+        modifier = Modifier.size(size),
+        shape = CircleShape,
+        color = Color.White,
+        border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.05f))
+    ) {
+        AsyncImage(
+            model = faviconUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize().padding(2.dp),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -978,8 +877,12 @@ fun ChatMessageList(
     currentConfig: AiConfig?,
     performanceMode: Boolean,
     onRegenerate: (Int) -> Unit,
+    onLinkClick: (String) -> Unit,
+    onLongPress: (AiMessage) -> Unit,
+    onShowSources: (AiMessage) -> Unit,
     onScrollBottom: () -> Unit,
     onRetrySync: () -> Unit,
+    loadingPhaseText: String?,
 ) {
     Box(
         modifier = Modifier
@@ -1004,23 +907,23 @@ fun ChatMessageList(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 24.dp)
         ) {
-            items(messages) { ChatBubble(it, currentConfig, performanceMode, onRegenerate) }
-            if (streamingText.isNotEmpty()) item { StreamingBubble(streamingText, currentConfig, performanceMode) }
-            if (isLoading && streamingText.isEmpty()) item { TypingIndicator(currentConfig, performanceMode) }
+            items(messages, key = { it.id }) { ChatBubble(it, currentConfig, performanceMode, onRegenerate, onLinkClick, onLongPress, onShowSources) }
+            if (isLoading || streamingText.isNotEmpty()) {
+                item { 
+                    ActiveAiBubble(
+                        isLoading = isLoading, 
+                        loadingPhaseText = loadingPhaseText ?: "",
+                        streamingText = streamingText, 
+                        currentConfig = currentConfig, 
+                        performanceMode = performanceMode, 
+                        onLinkClick = onLinkClick
+                    ) 
+                }
+            }
             if (error != null) item { ErrorMessage(error, onRetrySync) }
             item { Spacer(Modifier.height(100.dp)) }
         }
     }
-}
-
-@Composable
-fun StreamingBubble(text: String, currentConfig: AiConfig?, performanceMode: Boolean) {
-    ChatBubble(
-        message = AiMessage(chatId = 0, text = text, isUser = false), 
-        currentConfig = currentConfig, 
-        performanceMode = performanceMode, 
-        onRegenerate = {}
-    )
 }
 
 @Composable
@@ -1040,15 +943,86 @@ fun AiAvatar(config: AiConfig?, size: Dp, modifier: Modifier = Modifier, perform
 }
 
 @Composable
-fun TypingIndicator(currentConfig: AiConfig?, performanceMode: Boolean) {
+fun ActiveAiBubble(
+    isLoading: Boolean,
+    loadingPhaseText: String,
+    streamingText: String,
+    currentConfig: AiConfig?,
+    performanceMode: Boolean,
+    onLinkClick: (String) -> Unit
+) {
+    val isTypingOnly = isLoading && streamingText.isEmpty()
+    
+    // Animate bubble width based on state
+    val bubbleModifier = Modifier.animateContentSize(
+        animationSpec = spring(
+            dampingRatio = 0.6f,
+            stiffness = Spring.StiffnessMediumLow
+        )
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top
     ) {
         AiAvatar(currentConfig, 32.dp, performanceMode = performanceMode)
-        Surface(shape = RoundedCornerShape(4.dp, AiDesign.CornerMedium, AiDesign.CornerMedium, AiDesign.CornerMedium), color = AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
-            TypingIndicatorDots(MaterialTheme.colorScheme.primary)
+        
+        Surface(
+            shape = RoundedCornerShape(4.dp, AiDesign.CornerMedium, AiDesign.CornerMedium, AiDesign.CornerMedium),
+            color = AiDesign.glassColor(),
+            border = BorderStroke(1.dp, AiDesign.glassBorder()),
+            modifier = bubbleModifier
+        ) {
+            AnimatedContent(
+                targetState = isTypingOnly,
+                transitionSpec = {
+                    (fadeIn(tween(400)) + scaleIn(initialScale = 0.8f, animationSpec = tween(400, easing = EaseOutBack)))
+                        .togetherWith(fadeOut(tween(200)))
+                }, label = "bubble_expansion"
+            ) { typing ->
+                if (typing) {
+                    // Loading Phase
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TypingIndicatorDots(MaterialTheme.colorScheme.primary)
+                        AnimatedContent(
+                            targetState = loadingPhaseText,
+                            transitionSpec = {
+                                slideInVertically { height -> height } + fadeIn() togetherWith
+                                slideOutVertically { height -> -height } + fadeOut()
+                            }, label = "loading_text"
+                        ) { text ->
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AiDesign.textColor(0.7f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                } else {
+                    // Typewriter Phase
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        val segments = parseMarkdownToSegments(streamingText)
+                        segments.forEach { seg ->
+                            MarkdownSegment(
+                                seg = seg,
+                                baseFontSize = 15.sp,
+                                modifier = Modifier.padding(vertical = 4.dp).animateContentSize(),
+                                textColor = AiDesign.textColor(),
+                                onLinkClick = onLinkClick
+                            )
+                        }
+                        if (isLoading) {
+                            TypingIndicatorDots(MaterialTheme.colorScheme.primary.copy(0.5f))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1484,7 +1458,7 @@ fun AiSettingsDialog(
                                     }
                                 }
                             }
-                            items(savedConfigs) { config ->
+                            items(savedConfigs, key = { it.name }) { config ->
                                 Surface(Modifier.fillMaxWidth(), RoundedCornerShape(AiDesign.CornerSmall), AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                         AiAvatar(config, 40.dp, performanceMode = true)
@@ -1549,3 +1523,189 @@ fun ErrorMessage(error: String, onRetry: () -> Unit) {
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessageActionsSheet(
+    message: AiMessage,
+    onDismiss: () -> Unit,
+    onRegenerate: (Int) -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                text = "Message Actions",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            ActionRow(
+                icon = Icons.Rounded.ContentCopy,
+                label = "Copy Text",
+                color = MaterialTheme.colorScheme.onSurface,
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(message.text))
+                    onDismiss()
+                }
+            )
+            
+            if (!message.isUser) {
+                ActionRow(
+                    icon = Icons.Rounded.Refresh,
+                    label = "Regenerate",
+                    color = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        onRegenerate(message.id)
+                        onDismiss()
+                    }
+                )
+            }
+
+            ActionRow(
+                icon = Icons.Rounded.Share,
+                label = "Share",
+                color = MaterialTheme.colorScheme.onSurface,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, message.text)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share via"))
+                    onDismiss()
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessageSourcesSheet(
+    message: AiMessage,
+    onDismiss: () -> Unit,
+    onLinkClick: (String) -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+    
+    val sources = remember(message.searchSources) {
+        if (message.searchSources.isNullOrBlank()) {
+            emptyList<SearchResult>()
+        } else {
+            try {
+                val moshi = Moshi.Builder()
+                    .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                    .build()
+                val listType = Types.newParameterizedType(List::class.java, SearchResult::class.java)
+                val adapter = moshi.adapter<List<SearchResult>>(listType)
+                adapter.fromJson(message.searchSources) ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                text = "Sources",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(bottom = 20.dp)
+            )
+            
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                itemsIndexed(sources, key = { index, source -> "${source.url}_$index" }) { _, source ->
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                SourceFavicon(url = source.url, size = 24.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = source.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = source.displayUrl,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            
+                            if (source.snippet.isNotBlank()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = source.snippet,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                            
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { onLinkClick(source.url) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Public, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Open", fontSize = 13.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = { 
+                                        clipboardManager.setText(AnnotatedString(source.url))
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Copy URL", fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
