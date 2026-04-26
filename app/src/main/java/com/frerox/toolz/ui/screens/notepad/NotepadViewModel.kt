@@ -110,9 +110,10 @@ class NotepadViewModel @Inject constructor(
         attachedAudioUri : String? = null,
         attachedAudioName: String? = null,
         attachedImageUri : String? = null,
+        onInserted       : (Int) -> Unit = {},
     ) {
         viewModelScope.launch {
-            noteDao.insertNote(
+            val insertedId = noteDao.insertNote(
                 Note(
                     title             = title.trim(),
                     content           = content,
@@ -127,11 +128,18 @@ class NotepadViewModel @Inject constructor(
                     attachedImageUri  = attachedImageUri,
                 )
             )
+            onInserted(insertedId.toInt())
         }
     }
 
     fun updateNote(note: Note) {
         viewModelScope.launch { noteDao.insertNote(note) }   // insert with REPLACE strategy
+    }
+
+    fun updateNoteCardSize(note: Note, cardSize: String) {
+        viewModelScope.launch {
+            noteDao.insertNote(note.copy(cardSize = cardSize))
+        }
     }
 
     fun deleteNote(note: Note) {

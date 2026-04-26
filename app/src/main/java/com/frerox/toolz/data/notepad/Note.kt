@@ -18,5 +18,6 @@ data class Note(
     val attachedPdfUri: String? = null,
     val attachedAudioUri: String? = null,
     val attachedAudioName: String? = null,
-    val attachedImageUri: String? = null
+    val attachedImageUri: String? = null,
+    val cardSize: String = "AUTO"
 )

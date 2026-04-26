@@ -1174,12 +1174,27 @@ fun QuickNoteItem(note: Note, onNavigate: (String) -> Unit) {
     } else {
         noteColor.copy(alpha = 0.12f)
     }
+    val cardWidth = when {
+        note.cardSize == "LARGE" || note.attachedAudioUri != null -> 292.dp
+        note.attachedImageUri != null -> 252.dp
+        else -> 220.dp
+    }
+    val cardHeight = when {
+        note.attachedImageUri != null -> 198.dp
+        note.cardSize == "SMALL" -> 148.dp
+        else -> 172.dp
+    }
     
     Card(
         modifier = Modifier
-            .size(width = 220.dp, height = 140.dp)
-            .bouncyClick { onNavigate(Screen.Notepad.route) },
-        shape = RoundedCornerShape(30.dp),
+            .size(width = cardWidth, height = cardHeight)
+            .bouncyClick { onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}") },
+        shape = when {
+            note.attachedAudioUri != null -> RoundedCornerShape(32.dp, 24.dp, 32.dp, 24.dp)
+            note.attachedImageUri != null -> RoundedCornerShape(30.dp, 18.dp, 30.dp, 18.dp)
+            note.attachedPdfUri != null -> RoundedCornerShape(24.dp)
+            else -> RoundedCornerShape(30.dp)
+        },
         colors = CardDefaults.cardColors(
             containerColor = containerColor
         ),
@@ -1188,25 +1203,107 @@ fun QuickNoteItem(note: Note, onNavigate: (String) -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(18.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Text(
+                        text = note.title.ifBlank { "Untitled" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (note.isPinned) {
+                        Surface(
+                            color = noteColor.copy(alpha = 0.18f),
+                            shape = CircleShape,
+                        ) {
+                            Icon(
+                                Icons.Rounded.PushPin,
+                                null,
+                                modifier = Modifier.padding(6.dp).size(14.dp),
+                                tint = noteColor,
+                            )
+                        }
+                    }
+                }
+
+                note.attachedImageUri?.let { imageUri ->
+                    AsyncImage(
+                        model = imageUri,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(84.dp)
+                            .clip(RoundedCornerShape(18.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+
+                Text(
+                    text = note.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                    maxLines = if (note.attachedImageUri != null) 3 else 4,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (note.attachedAudioUri != null) {
+                        QuickNoteAttachmentChip(Icons.Rounded.MusicNote, "Audio", noteColor)
+                    }
+                    if (note.attachedPdfUri != null) {
+                        QuickNoteAttachmentChip(Icons.Rounded.Description, "PDF", noteColor)
+                    }
+                    if (note.attachedImageUri != null) {
+                        QuickNoteAttachmentChip(Icons.Rounded.Image, "Image", noteColor)
+                    }
+                }
+                Text(
+                    text = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault()).format(java.util.Date(note.timestamp)).uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    fontWeight = FontWeight.Black,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickNoteAttachmentChip(icon: ImageVector, label: String, accent: Color) {
+    Surface(
+        color = accent.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.18f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(icon, null, modifier = Modifier.size(12.dp), tint = accent)
             Text(
-                text = note.title.ifBlank { "Untitled" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = note.content,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Medium
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = accent,
             )
         }
     }

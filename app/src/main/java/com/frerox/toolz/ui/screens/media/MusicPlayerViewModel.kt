@@ -91,7 +91,10 @@ data class MusicUiState(
     val equalizerPresets: List<String> = listOf("Normal", "Pop", "Rock", "Jazz", "Classical", "Dance", "Heavy Metal", "Hip Hop", "Flat", "Custom"),
     val customEqualizerGains: List<Float> = List(5) { 0f },
     val visualizerSensitivity: Float = 1.0f,
-    val showMusicSettings: Boolean = false
+    val showMusicSettings: Boolean = false,
+    val fastSeeking: Boolean = true,
+    val alwaysSync: Boolean = true,
+    val catalogResults: List<CatalogTrack> = emptyList()
 )
 
 data class QueueEntry(
@@ -736,16 +739,14 @@ class MusicPlayerViewModel @Inject constructor(
             while (true) {
                 if (_sliderPosition.value == null) {
                     val p: Player = controller ?: player
-                    val currentPos = p.currentPosition
+                    val currentPos = p.currentPosition.coerceAtLeast(0)
                     _uiState.update { it.copy(playbackPosition = currentPos) }
-                    if (_playbackPosition.value != currentPos) {
-                        _playbackPosition.value = currentPos
-                    }
+                    _playbackPosition.value = currentPos
                 }
                 val isSyncedLyricsVisible = _uiState.value.currentTrack?.aiLyrics?.contains("[0") == true
                 val interval = when {
                     _uiState.value.performanceMode -> 500L
-                    isSyncedLyricsVisible -> 16L
+                    _uiState.value.fastSeeking || isSyncedLyricsVisible -> 16L
                     else -> 100L
                 }
                 delay(interval)
