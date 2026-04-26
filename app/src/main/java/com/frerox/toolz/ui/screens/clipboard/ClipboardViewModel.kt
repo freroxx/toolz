@@ -11,6 +11,7 @@ import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ClipboardService
 import com.frerox.toolz.util.ConnectivityObserver
 import com.frerox.toolz.util.NetworkConnectivityObserver
@@ -33,6 +34,7 @@ class ClipboardViewModel @Inject constructor(
     private val application: Application,
     private val clipboardDao: ClipboardDao,
     private val aiRepository: ChatRepository,
+    private val settingsRepository: SettingsRepository,
     val classifier: ClipboardClassifier
 ) : AndroidViewModel(application) {
 
@@ -103,6 +105,10 @@ class ClipboardViewModel @Inject constructor(
         if (!isWifiAvailable()) return
 
         viewModelScope.launch {
+            if (settingsRepository.offlineModeEnabled.first()) return@launch
+            if (!settingsRepository.aiSearchEnabled.first()) return@launch
+            if (!settingsRepository.aiClipboardMonitoringEnabled.first()) return@launch
+
             val currentEntries = entries.value
             if (currentEntries.isEmpty()) return@launch
 

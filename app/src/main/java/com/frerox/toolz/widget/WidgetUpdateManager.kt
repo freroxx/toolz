@@ -8,6 +8,8 @@ import com.frerox.toolz.widget.glance.MusicGlanceWidget
 import com.frerox.toolz.widget.glance.MusicWidgetState
 import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
 import com.frerox.toolz.widget.glance.PomodoroWidgetState
+import com.frerox.toolz.widget.glance.MusicWidgetStateDefinition
+import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import com.frerox.toolz.widget.glance.SearchBarGlanceWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -27,7 +29,7 @@ class WidgetUpdateManager @Inject constructor(
     ) {
         val glanceIds = GlanceAppWidgetManager(context).getGlanceIds(MusicGlanceWidget::class.java)
         glanceIds.forEach { glanceId ->
-            updateAppWidgetState(context, glanceId) { prefs ->
+            updateAppWidgetState(context, MusicWidgetStateDefinition, glanceId) { prefs ->
                 prefs.toMutablePreferences().apply {
                     this[MusicWidgetState.KEY_TITLE] = title
                     this[MusicWidgetState.KEY_ARTIST] = artist
@@ -55,7 +57,7 @@ class WidgetUpdateManager @Inject constructor(
     ) {
         val glanceIds = GlanceAppWidgetManager(context).getGlanceIds(PomodoroGlanceWidget::class.java)
         glanceIds.forEach { glanceId ->
-            updateAppWidgetState(context, glanceId) { prefs ->
+            updateAppWidgetState(context, PomodoroWidgetStateDefinition, glanceId) { prefs ->
                 prefs.toMutablePreferences().apply {
                     this[PomodoroWidgetState.KEY_MODE] = mode
                     this[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs

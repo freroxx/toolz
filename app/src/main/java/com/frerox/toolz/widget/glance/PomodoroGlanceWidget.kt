@@ -1,8 +1,10 @@
 package com.frerox.toolz.widget.glance
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import com.frerox.toolz.MainActivity
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
@@ -21,6 +23,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionSendBroadcast
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.getAppWidgetState
@@ -90,6 +93,12 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         val ringBitmap = buildRingBitmap(progress, ringArgb, trackArgb, bgArgb, 300)
         val timeString = formatMillis(remainingMs.toLong())
 
+        // Intent to open the Pomodoro screen in the app
+        val openPomodoroIntent = Intent(context, MainActivity::class.java).apply {
+            putExtra("navigate_to", "pomodoro")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+
         provideContent {
             GlanceTheme {
                 val size       = LocalSize.current
@@ -98,7 +107,8 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                 Box(
                     modifier = GlanceModifier.fillMaxSize()
                         .background(GlanceTheme.colors.surface)
-                        .cornerRadius(28.dp),
+                        .cornerRadius(28.dp)
+                        .clickable(actionStartActivity(openPomodoroIntent)),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (isExpanded) {
@@ -123,18 +133,20 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
     ): Bitmap {
         val bmp    = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        val stroke = sizePx * 0.09f
-        val inset  = stroke / 2f + sizePx * 0.02f
+        val stroke = sizePx * 0.12f // Thicker ring for better visibility
+        val inset  = stroke / 2f + sizePx * 0.03f
 
+        // Draw background circle
         canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f,
             Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor; style = Paint.Style.FILL })
 
         val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = trackColor; style = Paint.Style.STROKE; strokeWidth = stroke; strokeCap = Paint.Cap.ROUND
+            alpha = 40 // Make track subtle
         }
         canvas.drawArc(RectF(inset, inset, sizePx - inset, sizePx - inset), -90f, 360f, false, trackPaint)
 
-        if (progress > 0.01f) {
+        if (progress > 0.005f) {
             val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = ringColor; style = Paint.Style.STROKE; strokeWidth = stroke; strokeCap = Paint.Cap.ROUND
             }
@@ -157,26 +169,38 @@ private fun CompactPomodoroContent(
     Box(modifier = GlanceModifier.fillMaxSize().padding(8.dp), contentAlignment = Alignment.Center) {
         Image(provider = ImageProvider(ringBitmap), contentDescription = null,
             modifier = GlanceModifier.fillMaxSize())
+        
         Column(
             modifier = GlanceModifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(modeLabel(mode), maxLines = 1, style = TextStyle(
-                color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp,
+                color = if (mode == "WORK") GlanceTheme.colors.primary else GlanceTheme.colors.tertiary, 
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
-            Spacer(GlanceModifier.height(2.dp))
+            
+            Spacer(GlanceModifier.height(4.dp))
+            
             Text(timeString, style = TextStyle(
-                color = GlanceTheme.colors.onSurface, fontSize = 28.sp,
+                color = GlanceTheme.colors.onSurface, fontSize = 32.sp,
                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
-            Spacer(GlanceModifier.height(8.dp))
-            Box(modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
-                    .background(GlanceTheme.colors.primary)
-                    .clickable(actionSendBroadcast(POMODORO_ACTION_TOGGLE)),
+            
+            Spacer(GlanceModifier.height(10.dp))
+            
+            val pkg = androidx.glance.LocalContext.current.packageName
+            val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.PomodoroWidgetReceiver")
+            val toggleIntent = Intent(POMODORO_ACTION_TOGGLE).apply { component = receiver }
+
+            Box(modifier = GlanceModifier.size(44.dp).cornerRadius(22.dp)
+                    .background(if (mode == "WORK") GlanceTheme.colors.primary else GlanceTheme.colors.tertiary)
+                    .clickable(actionSendBroadcast(toggleIntent)),
                 contentAlignment = Alignment.Center) {
                 Image(provider = ImageProvider(if (isRunning) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
-                    contentDescription = null, modifier = GlanceModifier.size(18.dp),
-                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary))
+                    contentDescription = null, modifier = GlanceModifier.size(24.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(
+                        if (mode == "WORK") GlanceTheme.colors.onPrimary else GlanceTheme.colors.onTertiary
+                    ))
             }
         }
     }
@@ -197,10 +221,11 @@ private fun ExpandedPomodoroContent(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = GlanceModifier.fillMaxSize()) {
                 Text(modeLabel(mode), style = TextStyle(
-                    color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp,
+                    color = if (mode == "WORK") GlanceTheme.colors.primary else GlanceTheme.colors.tertiary, 
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
                 Text(timeString, style = TextStyle(
-                    color = GlanceTheme.colors.onSurface, fontSize = 22.sp,
+                    color = GlanceTheme.colors.onSurface, fontSize = 24.sp,
                     fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
             }
         }
@@ -211,47 +236,62 @@ private fun ExpandedPomodoroContent(
         Column(modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically) {
             // Daily goal chip
-            Box(modifier = GlanceModifier.fillMaxWidth().cornerRadius(12.dp)
-                    .background(GlanceTheme.colors.primaryContainer)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Box(modifier = GlanceModifier.fillMaxWidth().cornerRadius(16.dp)
+                    .background(GlanceTheme.colors.secondaryContainer)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Column {
                     Text("DAILY FOCUS GOAL", style = TextStyle(
-                        color = GlanceTheme.colors.onPrimaryContainer, fontSize = 9.sp,
+                        color = GlanceTheme.colors.onSecondaryContainer, fontSize = 10.sp,
                         fontWeight = FontWeight.Bold))
                     Text("$sessionsDone / $sessionsGoal sessions", style = TextStyle(
-                        color = GlanceTheme.colors.onPrimaryContainer, fontSize = 13.sp,
+                        color = GlanceTheme.colors.onSecondaryContainer, fontSize = 14.sp,
                         fontWeight = FontWeight.Bold))
                 }
             }
 
-            Spacer(GlanceModifier.height(12.dp))
+            Spacer(GlanceModifier.height(14.dp))
 
             // Control row
             Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                val pkg = androidx.glance.LocalContext.current.packageName
+                val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.PomodoroWidgetReceiver")
+                val resetIntent = Intent(POMODORO_ACTION_RESET).apply { component = receiver }
+                val toggleIntent = Intent(POMODORO_ACTION_TOGGLE).apply { component = receiver }
+                val skipIntent = Intent(POMODORO_ACTION_SKIP).apply { component = receiver }
+
+                // Reset Button
+                Box(modifier = GlanceModifier.size(42.dp).cornerRadius(21.dp)
                         .background(GlanceTheme.colors.surfaceVariant)
-                        .clickable(actionSendBroadcast(POMODORO_ACTION_RESET)),
+                        .clickable(actionSendBroadcast(resetIntent)),
                     contentAlignment = Alignment.Center) {
                     Image(provider = ImageProvider(R.drawable.ic_widget_reset),
-                        contentDescription = "Reset", modifier = GlanceModifier.size(18.dp),
+                        contentDescription = "Reset", modifier = GlanceModifier.size(20.dp),
                         colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant))
                 }
-                Spacer(GlanceModifier.width(8.dp))
-                Box(modifier = GlanceModifier.size(44.dp).cornerRadius(22.dp)
-                        .background(GlanceTheme.colors.primary)
-                        .clickable(actionSendBroadcast(POMODORO_ACTION_TOGGLE)),
+                
+                Spacer(GlanceModifier.width(12.dp))
+                
+                // Play/Pause Button
+                Box(modifier = GlanceModifier.size(52.dp).cornerRadius(26.dp)
+                        .background(if (mode == "WORK") GlanceTheme.colors.primary else GlanceTheme.colors.tertiary)
+                        .clickable(actionSendBroadcast(toggleIntent)),
                     contentAlignment = Alignment.Center) {
                     Image(provider = ImageProvider(if (isRunning) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
-                        contentDescription = null, modifier = GlanceModifier.size(22.dp),
-                        colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary))
+                        contentDescription = null, modifier = GlanceModifier.size(26.dp),
+                        colorFilter = androidx.glance.ColorFilter.tint(
+                            if (mode == "WORK") GlanceTheme.colors.onPrimary else GlanceTheme.colors.onTertiary
+                        ))
                 }
-                Spacer(GlanceModifier.width(8.dp))
-                Box(modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                
+                Spacer(GlanceModifier.width(12.dp))
+                
+                // Skip Button
+                Box(modifier = GlanceModifier.size(42.dp).cornerRadius(21.dp)
                         .background(GlanceTheme.colors.surfaceVariant)
-                        .clickable(actionSendBroadcast(POMODORO_ACTION_SKIP)),
+                        .clickable(actionSendBroadcast(skipIntent)),
                     contentAlignment = Alignment.Center) {
                     Image(provider = ImageProvider(R.drawable.ic_widget_next),
-                        contentDescription = "Skip", modifier = GlanceModifier.size(18.dp),
+                        contentDescription = "Skip", modifier = GlanceModifier.size(20.dp),
                         colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant))
                 }
             }

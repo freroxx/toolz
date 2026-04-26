@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.steps.StepEntry

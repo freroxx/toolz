@@ -17,11 +17,15 @@ class PomodoroWidgetReceiver : GlanceAppWidgetReceiver() {
         super.onReceive(context, intent)
         val action = when (intent.action) {
             POMODORO_ACTION_TOGGLE -> ToolService.ACTION_POMODORO_TOGGLE
-            POMODORO_ACTION_RESET  -> ToolService.ACTION_POMODORO_STOP
+            POMODORO_ACTION_RESET  -> ToolService.ACTION_POMODORO_RESET
             POMODORO_ACTION_SKIP   -> ToolService.ACTION_POMODORO_SKIP
             else                   -> return
         }
         val serviceIntent = Intent(context, ToolService::class.java).apply { this.action = action }
-        context.startService(serviceIntent)
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

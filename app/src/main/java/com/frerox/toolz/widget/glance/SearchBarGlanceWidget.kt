@@ -74,7 +74,7 @@ private fun SearchBarContent(openSearchIntent: Intent, voiceIntent: Intent) {
         modifier = GlanceModifier
             .fillMaxSize()
             .background(GlanceTheme.colors.surface)
-            .cornerRadius(999.dp)
+            .cornerRadius(32.dp) // Premium rounded pill
             .clickable(actionStartActivity(openSearchIntent)),
         contentAlignment = Alignment.Center,
     ) {
@@ -82,21 +82,24 @@ private fun SearchBarContent(openSearchIntent: Intent, voiceIntent: Intent) {
             modifier = GlanceModifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Toolz "Z" logo badge
+            // Search icon badge - replaced "Z" with search icon
             Box(
-                modifier = GlanceModifier.size(28.dp).cornerRadius(8.dp)
+                modifier = GlanceModifier.size(34.dp).cornerRadius(10.dp)
                     .background(GlanceTheme.colors.primary),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("Z", style = TextStyle(
-                    color = GlanceTheme.colors.onPrimary,
-                    fontSize = 14.sp, fontWeight = FontWeight.Bold))
+                Image(
+                    provider = ImageProvider(R.drawable.ic_search),
+                    contentDescription = "Search",
+                    modifier = GlanceModifier.size(20.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary)
+                )
             }
 
-            Spacer(GlanceModifier.width(10.dp))
+            Spacer(GlanceModifier.width(16.dp))
 
             // Hint text (fills remaining space)
             Text(
@@ -104,28 +107,29 @@ private fun SearchBarContent(openSearchIntent: Intent, voiceIntent: Intent) {
                 modifier = GlanceModifier.defaultWeight(),
                 style = TextStyle(
                     color = GlanceTheme.colors.onSurfaceVariant,
-                    fontSize = 14.sp),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium),
             )
 
             Spacer(GlanceModifier.width(8.dp))
 
-            // Vertical divider
-            Box(modifier = GlanceModifier.width(1.dp).height(22.dp)
+            // Vertical divider - more subtle
+            Box(modifier = GlanceModifier.width(1.dp).height(20.dp)
                     .background(GlanceTheme.colors.outline)) {}
 
-            Spacer(GlanceModifier.width(8.dp))
+            Spacer(GlanceModifier.width(12.dp))
 
-            // Mic button
+            // Mic button - refined
             Box(
-                modifier = GlanceModifier.size(32.dp).cornerRadius(16.dp)
-                    .background(GlanceTheme.colors.primaryContainer)
+                modifier = GlanceModifier.size(40.dp).cornerRadius(20.dp)
+                    .background(GlanceTheme.colors.secondaryContainer)
                     .clickable(actionStartActivity(voiceIntent)),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(provider = ImageProvider(R.drawable.ic_widget_mic),
                     contentDescription = "Voice Search",
-                    modifier = GlanceModifier.size(18.dp),
-                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer))
+                    modifier = GlanceModifier.size(22.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer))
             }
         }
     }

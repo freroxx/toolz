@@ -110,6 +110,7 @@ class SettingsViewModel @Inject constructor(
     val showMusicVisualizer = repository.showMusicVisualizer
     val musicAiEnabled = repository.musicAiEnabled
     val musicKeepScreenOnLyrics = repository.musicKeepScreenOnLyrics
+    val aiClipboardMonitoringEnabled = repository.aiClipboardMonitoringEnabled
 
     val performanceMode = repository.performanceMode
 
@@ -169,6 +170,7 @@ class SettingsViewModel @Inject constructor(
     fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
 
     fun setPdfAiOcrEnhance(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiOcrEnhance(enabled) }
+    fun setAiClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiClipboardMonitoringEnabled(enabled) }
 
     fun scheduleBackup(frequency: String) {
         val workManager = WorkManager.getInstance(context)

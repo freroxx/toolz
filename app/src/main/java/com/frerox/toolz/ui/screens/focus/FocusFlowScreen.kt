@@ -221,6 +221,7 @@ fun FocusFlowScreen(
             }
         },
         containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
     ) { padding ->
         Box(Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             LazyColumn(
@@ -461,26 +462,30 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
     Surface(
         onClick = onResolveClick,
         modifier = Modifier.fillMaxWidth().bouncyClick { },
-        shape    = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f),
-        border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
+        shape    = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.12f),
+        border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f)),
     ) {
         Row(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
-                    .background(MaterialTheme.colorScheme.error, RoundedCornerShape(16.dp)),
+                    .size(56.dp)
+                    .background(
+                        Brush.linearGradient(listOf(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(0.7f))), 
+                        RoundedCornerShape(16.dp)
+                    )
+                    .shadow(8.dp, RoundedCornerShape(16.dp), spotColor = MaterialTheme.colorScheme.error),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (!canDrawOverlays) Icons.Rounded.Layers else Icons.Rounded.AccessibilityNew,
                     null,
                     tint     = MaterialTheme.colorScheme.onError,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(28.dp),
                 )
             }
             Column(Modifier.weight(1f)) {
@@ -489,25 +494,27 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
                     fontWeight    = FontWeight.Black,
                     color         = MaterialTheme.colorScheme.error,
                     style         = MaterialTheme.typography.labelSmall,
-                    letterSpacing = 1.sp,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    if (!canDrawOverlays)
-                        "Needed to block distracting apps"
-                    else
-                        "Accessibility service helps the flow engine",
-                    style      = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.2.sp,
                 )
                 Spacer(Modifier.height(4.dp))
+                Text(
+                    if (!canDrawOverlays)
+                        "Enable overlay to block distractions"
+                    else
+                        "Required for real-time flow engine",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color      = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = onResolveClick,
                     modifier = Modifier.height(36.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
                 ) {
-                    Text("AUTHORIZE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Text("GRANT PERMISSION", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -545,7 +552,12 @@ fun MetricCard(
                 Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.height(10.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(
+                value, 
+                style = MaterialTheme.typography.titleLarge, 
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Spacer(Modifier.height(2.dp))
             Text(
                 label,
@@ -618,17 +630,17 @@ fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick
             .combinedClickable(onClick = {}, onLongClick = onLongClick)
             .graphicsLayer {
                 if (isElite && !performanceMode) {
-                    shadowElevation = 18.dp.toPx()
-                    spotShadowColor = accentColor.copy(alpha = 0.35f)
+                    shadowElevation = 24.dp.toPx()
+                    spotShadowColor = accentColor.copy(alpha = 0.45f)
                 }
             },
-        shape = RoundedCornerShape(28.dp),
-        color = accentColor.copy(alpha = 0.08f),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = glowStrength)),
+        shape = RoundedCornerShape(32.dp),
+        color = accentColor.copy(alpha = 0.06f),
+        border = BorderStroke(1.5.dp, Brush.sweepGradient(listOf(accentColor.copy(0.1f), accentColor, accentColor.copy(0.1f)))),
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.padding(28.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -643,80 +655,74 @@ fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (isElite) {
-                            Icon(
-                                imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = accentColor,
-                            )
+                        Surface(
+                            shape = CircleShape,
+                            color = accentColor.copy(0.15f)
+                        ) {
+                            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(
+                                    imageVector = if (isElite) Icons.Rounded.AutoAwesome else Icons.Rounded.Bolt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = accentColor,
+                                )
+                                Text(
+                                    text = "FLOW STATE",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = accentColor,
+                                    letterSpacing = 1.2.sp,
+                                )
+                            }
                         }
-                        Text(
-                            text = "FLOW STATE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = accentColor,
-                            letterSpacing = 1.5.sp,
-                        )
                     }
                     Text(
                         text = statusLabel,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = supportLabel,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
                     )
                 }
 
                 Column(
                     horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = accentColor.copy(alpha = 0.12f),
-                    ) {
-                        Text(
-                            text = "LONG PRESS FOR AI TIPS",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = accentColor,
-                        )
-                    }
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = "$animatedScore",
-                            style = MaterialTheme.typography.displayMedium.copy(fontSize = 72.sp),
+                            style = MaterialTheme.typography.displayMedium.copy(fontSize = 80.sp),
                             fontWeight = FontWeight.Black,
                             color = accentColor,
                             modifier = Modifier.graphicsLayer {
                                 if (isElite && !performanceMode) {
-                                    scaleX = 1f + (pulseRaw - 0.7f) * 0.1f
-                                    scaleY = 1f + (pulseRaw - 0.7f) * 0.1f
+                                    val s = 1f + (pulseRaw - 0.7f) * 0.08f
+                                    scaleX = s
+                                    scaleY = s
                                 }
                             },
                         )
                         Text(
                             text = "%",
-                            modifier = Modifier.padding(start = 4.dp, bottom = 14.dp),
+                            modifier = Modifier.padding(start = 2.dp, bottom = 18.dp),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
-                            color = accentColor.copy(alpha = 0.45f),
+                            color = accentColor.copy(alpha = 0.4f),
                         )
                     }
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
+                        .height(14.dp)
                         .clip(RoundedCornerShape(999.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                 ) {
@@ -727,29 +733,33 @@ fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick
                             .clip(RoundedCornerShape(999.dp))
                             .background(
                                 Brush.horizontalGradient(
-                                    listOf(accentColor.copy(alpha = 0.55f), accentColor),
+                                    listOf(accentColor.copy(alpha = 0.6f), accentColor),
                                 ),
                             ),
                     )
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
-                    Text("50", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
-                    Text("100", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                    listOf("0", "50", "100").forEach {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-
-            SquigglySlider(
-                value = score.toFloat(),
-                onValueChange = {},
-                valueRange = 0f..100f,
-                isPlaying = !performanceMode,
-                activeColor = accentColor,
-                inactiveColor = accentColor.copy(alpha = 0.12f),
-            )
+            
+            Surface(
+                onClick = onLongClick,
+                shape = RoundedCornerShape(16.dp),
+                color = accentColor.copy(alpha = 0.1f),
+                modifier = Modifier.fillMaxWidth().height(44.dp)
+            ) {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = accentColor)
+                    Spacer(Modifier.width(8.dp))
+                    Text("ANALYZE WITH AI TIPS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = accentColor)
+                }
+            }
         }
     }
 }
@@ -853,6 +863,7 @@ fun EnhancedUsageItem(
                             info.appName,
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
@@ -899,13 +910,16 @@ fun EnhancedUsageItem(
                             Text(
                                 info.packageName.lowercase(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 }
+
+                val context = LocalContext.current
+                val isToolzApp = info.packageName == context.packageName
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
@@ -915,9 +929,10 @@ fun EnhancedUsageItem(
                         color = if (isOverLimit) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(3.dp))
-                    val catColor = when (info.category) {
-                        AppCategory.TOOLZ -> MaterialTheme.colorScheme.primary
-                        AppCategory.DISTRACTION -> MaterialTheme.colorScheme.error
+                    val catColor = when {
+                        isToolzApp -> MaterialTheme.colorScheme.tertiary
+                        info.category == AppCategory.TOOLZ -> MaterialTheme.colorScheme.primary
+                        info.category == AppCategory.DISTRACTION -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     }
                     Surface(
@@ -925,9 +940,10 @@ fun EnhancedUsageItem(
                         shape = RoundedCornerShape(6.dp),
                     ) {
                         Text(
-                            when (info.category) {
-                                AppCategory.TOOLZ -> "PRODUCTIVE"
-                                AppCategory.DISTRACTION -> "DISTRACTION"
+                            when {
+                                isToolzApp -> "PRODUCTION"
+                                info.category == AppCategory.TOOLZ -> "PRODUCTIVE"
+                                info.category == AppCategory.DISTRACTION -> "DISTRACTION"
                                 else -> "OTHER"
                             },
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1227,97 +1243,135 @@ fun FocusAppSettingsSheet(
 
             Spacer(Modifier.height(24.dp))
 
-            // Quick limit chips
-            Text("QUICK LIMITS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(15, 30, 60, 120).forEach { mins ->
-                    val isSelected  = (selectedHours * 60 + selectedMins) == mins
-                    val activeColor = MaterialTheme.colorScheme.primary
+            val context = LocalContext.current
+            val isToolzApp = app.packageName == context.packageName
+
+            if (!isToolzApp) {
+                // Quick limit chips
+                Text("QUICK LIMITS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(15, 30, 60, 120).forEach { mins ->
+                        val isSelected  = (selectedHours * 60 + selectedMins) == mins
+                        val activeColor = MaterialTheme.colorScheme.primary
+                        Surface(
+                            modifier = Modifier.weight(1f).height(38.dp).bouncyClick { vibrationManager?.vibrateTick(); selectedHours = mins / 60; selectedMins = mins % 60 },
+                            shape    = RoundedCornerShape(12.dp),
+                            color    = if (isSelected) activeColor else activeColor.copy(0.08f),
+                            border   = if (isSelected) null else BorderStroke(1.dp, activeColor.copy(0.15f)),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (mins < 60) "${mins}m" else "${mins / 60}h",
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color      = if (isSelected) MaterialTheme.colorScheme.onPrimary else activeColor,
+                                )
+                            }
+                        }
+                    }
                     Surface(
-                        modifier = Modifier.weight(1f).height(38.dp).bouncyClick { vibrationManager?.vibrateTick(); selectedHours = mins / 60; selectedMins = mins % 60 },
+                        modifier = Modifier.weight(1f).height(38.dp).bouncyClick {
+                            vibrationManager?.vibrateTick()
+                            selectedHours = 0
+                            selectedMins = 0
+                            onSaveLimit(0)
+                            onDismiss()
+                        },
                         shape    = RoundedCornerShape(12.dp),
-                        color    = if (isSelected) activeColor else activeColor.copy(0.08f),
-                        border   = if (isSelected) null else BorderStroke(1.dp, activeColor.copy(0.15f)),
+                        color    = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                if (mins < 60) "${mins}m" else "${mins / 60}h",
-                                style      = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color      = if (isSelected) MaterialTheme.colorScheme.onPrimary else activeColor,
-                            )
+                            Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
+
+                Spacer(Modifier.height(24.dp))
+
+                // Custom duration picker
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("CUSTOM DURATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                    if (selectedHours == 0 && selectedMins == 0) {
+                        Text("No Limit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.55f), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
                 Surface(
-                    modifier = Modifier.weight(1f).height(38.dp).bouncyClick {
-                        vibrationManager?.vibrateTick()
-                        selectedHours = 0
-                        selectedMins = 0
-                        onSaveLimit(0)
-                        onDismiss()
-                    },
-                    shape    = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    shape    = RoundedCornerShape(24.dp),
                     color    = MaterialTheme.colorScheme.surfaceContainerHighest,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Selection highlight
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(0.55f).height(48.dp),
+                            color    = MaterialTheme.colorScheme.primary.copy(0.08f),
+                            shape    = RoundedCornerShape(12.dp),
+                            border   = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(0.2f)),
+                        ) {}
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment     = Alignment.CenterVertically,
+                        ) {
+                            ScrollableNumberPicker(0..23, selectedHours, { selectedHours = it }, "h")
+                            Spacer(Modifier.width(20.dp))
+                            Text(":", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(0.4f))
+                            Spacer(Modifier.width(20.dp))
+                            ScrollableNumberPicker(0..59, selectedMins, { selectedMins = it }, "m", formatTwoDigits = true)
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
 
-            // Custom duration picker
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("CUSTOM DURATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-                if (selectedHours == 0 && selectedMins == 0) {
-                    Text("No Limit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.55f), fontWeight = FontWeight.SemiBold)
+                Button(
+                    onClick  = {
+                        vibrationManager?.vibrateClick()
+                        val totalMins = selectedHours * 60L + selectedMins
+                        onSaveLimit(totalMins)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    shape    = RoundedCornerShape(18.dp),
+                ) {
+                    Text("APPLY SETTINGS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-
-            Surface(
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-                shape    = RoundedCornerShape(24.dp),
-                color    = MaterialTheme.colorScheme.surfaceContainerHighest,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    // Selection highlight
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(0.55f).height(48.dp),
-                        color    = MaterialTheme.colorScheme.primary.copy(0.08f),
-                        shape    = RoundedCornerShape(12.dp),
-                        border   = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(0.2f)),
-                    ) {}
+            } else {
+                // Info message for Toolz app
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f))
+                ) {
                     Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment     = Alignment.CenterVertically,
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        ScrollableNumberPicker(0..23, selectedHours, { selectedHours = it }, "h")
-                        Spacer(Modifier.width(20.dp))
-                        Text(":", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.alpha(0.4f))
-                        Spacer(Modifier.width(20.dp))
-                        ScrollableNumberPicker(0..59, selectedMins, { selectedMins = it }, "m", formatTwoDigits = true)
+                        Icon(Icons.Rounded.Verified, null, tint = MaterialTheme.colorScheme.tertiary)
+                        Text(
+                            "This is a system application. Limits cannot be set for Toolz to ensure you always have access to your productivity tools.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-            }
-
-            Spacer(Modifier.height(28.dp))
-
-            Button(
-                onClick  = {
-                    vibrationManager?.vibrateClick()
-                    val totalMins = selectedHours * 60L + selectedMins
-                    onSaveLimit(totalMins)
-                    onDismiss()
-                },
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                shape    = RoundedCornerShape(18.dp),
-            ) {
-                Text("APPLY SETTINGS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                
+                Spacer(Modifier.height(24.dp))
+                
+                Button(
+                    onClick  = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    shape    = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) {
+                    Text("DONE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                }
             }
         }
     }

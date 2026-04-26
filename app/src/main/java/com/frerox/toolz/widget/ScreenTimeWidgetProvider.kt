@@ -13,6 +13,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
+import android.util.Log
 import android.widget.RemoteViews
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
@@ -120,8 +121,7 @@ class ScreenTimeWidgetProvider : AppWidgetProvider() {
                 as? UsageStatsManager ?: return UsageResult(0L, emptyList())
         val pm  = context.packageManager
         val now = System.currentTimeMillis()
-        val tz  = TimeZone.getDefault()
-        val cal = Calendar.getInstance(tz).apply {
+        val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
@@ -130,61 +130,65 @@ class ScreenTimeWidgetProvider : AppWidgetProvider() {
         val startTime = cal.timeInMillis
 
         return try {
-            val usageMap      = mutableMapOf<String, Long>()
-            val lastEventTime = mutableMapOf<String, Long>()
-            val isFg          = mutableMapOf<String, Boolean>()
-
-            val events = statsManager.queryEvents(startTime, now)
-            while (events.hasNextEvent()) {
-                val ev = UsageEvents.Event()
-                events.getNextEvent(ev)
-                val pkg  = ev.packageName
-                val time = ev.timeStamp
+            val stats = statsManager.queryAndAggregateUsageStats(startTime, now)
+            val excluded = setOf("android", "com.android.systemui")
+            
+            // Detect the currently active foreground session.
+            // Only add delta time when the system hasn't yet flushed this resume event.
+            val ongoingSessions = mutableMapOf<String, Long>()
+            val recentEvents = statsManager.queryEvents(now - 600_000L, now)
+            val lastResumed = mutableMapOf<String, Long>()
+            val lastPaused  = mutableMapOf<String, Long>()
+            while (recentEvents.hasNextEvent()) {
+                val ev = android.app.usage.UsageEvents.Event()
+                recentEvents.getNextEvent(ev)
                 when (ev.eventType) {
-                    UsageEvents.Event.ACTIVITY_RESUMED -> {
-                        lastEventTime[pkg] = time
-                        isFg[pkg] = true
-                    }
-                    UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED -> {
-                        if (isFg[pkg] == true) {
-                            val diff = time - (lastEventTime[pkg] ?: startTime)
-                            if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
-                            isFg[pkg] = false
+                    android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ->
+                        lastResumed[ev.packageName] = ev.timeStamp
+                    android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
+                    android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED ->
+                        lastPaused[ev.packageName] = ev.timeStamp
+                }
+            }
+            lastResumed.forEach { (pkg, resumeTime) ->
+                val pauseTime = lastPaused[pkg] ?: 0L
+                if (resumeTime > pauseTime) {
+                    val ongoingMs = now - resumeTime
+                    if (ongoingMs > 0L) {
+                        val aggregateLastUsed = stats[pkg]?.lastTimeUsed ?: 0L
+                        if (aggregateLastUsed < resumeTime) {
+                            ongoingSessions[pkg] = ongoingMs
                         }
                     }
                 }
             }
-            // Add still-running foreground
-            isFg.forEach { (pkg, fg) ->
-                if (fg) {
-                    val diff = now - (lastEventTime[pkg] ?: startTime)
-                    if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
-                }
-            }
 
-            val excluded = setOf("android", "com.android.systemui", context.packageName)
-            val appList = usageMap.entries
-                .filter { (pkg, ms) ->
-                    ms > 5_000L &&
+            val appList = stats.asSequence()
+                .filter { (pkg, usage) ->
+                    val ms = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
+                    val isToolz = pkg == context.packageName
+                    (ms > 5_000L || isToolz) && 
                     pkg !in excluded &&
-                    pm.getLaunchIntentForPackage(pkg) != null
+                    (isToolz || pm.getLaunchIntentForPackage(pkg) != null)
                 }
-                .mapNotNull { (pkg, ms) ->
+                .mapNotNull { (pkg, usage) ->
+                    val ms = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
                     val name = try {
-                        pm.getApplicationLabel(
-                            pm.getApplicationInfo(pkg, 0)
-                        ).toString()
-                    } catch (_: Exception) { return@mapNotNull null }
+                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                    } catch (_: Exception) {
+                        if (pkg == context.packageName) "Toolz" else return@mapNotNull null
+                    }
                     name to ms
                 }
                 .sortedByDescending { it.second }
+                .toList()
 
             UsageResult(
                 totalMs = appList.sumOf { it.second },
                 topApps = appList.take(3),
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("ScreenTimeWidget", "Error querying usage stats", e)
             UsageResult(0L, emptyList())
         }
     }
@@ -193,13 +197,13 @@ class ScreenTimeWidgetProvider : AppWidgetProvider() {
 
     private fun getPrimaryColor(context: Context): Int {
         return if (Build.VERSION.SDK_INT >= 31) {
-            context.resources.getColor(android.R.color.system_accent1_400, context.theme)
-        } else 0xFF6750A4.toInt()
+            context.resources.getColor(android.R.color.system_accent1_200, context.theme)
+        } else 0xFFD0BCFF.toInt()
     }
 
     private fun getTrackColor(context: Context): Int {
         return if (Build.VERSION.SDK_INT >= 31) {
-            context.resources.getColor(android.R.color.system_neutral1_700, context.theme)
+            context.resources.getColor(android.R.color.system_neutral1_800, context.theme)
         } else 0xFF49454F.toInt()
     }
 
@@ -235,8 +239,8 @@ object ScreenTimeWidgetDrawer {
     ): Bitmap {
         val bmp    = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        val stroke = sizePx * 0.12f
-        val inset  = stroke / 2f + sizePx * 0.03f
+        val stroke = sizePx * 0.10f
+        val inset  = stroke / 2f + sizePx * 0.04f
 
         // Background fill
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

@@ -174,6 +174,9 @@ class SettingsRepository @Inject constructor(
     // Offline Mode
     private val OFFLINE_MODE_ENABLED = booleanPreferencesKey("offline_mode_enabled")
 
+    // AI Clipboard Monitoring
+    private val AI_CLIPBOARD_MONITORING = booleanPreferencesKey("ai_clipboard_monitoring")
+
     // Loading Screen Persistence
     private val LAST_LOADING_TIME = longPreferencesKey("last_loading_time")
 
@@ -314,6 +317,11 @@ class SettingsRepository @Inject constructor(
     ) { enabled, offline -> if (offline) false else enabled }
 
     val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
+
+    val aiClipboardMonitoringEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: true },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
 
     val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
 
@@ -491,6 +499,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiSearchIconVisible(visible: Boolean) {
         dataStore.edit { it[AI_SEARCH_ICON_VISIBLE] = visible }
+    }
+
+    suspend fun setAiClipboardMonitoringEnabled(enabled: Boolean) {
+        dataStore.edit { it[AI_CLIPBOARD_MONITORING] = enabled }
     }
 
     suspend fun setOfflineModeEnabled(enabled: Boolean) {
