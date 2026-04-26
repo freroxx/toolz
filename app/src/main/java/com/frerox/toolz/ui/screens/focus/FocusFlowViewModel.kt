@@ -30,6 +30,7 @@ import org.json.JSONObject
 import retrofit2.HttpException
 import java.util.*
 import javax.inject.Inject
+import com.frerox.toolz.data.focus.UsageStatsRepository
 
 // ─────────────────────────────────────────────────────────────
 //  Over-limit status — consumed by the accessibility service
@@ -55,6 +56,7 @@ class FocusFlowViewModel @Inject constructor(
     private val settingsRepository : SettingsRepository,
     private val openAiService      : OpenAiService,
     private val aiSettingsManager  : AiSettingsManager,
+    private val usageRepository    : UsageStatsRepository,
 ) : ViewModel() {
 
     companion object {
@@ -67,15 +69,7 @@ class FocusFlowViewModel @Inject constructor(
         private const val KEY_CATEGORIES    = "categories_json"
         private const val PREFS_USAGE_CACHE = "focus_daily_usage_cache"
 
-        private val EXCLUDED_PACKAGES = setOf(
-            "android", "com.android.systemui",
-            "com.android.launcher", "com.android.launcher3", "com.android.launcher2",
-            "com.google.android.apps.nexuslauncher", "com.sec.android.app.launcher",
-            "com.miui.home", "com.oneplus.launcher", "com.huawei.android.launcher",
-            "com.vivo.launcher", "com.oppo.launcher", "com.asus.launcher",
-            "com.realme.launcher", "com.nothing.launcher",
-            "com.google.android.inputmethod.latin", "com.samsung.android.honeyboard",
-        )
+        private val EXCLUDED_PACKAGES = emptySet<String>() // Moved to UsageStatsRepository
     }
 
     // ── Persistent AI category cache ───────────────────────────────────────
@@ -94,6 +88,9 @@ class FocusFlowViewModel @Inject constructor(
 
     private val _productivityScore = MutableStateFlow(0)
     val productivityScore: StateFlow<Int> = _productivityScore.asStateFlow()
+
+    private val _hasUsagePermission = MutableStateFlow(false)
+    val hasUsagePermission: StateFlow<Boolean> = _hasUsagePermission.asStateFlow()
 
     /**
      * AI-determined categories. Pre-loaded from SharedPreferences so results
@@ -180,6 +177,10 @@ class FocusFlowViewModel @Inject constructor(
         }.sortedByDescending { it.usageTimeMillis }
 
     }.distinctUntilChanged()
+
+    val top5Apps: StateFlow<List<AppUsageInfo>> = combinedUsageStats
+        .map { it.take(5) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
      * Debounced over-limit map for the accessibility service.
@@ -317,12 +318,13 @@ class FocusFlowViewModel @Inject constructor(
 
     fun refreshStats() {
         viewModelScope.launch {
-            val statsManager = context.getSystemService(Context.USAGE_STATS_SERVICE)
-                    as? UsageStatsManager ?: return@launch
-            val pm  = context.packageManager
-            val now = System.currentTimeMillis()
+            _hasUsagePermission.value = usageRepository.hasUsageStatsPermission()
+            if (!_hasUsagePermission.value) {
+                _rawStats.value = emptyList()
+                return@launch
+            }
 
-            // ── Timezone-correct interval ──────────────────────────────────
+            val now = System.currentTimeMillis()
             val tz  = TimeZone.getDefault()
             val cal = Calendar.getInstance(tz)
             
@@ -330,7 +332,6 @@ class FocusFlowViewModel @Inject constructor(
 
             cal.apply {
                 if (_isWeekly.value) {
-                    // Normalize to start of week (Monday) regardless of locale
                     val dow = get(Calendar.DAY_OF_WEEK)
                     val daysFromMonday = (dow - Calendar.MONDAY + 7) % 7
                     add(Calendar.DAY_OF_YEAR, -daysFromMonday)
@@ -343,73 +344,10 @@ class FocusFlowViewModel @Inject constructor(
             val startTime = cal.timeInMillis
 
             val usageList = withContext(Dispatchers.IO) {
-                try {
-                    val stats = statsManager.queryAndAggregateUsageStats(startTime, now)
-
-                    // Detect the currently active (resumed) app session.
-                    // We only add the extra ongoing time if the aggregate's lastTimeUsed predates
-                    // the resume event, meaning the system hasn't yet flushed that session.
-                    val ongoingSessions = mutableMapOf<String, Long>()
-                    val recentEvents = statsManager.queryEvents(now - 600_000L, now) // last 10 min
-                    // Track the last RESUMED and last PAUSED timestamps per pkg
-                    val lastResumed = mutableMapOf<String, Long>()
-                    val lastPaused  = mutableMapOf<String, Long>()
-
-                    while (recentEvents.hasNextEvent()) {
-                        val ev = android.app.usage.UsageEvents.Event()
-                        recentEvents.getNextEvent(ev)
-                        when (ev.eventType) {
-                            android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ->
-                                lastResumed[ev.packageName] = ev.timeStamp
-                            android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
-                            android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED ->
-                                lastPaused[ev.packageName] = ev.timeStamp
-                        }
-                    }
-
-                    lastResumed.forEach { (pkg, resumeTime) ->
-                        val pauseTime = lastPaused[pkg] ?: 0L
-                        // App is still in foreground if it was resumed after the last pause
-                        if (resumeTime > pauseTime) {
-                            val ongoingMs = now - resumeTime
-                            if (ongoingMs > 0L) {
-                                // Only add if the aggregate stats don't already include this time.
-                                // The aggregate lastTimeUsed tells us when the system last wrote stats.
-                                val aggregateLastUsed = stats[pkg]?.lastTimeUsed ?: 0L
-                                if (aggregateLastUsed < resumeTime) {
-                                    // System hasn't flushed this session yet — add it
-                                    ongoingSessions[pkg] = ongoingMs
-                                }
-                                // If aggregateLastUsed >= resumeTime, the system already included
-                                // the in-progress session in totalTimeInForeground — don't double-add
-                            }
-                        }
-                    }
-
-                    stats.asSequence()
-                        .filter { (pkg, usage) ->
-                            val totalTime = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
-                            val isToolz = pkg == context.packageName
-                            (totalTime >= 5_000L || isToolz) &&
-                                    pkg !in EXCLUDED_PACKAGES &&
-                                    (isToolz || pm.getLaunchIntentForPackage(pkg) != null)
-                        }
-                        .mapNotNull { (pkg, usage) ->
-                            val name = try {
-                                pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                            } catch (_: Exception) {
-                                if (pkg == context.packageName) "Toolz" else return@mapNotNull null
-                            }
-                            AppUsageInfo(
-                                packageName     = pkg,
-                                appName         = name,
-                                usageTimeMillis = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L),
-                            )
-                        }
-                        .toList()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to query usage stats", e)
-                    emptyList()
+                if (_isWeekly.value) {
+                    usageRepository.queryWeeklyByAggregate(startTime, now)
+                } else {
+                    usageRepository.queryDailyByEvents(startTime, now)
                 }
             }
 

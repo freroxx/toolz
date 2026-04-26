@@ -82,6 +82,8 @@ fun FocusFlowScreen(
     val isWeekly          by viewModel.isWeekly.collectAsState()
     val isAiClassifying   by viewModel.isAiClassifying.collectAsState()
     val aiClassifiedPkgs  by viewModel.aiClassifiedPackages.collectAsState()
+    val hasUsagePermission by viewModel.hasUsagePermission.collectAsState()
+    val top5Apps          by viewModel.top5Apps.collectAsState()
 
     val performanceMode   = LocalPerformanceMode.current
     val vibrationManager  = LocalVibrationManager.current
@@ -234,7 +236,18 @@ fun FocusFlowScreen(
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                // ── Permission banner ──────────────────────────────────────
+                // ── Permission banners ─────────────────────────────────────
+                if (!hasUsagePermission) {
+                    item {
+                        UsagePermissionBanner(
+                            onGrantClick = {
+                                vibrationManager?.vibrateClick()
+                                context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                            }
+                        )
+                    }
+                }
+
                 if (!canDrawOverlays || !isAccessibilityEnabled) {
                     item {
                         PermissionBanner(
@@ -291,6 +304,14 @@ fun FocusFlowScreen(
                     }
                 }
 
+                // ── Top 5 Apps section ─────────────────────────────────────
+                if (!isWeekly && top5Apps.isNotEmpty()) {
+                    item {
+                        val totalTime = usageStats.sumOf { it.usageTimeMillis }
+                        Top5AppsSection(topApps = top5Apps, totalTime = totalTime)
+                    }
+                }
+
                 // ── Analytics toggle + weekly chart ───────────────────────
                 item {
                     Row(
@@ -337,27 +358,53 @@ fun FocusFlowScreen(
                 if (usageStats.isEmpty()) {
                     item {
                         Box(
-                            Modifier.fillMaxWidth().padding(top = 64.dp),
+                            Modifier.fillMaxWidth().padding(top = 40.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 32.dp)) {
                                 Surface(
                                     shape  = RoundedCornerShape(28.dp),
                                     color  = MaterialTheme.colorScheme.surfaceContainerLow,
                                     modifier = Modifier.size(100.dp),
                                 ) {
                                     Icon(
-                                        Icons.Rounded.Assessment, null,
+                                        if (!hasUsagePermission) Icons.Rounded.Lock else Icons.Rounded.TimerOff, null,
                                         modifier = Modifier.padding(24.dp),
                                         tint     = MaterialTheme.colorScheme.outline,
                                     )
                                 }
-                                Spacer(Modifier.height(16.dp))
+                                Spacer(Modifier.height(24.dp))
                                 Text(
-                                    "No usage data collected yet.",
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    if (!hasUsagePermission) "Usage Access not granted" else "No events recorded today",
+                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center
                                 )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (!hasUsagePermission) 
+                                        "Usage Access is required to accurately track your screen time. Tap the banner above to grant it."
+                                    else 
+                                        "Some OEMs (Xiaomi, Samsung) restrict background event access. Try opening a few apps and refreshing.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 20.sp
+                                )
+                                
+                                if (hasUsagePermission) {
+                                    Spacer(Modifier.height(24.dp))
+                                    Button(
+                                        onClick = { 
+                                            vibrationManager?.vibrateClick()
+                                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                        },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("RE-GRANT USAGE ACCESS", fontWeight = FontWeight.Black)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1558,6 +1605,123 @@ fun WeeklyDetailedSheet(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Usage Permission Banner
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun UsagePermissionBanner(onGrantClick: () -> Unit) {
+    Surface(
+        onClick = onGrantClick,
+        modifier = Modifier.fillMaxWidth().bouncyClick { },
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(MaterialTheme.colorScheme.primary.copy(0.15f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "ACCURATE SCREEN TIME",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    "Usage Access required for accurate tracking. Tap to grant.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.primary.copy(0.5f))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Top 5 Apps Section
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun Top5AppsSection(topApps: List<AppUsageInfo>, totalTime: Long) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "TOP 5 APPS",
+            modifier = Modifier.padding(horizontal = 12.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+            letterSpacing = 1.sp,
+        )
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(0.5f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.2f))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                topApps.forEach { app ->
+                    val h = app.usageTimeMillis / 3_600_000
+                    val m = (app.usageTimeMillis % 3_600_000) / 60_000
+                    val timeStr = if (h > 0) "${h}h ${m}m" else "${m}m"
+                    val progress = if (totalTime > 0) app.usageTimeMillis.toFloat() / totalTime else 0f
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(Modifier.size(32.dp)) {
+                            AppIcon(packageName = app.packageName, modifier = Modifier.fillMaxSize())
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    app.appName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    timeStr,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primary.copy(0.1f),
+                                strokeCap = StrokeCap.Round
+                            )
                         }
                     }
                 }
