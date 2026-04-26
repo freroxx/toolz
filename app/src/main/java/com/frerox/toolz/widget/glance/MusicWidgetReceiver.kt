@@ -16,11 +16,17 @@ class MusicWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        // Forward control actions to MusicPlayerService
+        val serviceIntent = Intent(context, MusicPlayerService::class.java)
         when (intent.action) {
-            MUSIC_ACTION_TOGGLE -> context.startService(Intent(context, MusicPlayerService::class.java).apply { action = "TOGGLE_PLAY" })
-            MUSIC_ACTION_NEXT   -> context.startService(Intent(context, MusicPlayerService::class.java).apply { action = "SKIP_NEXT" })
-            MUSIC_ACTION_PREV   -> context.startService(Intent(context, MusicPlayerService::class.java).apply { action = "SKIP_PREV" })
+            MUSIC_ACTION_TOGGLE -> serviceIntent.action = "TOGGLE_PLAY"
+            MUSIC_ACTION_NEXT   -> serviceIntent.action = "SKIP_NEXT"
+            MUSIC_ACTION_PREV   -> serviceIntent.action = "SKIP_PREV"
+            else -> return
+        }
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }

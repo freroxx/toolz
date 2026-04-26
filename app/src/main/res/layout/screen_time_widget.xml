@@ -5,7 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
-    android:padding="12dp"
+    android:padding="16dp"
     android:background="@drawable/widget_rounded_bg"
     android:gravity="center_vertical">
 
@@ -33,55 +33,58 @@
                 android:id="@+id/st_total_time"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="18sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:gravity="center"
+                android:textColor="#FFFFFF"
                 android:text="0m" />
 
             <TextView
                 android:id="@+id/st_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="9sp"
+                android:textSize="10sp"
                 android:gravity="center"
+                android:textColor="#B3FFFFFF"
                 android:text="Screen Time" />
 
             <TextView
                 android:id="@+id/st_percent"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="11sp"
+                android:textSize="12sp"
                 android:textStyle="bold"
+                android:layout_marginTop="2dp"
                 android:gravity="center"
                 android:text="0%" />
         </LinearLayout>
     </FrameLayout>
 
-    <!-- App bars section (shown in expanded 4×2) -->
+    <!-- App bars section -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="1.4"
+        android:layout_weight="1.3"
         android:orientation="vertical"
         android:gravity="center_vertical"
-        android:paddingStart="10dp">
+        android:paddingStart="16dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="TOP APPS"
-            android:textSize="9sp"
+            android:text="TOP USAGE"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:letterSpacing="0.1"
-            android:alpha="0.5"
-            android:textColor="#FFFFFFFF" />
+            android:alpha="0.6"
+            android:textColor="#FFFFFF" />
 
         <!-- App 1 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="12dp">
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -94,20 +97,22 @@
                     android:layout_weight="1"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:textSize="11sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
                 <TextView
                     android:id="@+id/app1_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="10sp" />
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="11sp" />
             </LinearLayout>
             <ProgressBar
                 android:id="@+id/app1_bar"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="4dp"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:max="100"
                 android:progress="0"
                 android:progressDrawable="@drawable/widget_progress_bar" />
@@ -118,7 +123,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="10dp">
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -131,20 +136,22 @@
                     android:layout_weight="1"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:textSize="11sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
                 <TextView
                     android:id="@+id/app2_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="10sp" />
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="11sp" />
             </LinearLayout>
             <ProgressBar
                 android:id="@+id/app2_bar"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="4dp"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:max="100"
                 android:progress="0"
                 android:progressDrawable="@drawable/widget_progress_bar" />
@@ -155,7 +162,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="10dp">
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -168,20 +175,22 @@
                     android:layout_weight="1"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:textSize="11sp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
                 <TextView
                     android:id="@+id/app3_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textSize="10sp" />
+                    android:textColor="#B3FFFFFF"
+                    android:textSize="11sp" />
             </LinearLayout>
             <ProgressBar
                 android:id="@+id/app3_bar"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
                 android:layout_height="4dp"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:max="100"
                 android:progress="0"
                 android:progressDrawable="@drawable/widget_progress_bar" />

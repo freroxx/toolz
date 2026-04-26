@@ -183,14 +183,6 @@ class FocusFlowViewModel @Inject constructor(
 
     /**
      * Debounced over-limit map for the accessibility service.
-     *
-     * **Why 2.5 s debounce fixes the flicker:**
-     * When the overlay appears, the target app briefly goes to background,
-     * triggering a usage re-check. Without debounce, the re-check sees the
-     * app still over-limit → new overlay → old one destroyed → new one appears
-     * → loop. The 2.5 s debounce ensures only stable state that hasn't changed
-     * for 2.5 seconds reaches the service, so the brief backgrounding caused
-     * by the overlay itself never triggers a redundant recreation.
      */
     val appsOverLimit: StateFlow<Map<String, OverLimitStatus>> = combinedUsageStats
         .map { stats ->
@@ -338,8 +330,10 @@ class FocusFlowViewModel @Inject constructor(
 
             cal.apply {
                 if (_isWeekly.value) {
-                    set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-                    if (timeInMillis > now) add(Calendar.WEEK_OF_YEAR, -1)
+                    // Normalize to start of week (Monday) regardless of locale
+                    val dow = get(Calendar.DAY_OF_WEEK)
+                    val daysFromMonday = (dow - Calendar.MONDAY + 7) % 7
+                    add(Calendar.DAY_OF_YEAR, -daysFromMonday)
                 }
                 set(Calendar.HOUR_OF_DAY, 0)
                 set(Calendar.MINUTE,      0)
@@ -350,70 +344,71 @@ class FocusFlowViewModel @Inject constructor(
 
             val usageList = withContext(Dispatchers.IO) {
                 try {
-                    val usageMap = mutableMapOf<String, Long>()
-                    val lastEventTimes = mutableMapOf<String, Long>()
-                    val isForeground = mutableMapOf<String, Boolean>()
+                    val stats = statsManager.queryAndAggregateUsageStats(startTime, now)
 
-                    val events = statsManager.queryEvents(startTime, now)
-                    while (events.hasNextEvent()) {
-                        val event = android.app.usage.UsageEvents.Event()
-                        events.getNextEvent(event)
-                        val pkg = event.packageName
-                        val time = event.timeStamp
+                    // Detect the currently active (resumed) app session.
+                    // We only add the extra ongoing time if the aggregate's lastTimeUsed predates
+                    // the resume event, meaning the system hasn't yet flushed that session.
+                    val ongoingSessions = mutableMapOf<String, Long>()
+                    val recentEvents = statsManager.queryEvents(now - 600_000L, now) // last 10 min
+                    // Track the last RESUMED and last PAUSED timestamps per pkg
+                    val lastResumed = mutableMapOf<String, Long>()
+                    val lastPaused  = mutableMapOf<String, Long>()
 
-                        when (event.eventType) {
-                            android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED -> {
-                                lastEventTimes[pkg] = time
-                                isForeground[pkg] = true
-                            }
+                    while (recentEvents.hasNextEvent()) {
+                        val ev = android.app.usage.UsageEvents.Event()
+                        recentEvents.getNextEvent(ev)
+                        when (ev.eventType) {
+                            android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ->
+                                lastResumed[ev.packageName] = ev.timeStamp
                             android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
-                            android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED -> {
-                                if (isForeground[pkg] == true) {
-                                    val start = lastEventTimes[pkg] ?: startTime
-                                    val diff = time - start
-                                    if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
-                                    isForeground[pkg] = false
-                                } else if (!lastEventTimes.containsKey(pkg)) {
-                                    // Heuristic for apps running since start of window
-                                    val diff = time - startTime
-                                    // Tighten: Only if diff is reasonable (less than total window)
-                                    if (diff > 0 && diff < (now - startTime)) {
-                                        usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
-                                    }
-                                    lastEventTimes[pkg] = time
-                                    isForeground[pkg] = false
-                                }
-                            }
-                        }
-                    }
-                    isForeground.forEach { (pkg, isFg) ->
-                        if (isFg) {
-                            val start = lastEventTimes[pkg] ?: startTime
-                            val diff = now - start
-                            if (diff > 0) usageMap[pkg] = (usageMap[pkg] ?: 0L) + diff
+                            android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED ->
+                                lastPaused[ev.packageName] = ev.timeStamp
                         }
                     }
 
-                    usageMap.asSequence()
-                        .filter { (pkg, totalTime) ->
-                            totalTime >= 8_000L && // Increased threshold slightly to filter jitter
-                                    pkg !in EXCLUDED_PACKAGES &&
-                                    pkg != context.packageName && // Exclude self
-                                    pm.getLaunchIntentForPackage(pkg) != null
+                    lastResumed.forEach { (pkg, resumeTime) ->
+                        val pauseTime = lastPaused[pkg] ?: 0L
+                        // App is still in foreground if it was resumed after the last pause
+                        if (resumeTime > pauseTime) {
+                            val ongoingMs = now - resumeTime
+                            if (ongoingMs > 0L) {
+                                // Only add if the aggregate stats don't already include this time.
+                                // The aggregate lastTimeUsed tells us when the system last wrote stats.
+                                val aggregateLastUsed = stats[pkg]?.lastTimeUsed ?: 0L
+                                if (aggregateLastUsed < resumeTime) {
+                                    // System hasn't flushed this session yet — add it
+                                    ongoingSessions[pkg] = ongoingMs
+                                }
+                                // If aggregateLastUsed >= resumeTime, the system already included
+                                // the in-progress session in totalTimeInForeground — don't double-add
+                            }
                         }
-                        .mapNotNull { (pkg, totalTime) ->
+                    }
+
+                    stats.asSequence()
+                        .filter { (pkg, usage) ->
+                            val totalTime = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L)
+                            val isToolz = pkg == context.packageName
+                            (totalTime >= 5_000L || isToolz) &&
+                                    pkg !in EXCLUDED_PACKAGES &&
+                                    (isToolz || pm.getLaunchIntentForPackage(pkg) != null)
+                        }
+                        .mapNotNull { (pkg, usage) ->
                             val name = try {
                                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                            } catch (_: Exception) { return@mapNotNull null }
+                            } catch (_: Exception) {
+                                if (pkg == context.packageName) "Toolz" else return@mapNotNull null
+                            }
                             AppUsageInfo(
                                 packageName     = pkg,
                                 appName         = name,
-                                usageTimeMillis = totalTime,
+                                usageTimeMillis = usage.totalTimeInForeground + (ongoingSessions[pkg] ?: 0L),
                             )
                         }
                         .toList()
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to query exact usage stats", e)
+                    Log.e(TAG, "Failed to query usage stats", e)
                     emptyList()
                 }
             }
@@ -549,32 +544,39 @@ class FocusFlowViewModel @Inject constructor(
                     _screenTips.value = "AI key not configured. Please supply a Groq key in AI Settings."
                     return@launch
                 }
-
-                // Get distraction apps used for more than an hour
-                val stats = combinedUsageStats.first()
+ 
+                val isWeeklyTab = _isWeekly.value
+                val stats = combinedUsageStats.first().sortedByDescending { it.usageTimeMillis }
+                val top10Apps = stats.take(10)
+                
                 val heavyDistractions = stats.filter { 
                     it.category == AppCategory.DISTRACTION && it.usageTimeMillis > 3_600_000L 
                 }
                 
                 val customInstr = customInstructions.value
-                val distractionList = heavyDistractions.joinToString { "${it.appName} (${it.usageTimeMillis / 3_600_000}h)" }
+                val appUsageContext = top10Apps.joinToString("\n") { 
+                    "- ${it.appName}: ${it.usageTimeMillis / 3_600_000}h ${(it.usageTimeMillis % 3_600_000) / 60_000}m (${it.category})"
+                }
 
                 val userContext = buildString {
+                    appendLine("User's ${if (isWeeklyTab) "Weekly" else "Daily"} Top App Usage:")
+                    appendLine(appUsageContext)
                     if (customInstr.isNotBlank()) {
-                        appendLine("User Custom Instructions: $customInstr")
+                        appendLine("\nUser Custom Instructions: $customInstr")
                     }
                     if (heavyDistractions.isNotEmpty()) {
-                        appendLine("User is spending excessive time (over 1 hour today) on these distractions: $distractionList. Help them find alternatives or strategies to reduce this.")
+                        val distractionList = heavyDistractions.joinToString { it.appName }
+                        appendLine("\nHeavy distractions detected: $distractionList. Help them reduce this.")
                     }
                 }
                 
                 val request = OpenAiRequest(
                     model = AI_MODEL_PRIMARY,
                     messages = listOf(
-                        OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach. Analyze the user's screen usage and provide personalized advice.")),
-                        OpenAiMessage("user", MessageContent.Text("${userContext}\n\nGive me 3 short, actionable, and creative tips to reduce my screen time and improve focus. Format your response beautifully in short paragraphs with emojis. Use Markdown formatting like **bold**, *italic*, and bullet points. Do not output anything before or after the tips."))
+                        OpenAiMessage("system", MessageContent.Text("You are an expert productivity coach. Analyze the user's screen usage and provide personalized advice. Do NOT use emojis. Use Markdown formatting like **bold**, *italic*, and bullet points.")),
+                        OpenAiMessage("user", MessageContent.Text("${userContext}\n\nGive me 3 short, actionable, and creative tips to improve focus based on this specific data. DO NOT USE ANY EMOJIS. Format your response with headers and bullet points. Output ONLY the tips."))
                     ),
-                    maxTokens = 500,
+                    maxTokens = 800,
                 )
                 
                 val response = runGroqRequest(groqKey) { requestKey ->

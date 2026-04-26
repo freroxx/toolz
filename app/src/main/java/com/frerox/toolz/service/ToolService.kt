@@ -65,13 +65,16 @@ class ToolService : Service() {
     private var timerEndTimestamp: Long = 0L
 
     // Pomodoro State
-    private val _pomodoroRemaining = MutableStateFlow(0L)
+    private val _pomodoroRemaining = MutableStateFlow(25 * 60 * 1000L) // Default to 25:00
     val pomodoroRemaining: StateFlow<Long> = _pomodoroRemaining
     private val _isPomodoroRunning = MutableStateFlow(false)
     val isPomodoroRunning: StateFlow<Boolean> = _isPomodoroRunning
+    private val _pomodoroSessionsDone = MutableStateFlow(0)
+    val pomodoroSessionsDone: StateFlow<Int> = _pomodoroSessionsDone
     private var pomodoroJob: Job? = null
     private var pomodoroMode = "WORK"
     private var pomodoroEndTimestamp: Long = 0L
+    private var workSessionsCount = 0
 
     // Todo Session State
     private val _todoSessionTime = MutableStateFlow(0L)
@@ -103,7 +106,7 @@ class ToolService : Service() {
                 if (_isPomodoroRunning.value) pausePomodoro()
                 else startPomodoro(_pomodoroRemaining.value, pomodoroMode)
             }
-            ACTION_POMODORO_STOP -> resetPomodoro()
+            ACTION_POMODORO_STOP, ACTION_POMODORO_RESET -> resetPomodoro()
             ACTION_POMODORO_SKIP -> skipPomodoro()
             ACTION_TODO_STOP -> stopTodoSession()
             ACTION_DISMISS_ALARM -> {
@@ -214,10 +217,18 @@ class ToolService : Service() {
 
     // --- Pomodoro Logic ---
     fun startPomodoro(durationMillis: Long, mode: String) {
-        _pomodoroRemaining.value = durationMillis
+        val actualDuration = if (durationMillis <= 0) {
+            when (mode) {
+                "SHORT_BREAK" -> 5 * 60 * 1000L
+                "LONG_BREAK" -> 15 * 60 * 1000L
+                else -> 25 * 60 * 1000L
+            }
+        } else durationMillis
+
+        _pomodoroRemaining.value = actualDuration
         pomodoroMode = mode
         _isPomodoroRunning.value = true
-        pomodoroEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
+        pomodoroEndTimestamp = SystemClock.elapsedRealtime() + actualDuration
         pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
             while (_pomodoroRemaining.value > 0 && _isPomodoroRunning.value) {
@@ -225,7 +236,7 @@ class ToolService : Service() {
                 pushPomodoroWidgetState()
                 delay(1000)
             }
-            if (_pomodoroRemaining.value == 0L) {
+            if (_pomodoroRemaining.value == 0L && _isPomodoroRunning.value) {
                 _isPomodoroRunning.value = false
                 onPomodoroFinished()
             }
@@ -235,12 +246,34 @@ class ToolService : Service() {
     }
 
     private fun onPomodoroFinished() {
+        if (pomodoroMode == "WORK") {
+            workSessionsCount++
+            _pomodoroSessionsDone.value++
+        }
+        
         val title   = if (pomodoroMode == "WORK") "Work Session Finished" else "Break Finished"
         val message = if (pomodoroMode == "WORK") "Time to take a break! 🌱" else "Ready to focus? 🔥"
         showAlarmNotification(title, message, NotificationHelper.ID_POMODORO_ALARM, Screen.Pomodoro.route)
         vibrateFinish()
+        
+        // Cycle mode automatically
+        cyclePomodoroMode()
+        
         serviceScope.launch { pushPomodoroWidgetState() }
         updatePomodoroNotification("Session finished!")
+    }
+
+    private fun cyclePomodoroMode() {
+        pomodoroMode = when {
+            pomodoroMode == "WORK" && workSessionsCount % 4 == 0 -> "LONG_BREAK"
+            pomodoroMode == "WORK" -> "SHORT_BREAK"
+            else -> "WORK"
+        }
+        _pomodoroRemaining.value = when (pomodoroMode) {
+            "SHORT_BREAK" -> 5 * 60 * 1000L
+            "LONG_BREAK" -> 15 * 60 * 1000L
+            else -> 25 * 60 * 1000L
+        }
     }
 
     fun pausePomodoro() {
@@ -253,7 +286,11 @@ class ToolService : Service() {
     fun resetPomodoro() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
-        _pomodoroRemaining.value = 0L
+        _pomodoroRemaining.value = when (pomodoroMode) {
+            "SHORT_BREAK" -> 5 * 60 * 1000L
+            "LONG_BREAK" -> 15 * 60 * 1000L
+            else -> 25 * 60 * 1000L
+        }
         serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
@@ -262,7 +299,14 @@ class ToolService : Service() {
     fun skipPomodoro() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
-        _pomodoroRemaining.value = 0L
+        
+        if (pomodoroMode == "WORK") {
+            workSessionsCount++
+            _pomodoroSessionsDone.value++
+        }
+        
+        cyclePomodoroMode()
+        
         serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
@@ -476,7 +520,9 @@ class ToolService : Service() {
                 mode = pomodoroMode,
                 remainingMs = _pomodoroRemaining.value.toFloat(),
                 totalMs = totalMs,
-                isRunning = _isPomodoroRunning.value
+                isRunning = _isPomodoroRunning.value,
+                sessionsDone = _pomodoroSessionsDone.value,
+                sessionsGoal = 8
             )
         } catch (_: Exception) {}
     }
@@ -506,7 +552,8 @@ class ToolService : Service() {
         const val ACTION_TIMER_STOP = "com.frerox.toolz.TIMER_STOP"
         const val ACTION_POMODORO_TOGGLE = "com.frerox.toolz.POMODORO_TOGGLE"
         const val ACTION_POMODORO_STOP   = "com.frerox.toolz.POMODORO_STOP"
-        const val ACTION_POMODORO_SKIP   = "com.frerox.toolz.POMODORO_SKIP"
+        const val ACTION_POMODORO_SKIP   = "com.frerox.toolz.POMO_SKIP"
+        const val ACTION_POMODORO_RESET  = "com.frerox.toolz.POMO_RESET"
         const val ACTION_TODO_STOP       = "com.frerox.toolz.TODO_STOP"
         const val ACTION_DISMISS_ALARM   = "com.frerox.toolz.DISMISS_ALARM"
         

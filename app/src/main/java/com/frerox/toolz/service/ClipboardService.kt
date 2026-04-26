@@ -15,9 +15,11 @@ import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 private const val TAG = "ClipboardService"
@@ -28,9 +30,11 @@ class ClipboardService : Service() {
     @Inject lateinit var clipboardDao: ClipboardDao
     @Inject lateinit var classifier: ClipboardClassifier
     @Inject lateinit var aiRepository: ChatRepository
+    @Inject lateinit var settingsRepository: SettingsRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var clipboardManager: ClipboardManager? = null
+    private var isAiMonitoringEnabled = true
     
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         checkClipboard()
@@ -82,6 +86,7 @@ class ClipboardService : Service() {
 
     private fun processWithAi(id: Int, text: String, currentType: String) {
         serviceScope.launch {
+            if (!settingsRepository.aiClipboardMonitoringEnabled.first()) return@launch
             try {
                 val prompt = """
                     Classify this clipboard content. Be smart and specific. 
@@ -136,7 +141,19 @@ class ClipboardService : Service() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager?.addPrimaryClipChangedListener(clipListener)
         
+        serviceScope.launch {
+            settingsRepository.aiClipboardMonitoringEnabled.collect { enabled ->
+                isAiMonitoringEnabled = enabled
+                updateNotification()
+            }
+        }
+
         startPeriodicCheck()
+    }
+    
+    private fun updateNotification() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        manager.notify(NotificationHelper.ID_CLIPBOARD, createNotification())
     }
     
     private fun startPeriodicCheck() {
@@ -174,7 +191,7 @@ class ClipboardService : Service() {
     private fun createNotification(): Notification {
         return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_CLIPBOARD)
             .setContentTitle("Clipboard Monitoring")
-            .setContentText("AI Background Processing Active")
+            .setContentText(if (isAiMonitoringEnabled) "AI Background Processing Active" else "AI Background Processing Disabled")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setSilent(true)

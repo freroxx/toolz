@@ -242,6 +242,17 @@ fun SettingsScreen(
                                 onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
                             )
                         }
+                        if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize")) {
+                            val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
+                            SettingsToggleItem(
+                                title = "AI Clipboard Monitoring",
+                                subtitle = "Smart classification and summaries in background",
+                                icon = Icons.Rounded.AutoAwesome,
+                                checked = aiMonitoring,
+                                onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
+                                enabled = !offlineModeEnabled
+                            )
+                        }
                         if (matches(searchQuery, "backup", "restore", "data", "save", "json")) {
                             val currentFreq by viewModel.backupFrequency.collectAsState(initial = "Never")
                             SettingsItem(
@@ -821,8 +832,8 @@ fun SettingsScreen(
                     ) {
                         if (matches(searchQuery, "widget", "opacity", "background")) {
                             SettingsItem(
-                                title = "Widget Styling",
-                                subtitle = "Transparency and color overrides",
+                                title = "Widget Styling (SOON)",
+                                subtitle = "Under maintenance, sorry",
                                 icon = Icons.Rounded.SettingsSuggest
                             ) {
                                 Column(modifier = Modifier.padding(top = 12.dp)) {
@@ -1317,12 +1328,14 @@ fun SettingsToggleItem(
     subtitle: String,
     icon: ImageVector,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .bouncyClick { onCheckedChange(!checked) },
+            .alpha(if (enabled) 1f else 0.5f)
+            .then(if (enabled) Modifier.bouncyClick { onCheckedChange(!checked) } else Modifier),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
@@ -1352,6 +1365,7 @@ fun SettingsToggleItem(
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
+                enabled = enabled,
                 modifier = Modifier.scale(0.8f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
