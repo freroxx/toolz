@@ -142,64 +142,116 @@ class WebSearchRepository @Inject constructor(
         searchDao.updateQuickLinks(entries)
     }
 
+    suspend fun fetchWebsiteContent(url: String): String = withContext(Dispatchers.IO) {
+        try {
+            val client = getDnsClient()
+            val request = Request.Builder().url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .build()
+            
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext "Error: Failed to fetch $url (HTTP ${response.code})"
+
+            val html = response.body?.string() ?: return@withContext "Error: Empty response from $url"
+            val doc = Jsoup.parse(html, url)
+            
+            // Remove unnecessary elements
+            doc.select("script, style, nav, footer, header, aside, .ads, .sidebar").remove()
+            
+            // Get main content candidates
+            val content = doc.select("article, main, .content, .post-content, #content, .article-body").firstOrNull() 
+                ?: doc.body()
+            
+            val text = content?.text() ?: ""
+            if (text.length > 3000) text.take(3000) + "... [truncated]" else text
+        } catch (e: Exception) {
+            "Error fetching website content: ${e.message}"
+        }
+    }
+
     suspend fun search(query: String, offset: Int = 0): List<SearchResult> = withContext(Dispatchers.IO) {
         try {
             val adBlockEnabled = settingsRepository.searchAdBlockEnabled.first()
             val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
-            val offsetParam = if (offset > 0) "&s=$offset&dc=$offset" else ""
-            val url = "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam"
-            val client = getDnsClient()
-            val request = Request.Builder().url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.5")
-                .header("Referer", "https://html.duckduckgo.com/")
-                .build()
             
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
+            // DuckDuckGo HTML pagination parameters: 
+            // 's' is the offset, 'dc' is the start index for the next request.
+            // Page 1: s=0 (or missing)
+            // Page 2: s=30, dc=30
+            // Page 3: s=80, dc=80
+            val offsetParam = if (offset > 0) "&s=$offset&dc=$offset&v=l" else ""
+            // Try both 'html' and 'lite' versions if results are empty
+            val urlsToTry = listOf(
+                "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam",
+                "https://duckduckgo.com/html/?q=$encodedQuery$offsetParam",
+                "https://duckduckgo.com/lite/?q=$encodedQuery$offsetParam"
+            )
+            
+            var html = ""
+            var finalUrl = ""
+            val client = getDnsClient()
 
-            val html = response.body?.string() ?: return@withContext emptyList()
-            val doc = Jsoup.parse(html, url)
+            for (tryUrl in urlsToTry) {
+                val request = Request.Builder().url(tryUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.5")
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    html = response.body?.string() ?: ""
+                    if (html.isNotBlank() && (html.contains("result") || html.contains("links_main"))) {
+                        finalUrl = tryUrl
+                        break
+                    }
+                }
+            }
+
+            if (html.isBlank()) return@withContext emptyList()
+            val doc = Jsoup.parse(html, finalUrl)
 
             val results = mutableListOf<SearchResult>()
-            // Support multiple layouts: DuckDuckGo HTML, mobile, and variations
-            val elements = doc.select(".result, .web-result, .links_main")
-
+            // Select result blocks: check for multiple common DDG layouts
+            val elements = doc.select(".result, .web-result, .links_main, .result__body, div.result, article.result, tr")
+            
             for (element in elements) {
                 // Try multiple selectors for each part
-                val titleElement = element.select(".result__title .result__a, .result__a, a.result__title").first()
-                val snippetElement = element.select(".result__snippet, .result__body, .snippet, .result__body__snippet").first()
-                val urlElement = element.select(".result__url, .result__extras__url, .result__url__domain").first()
+                val titleElement = element.select(".result__title .result__a, .result__a, a.result__title, .result-link, h2 a, a.result__title__a, .result-link").first()
+                val snippetElement = element.select(".result__snippet, .result__body, .snippet, .result__body__snippet, .result-snippet, .result__content, .snippet-content").first()
+                val urlElement = element.select(".result__url, .result__extras__url, .result__url__domain, .result-url, .result__check, .url").first()
 
                 if (titleElement != null) {
                     val rawUrl = titleElement.attr("href")
-                    if (rawUrl.isNullOrBlank() || rawUrl.startsWith("/")) continue
+                    if (rawUrl.isNullOrBlank() || (rawUrl.startsWith("/") && !rawUrl.startsWith("//"))) continue
                     
                     val cleanUrl = cleanDuckDuckGoUrl(rawUrl)
                     if (adBlockEnabled && isAdDomain(cleanUrl)) continue
-                    // Ensure we don't have duplicate results
                     if (results.any { it.url == cleanUrl }) continue
 
-                    val snippet = snippetElement?.text() ?: ""
+                    val snippet = snippetElement?.text()?.replace(Regex("\\s+"), " ")?.trim() ?: ""
                     
                     results.add(
                         SearchResult(
-                            title = titleElement.text(),
+                            title = titleElement.text().trim(),
                             snippet = snippet,
                             url = cleanUrl,
-                            displayUrl = urlElement?.text() ?: cleanUrl
+                            displayUrl = urlElement?.text()?.trim() ?: cleanUrl
                         )
                     )
                 }
             }
-            // Fallback: If no results found with specific selectors, try a broader approach
+            
+            // Broad fallback for generic link parsing if selectors failed
             if (results.isEmpty()) {
-                val links = doc.select("a.result__a")
+                val links = doc.select("a[href^=http]")
                 for (link in links) {
-                    val url = cleanDuckDuckGoUrl(link.attr("href"))
-                    if (url.startsWith("http")) {
-                        results.add(SearchResult(link.text(), "", url, url))
+                    val rawUrl = link.attr("href")
+                    if (rawUrl.contains("duckduckgo.com") || rawUrl.contains("google.com")) continue
+                    
+                    val url = cleanDuckDuckGoUrl(rawUrl)
+                    if (results.none { it.url == url }) {
+                        results.add(SearchResult(link.text().trim(), "", url, url))
                     }
                 }
             }

@@ -1,5 +1,7 @@
 package com.frerox.toolz.ui.screens.browser
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -9,6 +11,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -18,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,6 +48,8 @@ fun WebViewScreen(
     val adBlockEnabled by viewModel.adBlockEnabled.collectAsState(initial = true)
     val dnsProvider by viewModel.dnsProvider.collectAsState(initial = "ADGUARD")
     val customDns by viewModel.customDns.collectAsState(initial = "")
+    var showFindInPage by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
@@ -83,6 +90,15 @@ fun WebViewScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { 
+                        showFindInPage = !showFindInPage 
+                        if (!showFindInPage) {
+                            webView?.clearMatches()
+                            findQuery = ""
+                        }
+                    }) {
+                        Icon(Icons.Default.Search, contentDescription = "Find in page")
+                    }
                     IconButton(onClick = { viewModel.toggleBookmark(pageTitle, currentUrl) }) {
                         Icon(
                             imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
@@ -107,6 +123,13 @@ fun WebViewScreen(
                     }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("URL", currentUrl)
+                        clipboard.setPrimaryClip(clip)
+                    }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link")
+                    }
+                    IconButton(onClick = {
                         val sendIntent: Intent = Intent().apply {
                             action = Intent.ACTION_SEND
                             putExtra(Intent.EXTRA_TEXT, currentUrl)
@@ -128,6 +151,38 @@ fun WebViewScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
+            AnimatedVisibility(visible = showFindInPage) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextField(
+                        value = findQuery,
+                        onValueChange = { 
+                            findQuery = it
+                            webView?.findAllAsync(it)
+                        },
+                        placeholder = { Text("Find in page...") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        keyboardActions = KeyboardActions(onNext = { webView?.findNext(true) }),
+                        trailingIcon = {
+                            if (findQuery.isNotEmpty()) {
+                                IconButton(onClick = { findQuery = ""; webView?.clearMatches() }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                }
+                            }
+                        }
+                    )
+                    IconButton(onClick = { webView?.findNext(false) }) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous")
+                    }
+                    IconButton(onClick = { webView?.findNext(true) }) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next")
+                    }
+                }
+            }
             if (isLoading) {
                 LinearProgressIndicator(
                     progress = { progress },

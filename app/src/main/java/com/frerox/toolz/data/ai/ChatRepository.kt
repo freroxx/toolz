@@ -36,4 +36,10 @@ interface ChatRepository {
      *                short confirmation string; failure contains the error.
      */
     fun testConnection(config: AiConfig): Flow<Result<String>>
+
+    fun performDeepDive(
+        prompt: String,
+        sourcesJson: String,
+        history: List<AiMessage>
+    ): Flow<Result<ChatResponseChunk>>
 }

@@ -17,6 +17,8 @@ data class AiChat(
     val createdAt: Long get() = timestamp
 }
 
+enum class DeepDiveState { NONE, PENDING, COMPLETED, FADED }
+
 @Entity(
     tableName = "ai_messages",
     foreignKeys = [
@@ -37,6 +39,8 @@ data class AiMessage(
     val isUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
     val searchSources: String? = null,
+    val canDeepDive: Boolean = false,
+    val deepDiveState: DeepDiveState = DeepDiveState.NONE,
 )
 
 @Dao
@@ -66,4 +70,7 @@ interface AiDao {
 
     @Update
     suspend fun updateChat(chat: AiChat)
+
+    @Update
+    suspend fun updateMessage(message: AiMessage)
 }

@@ -62,6 +62,8 @@ data class AiSettingsUiState(
     val customIconUri        : String?   = null,
     val dynamicPromptsEnabled: Boolean   = true,
     val promptFormat         : String    = "medium",
+    val showGroqKeyMissingDialog: Boolean = false,
+    val isGroqConfigured     : Boolean   = false,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -256,7 +258,58 @@ class AiAssistantViewModel @Inject constructor(
 
     fun toggleAiSearch() {
         viewModelScope.launch {
-            settingsRepository.setAiSearchEnabled(!_uiState.value.aiSearchEnabled)
+            val nextState = !_uiState.value.aiSearchEnabled
+            if (nextState && !settingsManager.hasUserApiKey("Groq")) {
+                _settingsUiState.update { it.copy(showGroqKeyMissingDialog = true) }
+            } else {
+                settingsRepository.setAiSearchEnabled(nextState)
+            }
+        }
+    }
+
+    fun dismissGroqDialog() {
+        _settingsUiState.update { it.copy(showGroqKeyMissingDialog = false) }
+    }
+
+    fun performDeepDive(message: AiMessage) {
+        val chatId = message.chatId
+        val sources = message.searchSources ?: return
+        val userPrompt = _uiState.value.messages.findLast { it.isUser }?.text ?: return
+        
+        viewModelScope.launch {
+            // Update state to COMPLETED (to hide buttons immediately)
+            aiDao.updateMessage(message.copy(deepDiveState = DeepDiveState.COMPLETED))
+            
+            _uiState.update { it.copy(isLoading = true, loadingPhaseText = "Deep diving into websites...") }
+            
+            val accumulated = StringBuilder()
+            chatRepository.performDeepDive(userPrompt, sources, _uiState.value.messages).collect { r ->
+                r.onSuccess { chunk ->
+                    accumulated.append(chunk.text)
+                    _uiState.update { it.copy(streamingText = accumulated.toString()) }
+                }.onFailure { e ->
+                    _uiState.update { it.copy(isLoading = false, error = "Deep dive failed: ${e.message}") }
+                }
+            }
+            
+            if (accumulated.isNotEmpty()) {
+                aiDao.insertMessage(AiMessage(chatId = chatId, text = accumulated.toString(), isUser = false))
+            }
+            _uiState.update { it.copy(isLoading = false, streamingText = "", loadingPhaseText = "") }
+        }
+    }
+
+    fun dismissDeepDive(message: AiMessage) {
+        viewModelScope.launch {
+            aiDao.updateMessage(message.copy(deepDiveState = DeepDiveState.FADED))
+        }
+    }
+
+    fun saveGroqKey(key: String) {
+        viewModelScope.launch {
+            settingsManager.setApiKey(key, "Groq")
+            _settingsUiState.update { it.copy(showGroqKeyMissingDialog = false, isGroqConfigured = true) }
+            settingsRepository.setAiSearchEnabled(true)
         }
     }
     
@@ -477,7 +530,16 @@ class AiAssistantViewModel @Inject constructor(
             }
 
             if (accumulated.isNotEmpty()) {
-                aiDao.insertMessage(AiMessage(chatId = currentId, text = accumulated.toString(), isUser = false, searchSources = lastSources))
+                val responseText = accumulated.toString()
+                
+                aiDao.insertMessage(AiMessage(
+                    chatId = currentId, 
+                    text = responseText, 
+                    isUser = false, 
+                    searchSources = lastSources,
+                    canDeepDive = (lastSources != null),
+                    deepDiveState = if (lastSources != null) DeepDiveState.PENDING else DeepDiveState.NONE
+                ))
 
                 if (history.isEmpty() && text.isNotBlank()) {
                     generateChatTitle(currentId, text, accumulated.toString())
