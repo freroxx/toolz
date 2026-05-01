@@ -1,22 +1,16 @@
 package com.frerox.toolz.ui.screens.settings
 
 import android.content.Intent
-import android.net.Uri
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
@@ -44,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
+import androidx.compose.ui.tooling.preview.Preview
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
@@ -70,8 +65,6 @@ fun SettingsScreen(
     val pdfAiOcrEnhance by viewModel.pdfAiOcrEnhance.collectAsState(initial = false)
 
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
-    val showRecentTools by viewModel.showRecentTools.collectAsState(initial = true)
-    val showQuickNotes by viewModel.showQuickNotes.collectAsState(initial = true)
 
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState(initial = true)
     val notificationVaultEnabled by viewModel.notificationVaultEnabled.collectAsState(initial = true)
@@ -91,6 +84,61 @@ fun SettingsScreen(
     val pillFocusEnabled by viewModel.pillFocusEnabled.collectAsState(initial = true)
 
     val userName by viewModel.userName.collectAsState(initial = "")
+    var userNameInput by remember { mutableStateOf("") }
+    
+    LaunchedEffect(userName) {
+        if (userNameInput != userName) {
+            userNameInput = userName
+        }
+    }
+
+    LaunchedEffect(userNameInput) {
+        if (userNameInput != userName) {
+            delay(500)
+            viewModel.setUserName(userNameInput)
+        }
+    }
+
+    var showGraySuggestion by remember { mutableStateOf(false) }
+    val isSystemInDarkTheme = isSystemInDarkTheme()
+    val isDarkTheme = when (themeMode) {
+        "DARK" -> true
+        "LIGHT" -> false
+        else -> isSystemInDarkTheme
+    }
+
+    if (showGraySuggestion) {
+        AlertDialog(
+            onDismissRequest = { showGraySuggestion = false },
+            title = { Text("Perfect Gray Suggestion", fontWeight = FontWeight.Black) },
+            text = { Text("You've selected a dark primary color while in Dark Mode. Would you like to switch to a 'Perfect Gray' for a better visual experience?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vibrationManager?.vibrateSuccess()
+                        viewModel.setCustomPrimaryColor(0xFF1A1C1E.toInt())
+                        showGraySuggestion = false
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    @Suppress("DEPRECATION")
+                    Text("ACCEPT CHANGES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vibrationManager?.vibrateClick()
+                    showGraySuggestion = false
+                }) {
+                    @Suppress("DEPRECATION")
+                    Text("DISMISS", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                }
+            },
+            shape = RoundedCornerShape(32.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
 
@@ -99,6 +147,7 @@ fun SettingsScreen(
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState(initial = true)
     val musicAiEnabled by viewModel.musicAiEnabled.collectAsState(initial = true)
     val musicKeepScreenOnLyrics by viewModel.musicKeepScreenOnLyrics.collectAsState(initial = true)
+    val karaokeEnabled by viewModel.karaokeEnabled.collectAsState(initial = true)
 
     val performanceMode by viewModel.performanceMode.collectAsState(initial = false)
 
@@ -226,14 +275,255 @@ fun SettingsScreen(
                 ) {
                     Spacer(Modifier.height(8.dp))
 
-                    // Section: SYSTEM
+                    // 1. Section: MY ACCOUNT
                     SettingsExpandableSection(
-                        title = "SYSTEM & ENGINE",
-                        icon = Icons.Rounded.SettingsInputComponent,
-                        isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
+                        title = "MY ACCOUNT",
+                        icon = Icons.Rounded.AccountCircle,
+                        isExpanded = expandedSection == "ACCOUNT" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "ACCOUNT") null else "ACCOUNT" }
                     ) {
-                        if (matches(searchQuery, "offline", "local", "internet", "network")) {
+                        if (matches(searchQuery, "profile", "name", "explorer", "identity")) {
+                            SettingsItem(
+                                title = "User Identity",
+                                subtitle = "Name: ${userName.ifBlank { "Explorer" }}",
+                                icon = Icons.Rounded.Badge
+                            ) {
+                                OutlinedTextField(
+                                    value = userNameInput,
+                                    onValueChange = { userNameInput = it },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    placeholder = { Text("Enter your identity") },
+                                    shape = RoundedCornerShape(20.dp),
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        unfocusedBorderColor = Color.Transparent,
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Section: VISUALS & THEME
+                    SettingsExpandableSection(
+                        title = "VISUALS & THEME",
+                        icon = Icons.Rounded.Palette,
+                        isExpanded = expandedSection == "VISUALS" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "VISUALS") null else "VISUALS" }
+                    ) {
+                        if (matches(searchQuery, "performance", "lag", "animations", "blur", "speed", "optimization")) {
+                            SettingsToggleItem(
+                                title = "Performance Mode",
+                                subtitle = "Disable blur and high-frequency animations",
+                                icon = Icons.Rounded.Speed,
+                                checked = performanceMode,
+                                onCheckedChange = { viewModel.setPerformanceMode(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "dark", "light", "mode", "appearance", "theme")) {
+                            SettingsItem(
+                                title = "Appearance Mode",
+                                subtitle = "Current: ${themeMode.lowercase()}",
+                                icon = Icons.Rounded.DarkMode
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
+                                        val isSelected = themeMode == mode
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setThemeMode(mode)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette", "accent")) {
+                            SettingsToggleItem(
+                                title = "Dynamic Colors",
+                                subtitle = "Adapt to device wallpaper (Android 12+)",
+                                icon = Icons.Rounded.ColorLens,
+                                checked = dynamicColor,
+                                onCheckedChange = { viewModel.setDynamicColor(it) }
+                            )
+
+                            if (!dynamicColor) {
+                                SettingsItem(
+                                    title = "Custom Palette",
+                                    subtitle = "Define your unique color scheme",
+                                    icon = Icons.Rounded.FormatColorFill
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                                @Suppress("DEPRECATION")
+                                                Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+                                                IconButton(onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomPrimaryColor(null)
+                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
+                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            ColorPickerRow(
+                                                selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
+                                                onColorSelected = {
+                                                    vibrationManager?.vibrateClick()
+                                                    val color = Color(it)
+                                                    if (isDarkTheme && color.luminance() < 0.2f) {
+                                                        showGraySuggestion = true
+                                                    }
+                                                    viewModel.setCustomPrimaryColor(it)
+                                                }
+                                            )
+                                        }
+
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                                @Suppress("DEPRECATION")
+                                                Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
+                                                IconButton(onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomSecondaryColor(null)
+                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
+                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            ColorPickerRow(
+                                                selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
+                                                onColorSelected = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setCustomSecondaryColor(it)
+                                                }
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                showAdvancedThemeDialog = true
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                                contentColor = MaterialTheme.colorScheme.primary
+                                            )
+                                        ) {
+                                            Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            @Suppress("DEPRECATION")
+                                            Text("ADVANCED THEME", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "gradient", "background", "effect", "visual")) {
+                            SettingsToggleItem(
+                                title = "Background Gradient",
+                                subtitle = "Subtle depth effect on main screens",
+                                icon = Icons.Rounded.Gradient,
+                                checked = backgroundGradientEnabled,
+                                onCheckedChange = { viewModel.setBackgroundGradientEnabled(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "style")) {
+                            SettingsItem(
+                                title = "Home Layout",
+                                subtitle = "Current style: ${dashboardView.lowercase()}",
+                                icon = Icons.Rounded.Dashboard
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("DEFAULT", "LIST").forEach { viewStyle ->
+                                        val isSelected = dashboardView == viewStyle
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setDashboardView(viewStyle)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "widget", "opacity", "background", "styling", "home screen")) {
+                            SettingsItem(
+                                title = "Widget Styling",
+                                subtitle = "Customize home screen widgets",
+                                icon = Icons.Rounded.SettingsSuggest
+                            ) {
+                                Column(modifier = Modifier.padding(top = 12.dp)) {
+                                    ColorPickerRow(
+                                        selectedColor = widgetBgColor,
+                                        onColorSelected = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setWidgetBackgroundColor(it)
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(16.dp))
+                                        @Suppress("DEPRECATION")
+                                        Slider(
+                                            value = widgetOpacity,
+                                            onValueChange = { viewModel.setWidgetOpacity(it) },
+                                            valueRange = 0.1f..1f,
+                                            modifier = Modifier.weight(1f),
+                                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                        )
+                                        Spacer(Modifier.width(16.dp))
+                                        @Suppress("DEPRECATION")
+                                        Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Section: INTELLIGENCE & AI
+                    SettingsExpandableSection(
+                        title = "INTELLIGENCE & AI",
+                        icon = Icons.Rounded.AutoAwesome,
+                        isExpanded = expandedSection == "INTELLIGENCE" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "INTELLIGENCE") null else "INTELLIGENCE" }
+                    ) {
+                        if (matches(searchQuery, "offline", "local", "internet", "network", "privacy")) {
                             SettingsToggleItem(
                                 title = "Offline Mode",
                                 subtitle = "Force local operation and hide AI features",
@@ -242,22 +532,299 @@ fun SettingsScreen(
                                 onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
                             )
                         }
-                        if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize")) {
+                        if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
                             val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
                             SettingsToggleItem(
                                 title = "AI Clipboard Monitoring",
-                                subtitle = "Smart classification and summaries in background",
+                                subtitle = "Smart classification and summaries",
                                 icon = Icons.Rounded.AutoAwesome,
                                 checked = aiMonitoring,
                                 onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
                                 enabled = !offlineModeEnabled
                             )
                         }
-                        if (matches(searchQuery, "backup", "restore", "data", "save", "json")) {
+                        if (matches(searchQuery, "pdf", "ocr", "enhance", "ai", "text", "scan")) {
+                            SettingsToggleItem(
+                                title = "AI OCR Enhance",
+                                subtitle = "Improve PDF text recognition with AI",
+                                icon = Icons.Rounded.DocumentScanner,
+                                checked = pdfAiOcrEnhance,
+                                onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) },
+                                enabled = !offlineModeEnabled
+                            )
+                        }
+                        if (matches(searchQuery, "now playing", "lyrics", "meaning", "smart", "ai")) {
+                            SettingsToggleItem(
+                                title = "Now Playing AI",
+                                subtitle = "Smart lyrics meanings and recommendations",
+                                icon = Icons.Rounded.MusicNote,
+                                checked = musicAiEnabled,
+                                onCheckedChange = { viewModel.setMusicAiEnabled(it) },
+                                enabled = !offlineModeEnabled
+                            )
+                        }
+                    }
+
+                    // 4. Section: INTERACTION & HUD
+                    SettingsExpandableSection(
+                        title = "INTERACTION & HUD",
+                        icon = Icons.Rounded.SmartButton,
+                        isExpanded = expandedSection == "INTERACTION" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "INTERACTION") null else "INTERACTION" }
+                    ) {
+                        if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill", "hud")) {
+                            SettingsToggleItem(
+                                title = "Smart Overlay (Pill)",
+                                subtitle = "Floating tool for quick access",
+                                icon = Icons.Rounded.SmartButton,
+                                checked = showToolzPill,
+                                onCheckedChange = { viewModel.setShowToolzPill(it) }
+                            )
+
+                            if (showToolzPill) {
+                                SettingsToggleItem(
+                                    title = "Fill the Pill",
+                                    subtitle = "Show tips when inactive",
+                                    icon = Icons.Rounded.AutoAwesome,
+                                    checked = fillThePillEnabled,
+                                    onCheckedChange = { viewModel.setFillThePillEnabled(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Task Progress",
+                                    subtitle = "Track active tasks on overlay",
+                                    icon = Icons.Rounded.TaskAlt,
+                                    checked = pillTodoEnabled,
+                                    onCheckedChange = { viewModel.setPillTodoEnabled(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Focus Score",
+                                    subtitle = "View productivity on overlay",
+                                    icon = Icons.Rounded.Toll,
+                                    checked = pillFocusEnabled,
+                                    onCheckedChange = { viewModel.setPillFocusEnabled(it) }
+                                )
+                            }
+                        }
+
+                        if (matches(searchQuery, "vibration", "haptic", "intensity", "feedback")) {
+                            SettingsToggleItem(
+                                title = "Haptic Feedback",
+                                subtitle = "Tactile response on interaction",
+                                icon = Icons.Rounded.Vibration,
+                                checked = hapticFeedback,
+                                onCheckedChange = { viewModel.setHapticFeedback(it) }
+                            )
+
+                            if (hapticFeedback) {
+                                SettingsItem(
+                                    title = "Vibration Strength",
+                                    subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
+                                    icon = Icons.Rounded.GraphicEq
+                                ) {
+                                    Slider(
+                                        value = hapticIntensity,
+                                        onValueChange = { viewModel.setHapticIntensity(it) },
+                                        onValueChangeFinished = { vibrationManager?.vibrateClick() },
+                                        valueRange = 0.1f..1f,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "unit", "system", "metric", "imperial", "measure")) {
+                            SettingsItem(
+                                title = "Measurement Units",
+                                subtitle = "System: ${unitSystem.lowercase()}",
+                                icon = Icons.Rounded.SquareFoot
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("METRIC", "IMPERIAL").forEach { unit ->
+                                        val isSelected = unitSystem == unit
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateClick()
+                                                viewModel.setUnitSystem(unit)
+                                            },
+                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                @Suppress("DEPRECATION")
+                                                Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. Section: MEDIA & AUDIO
+                    SettingsExpandableSection(
+                        title = "MEDIA & AUDIO",
+                        icon = Icons.Rounded.MusicNote,
+                        isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
+                    ) {
+                        if (matches(searchQuery, "shake", "skip", "audio", "sensitivity", "gesture")) {
+                            SettingsToggleItem(
+                                title = "Shake to Skip",
+                                subtitle = "Shake phone for next track",
+                                icon = Icons.Rounded.PhonelinkRing,
+                                checked = musicShakeToSkip,
+                                onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
+                            )
+                            
+                            if (musicShakeToSkip) {
+                                SettingsItem(
+                                    title = "Shake Sensitivity",
+                                    subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
+                                    icon = Icons.Rounded.GraphicEq
+                                ) {
+                                    Slider(
+                                        value = musicShakeSensitivity,
+                                        onValueChange = { viewModel.setMusicShakeSensitivity(it) },
+                                        valueRange = 0.1f..1f,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (matches(searchQuery, "lyrics", "screen", "sleep", "awake", "visibility")) {
+                            SettingsToggleItem(
+                                title = "Lyrics Keep Awake",
+                                subtitle = "Prevent sleep in lyrics mode",
+                                icon = Icons.Rounded.Visibility,
+                                checked = musicKeepScreenOnLyrics,
+                                onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "audio", "focus", "pause", "smart")) {
+                            SettingsToggleItem(
+                                title = "Smart Audio Focus",
+                                subtitle = "Auto-pause for other apps",
+                                icon = Icons.Rounded.Hearing,
+                                checked = musicAudioFocus,
+                                onCheckedChange = { viewModel.setMusicAudioFocus(it) }
+                            )
+                        }
+
+                        if (matches(searchQuery, "karaoke", "mic", "sing", "audio")) {
+                            SettingsToggleItem(
+                                title = "Karaoke Mode",
+                                subtitle = "Enable karaoke features and mic buttons",
+                                icon = Icons.Rounded.Mic,
+                                checked = karaokeEnabled,
+                                onCheckedChange = { viewModel.setKaraokeEnabled(it) }
+                            )
+                        }
+                    }
+
+                    // 6. Section: HEALTH & ACTIVITY
+                    SettingsExpandableSection(
+                        title = "HEALTH & ACTIVITY",
+                        icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                        isExpanded = expandedSection == "HEALTH" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "HEALTH") null else "HEALTH" }
+                    ) {
+                        if (matches(searchQuery, "step", "goal", "health", "tracker", "walking")) {
+                            SettingsToggleItem(
+                                title = "Step Tracker",
+                                subtitle = "Monitor activity in background",
+                                icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                checked = stepCounterEnabled,
+                                onCheckedChange = { viewModel.setStepCounterEnabled(it) }
+                            )
+
+                            if (stepCounterEnabled) {
+                                SettingsItem(
+                                    title = "Daily Step Goal",
+                                    subtitle = "Target: $stepGoal steps",
+                                    icon = Icons.Rounded.EmojiEvents
+                                ) {
+                                    Slider(
+                                        value = stepGoal.divideToFloat(),
+                                        onValueChange = { viewModel.setStepGoal(it.toInt()) },
+                                        valueRange = 1000f..30000f,
+                                        steps = 29,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 7. Section: NOTIFICATIONS
+                    SettingsExpandableSection(
+                        title = "NOTIFICATIONS",
+                        icon = Icons.Rounded.Notifications,
+                        isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
+                    ) {
+                        if (matches(searchQuery, "notification", "master", "switch", "alerts")) {
+                            SettingsToggleItem(
+                                title = "Master Switch",
+                                subtitle = "Enable all app alerts",
+                                icon = Icons.Rounded.NotificationsActive,
+                                checked = notificationsEnabled,
+                                onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                            )
+
+                            if (notificationsEnabled) {
+                                if (matches(searchQuery, "vault", "history", "save")) {
+                                    SettingsToggleItem(
+                                        title = "Notification History",
+                                        subtitle = "Save and view previous alerts",
+                                        icon = Icons.Rounded.History,
+                                        checked = notificationVaultEnabled,
+                                        onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "step", "goal", "alert")) {
+                                    SettingsToggleItem(
+                                        title = "Step Goal Alerts",
+                                        subtitle = "Notify on daily progress",
+                                        icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                        checked = stepNotifications,
+                                        onCheckedChange = { viewModel.setStepNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "timer", "alert", "task")) {
+                                    SettingsToggleItem(
+                                        title = "Timer Alerts",
+                                        subtitle = "Alarms for timers and tasks",
+                                        icon = Icons.Rounded.Timer,
+                                        checked = timerNotifications,
+                                        onCheckedChange = { viewModel.setTimerNotifications(it) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 8. Section: SYSTEM & DATA
+                    SettingsExpandableSection(
+                        title = "SYSTEM & DATA",
+                        icon = Icons.Rounded.SettingsInputComponent,
+                        isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
+                    ) {
+                        if (matches(searchQuery, "backup", "restore", "data", "save", "json", "export", "import")) {
                             val currentFreq by viewModel.backupFrequency.collectAsState(initial = "Never")
                             SettingsItem(
                                 title = "Backup & Restore",
-                                subtitle = "Securely export your data and settings",
+                                subtitle = "Export your data and settings",
                                 icon = Icons.Rounded.Backup,
                             ) {
                                 Column(modifier = Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -308,34 +875,11 @@ fun SettingsScreen(
                                 }
                             }
                         }
-                        if (matches(searchQuery, "update", "auto", "version")) {
-                            SettingsToggleItem(
-                                title = "Automatic Updates",
-                                subtitle = "Download patches in the background",
-                                icon = Icons.Rounded.AutoFixHigh,
-                                checked = autoUpdateEnabled,
-                                onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
-                            )
-                            SettingsItem(
-                                title = "Check for Updates",
-                                subtitle = "See if a new version is available",
-                                icon = Icons.Rounded.SystemUpdate,
-                                onClick = onNavigateToUpdate
-                            )
-                        }
-                        if (matches(searchQuery, "performance", "lag", "animations", "blur")) {
-                            SettingsToggleItem(
-                                title = "Performance Mode",
-                                subtitle = "Disable blur and high-frequency animations",
-                                icon = Icons.Rounded.Speed,
-                                checked = performanceMode,
-                                onCheckedChange = { viewModel.setPerformanceMode(it) }
-                            )
-                        }
-                        if (matches(searchQuery, "converter", "output", "path", "folder", "save")) {
+
+                        if (matches(searchQuery, "converter", "output", "path", "folder", "save", "storage")) {
                             SettingsItem(
                                 title = "Output Folder",
-                                subtitle = if (converterCustomPath == null) "Default: Downloads/Toolz" else "Custom folder selected",
+                                subtitle = if (converterCustomPath == null) "Default: Downloads/Toolz" else "Custom folder active",
                                 icon = Icons.Rounded.FolderSpecial,
                                 onClick = { folderLauncher.launch(null) }
                             ) {
@@ -365,505 +909,33 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Section: EXPERIENCE
+                    // 9. Section: UPDATE
                     SettingsExpandableSection(
-                        title = "INTERFACE & TOOLS",
-                        icon = Icons.Rounded.DashboardCustomize,
-                        isExpanded = expandedSection == "EXPERIENCE" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "EXPERIENCE") null else "EXPERIENCE" }
+                        title = "UPDATE",
+                        icon = Icons.Rounded.SystemUpdate,
+                        isExpanded = expandedSection == "UPDATE" || searchQuery.isNotEmpty(),
+                        onExpandToggle = { expandedSection = if (expandedSection == "UPDATE") null else "UPDATE" }
                     ) {
-                        if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill")) {
+                        if (matches(searchQuery, "update", "auto", "patch", "background")) {
                             SettingsToggleItem(
-                                title = "Smart Overlay",
-                                subtitle = "Floating tool for quick access",
-                                icon = Icons.Rounded.SmartButton,
-                                checked = showToolzPill,
-                                onCheckedChange = { viewModel.setShowToolzPill(it) }
+                                title = "Automatic Updates",
+                                subtitle = "Download patches in background",
+                                icon = Icons.Rounded.AutoFixHigh,
+                                checked = autoUpdateEnabled,
+                                onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
                             )
-
-                            if (showToolzPill) {
-                                SettingsToggleItem(
-                                    title = "Fill the Pill",
-                                    subtitle = "Show tips when no active services are running",
-                                    icon = Icons.Rounded.AutoAwesome,
-                                    checked = fillThePillEnabled,
-                                    onCheckedChange = { viewModel.setFillThePillEnabled(it) }
-                                )
-                                SettingsToggleItem(
-                                    title = "Show Task Progress",
-                                    subtitle = "Track active tasks on the overlay",
-                                    icon = Icons.Rounded.TaskAlt,
-                                    checked = pillTodoEnabled,
-                                    onCheckedChange = { viewModel.setPillTodoEnabled(it) }
-                                )
-                                SettingsToggleItem(
-                                    title = "Show Focus Score",
-                                    subtitle = "View productivity score on the overlay",
-                                    icon = Icons.Rounded.Toll,
-                                    checked = pillFocusEnabled,
-                                    onCheckedChange = { viewModel.setPillFocusEnabled(it) }
-                                )
-                            }
                         }
-
-                        if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "notes")) {
-                            SettingsToggleItem(
-                                title = "Show Recent Tools",
-                                subtitle = "List frequently used tools on home",
-                                icon = Icons.Rounded.History,
-                                checked = showRecentTools,
-                                onCheckedChange = { viewModel.setShowRecentTools(it) }
-                            )
-
-                            SettingsToggleItem(
-                                title = "Show Quick Notes",
-                                subtitle = "Show pinned notes on dashboard",
-                                icon = Icons.AutoMirrored.Rounded.StickyNote2,
-                                checked = showQuickNotes,
-                                onCheckedChange = { viewModel.setShowQuickNotes(it) }
-                            )
-
+                        if (matches(searchQuery, "update", "check", "version", "new")) {
                             SettingsItem(
-                                title = "Home Layout",
-                                subtitle = "Current style: ${dashboardView.lowercase()}",
-                                icon = Icons.Rounded.Dashboard
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("DEFAULT", "LIST").forEach { viewStyle ->
-                                        val isSelected = dashboardView == viewStyle
-                                        Surface(
-                                            onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setDashboardView(viewStyle)
-                                            },
-                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                @Suppress("DEPRECATION")
-                                                Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Section: PERSONAL & HEALTH
-                    SettingsExpandableSection(
-                        title = "USER & ENVIRONMENT",
-                        icon = Icons.Rounded.PersonPin,
-                        isExpanded = expandedSection == "USER" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "USER") null else "USER" }
-                    ) {
-                        if (matches(searchQuery, "profile", "name", "explorer")) {
-                            SettingsItem(
-                                title = "User Profile",
-                                subtitle = "Name: ${userName.ifBlank { "Explorer" }}",
-                                icon = Icons.Rounded.AccountCircle
-                            ) {
-                                OutlinedTextField(
-                                    value = userName,
-                                    onValueChange = { viewModel.setUserName(it) },
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    placeholder = { Text("Enter your identity") },
-                                    shape = RoundedCornerShape(20.dp),
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        unfocusedBorderColor = Color.Transparent,
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                    )
-                                )
-                            }
-                        }
-
-                        if (matches(searchQuery, "step", "goal", "health", "tracker")) {
-                            SettingsToggleItem(
-                                title = "Step Tracker",
-                                subtitle = "Monitor physical activity in background",
-                                icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                checked = stepCounterEnabled,
-                                onCheckedChange = { viewModel.setStepCounterEnabled(it) }
-                            )
-
-                            if (stepCounterEnabled) {
-                                SettingsItem(
-                                    title = "Step Goal",
-                                    subtitle = "Target: $stepGoal steps",
-                                    icon = Icons.Rounded.EmojiEvents
-                                ) {
-                                    Slider(
-                                        value = stepGoal.DivideToFloat(),
-                                        onValueChange = { viewModel.setStepGoal(it.toInt()) },
-                                        valueRange = 1000f..30000f,
-                                        steps = 29,
-                                        modifier = Modifier.padding(top = 8.dp),
-                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (matches(searchQuery, "unit", "system", "metric", "imperial")) {
-                            SettingsItem(
-                                title = "Measurement Units",
-                                subtitle = "System: ${unitSystem.lowercase()}",
-                                icon = Icons.Rounded.SquareFoot
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("METRIC", "IMPERIAL").forEach { unit ->
-                                        val isSelected = unitSystem == unit
-                                        Surface(
-                                            onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setUnitSystem(unit)
-                                            },
-                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                @Suppress("DEPRECATION")
-                                                Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (matches(searchQuery, "vibration", "haptic", "intensity")) {
-                            SettingsToggleItem(
-                                title = "Haptic Feedback",
-                                subtitle = "Tactile response on interaction",
-                                icon = Icons.Rounded.Vibration,
-                                checked = hapticFeedback,
-                                onCheckedChange = { viewModel.setHapticFeedback(it) }
-                            )
-
-                            if (hapticFeedback) {
-                                SettingsItem(
-                                    title = "Vibration Strength",
-                                    subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
-                                    icon = Icons.Rounded.GraphicEq
-                                ) {
-                                    Slider(
-                                        value = hapticIntensity,
-                                        onValueChange = { viewModel.setHapticIntensity(it) },
-                                        onValueChangeFinished = { vibrationManager?.vibrateClick() },
-                                        valueRange = 0.1f..1f,
-                                        modifier = Modifier.padding(top = 8.dp),
-                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Section: MEDIA
-                    SettingsExpandableSection(
-                        title = "MUSIC & AUDIO",
-                        icon = Icons.Rounded.MusicNote,
-                        isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
-                    ) {
-                        if (matches(searchQuery, "ai", "now playing", "lyrics", "meaning", "smart")) {
-                            SettingsToggleItem(
-                                title = "NOW PLAYING AI",
-                                subtitle = "Smart lyrics, meanings, and recommendations",
-                                icon = Icons.Rounded.AutoAwesome,
-                                checked = musicAiEnabled,
-                                onCheckedChange = { viewModel.setMusicAiEnabled(it) }
-                            )
-                        }
-
-                        if (matches(searchQuery, "lyrics", "screen", "sleep", "awake")) {
-                            SettingsToggleItem(
-                                title = "Lyrics Keep Screen Awake",
-                                subtitle = "Stop phone from sleeping in lyrics mode",
-                                icon = Icons.Rounded.Visibility,
-                                checked = musicKeepScreenOnLyrics,
-                                onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
-                            )
-                        }
-
-                        if (matches(searchQuery, "shake", "skip", "audio", "sensitivity")) {
-                            SettingsToggleItem(
-                                title = "Shake to Skip",
-                                subtitle = "Shake phone to play next song",
-                                icon = Icons.Rounded.PhonelinkRing,
-                                checked = musicShakeToSkip,
-                                onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
-                            )
-                            
-                            if (musicShakeToSkip) {
-                                SettingsItem(
-                                    title = "Shake Sensitivity",
-                                    subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
-                                    icon = Icons.Rounded.GraphicEq
-                                ) {
-                                    Slider(
-                                        value = musicShakeSensitivity,
-                                        onValueChange = { viewModel.setMusicShakeSensitivity(it) },
-                                        valueRange = 0.1f..1f,
-                                        modifier = Modifier.padding(top = 8.dp),
-                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                    )
-                                    @Suppress("DEPRECATION")
-                                    Text(
-                                        text = if (musicShakeSensitivity < 0.4f) "High force required" else if (musicShakeSensitivity < 0.7f) "Medium force" else "Light shake",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.End
-                                    )
-                                }
-                            }
-
-                            SettingsToggleItem(
-                                title = "Smart Audio Focus",
-                                subtitle = "Automatically pause for other apps",
-                                icon = Icons.Rounded.Hearing,
-                                checked = musicAudioFocus,
-                                onCheckedChange = { viewModel.setMusicAudioFocus(it) }
-                            )
-                        }
-                        if (matches(searchQuery, "pdf", "ocr", "enhance", "ai")) {
-                            SettingsToggleItem(
-                                title = "AI OCR Enhance",
-                                subtitle = "Improve text recognition in PDFs using AI",
-                                icon = Icons.Rounded.DocumentScanner,
-                                checked = pdfAiOcrEnhance,
-                                onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) }
+                                title = "Check for Updates",
+                                subtitle = "See if a new version is available",
+                                icon = Icons.Rounded.Update,
+                                onClick = onNavigateToUpdate
                             )
                         }
                     }
 
-                    // Section: NOTIFICATIONS
-                    SettingsExpandableSection(
-                        title = "ALERTS & VAULT",
-                        icon = Icons.Rounded.Notifications,
-                        isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
-                    ) {
-                        if (matches(searchQuery, "notification", "vault", "history")) {
-                            SettingsToggleItem(
-                                title = "Master Switch",
-                                subtitle = "Enable or disable all app alerts",
-                                icon = Icons.Rounded.NotificationsActive,
-                                checked = notificationsEnabled,
-                                onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                            )
-
-                            if (notificationsEnabled) {
-                                SettingsToggleItem(
-                                    title = "Notification History",
-                                    subtitle = "Save and view previous alerts",
-                                    icon = Icons.Rounded.VerifiedUser,
-                                    checked = notificationVaultEnabled,
-                                    onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
-                                )
-                                SettingsToggleItem(
-                                    title = "Step Goal Alerts",
-                                    subtitle = "Notify on daily progress",
-                                    icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                    checked = stepNotifications,
-                                    onCheckedChange = { viewModel.setStepNotifications(it) }
-                                )
-                                SettingsToggleItem(
-                                    title = "Timer Alerts",
-                                    subtitle = "Alarms for timers and tasks",
-                                    icon = Icons.Rounded.Timer,
-                                    checked = timerNotifications,
-                                    onCheckedChange = { viewModel.setTimerNotifications(it) }
-                                )
-                            }
-                        }
-                    }
-
-                    // Section: DESIGN
-                    SettingsExpandableSection(
-                        title = "THEME & VISUALS",
-                        icon = Icons.Rounded.Palette,
-                        isExpanded = expandedSection == "DESIGN" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "DESIGN") null else "DESIGN" }
-                    ) {
-                        if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette")) {
-                            SettingsToggleItem(
-                                title = "Dynamic Colors",
-                                subtitle = "Adapt to device wallpaper (Android 12+)",
-                                icon = Icons.Rounded.ColorLens,
-                                checked = dynamicColor,
-                                onCheckedChange = { viewModel.setDynamicColor(it) }
-                            )
-
-                            if (!dynamicColor) {
-                                SettingsItem(
-                                    title = "Custom Palette",
-                                    subtitle = "Define your unique color scheme",
-                                    icon = Icons.Rounded.FormatColorFill
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                                @Suppress("DEPRECATION")
-                                                Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
-                                                IconButton(onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setCustomPrimaryColor(null)
-                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))) {
-                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                            Spacer(Modifier.height(8.dp))
-                                            ColorPickerRow(
-                                                selectedColor = customPrimaryInt ?: Color(0xFF2962FF).toArgb(),
-                                                onColorSelected = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setCustomPrimaryColor(it)
-                                                }
-                                            )
-                                        }
-
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                                @Suppress("DEPRECATION")
-                                                Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
-                                                IconButton(onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setCustomSecondaryColor(null)
-                                                }, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))) {
-                                                    Icon(Icons.Rounded.RestartAlt, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                            Spacer(Modifier.height(8.dp))
-                                            ColorPickerRow(
-                                                selectedColor = customSecondaryInt ?: Color(0xFF00BFA5).toArgb(),
-                                                onColorSelected = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setCustomSecondaryColor(it)
-                                                }
-                                            )
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                showAdvancedThemeDialog = true
-                                            },
-                                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                                            shape = RoundedCornerShape(16.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                                contentColor = MaterialTheme.colorScheme.primary
-                                            )
-                                        ) {
-                                            Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
-                                            Spacer(Modifier.width(8.dp))
-                                            @Suppress("DEPRECATION")
-                                            Text("ADVANCED THEMING", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (matches(searchQuery, "gradient", "background", "effect", "visual")) {
-                            SettingsToggleItem(
-                                title = "Background Gradient",
-                                subtitle = "Subtle depth effect on main screens",
-                                icon = Icons.Rounded.Gradient,
-                                checked = backgroundGradientEnabled,
-                                onCheckedChange = { viewModel.setBackgroundGradientEnabled(it) }
-                            )
-                        }
-
-                        if (matches(searchQuery, "dark", "light", "mode", "appearance")) {
-                            SettingsItem(
-                                title = "Appearance Mode",
-                                subtitle = "Current: ${themeMode.lowercase()}",
-                                icon = Icons.Rounded.DarkMode
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("SYSTEM", "LIGHT", "DARK").forEach { mode ->
-                                        val isSelected = themeMode == mode
-                                        Surface(
-                                            onClick = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setThemeMode(mode)
-                                            },
-                                            modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                @Suppress("DEPRECATION")
-                                                Text(mode, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Section: WIDGETS
-                    SettingsExpandableSection(
-                        title = "EXTERNAL COMPONENTS",
-                        icon = Icons.Rounded.Widgets,
-                        isExpanded = expandedSection == "WIDGETS" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "WIDGETS") null else "WIDGETS" }
-                    ) {
-                        if (matches(searchQuery, "widget", "opacity", "background")) {
-                            SettingsItem(
-                                title = "Widget Styling (SOON)",
-                                subtitle = "Under maintenance, sorry",
-                                icon = Icons.Rounded.SettingsSuggest
-                            ) {
-                                Column(modifier = Modifier.padding(top = 12.dp)) {
-                                    ColorPickerRow(
-                                        selectedColor = widgetBgColor,
-                                        onColorSelected = {
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.setWidgetBackgroundColor(it)
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.height(20.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                                        Spacer(Modifier.width(16.dp))
-                                        Slider(
-                                            value = widgetOpacity,
-                                            onValueChange = { viewModel.setWidgetOpacity(it) },
-                                            valueRange = 0.1f..1f,
-                                            modifier = Modifier.weight(1f),
-                                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                        )
-                                        Spacer(Modifier.width(16.dp))
-                                        @Suppress("DEPRECATION")
-                                        Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
+                    // 10. Section: ABOUT
                     AboutSection(onCheckUpdate = onNavigateToUpdate)
 
                     Spacer(modifier = Modifier.height(80.dp))
@@ -873,7 +945,7 @@ fun SettingsScreen(
     }
 }
 
-fun Int.DivideToFloat(): Float = this.toFloat()
+fun Int.divideToFloat(): Float = this.toFloat()
 
 @Composable
 fun AdvancedThemeDialog(
@@ -1111,16 +1183,16 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
             Text(
                 "Search settings...",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
         },
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 12.dp)
             .shadow(
-                elevation = 12.dp,
-                shape = RoundedCornerShape(24.dp),
-                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                elevation = 20.dp,
+                shape = RoundedCornerShape(28.dp),
+                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
             ),
         leadingIcon = {
             Icon(
@@ -1133,17 +1205,17 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Clear", modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Close, contentDescription = "Clear", modifier = Modifier.size(20.dp))
                 }
             }
         },
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(28.dp),
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
             focusedContainerColor = MaterialTheme.colorScheme.surface,
             unfocusedBorderColor = Color.Transparent,
-            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
         )
     )
 }
@@ -1233,6 +1305,41 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
     }
 }
 
+@Preview(showBackground = true)
+@Composable
+fun SettingsScreenPreview() {
+    MaterialTheme {
+        Surface(color = Color(0xFF121212)) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                SettingsExpandableSection(
+                    title = "VISUALS & THEME",
+                    icon = Icons.Rounded.Palette,
+                    isExpanded = true,
+                    onExpandToggle = {}
+                ) {
+                    SettingsToggleItem(
+                        title = "Performance Mode",
+                        subtitle = "Disable blur and high-frequency animations",
+                        icon = Icons.Rounded.Speed,
+                        checked = true,
+                        onCheckedChange = {}
+                    )
+                    SettingsItem(
+                        title = "Appearance Mode",
+                        subtitle = "Current: system",
+                        icon = Icons.Rounded.DarkMode
+                    )
+                    SettingsItem(
+                        title = "Widget Styling",
+                        subtitle = "Customize home screen widgets",
+                        icon = Icons.Rounded.SettingsSuggest
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ColorPickerRow(selectedColor: Int, onColorSelected: (Int) -> Unit) {
     Row(
@@ -1288,34 +1395,36 @@ fun SettingsItem(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.bouncyClick(onClick = onClick) else Modifier),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
+                    @Suppress("DEPRECATION")
                     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     @Suppress("DEPRECATION")
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                 }
                 if (onClick != null) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
                 }
             }
             extraContent?.let {
+                Spacer(Modifier.height(4.dp))
                 it()
             }
         }
@@ -1334,44 +1443,45 @@ fun SettingsToggleItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.5f)
+            .alpha(if (enabled) 1f else 0.6f)
             .then(if (enabled) Modifier.bouncyClick { onCheckedChange(!checked) } else Modifier),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
+                    @Suppress("DEPRECATION")
                     Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     @Suppress("DEPRECATION")
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Black)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
                 }
             }
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 enabled = enabled,
-                modifier = Modifier.scale(0.8f),
+                modifier = Modifier.scale(0.85f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
                     checkedTrackColor = MaterialTheme.colorScheme.primary,
                     uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 )
             )
         }

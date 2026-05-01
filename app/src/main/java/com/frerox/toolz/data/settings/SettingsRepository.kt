@@ -38,6 +38,7 @@ class SettingsRepository @Inject constructor(
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
     private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
+    private val KARAOKE_ENABLED = booleanPreferencesKey("karaoke_enabled")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
 
     private val SEARCH_FIRST_TIME = booleanPreferencesKey("search_first_time")
@@ -222,6 +223,7 @@ class SettingsRepository @Inject constructor(
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
     val musicNotifications: Flow<Boolean> = dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
+    val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
     val hiddenNotificationApps: Flow<Set<String>> = dataStore.data.map { it[HIDDEN_NOTIFICATION_APPS] ?: emptySet() }
     val customNotificationCategories: Flow<Set<String>> = dataStore.data.map { it[CUSTOM_NOTIFICATION_CATEGORIES] ?: setOf("Social", "Finance", "Work", "General") }
@@ -372,6 +374,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setTimerNotifications(enabled: Boolean) { dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
     suspend fun setMusicNotifications(enabled: Boolean) { dataStore.edit { it[MUSIC_NOTIFICATIONS] = enabled } }
+    suspend fun setKaraokeEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_ENABLED] = enabled } }
     suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
     suspend fun addHiddenNotificationApp(packageName: String) { dataStore.edit { it[HIDDEN_NOTIFICATION_APPS] = (it[HIDDEN_NOTIFICATION_APPS] ?: emptySet()) + packageName } }
     suspend fun removeHiddenNotificationApp(packageName: String) { dataStore.edit { it[HIDDEN_NOTIFICATION_APPS] = (it[HIDDEN_NOTIFICATION_APPS] ?: emptySet()) - packageName } }

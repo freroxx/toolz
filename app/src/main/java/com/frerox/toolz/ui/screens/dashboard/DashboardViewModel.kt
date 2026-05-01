@@ -156,11 +156,7 @@ class DashboardViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             _isAiSearching.value = true
             try {
-                val allCategories = categories.value
-                val toolsContext = allCategories.flatMap { it.items }.joinToString("\n") {
-                    "- ${it.title}: ${it.description} (Route: ${it.route})" 
-                }
-                
+                val context = categories.value.flatMap { it.items }.joinToString("\n") { "[TOOL] ${it.title}: ${it.description} (Route: ${it.route})" }
                 val notes = noteDao.getAllNotes().first().take(10)
                 val notesContext = if (notes.isNotEmpty()) {
                     "\nUSER'S RECENT NOTES:\n" + 
@@ -176,7 +172,7 @@ class DashboardViewModel @Inject constructor(
                 val prompt = """
                     You are the 'Toolz Intelligence Engine'. Match user intent to the most relevant tools.
                     USER QUERY: "$query"
-                    $toolsContext
+                    $context
                     $notesContext
                     $tasksContext
                     Return ONLY a comma-separated list of the TOP 3 most relevant tool routes.

@@ -110,6 +110,7 @@ class SettingsViewModel @Inject constructor(
     val showMusicVisualizer = repository.showMusicVisualizer
     val musicAiEnabled = repository.musicAiEnabled
     val musicKeepScreenOnLyrics = repository.musicKeepScreenOnLyrics
+    val karaokeEnabled = repository.karaokeEnabled
     val aiClipboardMonitoringEnabled = repository.aiClipboardMonitoringEnabled
 
     val performanceMode = repository.performanceMode
@@ -164,6 +165,7 @@ class SettingsViewModel @Inject constructor(
     fun setShowMusicVisualizer(enabled: Boolean) = viewModelScope.launch { repository.setShowMusicVisualizer(enabled) }
     fun setMusicAiEnabled(enabled: Boolean) = viewModelScope.launch { repository.setMusicAiEnabled(enabled) }
     fun setMusicKeepScreenOnLyrics(enabled: Boolean) = viewModelScope.launch { repository.setMusicKeepScreenOnLyrics(enabled) }
+    fun setKaraokeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setKaraokeEnabled(enabled) }
 
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
 

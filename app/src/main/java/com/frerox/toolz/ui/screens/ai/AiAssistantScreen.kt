@@ -64,6 +64,7 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.data.ai.AiChat
 import com.frerox.toolz.data.ai.AiConfig
 import com.frerox.toolz.data.ai.AiMessage
+import com.frerox.toolz.data.ai.DeepDiveState
 import com.frerox.toolz.data.ai.AiSettingsHelper
 import com.frerox.toolz.ui.components.MarkdownSegment
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
@@ -219,7 +220,8 @@ fun AiAssistantScreen(
         MessageSourcesSheet(
             message = selectedMessageForSources!!,
             onDismiss = { selectedMessageForSources = null },
-            onLinkClick = onNavigateToBrowser
+            onLinkClick = onNavigateToBrowser,
+            onDeepDive = { viewModel.performDeepDive(it) }
         )
     }
 
@@ -322,6 +324,8 @@ fun AiAssistantScreen(
                                 onScrollBottom = { scope.launch { listState.animateScrollToItem(uiState.messages.size.coerceAtLeast(1) - 1) } },
                                 onRetrySync = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
                                 loadingPhaseText = uiState.loadingPhaseText,
+                                onDeepDive = { viewModel.performDeepDive(it) },
+                                onDismissDeepDive = { viewModel.dismissDeepDive(it) }
                             )
                         } else {
                             EmptyChatStateRedesign(
@@ -337,6 +341,63 @@ fun AiAssistantScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (settingsUiState.showGroqKeyMissingDialog) {
+        GroqKeyRequiredDialog(
+            onDismiss = { viewModel.dismissGroqDialog() },
+            onSave = { viewModel.saveGroqKey(it) },
+            onGetLink = { onNavigateToBrowser("https://console.groq.com/keys") }
+        )
+    }
+}
+
+@Composable
+fun GroqKeyRequiredDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onGetLink: () -> Unit
+) {
+    var key by remember { mutableStateOf("") }
+    
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            Modifier.padding(28.dp).fillMaxWidth(), 
+            shape = RoundedCornerShape(AiDesign.CornerLarge), 
+            color = AiDesign.surfaceColor(),
+            border = BorderStroke(1.dp, AiDesign.glassBorder()),
+            shadowElevation = 24.dp
+        ) {
+            Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(86.dp).background(MaterialTheme.colorScheme.primary.copy(.12f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.VpnKey, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(42.dp))
+                }
+                Spacer(Modifier.height(26.dp))
+                Text("GROQ KEY REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                Spacer(Modifier.height(14.dp))
+                Text("Enable Web Search", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, color = AiDesign.textColor())
+                Spacer(Modifier.height(10.dp))
+                Text("Web search now uses a high-speed Groq model to extract queries. Please provide your Groq API key to continue.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = AiDesign.textColor(.6f), lineHeight = 22.sp)
+                
+                Spacer(Modifier.height(20.dp))
+                
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("Groq API Key") },
+                    placeholder = { Text("gsk_...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(Modifier.height(34.dp))
+                Button(onClick = { if (key.isNotBlank()) onSave(key) }, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(22.dp)) { Text("Save Key", fontWeight = FontWeight.Black, color = Color.White) }
+                Spacer(Modifier.height(14.dp))
+                OutlinedButton(onClick = onGetLink, Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, AiDesign.glassBorder())) { Text("Get Key", fontWeight = FontWeight.Bold, color = AiDesign.textColor(0.8f)) }
+                TextButton(onClick = onDismiss, Modifier.padding(top = 10.dp)) { Text("Cancel", style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.4f)) }
             }
         }
     }
@@ -608,7 +669,9 @@ fun ChatBubble(
     onRegenerate: (Int) -> Unit,
     onLinkClick: (String) -> Unit,
     onLongPress: (AiMessage) -> Unit,
-    onShowSources: (AiMessage) -> Unit
+    onShowSources: (AiMessage) -> Unit,
+    onDeepDive: (AiMessage) -> Unit,
+    onDismissDeepDive: (AiMessage) -> Unit
 ) {
     val isUser = message.isUser
     val segments = parseMarkdownToSegments(message.text)
@@ -681,19 +744,17 @@ fun ChatBubble(
                         }
 
                         if (sources.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),
                                 thickness = 0.5.dp,
-                                color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.15f)
+                                color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.1f)
                             )
                             SourcesPill(
                                 sources = sources,
                                 isUser = isUser,
                                 onClick = { onShowSources(message) }
                             )
-                            // Extra padding after pill
-                            Spacer(Modifier.height(4.dp))
                         }
                     }
                 }
@@ -883,6 +944,8 @@ fun ChatMessageList(
     onScrollBottom: () -> Unit,
     onRetrySync: () -> Unit,
     loadingPhaseText: String?,
+    onDeepDive: (AiMessage) -> Unit,
+    onDismissDeepDive: (AiMessage) -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -907,7 +970,7 @@ fun ChatMessageList(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 24.dp)
         ) {
-            items(messages, key = { it.id }) { ChatBubble(it, currentConfig, performanceMode, onRegenerate, onLinkClick, onLongPress, onShowSources) }
+            items(messages, key = { it.id }) { ChatBubble(it, currentConfig, performanceMode, onRegenerate, onLinkClick, onLongPress, onShowSources, onDeepDive, onDismissDeepDive) }
             if (isLoading || streamingText.isNotEmpty()) {
                 item { 
                     ActiveAiBubble(
@@ -1594,7 +1657,8 @@ fun MessageActionsSheet(
 fun MessageSourcesSheet(
     message: AiMessage,
     onDismiss: () -> Unit,
-    onLinkClick: (String) -> Unit
+    onLinkClick: (String) -> Unit,
+    onDeepDive: (AiMessage) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
     
@@ -1626,12 +1690,33 @@ fun MessageSourcesSheet(
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
         ) {
-            Text(
-                text = "Sources",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(bottom = 20.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Sources",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black
+                )
+
+                if (message.canDeepDive && message.deepDiveState == DeepDiveState.PENDING) {
+                    Button(
+                        onClick = { 
+                            onDeepDive(message)
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(Icons.Rounded.Search, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Deep Dive", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
