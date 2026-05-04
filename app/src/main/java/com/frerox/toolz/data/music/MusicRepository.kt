@@ -267,6 +267,11 @@ class MusicRepository @Inject constructor(
         }
     }
 
+    suspend fun incrementKaraokeSingCount(uri: String) {
+        val track = getTrackByUri(uri) ?: return
+        updateTrack(track.copy(karaokeSingCount = track.karaokeSingCount + 1))
+    }
+
     suspend fun insertTrack(track: MusicTrack) {
         musicDao.insertTrack(track)
     }
