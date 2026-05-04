@@ -120,6 +120,7 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_LYRICS_SEEK_ENABLED = booleanPreferencesKey("music_lyrics_seek_enabled")
     private val MUSIC_LYRICS_FONT = stringPreferencesKey("music_lyrics_font") // "SANS_SERIF", "SERIF", "MONOSPACE", "CURSIVE", "DISPLAY", "HANDWRITING"
     private val MUSIC_LYRICS_ALWAYS_SYNC = booleanPreferencesKey("music_lyrics_always_sync")
+    private val KARAOKE_SING_CONFIDENTLY_ENABLED = booleanPreferencesKey("karaoke_sing_confidently_enabled")
     private val MUSIC_VISUALIZER_SENSITIVITY = floatPreferencesKey("music_visualizer_sensitivity")
     private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
 
@@ -272,6 +273,7 @@ class SettingsRepository @Inject constructor(
     val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
     val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
     val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: false }
+    val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: true }
     val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
@@ -436,6 +438,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicLyricsSeekEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_SEEK_ENABLED] = enabled } }
     suspend fun setMusicLyricsFont(font: String) { dataStore.edit { it[MUSIC_LYRICS_FONT] = font } }
     suspend fun setMusicLyricsAlwaysSync(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_ALWAYS_SYNC] = enabled } }
+    suspend fun setKaraokeSingConfidentlyEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_SING_CONFIDENTLY_ENABLED] = enabled } }
     suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 

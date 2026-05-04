@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.KaraokeMicIcon
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.util.VibrationManager
 
@@ -74,7 +75,8 @@ fun NowPlayingAiBottomSheet(
     onDismiss: () -> Unit,
     vibrationManager: VibrationManager,
     onSeek: (Long) -> Unit = {},
-    onPlayRecommendation: (AiRecommendation) -> Unit = {}
+    onPlayRecommendation: (AiRecommendation) -> Unit = {},
+    onToggleKaraoke: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -91,7 +93,8 @@ fun NowPlayingAiBottomSheet(
             onDismiss = onDismiss,
             vibrationManager = vibrationManager,
             onSeek = onSeek,
-            onPlayRecommendation = onPlayRecommendation
+            onPlayRecommendation = onPlayRecommendation,
+            onToggleKaraoke = onToggleKaraoke
         )
     }
 }
@@ -107,7 +110,8 @@ fun NowPlayingAiContent(
     onDismiss: () -> Unit,
     vibrationManager: VibrationManager,
     onSeek: (Long) -> Unit = {},
-    onPlayRecommendation: (AiRecommendation) -> Unit = {}
+    onPlayRecommendation: (AiRecommendation) -> Unit = {},
+    onToggleKaraoke: () -> Unit = {}
 ) {
     val performanceMode = LocalPerformanceMode.current
 
@@ -161,7 +165,8 @@ fun NowPlayingAiContent(
                     vibrationManager.vibrateClick()
                     viewModel.refreshCurrentTab()
                 },
-                onDismiss = onDismiss
+                onDismiss = onDismiss,
+                onToggleKaraoke = onToggleKaraoke
             )
 
             Box(modifier = Modifier.weight(1f)) {
@@ -205,7 +210,8 @@ fun AiHeader(
     uiState: NowPlayingAiUiState,
     onTabSelected: (AiTab) -> Unit,
     onRefresh: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onToggleKaraoke: () -> Unit = {}
 ) {
     val performanceMode = LocalPerformanceMode.current
     Column(modifier = Modifier.padding(top = 14.dp)) {
@@ -260,6 +266,15 @@ fun AiHeader(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (uiState.isAiEnabled) {
+                    KaraokeMicIcon(
+                        isActive = false, // Not active yet, just availability
+                        onClick = onToggleKaraoke,
+                        size = 36.dp,
+                        iconSize = 18.dp
+                    )
+                }
+
                 Surface(
                     onClick = onRefresh,
                     modifier = Modifier.height(36.dp).wrapContentWidth().bouncyClick {},
@@ -378,10 +393,12 @@ fun LyricsTab(
 
     val syncedPosition = playbackPosition + 250L
 
-    val currentLineIndex = remember(syncedPosition, state.syncedLyrics) {
-        if (state.isSynced && state.syncedLyrics.isNotEmpty()) {
-            state.syncedLyrics.indexOfLast { it.timeMs <= syncedPosition }.coerceAtLeast(0)
-        } else -1
+    val currentLineIndex by remember(syncedPosition, state.syncedLyrics) {
+        derivedStateOf {
+            if (state.isSynced && state.syncedLyrics.isNotEmpty()) {
+                state.syncedLyrics.indexOfLast { it.timeMs <= syncedPosition }.coerceAtLeast(0)
+            } else -1
+        }
     }
 
     val isAutoScrollInFlight = remember { mutableStateOf(false) }
@@ -595,7 +612,7 @@ fun SyncedLyricLine(
 ) {
     val lineAlpha by animateFloatAsState(
         if (isCurrent) 1f else 0.35f,
-        if (performanceMode) snap() else spring(stiffness = Spring.StiffnessLow),
+        if (performanceMode) snap() else tween(350),
         label = "lineAlpha"
     )
 
@@ -762,7 +779,7 @@ fun WordView(
 
     val baseColor = if (isPast) pastColor else dim
     val color = if (performanceMode) (if (isActive) highlightColor else baseColor) else lerpColor(baseColor, highlightColor, animFrac)
-    val wordScale = if (performanceMode) (if (isActive) 1.15f else 1f) else 1f + (0.18f * animFrac)
+    val wordScale = 1f + (0.12f * animFrac)
 
     Text(
         text = word.word + " ",
@@ -779,7 +796,7 @@ fun WordView(
                 scaleX = wordScale
                 scaleY = wordScale
                 if (!performanceMode) {
-                    translationY = -3.dp.toPx() * animFrac
+                    translationY = -2.dp.toPx() * animFrac
                 }
             }
             .then(
@@ -787,12 +804,12 @@ fun WordView(
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                highlightColor.copy(alpha = 0.25f * animFrac),
-                                highlightColor.copy(alpha = 0.05f * animFrac),
+                                highlightColor.copy(alpha = 0.20f * animFrac),
+                                highlightColor.copy(alpha = 0.04f * animFrac),
                                 Color.Transparent
                             ),
                             center = center,
-                            radius = size.maxDimension * 2f
+                            radius = size.maxDimension * 1.5f
                         )
                     )
                 } else Modifier

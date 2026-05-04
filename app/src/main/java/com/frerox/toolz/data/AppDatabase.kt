@@ -62,7 +62,7 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
         BookmarkEntry::class,
         QuickLinkEntry::class
     ], 
-    version = 36,
+    version = 37,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class)

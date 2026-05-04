@@ -23,7 +23,8 @@ data class MusicTrack(
     val aiArtistVitals: String? = null,
     val aiSongMeaning: String? = null,
     val aiRecommendationsJson: String? = null, // Store list of recommendations as JSON string
-    val lastAiSync: Long = 0L
+    val lastAiSync: Long = 0L,
+    val karaokeSingCount: Int = 0
 )
 
 @Entity(tableName = "playlists")

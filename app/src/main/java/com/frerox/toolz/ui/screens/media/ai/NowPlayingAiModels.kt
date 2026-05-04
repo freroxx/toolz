@@ -1,6 +1,7 @@
 package com.frerox.toolz.ui.screens.media.ai
 
 import androidx.compose.runtime.Immutable
+import com.frerox.toolz.data.catalog.CatalogTrack
 
 @Immutable
 data class AiSong(
@@ -43,8 +44,13 @@ data class LyricsLine(
 data class LyricsWord(
     val word: String,
     val startTimeMs: Long,
-    val durationMs: Long
+    val durationMs: Long,
+    val karaokeStatus: KaraokeWordStatus = KaraokeWordStatus.PENDING
 )
+
+enum class KaraokeWordStatus {
+    PENDING, CORRECT, MISSED
+}
 
 @Immutable
 data class AiMoreInfoState(
@@ -87,5 +93,23 @@ data class NowPlayingAiUiState(
     val error: String? = null,
     val isAiEnabled: Boolean = true,
     val isExpandedPill: Boolean = false,
-    val performanceMode: Boolean = false
+    val performanceMode: Boolean = false,
+    // Karaoke
+    val karaokeSpeechCorrectionEnabled: Boolean = false,
+    val isKaraokeRecording: Boolean = false,
+    val karaokeScore: Int = 0,
+    val karaokeCorrectWords: Int = 0,
+    val karaokeTotalWords: Int = 0,
+    val karaokeMostAccurateLine: String? = null,
+    val karaokeStreak: Int = 0,
+    val karaokeMaxStreak: Int = 0,
+    val micRms: Float = 0f,
+    val quickSingEnabled: Boolean = true,
+    // Sing Confidently
+    val karaokeSingConfidentlyEnabled: Boolean = true,
+    val isSearchingInstrumental: Boolean = false,
+    val instrumentalMatch: CatalogTrack? = null,
+    val isSingConfidentlyActive: Boolean = false,
+    val instrumentalStreamUrl: String? = null,
+    val karaokeMissedStreak: Int = 0
 )
