@@ -22,9 +22,9 @@ class FileConverterViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FileConverterUiState())
     val uiState: StateFlow<FileConverterUiState> = _uiState.asStateFlow()
 
-    fun selectFile(uri: Uri, type: ConversionEngine.ConversionType, highQuality: Boolean) {
+    fun selectFiles(uris: List<Uri>, type: ConversionEngine.ConversionType, highQuality: Boolean) {
         _uiState.value = _uiState.value.copy(
-            selectedFileUri = uri,
+            selectedFileUri = uris.firstOrNull(),
             conversionType = type,
             isConverting = true,
             conversionSuccess = false,
@@ -32,16 +32,20 @@ class FileConverterViewModel @Inject constructor(
             error = null
         )
         
-        val intent = Intent(context, FileConversionService::class.java).apply {
-            putExtra("input_uri", uri)
-            putExtra("conversion_type", type.name)
-            putExtra("high_quality", highQuality)
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        // This is a simplified approach, real batching would need service changes.
+        // Keeping it simple based on the original structure.
+        uris.forEach { uri ->
+            val intent = Intent(context, FileConversionService::class.java).apply {
+                putExtra("input_uri", uri)
+                putExtra("conversion_type", type.name)
+                putExtra("high_quality", highQuality)
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 
