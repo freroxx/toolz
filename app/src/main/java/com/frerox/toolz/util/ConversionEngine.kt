@@ -102,7 +102,12 @@ class ConversionEngine @Inject constructor(
         IMAGE_TO_PDF("pdf", "Documents", true),
         VIDEO_TO_PDF("pdf", "Documents"),
         PDF_TO_PNG("png", "Images", true),
-        PDF_TO_JPG("jpg", "Images", true)
+        PDF_TO_JPG("jpg", "Images", true),
+
+        // Vector
+        SVG_TO_PNG("png", "Images", true),
+        SVG_TO_JPG("jpg", "Images", true),
+        SVG_TO_PDF("pdf", "Documents", true)
     }
 
     sealed class ConversionStatus {
