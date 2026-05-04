@@ -54,17 +54,30 @@ class DocumentHandler @Inject constructor(
 
             val spanned = Html.fromHtml(htmlContent, Html.FROM_HTML_MODE_LEGACY)
             
-            // Logic for pagination (rough)
-            val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4
-            val page = pdfDocument.startPage(pageInfo)
-            val canvas = page.canvas
-            
+            // Define page dimensions (A4 in points)
+            val pageWidth = 595
+            val pageHeight = 842
+            val margin = 40
+            val textWidth = pageWidth - 2 * margin
+
             val staticLayout = StaticLayout.Builder.obtain(
-                spanned, 0, spanned.length, textPaint, canvas.width
+                spanned, 0, spanned.length, textPaint, textWidth
             ).build()
-            
-            staticLayout.draw(canvas)
-            pdfDocument.finishPage(page)
+
+            val totalHeight = staticLayout.height
+            val pagesCount = Math.ceil(totalHeight.toDouble() / (pageHeight - 2 * margin)).toInt().coerceAtLeast(1)
+
+            for (i in 0 until pagesCount) {
+                val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, i + 1).create()
+                val page = pdfDocument.startPage(pageInfo)
+                val canvas = page.canvas
+                
+                canvas.translate(margin.toFloat(), margin.toFloat())
+                canvas.translate(0f, -(i * (pageHeight - 2 * margin)).toFloat())
+                
+                staticLayout.draw(canvas)
+                pdfDocument.finishPage(page)
+            }
 
             pdfDocument.writeTo(FileOutputStream(File(outputPath)))
             pdfDocument.close()
