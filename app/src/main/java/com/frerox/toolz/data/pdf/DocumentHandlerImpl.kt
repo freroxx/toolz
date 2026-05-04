@@ -69,9 +69,18 @@ class DocumentHandlerImpl @Inject constructor(
                 }
             }
 
-            // Guard: If no lines fit within usableHeight, force progress
-            if (!lineFits && layout.lineCount > 0 && layout.getLineTop(0) > usableHeight) {
-                end = start + 1
+            // Safety Guard: If no lines fit within usableHeight, force progress
+            // Even if the line is taller than usableHeight, we must include at least one character
+            // or we will loop infinitely.
+            if (!lineFits) {
+                // If it all fits, we are done.
+                // If it doesn't fit, we must take at least one character.
+                end = if (layout.lineCount > 0 && layout.getLineTop(0) > usableHeight) {
+                    // Line is taller than usableHeight, force inclusion of at least this line
+                    layout.getLineEnd(0).coerceAtLeast(start + 1)
+                } else {
+                    spanned.length
+                }
             } else if (end <= start) {
                 // Ensure we make progress if end <= start
                 end = minOf(start + 1, spanned.length)
