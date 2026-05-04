@@ -9,8 +9,13 @@ import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,6 +102,8 @@ fun KaraokeView(
     var phase               by remember(state.currentTrack?.uri) { mutableStateOf(KaraokePhase.SPLASH) }
     var countdownTick       by remember { mutableIntStateOf(3) }
     var showSettings        by remember { mutableStateOf(false) }
+    var showSingConfidentlyDialog by remember { mutableStateOf(false) }
+    var showInstrumentalSearch by remember { mutableStateOf(false) }
     var mediaRecorder       by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile       by remember { mutableStateOf<File?>(null) }
     var isRecorderStarting  by remember { mutableStateOf(false) }
@@ -120,12 +127,8 @@ fun KaraokeView(
     // ── Helpers ───────────────────────────────────────────────────────────────
     val startRecording: () -> Unit = {
         if (micPermission.status.isGranted && !isRecorderStarting) {
-            if (aiState.karaokeSpeechCorrectionEnabled) {
-                // Prioritize speech recognition (scoring) over file recording
-                // to avoid microphone hardware conflicts.
-                aiViewModel.startKaraokeRecording()
-            } else if (mediaRecorder == null) {
-                // Record high-quality audio to file
+            // Always try to start media recording for saving audio
+            if (mediaRecorder == null) {
                 isRecorderStarting = true
                 startMediaRecording(
                     context       = context,
@@ -134,9 +137,23 @@ fun KaraokeView(
                         mediaRecorder      = rec
                         recordingFile      = file
                         isRecorderStarting = false
+                        
+                        // If scoring is enabled, also start that
+                        if (aiState.karaokeSpeechCorrectionEnabled) {
+                            aiViewModel.startKaraokeRecording()
+                        }
                     },
-                    onError = { isRecorderStarting = false }
+                    onError = { 
+                        isRecorderStarting = false
+                        // Fallback: if media recorder fails, try starting scoring anyway
+                        if (aiState.karaokeSpeechCorrectionEnabled) {
+                            aiViewModel.startKaraokeRecording()
+                        }
+                    }
                 )
+            } else if (aiState.karaokeSpeechCorrectionEnabled && !aiState.isKaraokeRecording) {
+                // Media recorder already running, just start scoring
+                aiViewModel.startKaraokeRecording()
             }
         }
     }
@@ -148,6 +165,10 @@ fun KaraokeView(
         } else {
             startRecording()
         }
+    }
+
+    val togglePause: () -> Unit = {
+        if (state.isPlaying) onPause() else onPlay()
     }
 
     val finishSession: () -> Unit = {
@@ -401,11 +422,12 @@ fun KaraokeView(
             }
         }
 
-        // ── EVALUATION overlay ────────────────────────────────────────────────
         AnimatedVisibility(
             visible  = phase == KaraokePhase.EVALUATION,
-            enter    = fadeIn(tween(380)) + slideInVertically(tween(380, easing = FastOutSlowInEasing)) { it / 5 },
-            exit     = fadeOut(tween(280)),
+            enter    = fadeIn(tween(450)) + slideInVertically(
+                spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow)
+            ) { it / 4 },
+            exit     = fadeOut(tween(300)),
             modifier = Modifier.fillMaxSize().zIndex(20f)
         ) {
             KaraokeEvaluation(
@@ -426,22 +448,27 @@ fun KaraokeView(
                     }
                 },
                 onAudioSaved    = { 
-                    // Move file to Music/Karaoke folder
                     recordingFile?.let { file ->
                         try {
-                            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-                            val karaokeDir = File(musicDir, "Karaoke")
-                            if (!karaokeDir.exists()) karaokeDir.mkdirs()
-
-                            val destFile = File(karaokeDir, file.name)
-                            file.renameTo(destFile)
-
-                            // Scan file so it shows up in gallery/music apps
-                            MediaScannerConnection.scanFile(context, arrayOf(destFile.absolutePath), null, null)
-
-                            Toast.makeText(context, "Saved to Music/Karaoke", Toast.LENGTH_SHORT).show()
+                            val resolver = context.contentResolver
+                            val values = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.Audio.Media.DISPLAY_NAME, file.name)
+                                put(android.provider.MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                                put(android.provider.MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/Karaoke")
+                            }
+                            val uri = resolver.insert(android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                            if (uri != null) {
+                                resolver.openOutputStream(uri)?.use { outStream ->
+                                    file.inputStream().use { inStream ->
+                                        inStream.copyTo(outStream)
+                                    }
+                                }
+                                Toast.makeText(context, "Saved to Music/Karaoke", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Failed to save file", Toast.LENGTH_SHORT).show()
+                            }
                         } catch (e: Exception) {
-                            Log.e("Karaoke", "Failed to save audio", e)
+                            Log.e("Karaoke", "Failed to save audio via MediaStore", e)
                             Toast.makeText(context, "Failed to save audio", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -465,7 +492,7 @@ fun KaraokeView(
     }
 
     // Sing Confidently Dialog
-    var showSingConfidentlyDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(aiState.instrumentalMatch, aiState.karaokeSingConfidentlyEnabled, phase) {
         if (aiState.instrumentalMatch != null 
             && aiState.karaokeSingConfidentlyEnabled 
@@ -485,8 +512,19 @@ fun KaraokeView(
             },
             onKeep = { showSingConfidentlyDialog = false },
             onEdit = { 
-                // BETA: Simple re-search
-                aiViewModel.forceSearchInstrumental(track)
+                showSingConfidentlyDialog = false
+                showInstrumentalSearch = true
+            }
+        )
+    }
+
+    if (showInstrumentalSearch) {
+        InstrumentalSearchSheet(
+            onDismiss = { showInstrumentalSearch = false },
+            onSearch = { query -> 
+                aiViewModel.searchInstrumentalCustom(query)
+                showInstrumentalSearch = false
+                showSingConfidentlyDialog = true // Bring dialog back after search
             }
         )
     }
@@ -1241,28 +1279,6 @@ fun KaraokeEvaluationCard(
     onAudioSaved     = onAudioSaved
 )
 
-@Composable
-private fun KaraokeEvaluation(
-    track            : com.frerox.toolz.data.music.MusicTrack,
-    score            : Int,
-    correctWords     : Int,
-    totalWords       : Int,
-    mostAccurateLine : String?,
-    recordingFile    : File?,
-    onDone           : () -> Unit,
-    onAudioSaved     : () -> Unit
-) {
-    val (grade, gradeColor, message) = remember(score) {
-        when {
-            score >= 95 -> Triple("S", Color(0xFFFFD700), "Perfect! 👑")
-            score >= 85 -> Triple("A", Color(0xFF42A5F5), "Excellent! 🌟")
-            score >= 70 -> Triple("B", Color(0xFF66BB6A), "Great job! 🎵")
-            score >= 50 -> Triple("C", Color(0xFFFFA726), "Keep going! 💪")
-            else        -> Triple("D", Color(0xFFEF5350), "Practice more 🎤")
-        }
-    }
-
-    var audioSaved by remember { mutableStateOf(false) }
 
 @Composable
 private fun KaraokeEvaluation(
@@ -1480,115 +1496,178 @@ fun SingConfidentlyDialog(
     onKeep: () -> Unit,
     onEdit: () -> Unit
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onKeep,
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        icon = {
-            Icon(
-                Icons.Rounded.AutoFixHigh,
-                null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
-            )
-        },
-        title = {
-            Text(
-                "Sing Confidently",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(36.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+            shadowElevation = 32.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+            modifier = Modifier.padding(horizontal = 24.dp).graphicsLayer {
+                renderEffect = android.graphics.RenderEffect.createBlurEffect(40f, 40f, android.graphics.Shader.TileMode.CLAMP)
+                    .asComposeRenderEffect()
+            }
+        ) {
             Column(
+                modifier = Modifier.padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.tertiary
+                                )
+                            ),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoFixHigh,
+                        null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Text(
+                    "Sing Confidently",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
                 Text(
                     "For your maximum karaoke experience, we recommend choosing the instrumental version of this song.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
 
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         AsyncImage(
                             model = match.thumbnailUrl,
                             contentDescription = null,
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(8.dp)),
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(14.dp)),
                             contentScale = ContentScale.Crop
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 match.title,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 match.artist,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(onClick = onEdit) {
+                        IconButton(onClick = onEdit, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)) {
                             Icon(
-                                Icons.Rounded.Edit,
+                                Icons.Rounded.Search,
                                 null,
                                 modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
                 }
 
-                Text(
-                    "(BETA)",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onSwitch,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Switch to Instrumental", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onKeep,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "Keep Original",
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onKeep,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Text("Keep Original", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Button(
+                        onClick = onSwitch,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("Switch", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
+                    }
+                }
             }
         }
-    )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun InstrumentalSearchSheet(
+    onDismiss: () -> Unit,
+    onSearch: (String) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp).padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text("Search Instrumental", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. Someone Like You Karaoke", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                singleLine = true,
+                keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) onSearch(query) }),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+            Button(
+                onClick = { if (query.isNotBlank()) onSearch(query) },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("Search Catalog", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
