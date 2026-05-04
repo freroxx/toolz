@@ -6,7 +6,6 @@ import android.text.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.frerox.toolz.util.ConversionEngine
 import com.frerox.toolz.util.converters.ConversionHandler
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -37,7 +36,7 @@ class DocumentHandlerImpl @Inject constructor(
         highQuality: Boolean
     ): Flow<ConversionEngine.ConversionStatus> = flow {
         // Implementation for conversion if needed, or stub for now
-        emit(ConversionEngine.ConversionStatus.Success)
+        emit(ConversionEngine.ConversionStatus.Success(outputPath))
     }
 
     private fun readContent(uri: Uri): String {

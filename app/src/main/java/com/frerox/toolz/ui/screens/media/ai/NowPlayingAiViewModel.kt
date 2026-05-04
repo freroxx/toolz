@@ -3,6 +3,8 @@ package com.frerox.toolz.ui.screens.media.ai
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
 import android.speech.RecognizerIntent
@@ -10,6 +12,8 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -96,6 +100,11 @@ class NowPlayingAiViewModel @Inject constructor(
 
     private val instrumentalPlayer: ExoPlayer by lazy {
         ExoPlayer.Builder(context).build().apply {
+            val attr = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build()
+            setAudioAttributes(attr, false) // false = Do NOT handle/steal audio focus
             playWhenReady = true
         }
     }
@@ -607,6 +616,20 @@ class NowPlayingAiViewModel @Inject constructor(
         searchInstrumental(track)
     }
 
+    fun searchInstrumentalCustom(query: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isSearchingInstrumental = true) }
+            try {
+                val (results, _) = catalogRepository.search(query)
+                val match = results.firstOrNull()
+                _uiState.update { it.copy(isSearchingInstrumental = false, instrumentalMatch = match) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Custom instrumental search failed", e)
+                _uiState.update { it.copy(isSearchingInstrumental = false) }
+            }
+        }
+    }
+
     fun setSingConfidentlyEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setKaraokeSingConfidentlyEnabled(enabled)
@@ -809,24 +832,31 @@ class NowPlayingAiViewModel @Inject constructor(
      * when on-device is unavailable.
      */
     private fun buildRecognizer() {
-        val useOnDevice = SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-        speechRecognizer = if (useOnDevice) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val isOnline = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        
+        val onDeviceAvailable = SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+        
+        // If online, use standard recognizer (prefers cloud). 
+        // If offline and on-device is available, use on-device specifically.
+        speechRecognizer = if (!isOnline && onDeviceAvailable) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
         } else {
             SpeechRecognizer.createSpeechRecognizer(context)
         }
-        Log.d(TAG, "SpeechRecognizer created – on-device=$useOnDevice")
+        Log.d(TAG, "SpeechRecognizer created – online=$isOnline, on-device=$onDeviceAvailable")
 
         recognitionIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,  true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,      5) // Increased for better matching
-            // Prevent premature cutoff
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,      5)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-            // Prefer on-device even if online fallback is used
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, useOnDevice)
+            
+            // Prefer offline only if we are actually offline
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !isOnline)
         }
 
         speechRecognizer?.setRecognitionListener(recognitionListener)
