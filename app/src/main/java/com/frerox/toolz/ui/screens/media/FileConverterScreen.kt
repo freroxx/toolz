@@ -62,11 +62,11 @@ fun FileConverterScreen(
     var showAllFormatsSheet by remember { mutableStateOf(false) }
 
     var showTypePicker by remember { mutableStateOf(false) }
-    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     LaunchedEffect(initialUri) {
         if (initialUri != null && uiState.selectedFileUri == null) {
-            pendingUri = initialUri
+            pendingUris = listOf(initialUri)
             showTypePicker = true
         }
     }
@@ -108,20 +108,20 @@ fun FileConverterScreen(
     }
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            pendingUri = it
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            pendingUris = uris
             showTypePicker = true
         }
     }
 
-    if (showTypePicker && pendingUri != null) {
+    if (showTypePicker && pendingUris.isNotEmpty()) {
         ConversionTypeSheet(
-            uri = pendingUri!!,
+            uri = pendingUris.first(), // Simplification for type picker
             onDismiss = { showTypePicker = false },
             onTypeSelected = { type ->
-                viewModel.selectFile(pendingUri!!, type, highQuality)
+                viewModel.selectFiles(pendingUris, type, highQuality)
                 showTypePicker = false
             }
         )
