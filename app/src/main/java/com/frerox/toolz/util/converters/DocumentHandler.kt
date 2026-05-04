@@ -2,6 +2,7 @@ package com.frerox.toolz.util.converters
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
@@ -33,13 +34,13 @@ class DocumentHandler @Inject constructor(
 
         try {
             val pdfDocument = PdfDocument()
-            val paint = Paint()
             val textPaint = TextPaint().apply {
                 textSize = 14f
-                color = android.graphics.Color.BLACK
+                color = Color.BLACK
+                isAntiAlias = true
             }
 
-            // Simple handling for now (assuming 1 input for simple case)
+            // Using first URI, should ideally handle list or merge if needed
             val inputUri = inputUris.first()
             val content = context.contentResolver.openInputStream(inputUri)?.bufferedReader().use { it?.readText() } ?: ""
             
@@ -49,33 +50,42 @@ class DocumentHandler @Inject constructor(
                 val renderer = HtmlRenderer.builder().build()
                 renderer.render(document)
             } else {
-                content // Text
+                content.replace("\n", "<br>") // Simple text-to-html conversion
             }
 
             val spanned = Html.fromHtml(htmlContent, Html.FROM_HTML_MODE_LEGACY)
             
-            // Define page dimensions (A4 in points)
+            // Define page dimensions (A4 in points: 595 x 842)
             val pageWidth = 595
             val pageHeight = 842
             val margin = 40
             val textWidth = pageWidth - 2 * margin
+            val usableHeight = pageHeight - 2 * margin
 
             val staticLayout = StaticLayout.Builder.obtain(
                 spanned, 0, spanned.length, textPaint, textWidth
             ).build()
 
             val totalHeight = staticLayout.height
-            val pagesCount = Math.ceil(totalHeight.toDouble() / (pageHeight - 2 * margin)).toInt().coerceAtLeast(1)
+            val pagesCount = Math.ceil(totalHeight.toDouble() / usableHeight).toInt().coerceAtLeast(1)
 
             for (i in 0 until pagesCount) {
                 val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, i + 1).create()
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
                 
+                canvas.save()
                 canvas.translate(margin.toFloat(), margin.toFloat())
-                canvas.translate(0f, -(i * (pageHeight - 2 * margin)).toFloat())
+                
+                // Clip to the usable area of the page
+                canvas.clipRect(0, 0, textWidth, usableHeight)
+                
+                // Shift the content up by the height of previous pages
+                canvas.translate(0f, -(i * usableHeight).toFloat())
                 
                 staticLayout.draw(canvas)
+                canvas.restore()
+                
                 pdfDocument.finishPage(page)
             }
 
