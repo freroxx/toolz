@@ -60,6 +60,8 @@ biometric = "1.1.0"
 secretsGradlePlugin = "2.0.1"
 newpipeExtractor = "v0.26.0"
 glance = "1.1.0"
+commonmark = "0.21.0"
+androidsvg = "1.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -153,6 +155,8 @@ ffmpeg-kit-standard = { group = "io.github.jamaismagic.ffmpeg", name = "ffmpeg-k
 smart-exception-java = { group = "com.arthenica", name = "smart-exception-java", version.ref = "smartException" }
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
+androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "androidsvg" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -79,6 +79,7 @@ android {
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -93,6 +94,10 @@ android {
 
 
 kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-opt-in=androidx.media3.common.util.UnstableApi")
+    }
+
     jvmToolchain(17)
 }
 
@@ -152,6 +157,8 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation(libs.exp4j)
     implementation("org.jsoup:jsoup:1.22.1")
+    implementation(libs.commonmark)
+    implementation(libs.androidsvg)
     implementation("androidx.webkit:webkit:1.12.1")
     
     // WorkManager
