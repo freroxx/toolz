@@ -668,6 +668,10 @@ class NowPlayingAiViewModel @Inject constructor(
                         onSync(_playbackPositionMs.value)
                         instrumentalPlayer.seekTo(_playbackPositionMs.value)
                         instrumentalPlayer.play()
+                    } else {
+                        // If we can't resolve the stream, fall back to the original track
+                        _uiState.update { it.copy(isSingConfidentlyActive = true) }
+                        onSync(_playbackPositionMs.value)
                     }
                 }
             }

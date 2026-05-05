@@ -212,7 +212,8 @@ fun KaraokeView(
         aiState.isSearchingInstrumental,
         showSingConfidentlyDialog,
         phase,
-        hasStartedOnce
+        hasStartedOnce,
+        state.currentTrack?.uri
     ) {
         if (phase == KaraokePhase.SPLASH && minSplashTimeElapsed && !aiState.isSearchingInstrumental && !showSingConfidentlyDialog) {
             if (hasStartedOnce) {
@@ -262,11 +263,13 @@ fun KaraokeView(
     // }
 
     LaunchedEffect(state.isPlaying) {
-        if (!state.isPlaying && aiState.isKaraokeRecording) {
+        // Only pause/resume media recorder when we're actually recording audio (not just speech correction)
+        val isAudioRecording = mediaRecorder != null && !aiState.karaokeSpeechCorrectionEnabled
+        if (!state.isPlaying && isAudioRecording) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 mediaRecorder?.pause()
             }
-        } else if (state.isPlaying && aiState.isKaraokeRecording && !isPaused) {
+        } else if (state.isPlaying && isAudioRecording && !isPaused) {
              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 mediaRecorder?.resume()
             }
