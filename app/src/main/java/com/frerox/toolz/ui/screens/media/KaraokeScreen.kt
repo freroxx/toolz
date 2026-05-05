@@ -108,7 +108,7 @@ fun KaraokeView(
     var recordingFile       by remember { mutableStateOf<File?>(null) }
     var isRecorderStarting  by remember { mutableStateOf(false) }
     var hasStartedOnce      by remember { mutableStateOf(false) }
-    var isPaused            by remember(state.isPlaying) { mutableStateOf(!state.isPlaying && hasStartedOnce) }
+    var isPaused            by remember(state.isPlaying, hasStartedOnce) { mutableStateOf(!state.isPlaying && hasStartedOnce) }
     var minSplashTimeElapsed by remember { mutableStateOf(false) }
     var isSkipRequested      by remember { mutableStateOf(false) }
 
@@ -133,17 +133,19 @@ fun KaraokeView(
                 startMediaRecording(
                     context       = context,
                     trackTitle    = track.title,
+                    trackArtist   = track.artist ?: "Unknown Artist",
+                    thumbnailUrl  = track.thumbnailUri ?: "",
                     onRecorderReady = { rec, file ->
                         mediaRecorder      = rec
                         recordingFile      = file
                         isRecorderStarting = false
-                        
+
                         // If scoring is enabled, also start that
                         if (aiState.karaokeSpeechCorrectionEnabled) {
                             aiViewModel.startKaraokeRecording()
                         }
                     },
-                    onError = { 
+                    onError = {
                         isRecorderStarting = false
                         // Fallback: if media recorder fails, try starting scoring anyway
                         if (aiState.karaokeSpeechCorrectionEnabled) {
@@ -163,7 +165,13 @@ fun KaraokeView(
             stopMediaRecording(mediaRecorder) { mediaRecorder = null }
             aiViewModel.stopKaraokeRecording()
         } else {
-            startRecording()
+            if (aiState.karaokeSpeechCorrectionEnabled) {
+                // Speech recognizer only (no audio saving requested)
+                aiViewModel.startKaraokeRecording()
+            } else {
+                // Audio recording only
+                startRecording()
+            }
         }
     }
 
@@ -493,9 +501,18 @@ fun KaraokeView(
 
     // Sing Confidently Dialog
 
+    // Sync Sing Confidently Active with Main Player Muting
+    LaunchedEffect(aiState.isSingConfidentlyActive) {
+        if (aiState.isSingConfidentlyActive) {
+            aiViewModel.setInstrumentalPlayerVolume(0f)
+        } else {
+            aiViewModel.setInstrumentalPlayerVolume(1f)
+        }
+    }
+
     LaunchedEffect(aiState.instrumentalMatch, aiState.karaokeSingConfidentlyEnabled, phase) {
-        if (aiState.instrumentalMatch != null 
-            && aiState.karaokeSingConfidentlyEnabled 
+        if (aiState.instrumentalMatch != null
+            && aiState.karaokeSingConfidentlyEnabled
             && !aiState.isSingConfidentlyActive
             && (phase == KaraokePhase.SPLASH || phase == KaraokePhase.COUNTDOWN)
         ) {
@@ -1505,10 +1522,7 @@ fun SingConfidentlyDialog(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
             shadowElevation = 32.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-            modifier = Modifier.padding(horizontal = 24.dp).graphicsLayer {
-                renderEffect = android.graphics.RenderEffect.createBlurEffect(40f, 40f, android.graphics.Shader.TileMode.CLAMP)
-                    .asComposeRenderEffect()
-            }
+            modifier = Modifier.padding(horizontal = 24.dp)
         ) {
             Column(
                 modifier = Modifier.padding(28.dp),
@@ -1853,16 +1867,35 @@ private fun SettingsToggleRow(
 private fun startMediaRecording(
     context        : android.content.Context,
     trackTitle     : String,
+    trackArtist    : String,
+    thumbnailUrl   : String,
     onRecorderReady: (MediaRecorder, File) -> Unit,
     onError        : () -> Unit
 ) {
     val folder    = context.getExternalFilesDir(null) ?: return
     val safeTitle = trackTitle.replace(Regex("[\\\\/:*?\"<>|]"), "_")
     val count     = folder.listFiles { f ->
-        f.name.startsWith("$safeTitle recording")
+        f.name.startsWith("$safeTitle recording") && f.extension == "m4a"
     }?.size ?: 0
 
-    val file = File(folder, "$safeTitle recording ${count + 1}.m4a")
+    val baseName = "$safeTitle recording ${count + 1}"
+    val file = File(folder, "$baseName.m4a")
+    val metaFile = File(folder, "$baseName.json")
+
+    // Save metadata sidecar
+    try {
+        val metaJson = """
+            {
+                "title": "$trackTitle",
+                "artist": "$trackArtist",
+                "thumbnailUrl": "$thumbnailUrl",
+                "timestamp": ${System.currentTimeMillis()}
+            }
+        """.trimIndent()
+        metaFile.writeText(metaJson)
+    } catch (e: Exception) {
+        android.util.Log.e("KaraokeRecorder", "Failed to save metadata", e)
+    }
 
     try {
         val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
