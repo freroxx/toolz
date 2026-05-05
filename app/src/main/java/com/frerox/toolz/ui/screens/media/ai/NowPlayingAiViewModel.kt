@@ -23,6 +23,7 @@ import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.VibrationManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -71,6 +72,7 @@ class NowPlayingAiViewModel @Inject constructor(
     private val openAiService      : OpenAiService,
     private val lrcLibService      : LrcLibService,
     private val moshi              : Moshi,
+    private val vibrationManager   : VibrationManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -107,6 +109,10 @@ class NowPlayingAiViewModel @Inject constructor(
             setAudioAttributes(attr, false) // false = Do NOT handle/steal audio focus
             playWhenReady = true
         }
+    }
+
+    fun setInstrumentalPlayerVolume(volume: Float) {
+        instrumentalPlayer.volume = volume
     }
 
     private var currentTrackUri    : String?           = null
@@ -151,6 +157,16 @@ class NowPlayingAiViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.karaokeSingConfidentlyEnabled.collect { enabled ->
                 _uiState.update { it.copy(karaokeSingConfidentlyEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.karaokeSpeechCorrectionEnabled.collect { enabled ->
+                _uiState.update { it.copy(karaokeSpeechCorrectionEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.karaokeQuickSingEnabled.collect { enabled ->
+                _uiState.update { it.copy(quickSingEnabled = enabled) }
             }
         }
     }
@@ -760,11 +776,13 @@ class NowPlayingAiViewModel @Inject constructor(
     // Karaoke settings
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun setKaraokeSpeechCorrectionEnabled(enabled: Boolean) =
-        _uiState.update { it.copy(karaokeSpeechCorrectionEnabled = enabled) }
+    fun setKaraokeSpeechCorrectionEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setKaraokeSpeechCorrectionEnabled(enabled) }
+    }
 
-    fun setQuickSingEnabled(enabled: Boolean) =
-        _uiState.update { it.copy(quickSingEnabled = enabled) }
+    fun setQuickSingEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setKaraokeQuickSingEnabled(enabled) }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Speech recognition – clean, stable, on-device first
@@ -979,25 +997,19 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Word scoring  (Levenshtein-based fuzzy match, runs on Default dispatcher)
+    // Enhanced Word scoring  (Improved fuzzy match with phonetic similarity, runs on Default dispatcher)
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun processRecognizedTexts(texts: List<String>) {
         viewModelScope.launch(Dispatchers.Default) {
             val currentTime     = _playbackPositionMs.value
             val speechCorrect   = _uiState.value.karaokeSpeechCorrectionEnabled
-            
-            // Flatten all tokens from all alternative results
-            // Singing often extends vowels: "looooove" -> "love"
+
+            // Flatten all tokens from all alternative results with enhanced normalization
             val spokenTokens = texts
                 .asSequence()
                 .flatMap { it.split(Regex("\\s+")) }
-                .map { token -> 
-                    // Normalize extended vowels and letters (e.g., loooove -> loove)
-                    token.lowercase()
-                        .filter { it.isLetterOrDigit() }
-                        .replace(Regex("([a-z])\\1{2,}"), "$1$1") 
-                }
+                .map { token -> enhanceTokenNormalization(token) }
                 .filter { it.isNotBlank() }
                 .distinct()
                 .toList()
@@ -1007,7 +1019,8 @@ class NowPlayingAiViewModel @Inject constructor(
             _uiState.update { state ->
                 var newWordsCounted = 0
                 var missedCountInThisUpdate = 0
-                
+                var hapticFeedbackTriggered = false
+
                 val updatedLyrics = state.lyricsState.syncedLyrics.map { line ->
                     // Performance optimization: skip lines far away from current time
                     if (kotlin.math.abs(line.timeMs - currentTime) > 40_000L) return@map line
@@ -1016,30 +1029,25 @@ class NowPlayingAiViewModel @Inject constructor(
                         val cleanWord = word.word.filter { it.isLetterOrDigit() }.lowercase()
                         if (cleanWord.isBlank()) return@map word
 
-                        // Window for matching (accounting for lag, early singing, and long singing tones)
-                        val windowStart = word.startTimeMs - 4500L
-                        val windowEnd   = word.startTimeMs + word.durationMs + 6500L
-                        // Grace period before marking as missed
-                        val missedGrace = word.startTimeMs + word.durationMs + 10000L
+                        // Enhanced window for matching (more forgiving timing)
+                        val windowStart = word.startTimeMs - 5000L
+                        val windowEnd   = word.startTimeMs + word.durationMs + 7000L
+                        // Extended grace period before marking as missed
+                        val missedGrace = word.startTimeMs + word.durationMs + 12000L
 
                         if (currentTime in windowStart..windowEnd
                             && word.karaokeStatus == KaraokeWordStatus.PENDING
                         ) {
                             val matched = spokenTokens.any { spoken ->
-                                spoken == cleanWord
-                                        || (spoken.length >= 3 && cleanWord.startsWith(spoken))
-                                        || (cleanWord.length >= 3 && spoken.startsWith(cleanWord))
-                                        || (spoken.length >= 3 && cleanWord.contains(spoken))
-                                        || (cleanWord.length >= 3 && spoken.contains(cleanWord))
-                                        || levenshtein(spoken, cleanWord) <= when {
-                                            cleanWord.length > 6 -> 4
-                                            cleanWord.length > 4 -> 3
-                                            cleanWord.length > 2 -> 1
-                                            else -> 0
-                                        }
+                                isWordMatch(spoken, cleanWord)
                             }
                             if (matched) {
                                 newWordsCounted++
+                                // Trigger haptic feedback for correct word (only once per update to avoid over-feedback)
+                                if (!hapticFeedbackTriggered) {
+                                    vibrationManager.vibrateSuccess()
+                                    hapticFeedbackTriggered = true
+                                }
                                 word.copy(karaokeStatus = KaraokeWordStatus.CORRECT)
                             } else word
                         } else if (currentTime > missedGrace
@@ -1047,6 +1055,11 @@ class NowPlayingAiViewModel @Inject constructor(
                             && speechCorrect
                         ) {
                             missedCountInThisUpdate++
+                            // Trigger haptic feedback for missed word (only once per update to avoid over-feedback)
+                            if (!hapticFeedbackTriggered && speechCorrect) {
+                                vibrationManager.vibrateError()
+                                hapticFeedbackTriggered = true
+                            }
                             word.copy(karaokeStatus = KaraokeWordStatus.MISSED)
                         } else {
                             word
@@ -1073,10 +1086,10 @@ class NowPlayingAiViewModel @Inject constructor(
                     state.karaokeMissedStreak
                 }
 
-                // Break streak only if we miss 5+ words consecutively without getting one right
+                // Enhanced streak logic: break on 3+ consecutive misses (more forgiving)
                 val currentStreak = if (newWordsCounted > 0) {
                     state.karaokeStreak + newWordsCounted
-                } else if (nextMissedStreak >= 5) {
+                } else if (nextMissedStreak >= 3) {
                     0
                 } else {
                     state.karaokeStreak
@@ -1094,6 +1107,58 @@ class NowPlayingAiViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Enhanced token normalization for better speech recognition matching.
+     * Handles vowel elongation, consonant duplication, and common mispronunciations.
+     */
+    private fun enhanceTokenNormalization(token: String): String {
+        return token.lowercase()
+            .filter { it.isLetterOrDigit() }
+            // Handle elongated vowels (loooove -> love, cooool -> cool)
+            .replace(Regex("([aeiou])\\1{2,}"), "$1$1")
+            // Handle elongated consonants (ssssun -> sun, but keep essential doubles)
+            .replace(Regex("([bcdfg hjklmnpqrstvwxyz])\\1{3,}"), "$1$1")
+            // Handle common mishearings
+            .replace("ght", "t") // "nigh" -> "ni" (approximation)
+            .replace("ph", "f")  // "phone" -> "fone"
+            .replace("ck", "k")  // "back" -> "bak"
+            .replace("ll", "l")  // "hello" -> "helo" (but careful with essential doubles)
+    }
+
+    /**
+     * Determine if two words match using multiple similarity metrics.
+     * More forgiving than pure Levenshtein for singing/variations.
+     */
+    private fun isWordMatch(spoken: String, target: String): Boolean {
+        if (spoken == target) return true
+
+        // Length checks
+        val lengthDiff = kotlin.math.abs(spoken.length - target.length)
+        val minLength = kotlin.math.min(spoken.length, target.length)
+        if (minLength < 2) return false // Too short to be meaningful
+
+        // Exact substring checks (for partial words)
+        if (spoken.length >= 3 && target.contains(spoken)) return true
+        if (target.length >= 3 && spoken.contains(target)) return true
+
+        // Prefix/suffix checks (common in singing)
+        if (spoken.length >= 3 && target.startsWith(spoken.substring(0, 2))) return true
+        if (target.length >= 3 && spoken.startsWith(target.substring(0, 2))) return true
+        if (spoken.length >= 3 && target.endsWith(spoken.substring(spoken.length - 2))) return true
+        if (target.length >= 3 && spoken.endsWith(target.substring(target.length - 2))) return true
+
+        // Enhanced Levenshtein with dynamic threshold based on word length
+        val distance = levenshtein(spoken, target)
+        val maxAllowed = when {
+            minLength >= 8 -> 4
+            minLength >= 5 -> 3
+            minLength >= 3 -> 2
+            else -> 1
+        }
+
+        return distance <= maxAllowed
     }
 
     /**
