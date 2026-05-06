@@ -83,6 +83,7 @@ fun KaraokeView(
     onStop: () -> Unit,
     onSkipNext: () -> Unit,
     onSeek: (Long) -> Unit,
+    onSetVolume: (Float) -> Unit,
     onNextSongConfirmed: () -> Unit,
     playbackPosition: Long,
     visualizerData: FloatArray
@@ -111,6 +112,7 @@ fun KaraokeView(
     var isPaused            by remember(state.isPlaying, hasStartedOnce) { mutableStateOf(!state.isPlaying && hasStartedOnce) }
     var minSplashTimeElapsed by remember { mutableStateOf(false) }
     var isSkipRequested      by remember { mutableStateOf(false) }
+    var wasSingConfidentlyHandled by remember(state.currentTrack?.uri) { mutableStateOf(false) }
 
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
 
@@ -213,14 +215,31 @@ fun KaraokeView(
         showSingConfidentlyDialog,
         phase,
         hasStartedOnce,
-        state.currentTrack?.uri
+        state.currentTrack?.uri,
+        aiState.instrumentalMatch
     ) {
-        if (phase == KaraokePhase.SPLASH && minSplashTimeElapsed && !aiState.isSearchingInstrumental && !showSingConfidentlyDialog) {
-            if (hasStartedOnce) {
-                phase = KaraokePhase.ACTIVE
-                onPlay()
-            } else {
-                phase = KaraokePhase.COUNTDOWN
+        if (phase == KaraokePhase.SPLASH && minSplashTimeElapsed && !aiState.isSearchingInstrumental) {
+            
+            // Check if we should show the "Sing Confidently" dialog before moving to countdown
+            if (aiState.instrumentalMatch != null 
+                && aiState.karaokeSingConfidentlyEnabled 
+                && !aiState.isSingConfidentlyActive 
+                && !showSingConfidentlyDialog 
+                && !hasStartedOnce
+                && !wasSingConfidentlyHandled
+            ) {
+                showSingConfidentlyDialog = true
+                return@LaunchedEffect
+            }
+
+            if (!showSingConfidentlyDialog) {
+                if (hasStartedOnce) {
+                    phase = KaraokePhase.ACTIVE
+                    onPlay()
+                } else {
+                    onPause() // Ensure music is paused before countdown starts
+                    phase = KaraokePhase.COUNTDOWN
+                }
             }
         }
     }
@@ -296,6 +315,7 @@ fun KaraokeView(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(32.dp))
             .border(
@@ -315,7 +335,7 @@ fun KaraokeView(
     ) {
 
         // Blurred album art background
-        if (!performanceMode) {
+        if (!performanceMode && !track.thumbnailUri.isNullOrBlank()) {
             AsyncImage(
                 model          = track.thumbnailUri,
                 contentDescription = null,
@@ -324,9 +344,9 @@ fun KaraokeView(
                     .fillMaxSize()
                     .graphicsLayer {
                         renderEffect = android.graphics.RenderEffect
-                            .createBlurEffect(80f, 80f, android.graphics.Shader.TileMode.CLAMP)
+                            .createBlurEffect(48f, 48f, android.graphics.Shader.TileMode.CLAMP)
                             .asComposeRenderEffect()
-                        alpha = 0.22f
+                        alpha = 0.14f
                     }
             )
         }
@@ -352,7 +372,11 @@ fun KaraokeView(
             exit     = fadeOut(tween(280)) + scaleOut(targetScale = 1.12f),
             modifier = Modifier.fillMaxSize().zIndex(10f)
         ) {
-            KaraokeSplash(trackTitle = track.title, trackUri = track.thumbnailUri)
+            KaraokeSplash(
+                trackTitle = track.title, 
+                trackUri = track.thumbnailUri,
+                onSkip = { phase = KaraokePhase.COUNTDOWN }
+            )
         }
 
         // ── COUNTDOWN ────────────────────────────────────────────────────────
@@ -375,7 +399,6 @@ fun KaraokeView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
             ) {
                 KaraokeHeader(
                     title      = track.title,
@@ -401,7 +424,8 @@ fun KaraokeView(
                                 speechCorrectionEnabled  = aiState.karaokeSpeechCorrectionEnabled,
                                 onSeek                   = onSeek,
                                 listState                = listState,
-                                performanceMode          = performanceMode
+                                performanceMode          = performanceMode,
+                                isWordSyncEnabled        = aiState.lyricsState.isKaraokeWordSyncEnabled
                             )
                     }
                 }
@@ -460,6 +484,7 @@ fun KaraokeView(
                 },
                 onAudioSaved    = { 
                     recordingFile?.let { file ->
+                        Log.d("Karaoke", "Saving recording: ${file.absolutePath}, size: ${file.length()}")
                         try {
                             val resolver = context.contentResolver
                             val values = android.content.ContentValues().apply {
@@ -498,6 +523,8 @@ fun KaraokeView(
             onQuickSingToggle        = { aiViewModel.setQuickSingEnabled(it) },
             singConfidentlyEnabled   = aiState.karaokeSingConfidentlyEnabled,
             onSingConfidentlyToggle  = { aiViewModel.setSingConfidentlyEnabled(it) },
+            wordSyncEnabled          = aiState.lyricsState.isKaraokeWordSyncEnabled,
+            onWordSyncToggle         = { aiViewModel.toggleKaraokeWordSyncEnabled() },
             onDismiss                = { showSettings = false }
         )
     }
@@ -507,19 +534,11 @@ fun KaraokeView(
     // Sync Sing Confidently Active with Main Player Muting
     LaunchedEffect(aiState.isSingConfidentlyActive) {
         if (aiState.isSingConfidentlyActive) {
-            aiViewModel.setInstrumentalPlayerVolume(0f)
-        } else {
             aiViewModel.setInstrumentalPlayerVolume(1f)
-        }
-    }
-
-    LaunchedEffect(aiState.instrumentalMatch, aiState.karaokeSingConfidentlyEnabled, phase) {
-        if (aiState.instrumentalMatch != null
-            && aiState.karaokeSingConfidentlyEnabled
-            && !aiState.isSingConfidentlyActive
-            && (phase == KaraokePhase.SPLASH || phase == KaraokePhase.COUNTDOWN)
-        ) {
-            showSingConfidentlyDialog = true
+            onSetVolume(0f)
+        } else {
+            aiViewModel.setInstrumentalPlayerVolume(0f)
+            onSetVolume(1f)
         }
     }
 
@@ -528,9 +547,13 @@ fun KaraokeView(
             match = aiState.instrumentalMatch,
             onSwitch = {
                 showSingConfidentlyDialog = false
+                wasSingConfidentlyHandled = true
                 aiViewModel.toggleSingConfidentlyActive(true) { onSeek(it) }
             },
-            onKeep = { showSingConfidentlyDialog = false },
+            onKeep = { 
+                showSingConfidentlyDialog = false 
+                wasSingConfidentlyHandled = true
+            },
             onEdit = { 
                 showSingConfidentlyDialog = false
                 showInstrumentalSearch = true
@@ -540,7 +563,10 @@ fun KaraokeView(
 
     if (showInstrumentalSearch) {
         InstrumentalSearchSheet(
-            onDismiss = { showInstrumentalSearch = false },
+            onDismiss = { 
+                showInstrumentalSearch = false
+                wasSingConfidentlyHandled = true // Also mark handled if they cancel search
+            },
             onSearch = { query -> 
                 aiViewModel.searchInstrumentalCustom(query)
                 showInstrumentalSearch = false
@@ -555,7 +581,7 @@ fun KaraokeView(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun KaraokeSplash(trackTitle: String, trackUri: String?) {
+private fun KaraokeSplash(trackTitle: String, trackUri: String?, onSkip: () -> Unit) {
     val inf = rememberInfiniteTransition(label = "splash")
     val pulse by inf.animateFloat(
         0.92f, 1.08f,
@@ -616,6 +642,15 @@ private fun KaraokeSplash(trackTitle: String, trackUri: String?) {
                 textAlign   = TextAlign.Center,
                 modifier    = Modifier.padding(horizontal = 48.dp)
             )
+
+            Spacer(Modifier.height(8.dp))
+            
+            TextButton(
+                onClick = onSkip,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+            ) {
+                Text("READY? TAP TO SKIP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            }
         }
     }
 }
@@ -739,7 +774,8 @@ private fun KaraokeLyricsPane(
     speechCorrectionEnabled: Boolean,
     onSeek                 : (Long) -> Unit,
     listState              : LazyListState,
-    performanceMode        : Boolean
+    performanceMode        : Boolean,
+    isWordSyncEnabled      : Boolean = true
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -761,6 +797,7 @@ private fun KaraokeLyricsPane(
                     speechCorrectionEnabled = speechCorrectionEnabled,
                     performanceMode         = performanceMode,
                     onLongClick             = { onSeek(line.timeMs) },
+                    isWordSyncEnabled       = isWordSyncEnabled,
                     modifier                = Modifier.animateItem()
                 )
             }
@@ -798,6 +835,7 @@ private fun KaraokeLine(
     speechCorrectionEnabled: Boolean,
     performanceMode        : Boolean,
     onLongClick            : () -> Unit,
+    isWordSyncEnabled      : Boolean = true,
     modifier               : Modifier = Modifier
 ) {
     val scale by animateFloatAsState(
@@ -847,7 +885,7 @@ private fun KaraokeLine(
             .combinedClickable(onClick = {}, onLongClick = onLongClick),
         contentAlignment  = Alignment.Center
     ) {
-        if (line.words.isNotEmpty()) {
+        if (line.words.isNotEmpty() && isWordSyncEnabled) {
             FlowRow(
                 horizontalArrangement = Arrangement.Center,
                 verticalArrangement   = Arrangement.spacedBy(2.dp)
@@ -863,14 +901,23 @@ private fun KaraokeLine(
                 }
             }
         } else {
+            val isLineCorrect = line.words.any { it.karaokeStatus == KaraokeWordStatus.CORRECT }
+            val isLineMissed  = speechCorrectionEnabled && line.words.any { it.karaokeStatus == KaraokeWordStatus.MISSED }
+
+            val textColor = when {
+                isLineCorrect -> Color(0xFFFFD700) // Gold
+                isLineMissed  -> Color(0xFFFF5252).copy(alpha = 0.7f) // Subdued Red
+                isCurrent     -> MaterialTheme.colorScheme.primary
+                else          -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            }
+
             Text(
                 text       = line.content,
                 style      = if (isCurrent) MaterialTheme.typography.headlineMedium
                 else           MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
+                fontWeight = if (isCurrent || isLineCorrect) FontWeight.ExtraBold else FontWeight.SemiBold,
                 textAlign  = TextAlign.Center,
-                color      = if (isCurrent) MaterialTheme.colorScheme.onSurface
-                else           MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                color      = textColor
             )
         }
     }
@@ -929,8 +976,8 @@ private fun KaraokeWord(
     // Ping animation when correct
     val isCorrect = word.karaokeStatus == KaraokeWordStatus.CORRECT
     val pingScale by animateFloatAsState(
-        targetValue = if (isCorrect) 1.15f else 1f,
-        animationSpec = if (isCorrect) spring(Spring.DampingRatioHighBouncy) else snap()
+        targetValue = if (isCorrect) 1.08f else 1f,
+        animationSpec = if (isCorrect) spring(Spring.DampingRatioMediumBouncy) else snap()
     )
 
     // Word coloring
@@ -956,27 +1003,57 @@ private fun KaraokeWord(
             farColor
     }
 
-    val wordScale = (1f + (0.08f * animFrac)) * pingScale
+    val wordScale = (1f + (0.05f * animFrac)) * pingScale
 
-    Text(
-        text       = word.word,
-        style      = if (isCurrent) MaterialTheme.typography.headlineMedium
-        else           MaterialTheme.typography.bodyLarge,
-        fontWeight = if (isActive || isCorrect) FontWeight.Black
-        else if (isCurrent) FontWeight.ExtraBold
-        else FontWeight.Medium,
-        color      = color,
-        modifier   = Modifier
-            .graphicsLayer {
-                scaleX = wordScale
-                scaleY = wordScale
-                if (!performanceMode) {
-                    translationY = -2.dp.toPx() * animFrac
-                }
-            }
-            .padding(horizontal = 3.dp, vertical = 2.dp),
-        textAlign  = TextAlign.Center
+    val glowAlpha by animateFloatAsState(
+        targetValue = if ((isActive || isCorrect) && !performanceMode) 0.4f else 0f,
+        animationSpec = tween(400),
+        label = "glowAlpha"
     )
+
+    Box(contentAlignment = Alignment.Center) {
+        if (glowAlpha > 0f) {
+            Text(
+                text       = word.word,
+                style      = if (isCurrent) MaterialTheme.typography.headlineMedium
+                else           MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Black,
+                color      = color.copy(alpha = glowAlpha),
+                modifier   = Modifier
+                    .graphicsLayer {
+                        scaleX = wordScale * 1.15f
+                        scaleY = wordScale * 1.15f
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            renderEffect = android.graphics.RenderEffect
+                                .createBlurEffect(15f, 15f, android.graphics.Shader.TileMode.CLAMP)
+                                .asComposeRenderEffect()
+                        }
+                    }
+                    .padding(horizontal = 3.dp, vertical = 2.dp),
+                textAlign  = TextAlign.Center
+            )
+        }
+
+        Text(
+            text       = word.word,
+            style      = if (isCurrent) MaterialTheme.typography.headlineMedium
+            else           MaterialTheme.typography.bodyLarge,
+            fontWeight = if (isActive || isCorrect) FontWeight.Black
+            else if (isCurrent) FontWeight.ExtraBold
+            else FontWeight.Medium,
+            color      = color,
+            modifier   = Modifier
+                .graphicsLayer {
+                    scaleX = wordScale
+                    scaleY = wordScale
+                    if (!performanceMode) {
+                        translationY = -2.dp.toPx() * animFrac
+                    }
+                }
+                .padding(horizontal = 3.dp, vertical = 2.dp),
+            textAlign  = TextAlign.Center
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1086,38 +1163,47 @@ private fun LiveScoreChip(score: Int, correct: Int, total: Int, streak: Int) {
 
     val animatedScore by animateIntAsState(
         targetValue = score,
-        animationSpec = tween(500),
+        animationSpec = tween(600),
         label = "animatedScore"
     )
 
-    val popScale by animateFloatAsState(
-        targetValue = 1f + (correct % 5 * 0.01f).coerceAtMost(0.05f), // Slight pop on correct word
-        animationSpec = spring(Spring.DampingRatioMediumBouncy)
-    )
-
     Surface(
-        shape  = CircleShape,
-        color  = tint.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.28f)),
-        modifier = Modifier.scale(popScale)
+        shape  = RoundedCornerShape(16.dp),
+        color  = tint.copy(alpha = 0.12f),
+        border = BorderStroke(1.5.dp, tint.copy(alpha = 0.25f))
     ) {
         Row(
-            modifier              = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier              = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(Icons.Rounded.Star, null,
-                modifier = Modifier.size(13.dp), tint = tint)
+            Icon(Icons.Rounded.Stars, null,
+                modifier = Modifier.size(16.dp), tint = tint)
+            
             Text(
-                "$correct / $total  ·  $animatedScore%",
-                style      = MaterialTheme.typography.labelMedium,
+                "$animatedScore%",
+                style      = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Black,
                 color      = tint
             )
 
+            VerticalDivider(modifier = Modifier.height(14.dp).alpha(0.15f), color = tint)
+
+            Text(
+                "$correct/$total",
+                style      = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color      = tint.copy(alpha = 0.8f)
+            )
+
             if (streak > 2) {
-                VerticalDivider(modifier = Modifier.height(12.dp).alpha(0.2f), color = tint)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically, 
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .background(Color(0xFFFF7043).copy(alpha = 0.1f), CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
                     Icon(Icons.Rounded.Whatshot, null, modifier = Modifier.size(12.dp), tint = Color(0xFFFF7043))
                     Text(
                         "$streak",
@@ -1323,7 +1409,7 @@ private fun KaraokeEvaluation(
 
     val animatedScore by animateIntAsState(
         targetValue = score,
-        animationSpec = tween(1200, easing = FastOutSlowInEasing),
+        animationSpec = tween(1500, easing = FastOutSlowInEasing),
         label = "animatedScore"
     )
 
@@ -1334,7 +1420,7 @@ private fun KaraokeEvaluation(
                 Brush.verticalGradient(
                     listOf(
                         MaterialTheme.colorScheme.surface,
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
                     )
                 )
             )
@@ -1343,32 +1429,44 @@ private fun KaraokeEvaluation(
     ) {
         Column(
             modifier              = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp),
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment   = Alignment.CenterHorizontally,
-            verticalArrangement   = Arrangement.spacedBy(28.dp)
+            verticalArrangement   = Arrangement.SpaceBetween
         ) {
-            Text(
-                "SESSION RESULTS",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 3.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "PERFORMANCE REVIEW",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 4.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                )
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
             // Grade ring
             Box(contentAlignment = Alignment.Center) {
+                // Background glow
                 Box(
-                    modifier = Modifier.size(240.dp).background(
-                        Brush.radialGradient(listOf(gradeColor.copy(alpha=0.3f), Color.Transparent)), CircleShape
+                    modifier = Modifier.size(260.dp).background(
+                        Brush.radialGradient(listOf(gradeColor.copy(alpha=0.25f), Color.Transparent)), CircleShape
                     )
                 )
                 CircularProgressIndicator(
                     progress    = { animatedScore / 100f },
-                    modifier    = Modifier.size(210.dp),
-                    strokeWidth = 14.dp,
+                    modifier    = Modifier.size(220.dp),
+                    strokeWidth = 12.dp,
                     color       = gradeColor,
-                    trackColor  = gradeColor.copy(alpha = 0.08f),
+                    trackColor  = gradeColor.copy(alpha = 0.1f),
                     strokeCap   = StrokeCap.Round
                 )
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1376,85 +1474,97 @@ private fun KaraokeEvaluation(
                         grade,
                         style      = MaterialTheme.typography.displayLarge,
                         fontWeight = FontWeight.Black,
-                        fontSize   = 104.sp,
-                        color      = gradeColor
+                        fontSize   = 110.sp,
+                        color      = gradeColor,
+                        modifier   = Modifier.graphicsLayer {
+                            val s = 0.9f + (animatedScore / 100f) * 0.1f
+                            scaleX = s; scaleY = s
+                        }
                     )
                     Text(
                         "$animatedScore%",
                         style      = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        fontWeight = FontWeight.ExtraBold,
+                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
                 }
             }
 
-            Text(
-                message,
-                style      = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black,
-                color      = gradeColor,
-                textAlign  = TextAlign.Center
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                Text(
+                    message,
+                    style      = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black,
+                    color      = gradeColor,
+                    textAlign  = TextAlign.Center
+                )
 
-            // Stats card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape    = RoundedCornerShape(28.dp),
-                color    = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-                border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f))
-            ) {
-                Column(
-                    modifier            = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                // Stats card
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(32.dp),
+                    color    = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border   = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
                 ) {
-                    Row(
-                        modifier              = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                    Column(
+                        modifier            = Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        EvalStat("CORRECT", "$correctWords", gradeColor)
-                        EvalStat("ACCURACY", "$score%", gradeColor)
-                        EvalStat("TOTAL",   "$totalWords",
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
-                    }
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            EvalStat("CORRECT", "$correctWords", Icons.Rounded.DoneAll, gradeColor)
+                            EvalStat("ACCURACY", "$score%", Icons.Rounded.TrackChanges, gradeColor)
+                            EvalStat("TOTAL",   "$totalWords", Icons.Rounded.List,
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                        }
 
-                    if (mostAccurateLine != null) {
-                        HorizontalDivider(modifier = Modifier.alpha(0.06f))
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                "PERFECT LINE",
-                                style       = MaterialTheme.typography.labelSmall,
-                                fontWeight  = FontWeight.Black,
-                                color       = gradeColor.copy(alpha = 0.7f),
-                                letterSpacing = 1.2.sp
-                            )
-                            Text(
-                                "\"$mostAccurateLine\"",
-                                style      = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                                color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                                fontStyle  = FontStyle.Italic
-                            )
+                        if (mostAccurateLine != null) {
+                            HorizontalDivider(modifier = Modifier.alpha(0.08f))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Rounded.AutoAwesome, null, tint = gradeColor, modifier = Modifier.size(16.dp))
+                                    Text(
+                                        "PERFECT LINE",
+                                        style       = MaterialTheme.typography.labelSmall,
+                                        fontWeight  = FontWeight.Black,
+                                        color       = gradeColor.copy(alpha = 0.7f),
+                                        letterSpacing = 1.2.sp
+                                    )
+                                }
+                                Text(
+                                    "\"$mostAccurateLine\"",
+                                    style      = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                    fontStyle  = FontStyle.Italic
+                                )
+                            }
                         }
                     }
                 }
             }
 
             // Actions
-            Column(
-                modifier            = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+            Row(
+                modifier            = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 if (recordingFile != null) {
-                    OutlinedButton(
+                    Button(
                         onClick  = onAudioSaved,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape    = RoundedCornerShape(18.dp),
-                        border   = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                        modifier = Modifier.weight(1f).height(64.dp),
+                        shape    = RoundedCornerShape(24.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor   = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     ) {
                         Icon(Icons.Rounded.Save, null, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "SAVE RECORDING",
+                            "SAVE",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 1.sp
@@ -1464,13 +1574,13 @@ private fun KaraokeEvaluation(
 
                 Button(
                     onClick  = onDone,
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    shape    = RoundedCornerShape(18.dp),
+                    modifier = Modifier.weight(if (recordingFile != null) 1.2f else 1f).height(64.dp),
+                    shape    = RoundedCornerShape(24.dp),
                     colors   = ButtonDefaults.buttonColors(containerColor = gradeColor),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                 ) {
                     Text(
-                        "DONE",
+                        "CONTINUE",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
                         fontSize      = 18.sp,
@@ -1484,15 +1594,16 @@ private fun KaraokeEvaluation(
 }
 
 @Composable
-fun StatColumn(label: String, value: String) = EvalStat(label, value,
+fun StatColumn(label: String, value: String) = EvalStat(label, value, Icons.Rounded.Star,
     MaterialTheme.colorScheme.onSurface)
 
 @Composable
-private fun EvalStat(label: String, value: String, valueColor: Color) {
+private fun EvalStat(label: String, value: String, icon: ImageVector, valueColor: Color) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Icon(icon, null, modifier = Modifier.size(14.dp), tint = valueColor.copy(alpha = 0.6f))
         Text(value,
             style      = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Black,
@@ -1500,8 +1611,8 @@ private fun EvalStat(label: String, value: String, valueColor: Color) {
         Text(label,
             style       = MaterialTheme.typography.labelSmall,
             fontWeight  = FontWeight.Bold,
-            color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f),
-            letterSpacing = 1.sp)
+            color       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+            letterSpacing = 0.5.sp)
     }
 }
 
@@ -1606,13 +1717,30 @@ fun SingConfidentlyDialog(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(onClick = onEdit, modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, CircleShape)) {
-                            Icon(
-                                Icons.Rounded.Search,
-                                null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                        Surface(
+                            onClick = onEdit,
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.height(40.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Search,
+                                    null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    "EDIT",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
                     }
                 }
@@ -1696,6 +1824,8 @@ fun KaraokeSettingsModal(
     onQuickSingToggle       : (Boolean) -> Unit,
     singConfidentlyEnabled  : Boolean,
     onSingConfidentlyToggle : (Boolean) -> Unit,
+    wordSyncEnabled         : Boolean,
+    onWordSyncToggle        : (Boolean) -> Unit,
     onDismiss               : () -> Unit
 ) {
     ModalBottomSheet(
@@ -1772,6 +1902,14 @@ fun KaraokeSettingsModal(
                 subtitle       = "Recommends instrumental version when available",
                 checked        = singConfidentlyEnabled,
                 onCheckedChange = onSingConfidentlyToggle
+            )
+
+            SettingsToggleRow(
+                icon           = Icons.Rounded.Spellcheck,
+                title          = "Synced Words",
+                subtitle       = "Highlights lyrics word by word",
+                checked        = wordSyncEnabled,
+                onCheckedChange = onWordSyncToggle
             )
 
             Row(

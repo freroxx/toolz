@@ -266,7 +266,7 @@ fun AiHeader(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (uiState.isAiEnabled) {
+                if (uiState.isAiEnabled && (uiState.lyricsState.syncedLyrics.isNotEmpty() || uiState.instrumentalMatch != null)) {
                     KaraokeMicIcon(
                         isActive = false, // Not active yet, just availability
                         onClick = onToggleKaraoke,
@@ -514,7 +514,8 @@ fun LyricsTab(
                                     viewModel.updateProgress(line.timeMs)
                                     onSeek(line.timeMs)
                                 },
-                                font = state.fontFamily
+                                font = state.fontFamily,
+                                isWordSyncEnabled = state.isWordSyncEnabled
                             )
                         }
                     }
@@ -608,7 +609,8 @@ fun SyncedLyricLine(
     performanceMode: Boolean = LocalPerformanceMode.current,
     onClick: () -> Unit = {},
     isSeekEnabled: Boolean = true,
-    font: LyricsFont = LyricsFont.SANS_SERIF
+    font: LyricsFont = LyricsFont.SANS_SERIF,
+    isWordSyncEnabled: Boolean = true
 ) {
     val lineAlpha by animateFloatAsState(
         if (isCurrent) 1f else 0.35f,
@@ -636,7 +638,7 @@ fun SyncedLyricLine(
         label = "pressScale"
     )
 
-    if (line.words.isNotEmpty()) {
+    if (line.words.isNotEmpty() && isWordSyncEnabled) {
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -779,14 +781,14 @@ fun WordView(
 
     val baseColor = if (isPast) pastColor else dim
     val color = if (performanceMode) (if (isActive) highlightColor else baseColor) else lerpColor(baseColor, highlightColor, animFrac)
-    val wordScale = 1f + (0.12f * animFrac)
+    val wordScale = 1f + (0.05f * animFrac)
 
     Text(
         text = word.word + " ",
         style = MaterialTheme.typography.headlineSmall.copy(
             fontWeight = FontWeight.Black,
             fontSize = 32.sp,
-            letterSpacing = if (performanceMode) (-1.2).sp else ((-1.2).sp * (0.8f + 0.2f * animFrac)),
+            letterSpacing = if (performanceMode) (-1.2).sp else ((-1.2).sp * (0.85f + 0.15f * animFrac)),
             lineHeight = 42.sp,
             fontFamily = fontFamily
         ),
@@ -796,24 +798,9 @@ fun WordView(
                 scaleX = wordScale
                 scaleY = wordScale
                 if (!performanceMode) {
-                    translationY = -2.dp.toPx() * animFrac
+                    translationY = -1.5.dp.toPx() * animFrac
                 }
             }
-            .then(
-                if (!performanceMode && animFrac > 0.01f) Modifier.drawBehind {
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                highlightColor.copy(alpha = 0.20f * animFrac),
-                                highlightColor.copy(alpha = 0.04f * animFrac),
-                                Color.Transparent
-                            ),
-                            center = center,
-                            radius = size.maxDimension * 1.5f
-                        )
-                    )
-                } else Modifier
-            )
     )
 }
 

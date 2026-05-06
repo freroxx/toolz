@@ -32,10 +32,19 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.util.UnstableApi
 import coil3.compose.AsyncImage
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
+
+data class RecordingMetadata(
+    val title: String,
+    val artist: String,
+    val thumbnailUrl: String? = null,
+    val timestamp: Long
+)
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -52,10 +61,25 @@ fun KaraokeHistoryTab(
     fun loadRecordings() {
         recordings = historyFolder
             ?.listFiles { file ->
-                (file.extension == "m4a" && file.name.contains("recording", ignoreCase = true))
+                (file.extension == "m4a" || file.extension == "mp3" || file.extension == "opus") 
+                        && file.name.contains("recording", ignoreCase = true)
             }
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
+    }
+
+    fun getMetadata(file: File): RecordingMetadata? {
+        return try {
+            val metaFile = File(file.parent, file.nameWithoutExtension + ".json")
+            if (metaFile.exists()) {
+                val content = metaFile.readText()
+                val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+                val adapter = moshi.adapter(RecordingMetadata::class.java)
+                adapter.fromJson(content)
+            } else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     LaunchedEffect(Unit) { loadRecordings() }
@@ -81,17 +105,22 @@ fun KaraokeHistoryTab(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(recordings, key = { it.absolutePath }) { file ->
+                        val metadata = remember(file) { getMetadata(file) }
                         RecordingItem(
                             file = file,
+                            metadata = metadata,
                             onPlay = {
                                 viewModel.playUri(
                                     uri = Uri.fromFile(file),
-                                    title = file.nameWithoutExtension,
-                                    artist = "Karaoke Recording"
+                                    title = metadata?.title ?: file.nameWithoutExtension,
+                                    artist = metadata?.artist ?: "Karaoke Recording",
+                                    thumbUrl = metadata?.thumbnailUrl
                                 )
                             },
                             onDelete = {
                                 file.delete()
+                                val metaFile = File(file.parent, file.nameWithoutExtension + ".json")
+                                if (metaFile.exists()) metaFile.delete()
                                 loadRecordings()
                             }
                         )
@@ -282,6 +311,7 @@ private fun HistoryEmptyState() {
 @Composable
 fun RecordingItem(
     file: File,
+    metadata: RecordingMetadata?,
     onPlay: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -307,33 +337,67 @@ fun RecordingItem(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shadowElevation = 4.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
+                Box(contentAlignment = Alignment.Center) {
+                    Surface(
+                        modifier = Modifier.size(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shadowElevation = 4.dp
+                    ) {
+                        if (metadata?.thumbnailUrl != null) {
+                            AsyncImage(
+                                model = metadata.thumbnailUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+                            )
+                        } else {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.Mic,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Overlay play icon
+                    Surface(
+                        modifier = Modifier.size(24.dp).offset(x = 20.dp, y = 20.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        shadowElevation = 6.dp,
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
                         Icon(
                             Icons.Rounded.PlayArrow,
                             contentDescription = "Play",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(26.dp)
+                            tint = Color.White,
+                            modifier = Modifier.padding(4.dp)
                         )
                     }
                 }
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(18.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        file.nameWithoutExtension,
+                        metadata?.title ?: file.nameWithoutExtension,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        metadata?.artist ?: "Karaoke Recording",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(4.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically

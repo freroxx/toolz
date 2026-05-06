@@ -30,6 +30,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
+import com.frerox.toolz.data.catalog.CatalogRepository
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -97,7 +98,8 @@ data class MusicUiState(
     val isKaraokeActive         : Boolean                   = false,
     val fastSeeking             : Boolean                   = true,
     val alwaysSync              : Boolean                   = true,
-    val catalogResults          : List<CatalogTrack>        = emptyList()
+    val catalogResults          : List<CatalogTrack>        = emptyList(),
+    val catalogStreamQuality    : String                    = "AUTO"
 )
 
 data class QueueEntry(val id: String, val track: MusicTrack)
@@ -106,6 +108,7 @@ data class QueueEntry(val id: String, val track: MusicTrack)
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
     val repository          : MusicRepository,
+    private val catalogRepository: CatalogRepository,
     private val settingsRepository: SettingsRepository,
     private val offlineManager    : OfflineManager,
     val vibrationManager          : VibrationManager,
@@ -148,6 +151,10 @@ class MusicPlayerViewModel @Inject constructor(
     private var currentQueueUris: List<String> = emptyList()
 
 
+    private fun hapticClick() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateClick() }
+    private fun hapticSuccess() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateSuccess() }
+    private fun hapticTick() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateTick() }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Player listener
     // ─────────────────────────────────────────────────────────────────────────
@@ -162,11 +169,11 @@ class MusicPlayerViewModel @Inject constructor(
                 startPlayerService()
                 startVisualizer()
                 initEqualizer()
-                vibrationManager.vibrateClick()
+                hapticClick()
             } else {
                 stopProgressUpdate()
                 stopVisualizer()
-                vibrationManager.vibrateClick()
+                hapticClick()
             }
         }
 
@@ -275,12 +282,12 @@ class MusicPlayerViewModel @Inject constructor(
 
         override fun onRepeatModeChanged(repeatMode: Int) {
             _uiState.update { it.copy(repeatMode = repeatMode) }
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             _uiState.update { it.copy(isShuffleOn = shuffleModeEnabled) }
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -350,7 +357,7 @@ class MusicPlayerViewModel @Inject constructor(
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        player.setAudioAttributes(audioAttributes, true)
+        player.setAudioAttributes(audioAttributes, false)
         player.setHandleAudioBecomingNoisy(true)
         player.addListener(playerListener)
 
@@ -415,6 +422,11 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicVisualizerSensitivity.collect { sens ->
                 _uiState.update { it.copy(visualizerSensitivity = sens) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.catalogStreamQuality.collect { quality ->
+                _uiState.update { it.copy(catalogStreamQuality = quality) }
             }
         }
         viewModelScope.launch {
@@ -659,7 +671,7 @@ class MusicPlayerViewModel @Inject constructor(
             settingsRepository.setMusicEqualizerPreset(preset)
             _uiState.update { it.copy(equalizerPreset = preset) }
             applyEqualizerPreset(preset)
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
     }
 
@@ -768,7 +780,7 @@ class MusicPlayerViewModel @Inject constructor(
             p.seekTo(pos)
             _uiState.update { it.copy(playbackPosition = pos) }
             _playbackPosition.value = pos
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
         _sliderPosition.value = null
     }
@@ -778,7 +790,7 @@ class MusicPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
             repository.scanDeviceForMusic()
             _uiState.update { it.copy(isLoading = false) }
-            vibrationManager.vibrateSuccess()
+            hapticSuccess()
         }
     }
 
@@ -787,7 +799,7 @@ class MusicPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
             repository.scanCustomFolder(uri)
             _uiState.update { it.copy(isLoading = false) }
-            vibrationManager.vibrateSuccess()
+            hapticSuccess()
         }
     }
 
@@ -797,7 +809,7 @@ class MusicPlayerViewModel @Inject constructor(
             else                                    state.selectedTracks + uri
             state.copy(selectedTracks = sel, isSelectionMode = sel.isNotEmpty())
         }
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun clearSelection() {
@@ -813,7 +825,7 @@ class MusicPlayerViewModel @Inject constructor(
             return
         }
 
-        vibrationManager.vibrateClick()
+        hapticClick()
 
         viewModelScope.launch(Dispatchers.Default) {
             val trackUris  = tracks.map { it.uri }
@@ -848,7 +860,7 @@ class MusicPlayerViewModel @Inject constructor(
             connectToMediaController()
             return
         }
-        vibrationManager.vibrateClick()
+        hapticClick()
 
         var displayTitle = title ?: "External Audio"
         if (title == null) {
@@ -880,14 +892,14 @@ class MusicPlayerViewModel @Inject constructor(
     fun addToQueue(track: MusicTrack) {
         val p: Player = controller ?: player
         p.addMediaItem(track.toMediaItem())
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun playNext(track: MusicTrack) {
         val p: Player    = controller ?: player
         val nextIndex = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
         p.addMediaItem(nextIndex, track.toMediaItem())
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     /**
@@ -902,7 +914,7 @@ class MusicPlayerViewModel @Inject constructor(
             connectToMediaController()
             return
         }
-        vibrationManager.vibrateClick()
+        hapticClick()
 
         viewModelScope.launch {
             _uiState.update { it.copy(isResolvingCatalog = true) }
@@ -940,14 +952,14 @@ class MusicPlayerViewModel @Inject constructor(
     fun addToQueue(track: CatalogTrack) {
         val p: Player = controller ?: player
         p.addMediaItem(track.toMediaItem())
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun playNext(track: CatalogTrack) {
         val p: Player = controller ?: player
         val idx = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
         p.addMediaItem(idx, track.toMediaItem())
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     /**
@@ -970,7 +982,7 @@ class MusicPlayerViewModel @Inject constructor(
             p.addMediaItem(item)
         }
         if (!p.isPlaying && !p.playWhenReady) p.prepare()
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     // ── Media item builders ───────────────────────────────────────────────────
@@ -1012,25 +1024,25 @@ class MusicPlayerViewModel @Inject constructor(
         p.shuffleModeEnabled = true
         _uiState.update { it.copy(isShuffleOn = true) }
         playTrack(tracks.random(), tracks)
-        vibrationManager.vibrateSuccess()
+        hapticSuccess()
     }
 
     fun togglePlayPause() {
         startPlayerService()
         val p: Player = controller ?: player
         if (p.isPlaying) p.pause() else p.play()
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
-    fun play()  { startPlayerService(); val p: Player = controller ?: player; if (!p.isPlaying) p.play(); vibrationManager.vibrateClick() }
-    fun pause() { val p: Player = controller ?: player; if (p.isPlaying) p.pause(); vibrationManager.vibrateClick() }
+    fun play()  { startPlayerService(); val p: Player = controller ?: player; if (!p.isPlaying) p.play(); hapticClick() }
+    fun pause() { val p: Player = controller ?: player; if (p.isPlaying) p.pause(); hapticClick() }
 
     fun stop() {
         val p: Player = controller ?: player
         p.stop(); p.clearMediaItems()
         _uiState.update { it.copy(currentTrack = null, isPlaying = false, playbackPosition = 0L, duration = 0L, isResolvingCatalog = false) }
         _playbackPosition.value = 0L; _duration.value = 0L
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun seekTo(position: Long) {
@@ -1038,7 +1050,7 @@ class MusicPlayerViewModel @Inject constructor(
         p.seekTo(position)
         _uiState.update { it.copy(playbackPosition = position) }
         _playbackPosition.value = position
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun setVolume(volume: Float) {
@@ -1050,14 +1062,14 @@ class MusicPlayerViewModel @Inject constructor(
         val p: Player = controller ?: player
         if (p.hasNextMediaItem()) p.seekToNext()
         else if (p.repeatMode == Player.REPEAT_MODE_ALL) p.seekTo(0, 0)
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun skipPrevious() {
         val p: Player = controller ?: player
         if (p.currentPosition > 3_000) p.seekTo(0)
         else if (p.hasPreviousMediaItem()) p.seekToPrevious()
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun toggleShuffle() {
@@ -1065,7 +1077,7 @@ class MusicPlayerViewModel @Inject constructor(
         val new = !p.shuffleModeEnabled
         p.shuffleModeEnabled = new
         _uiState.update { it.copy(isShuffleOn = new) }
-        if (new) vibrationManager.vibrateSuccess() else vibrationManager.vibrateClick()
+        if (new) hapticSuccess() else hapticClick()
     }
 
     fun toggleRepeat() {
@@ -1077,12 +1089,12 @@ class MusicPlayerViewModel @Inject constructor(
         }
         p.repeatMode = new
         _uiState.update { it.copy(repeatMode = new) }
-        if (new != Player.REPEAT_MODE_OFF) vibrationManager.vibrateSuccess() else vibrationManager.vibrateClick()
+        if (new != Player.REPEAT_MODE_OFF) hapticSuccess() else hapticClick()
     }
 
     fun setSortOrder(order: SortOrder) {
         _uiState.update { it.copy(sortOrder = order) }
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
     fun setSleepTimer(minutes: Int?) {
@@ -1104,10 +1116,10 @@ class MusicPlayerViewModel @Inject constructor(
                 fadeOutAndStop()
             }
         }
-        vibrationManager.vibrateClick()
+        hapticClick()
     }
 
-    fun toggleSleepTimerDialog() { _showSleepTimer.update { !it }; vibrationManager.vibrateClick() }
+    fun toggleSleepTimerDialog() { _showSleepTimer.update { !it }; hapticClick() }
 
     private suspend fun fadeOutAndStop() {
         var vol = 1f
@@ -1121,7 +1133,7 @@ class MusicPlayerViewModel @Inject constructor(
     fun toggleShowVisualizer() {
         viewModelScope.launch {
             settingsRepository.setShowMusicVisualizer(!_uiState.value.showVisualizer)
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
     }
 
@@ -1131,7 +1143,18 @@ class MusicPlayerViewModel @Inject constructor(
             if (newActive) { val p: Player = controller ?: player; if (p.isPlaying) p.pause() }
             it.copy(isKaraokeActive = newActive)
         }
-        vibrationManager.vibrateClick()
+        hapticClick()
+    }
+
+    fun setKaraokeMode(enabled: Boolean) {
+        _uiState.update {
+            if (enabled && !it.isKaraokeActive) {
+                val p: Player = controller ?: player
+                if (p.isPlaying) p.pause()
+            }
+            it.copy(isKaraokeActive = enabled)
+        }
+        hapticClick()
     }
 
     fun incrementKaraokeSingCount(track: MusicTrack) {
@@ -1139,50 +1162,50 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun setArtShape(shape: String) {
-        viewModelScope.launch { settingsRepository.setMusicArtShape(shape); vibrationManager.vibrateClick() }
+        viewModelScope.launch { settingsRepository.setMusicArtShape(shape); hapticClick() }
     }
 
     fun toggleRotation() {
-        viewModelScope.launch { settingsRepository.setMusicRotationEnabled(!_uiState.value.rotationEnabled); vibrationManager.vibrateClick() }
+        viewModelScope.launch { settingsRepository.setMusicRotationEnabled(!_uiState.value.rotationEnabled); hapticClick() }
     }
 
     fun togglePipEnabled() {
-        viewModelScope.launch { settingsRepository.setMusicPipEnabled(!_uiState.value.pipEnabled); vibrationManager.vibrateClick() }
+        viewModelScope.launch { settingsRepository.setMusicPipEnabled(!_uiState.value.pipEnabled); hapticClick() }
     }
 
     fun createPlaylist(name: String, thumbnailUri: String? = null) {
-        viewModelScope.launch { repository.createPlaylist(Playlist(name = name, thumbnailUri = thumbnailUri)); vibrationManager.vibrateSuccess() }
+        viewModelScope.launch { repository.createPlaylist(Playlist(name = name, thumbnailUri = thumbnailUri)); hapticSuccess() }
     }
 
     fun addTrackToPlaylist(playlist: Playlist, track: MusicTrack) {
-        viewModelScope.launch { repository.updatePlaylist(playlist.copy(trackUris = (playlist.trackUris + track.uri).distinct())); vibrationManager.vibrateClick() }
+        viewModelScope.launch { repository.updatePlaylist(playlist.copy(trackUris = (playlist.trackUris + track.uri).distinct())); hapticClick() }
     }
 
     fun addSelectedTracksToPlaylist(playlist: Playlist) {
         viewModelScope.launch {
             repository.updatePlaylist(playlist.copy(trackUris = (playlist.trackUris + _uiState.value.selectedTracks).distinct()))
-            clearSelection(); vibrationManager.vibrateSuccess()
+            clearSelection(); hapticSuccess()
         }
     }
 
     fun removeTrackFromPlaylist(playlist: Playlist, trackUri: String) {
-        viewModelScope.launch { repository.updatePlaylist(playlist.copy(trackUris = playlist.trackUris - trackUri)); vibrationManager.vibrateClick() }
+        viewModelScope.launch { repository.updatePlaylist(playlist.copy(trackUris = playlist.trackUris - trackUri)); hapticClick() }
     }
 
     fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
-        viewModelScope.launch { repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString())); vibrationManager.vibrateClick() }
+        viewModelScope.launch { repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString())); hapticClick() }
     }
 
     fun createPlaylistWithTracks(name: String, trackUris: List<String>) {
-        viewModelScope.launch { repository.createPlaylist(Playlist(name = name, trackUris = trackUris)); vibrationManager.vibrateSuccess() }
+        viewModelScope.launch { repository.createPlaylist(Playlist(name = name, trackUris = trackUris)); hapticSuccess() }
     }
 
     fun deletePlaylist(playlist: Playlist) {
-        viewModelScope.launch { repository.deletePlaylist(playlist); vibrationManager.vibrateClick() }
+        viewModelScope.launch { repository.deletePlaylist(playlist); hapticClick() }
     }
 
     fun deleteTrack(track: MusicTrack) {
-        viewModelScope.launch { repository.deleteTrack(track); vibrationManager.vibrateClick() }
+        viewModelScope.launch { repository.deleteTrack(track); hapticClick() }
     }
 
     fun setPlaybackSpeed(speed: Float) {
@@ -1191,26 +1214,40 @@ class MusicPlayerViewModel @Inject constructor(
             val p: Player = controller ?: player
             p.playbackParameters = PlaybackParameters(speed)
             _uiState.update { it.copy(playbackSpeed = speed) }
-            vibrationManager.vibrateClick()
+            hapticClick()
         }
     }
 
-    fun toggleMusicSettings() { _uiState.update { it.copy(showMusicSettings = !it.showMusicSettings) }; vibrationManager.vibrateClick() }
+    fun setCatalogStreamQuality(quality: String) {
+        viewModelScope.launch {
+            settingsRepository.setCatalogStreamQuality(quality)
+            _uiState.update { it.copy(catalogStreamQuality = quality) }
+
+            val currentTrack = _uiState.value.currentTrack
+            if (currentTrack != null && currentTrack.isOnlineCatalogTrack()) {
+                refreshCurrentCatalogStream(currentTrack, quality)
+            } else {
+                hapticClick()
+            }
+        }
+    }
+
+    fun toggleMusicSettings() { _uiState.update { it.copy(showMusicSettings = !it.showMusicSettings) }; hapticClick() }
 
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         val p: Player = controller ?: player
         if (fromIndex in 0 until p.mediaItemCount && toIndex in 0 until p.mediaItemCount) {
-            p.moveMediaItem(fromIndex, toIndex); vibrationManager.vibrateTick()
+            p.moveMediaItem(fromIndex, toIndex); hapticTick()
         }
     }
 
     fun removeQueueItem(index: Int) {
         val p: Player = controller ?: player
-        if (index in 0 until p.mediaItemCount) { p.removeMediaItem(index); vibrationManager.vibrateClick() }
+        if (index in 0 until p.mediaItemCount) { p.removeMediaItem(index); hapticClick() }
     }
 
-    fun clearQueue()  { val p: Player = controller ?: player; p.clearMediaItems(); vibrationManager.vibrateClick() }
-    fun toggleFavorite(track: MusicTrack) { viewModelScope.launch { repository.toggleFavorite(track); vibrationManager.vibrateClick() } }
+    fun clearQueue()  { val p: Player = controller ?: player; p.clearMediaItems(); hapticClick() }
+    fun toggleFavorite(track: MusicTrack) { viewModelScope.launch { repository.toggleFavorite(track); hapticClick() } }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Cleanup
@@ -1227,5 +1264,52 @@ class MusicPlayerViewModel @Inject constructor(
         controller?.removeListener(playerListener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller = null
+    }
+
+    private suspend fun refreshCurrentCatalogStream(track: MusicTrack, quality: String) {
+        val sourceUrl = track.sourceUrl ?: return
+        val streamUrl = catalogRepository.resolveAudioStream(sourceUrl, quality) ?: run {
+            hapticClick()
+            return
+        }
+
+        val p: Player = controller ?: player
+        val index = p.currentMediaItemIndex
+        if (index < 0) {
+            hapticClick()
+            return
+        }
+
+        val wasPlaying = p.isPlaying
+        val resumePosition = p.currentPosition.coerceAtLeast(0L)
+        val metadata = p.currentMediaItem?.mediaMetadata ?: MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist ?: "Unknown Artist")
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setIsPlayable(true)
+            .setArtworkUri(track.thumbnailUri?.toUri())
+            .setExtras(android.os.Bundle().apply {
+                putString("source_url", sourceUrl)
+                putBoolean("is_catalog", true)
+            })
+            .build()
+
+        val replacement = MediaItem.Builder()
+            .setMediaId(streamUrl)
+            .setUri(streamUrl.toUri())
+            .setMediaMetadata(metadata)
+            .build()
+
+        withContext(Dispatchers.Main) {
+            p.replaceMediaItem(index, replacement)
+            p.prepare()
+            p.seekTo(index, resumePosition)
+            if (wasPlaying) p.play() else p.pause()
+        }
+        hapticClick()
+    }
+
+    private fun MusicTrack.isOnlineCatalogTrack(): Boolean {
+        return sourceUrl != null && path == null
     }
 }

@@ -20,7 +20,7 @@ import javax.inject.Singleton
 @Singleton
 class VibrationManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
 ) {
 
     private val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
