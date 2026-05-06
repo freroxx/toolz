@@ -120,7 +120,11 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_LYRICS_SEEK_ENABLED = booleanPreferencesKey("music_lyrics_seek_enabled")
     private val MUSIC_LYRICS_FONT = stringPreferencesKey("music_lyrics_font") // "SANS_SERIF", "SERIF", "MONOSPACE", "CURSIVE", "DISPLAY", "HANDWRITING"
     private val MUSIC_LYRICS_ALWAYS_SYNC = booleanPreferencesKey("music_lyrics_always_sync")
+    private val MUSIC_LYRICS_WORD_SYNC_ENABLED = booleanPreferencesKey("music_lyrics_word_sync_enabled")
+    private val KARAOKE_WORD_SYNC_ENABLED = booleanPreferencesKey("karaoke_word_sync_enabled")
     private val KARAOKE_SING_CONFIDENTLY_ENABLED = booleanPreferencesKey("karaoke_sing_confidently_enabled")
+    private val KARAOKE_SPEECH_CORRECTION_ENABLED = booleanPreferencesKey("karaoke_speech_correction_enabled")
+    private val KARAOKE_QUICK_SING_ENABLED = booleanPreferencesKey("karaoke_quick_sing_enabled")
     private val MUSIC_VISUALIZER_SENSITIVITY = floatPreferencesKey("music_visualizer_sensitivity")
     private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
 
@@ -146,6 +150,7 @@ class SettingsRepository @Inject constructor(
     // Download Settings
     private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format") // "M4A", "OPUS", "MP3"
     private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality") // "HIGH", "MEDIUM", "LOW"
+    private val CATALOG_STREAM_QUALITY = stringPreferencesKey("catalog_stream_quality") // "AUTO", "HIGH", "MEDIUM", "LOW"
 
     // Timer Duration Persistence
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
@@ -273,7 +278,11 @@ class SettingsRepository @Inject constructor(
     val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
     val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
     val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: false }
+    val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: false }
+    val karaokeWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_WORD_SYNC_ENABLED] ?: true }
     val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: true }
+    val karaokeSpeechCorrectionEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SPEECH_CORRECTION_ENABLED] ?: true }
+    val karaokeQuickSingEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_QUICK_SING_ENABLED] ?: false }
     val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
@@ -294,6 +303,7 @@ class SettingsRepository @Inject constructor(
 
     val downloadFormat: Flow<String> = dataStore.data.map { it[DOWNLOAD_FORMAT] ?: "M4A" }
     val downloadQuality: Flow<String> = dataStore.data.map { it[DOWNLOAD_QUALITY] ?: "HIGH" }
+    val catalogStreamQuality: Flow<String> = dataStore.data.map { it[CATALOG_STREAM_QUALITY] ?: "AUTO" }
 
     val lastTimerMinutes: Flow<Int> = dataStore.data.map { it[LAST_TIMER_MINUTES] ?: 0 }
     val lastTimerSeconds: Flow<Int> = dataStore.data.map { it[LAST_TIMER_SECONDS] ?: 0 }
@@ -438,7 +448,11 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicLyricsSeekEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_SEEK_ENABLED] = enabled } }
     suspend fun setMusicLyricsFont(font: String) { dataStore.edit { it[MUSIC_LYRICS_FONT] = font } }
     suspend fun setMusicLyricsAlwaysSync(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_ALWAYS_SYNC] = enabled } }
+    suspend fun setMusicLyricsWordSyncEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] = enabled } }
+    suspend fun setKaraokeWordSyncEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_WORD_SYNC_ENABLED] = enabled } }
     suspend fun setKaraokeSingConfidentlyEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_SING_CONFIDENTLY_ENABLED] = enabled } }
+    suspend fun setKaraokeSpeechCorrectionEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_SPEECH_CORRECTION_ENABLED] = enabled } }
+    suspend fun setKaraokeQuickSingEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_QUICK_SING_ENABLED] = enabled } }
     suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
@@ -459,6 +473,7 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setDownloadFormat(format: String) { dataStore.edit { it[DOWNLOAD_FORMAT] = format } }
     suspend fun setDownloadQuality(quality: String) { dataStore.edit { it[DOWNLOAD_QUALITY] = quality } }
+    suspend fun setCatalogStreamQuality(quality: String) { dataStore.edit { it[CATALOG_STREAM_QUALITY] = quality } }
 
     suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
         dataStore.edit {

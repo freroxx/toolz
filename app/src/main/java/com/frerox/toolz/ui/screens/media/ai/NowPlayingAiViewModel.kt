@@ -99,6 +99,7 @@ class NowPlayingAiViewModel @Inject constructor(
     private var recognitionIntent  : Intent?           = null
     private var restartJob         : Job?              = null
     private var isListening        : Boolean           = false
+    private var instrumentalSearchJob: Job?            = null
 
     private val instrumentalPlayer: ExoPlayer by lazy {
         ExoPlayer.Builder(context).build().apply {
@@ -147,6 +148,16 @@ class NowPlayingAiViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicLyricsAlwaysSync.collect { enabled ->
                 _uiState.update { it.copy(lyricsState = it.lyricsState.copy(alwaysSync = enabled)) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.musicLyricsWordSyncEnabled.collect { enabled ->
+                _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isWordSyncEnabled = enabled)) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.karaokeWordSyncEnabled.collect { enabled ->
+                _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isKaraokeWordSyncEnabled = enabled)) }
             }
         }
         viewModelScope.launch {
@@ -603,7 +614,8 @@ class NowPlayingAiViewModel @Inject constructor(
     // ── Sing Confidently ──────────────────────────────────────────────────────
 
     private fun searchInstrumental(track: MusicTrack) {
-        viewModelScope.launch(Dispatchers.IO) {
+        instrumentalSearchJob?.cancel()
+        instrumentalSearchJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isSearchingInstrumental = true, instrumentalMatch = null) }
             try {
                 val query = "${track.title} ${track.artist} instrumental"
@@ -622,6 +634,7 @@ class NowPlayingAiViewModel @Inject constructor(
                     Log.d(TAG, "Found instrumental match: ${match.title}")
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "Instrumental search failed", e)
                 _uiState.update { it.copy(isSearchingInstrumental = false) }
             }
@@ -773,6 +786,20 @@ class NowPlayingAiViewModel @Inject constructor(
             val new = !_uiState.value.lyricsState.alwaysSync
             settingsRepository.setMusicLyricsAlwaysSync(new)
             _uiState.update { it.copy(lyricsState = it.lyricsState.copy(alwaysSync = new)) }
+        }
+    }
+
+    fun toggleWordSyncEnabled() {
+        viewModelScope.launch {
+            val new = !_uiState.value.lyricsState.isWordSyncEnabled
+            settingsRepository.setMusicLyricsWordSyncEnabled(new)
+        }
+    }
+
+    fun toggleKaraokeWordSyncEnabled() {
+        viewModelScope.launch {
+            val new = !_uiState.value.lyricsState.isKaraokeWordSyncEnabled
+            settingsRepository.setKaraokeWordSyncEnabled(new)
         }
     }
 
@@ -1023,7 +1050,6 @@ class NowPlayingAiViewModel @Inject constructor(
             _uiState.update { state ->
                 var newWordsCounted = 0
                 var missedCountInThisUpdate = 0
-                var hapticFeedbackTriggered = false
 
                 val updatedLyrics = state.lyricsState.syncedLyrics.map { line ->
                     // Performance optimization: skip lines far away from current time
@@ -1047,11 +1073,6 @@ class NowPlayingAiViewModel @Inject constructor(
                             }
                             if (matched) {
                                 newWordsCounted++
-                                // Trigger haptic feedback for correct word (only once per update to avoid over-feedback)
-                                if (!hapticFeedbackTriggered) {
-                                    vibrationManager.vibrateSuccess()
-                                    hapticFeedbackTriggered = true
-                                }
                                 word.copy(karaokeStatus = KaraokeWordStatus.CORRECT)
                             } else word
                         } else if (currentTime > missedGrace
@@ -1059,11 +1080,6 @@ class NowPlayingAiViewModel @Inject constructor(
                             && speechCorrect
                         ) {
                             missedCountInThisUpdate++
-                            // Trigger haptic feedback for missed word (only once per update to avoid over-feedback)
-                            if (!hapticFeedbackTriggered && speechCorrect) {
-                                vibrationManager.vibrateError()
-                                hapticFeedbackTriggered = true
-                            }
                             word.copy(karaokeStatus = KaraokeWordStatus.MISSED)
                         } else {
                             word
@@ -1120,15 +1136,18 @@ class NowPlayingAiViewModel @Inject constructor(
     private fun enhanceTokenNormalization(token: String): String {
         return token.lowercase()
             .filter { it.isLetterOrDigit() }
-            // Handle elongated vowels (loooove -> love, cooool -> cool)
-            .replace(Regex("([aeiou])\\1{2,}"), "$1$1")
-            // Handle elongated consonants (ssssun -> sun, but keep essential doubles)
-            .replace(Regex("([bcdfg hjklmnpqrstvwxyz])\\1{3,}"), "$1$1")
-            // Handle common mishearings
-            .replace("ght", "t") // "nigh" -> "ni" (approximation)
-            .replace("ph", "f")  // "phone" -> "fone"
-            .replace("ck", "k")  // "back" -> "bak"
-            .replace("ll", "l")  // "hello" -> "helo" (but careful with essential doubles)
+            // Handle elongated vowels common in singing (loooove -> love)
+            .replace(Regex("([aeiou])\\1+"), "$1")
+            // Handle elongated consonants (ssssun -> sun)
+            .replace(Regex("([bcdfg hjklmnpqrstvwxyz])\\1+"), "$1")
+            // Handle common phonetic approximations for singing
+            .replace("ght", "t")
+            .replace("ph", "f")
+            .replace("ck", "k")
+            .replace("qu", "kw")
+            .replace("wh", "w")
+            .replace("ion", "un") // common ending reduction
+            .replace("ing", "in")  // common ending reduction
     }
 
     /**
@@ -1138,28 +1157,28 @@ class NowPlayingAiViewModel @Inject constructor(
     private fun isWordMatch(spoken: String, target: String): Boolean {
         if (spoken == target) return true
 
-        // Length checks
-        val lengthDiff = kotlin.math.abs(spoken.length - target.length)
+        // Length checks - ignore tiny tokens
         val minLength = kotlin.math.min(spoken.length, target.length)
-        if (minLength < 2) return false // Too short to be meaningful
+        if (minLength < 2) return spoken == target
 
-        // Exact substring checks (for partial words)
-        if (spoken.length >= 3 && target.contains(spoken)) return true
-        if (target.length >= 3 && spoken.contains(target)) return true
+        // Exact substring checks (for partial words or words joined with other sounds)
+        if (spoken.length >= 4 && target.contains(spoken)) return true
+        if (target.length >= 4 && spoken.contains(target)) return true
 
-        // Prefix/suffix checks (common in singing)
-        if (spoken.length >= 3 && target.startsWith(spoken.substring(0, 2))) return true
-        if (target.length >= 3 && spoken.startsWith(target.substring(0, 2))) return true
-        if (spoken.length >= 3 && target.endsWith(spoken.substring(spoken.length - 2))) return true
-        if (target.length >= 3 && spoken.endsWith(target.substring(target.length - 2))) return true
+        // Prefix/suffix checks - common when lyrics are held or cut short
+        if (minLength >= 3) {
+            if (target.startsWith(spoken.substring(0, 3))) return true
+            if (spoken.startsWith(target.substring(0, 3))) return true
+        }
 
-        // Enhanced Levenshtein with dynamic threshold based on word length
+        // Adaptive Levenshtein threshold based on word length
         val distance = levenshtein(spoken, target)
         val maxAllowed = when {
-            minLength >= 8 -> 4
-            minLength >= 5 -> 3
-            minLength >= 3 -> 2
-            else -> 1
+            target.length >= 10 -> 4
+            target.length >= 7  -> 3
+            target.length >= 5  -> 2
+            target.length >= 3  -> 1
+            else -> 0
         }
 
         return distance <= maxAllowed

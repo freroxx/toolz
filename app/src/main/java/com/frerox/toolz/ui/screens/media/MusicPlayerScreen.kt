@@ -206,12 +206,26 @@ fun MusicPlayerScreen(
     val filteredTracks = remember(state.tracks, searchQuery) {
         filterTracks(state.tracks, searchQuery)
     }
+    val tabs = remember(state.karaokeEnabled, state.isOnline) {
+        listOfNotNull(
+            "Tracks",
+            "Library",
+            if (state.karaokeEnabled) "History" else null,
+            if (state.isOnline) "Catalog" else null
+        )
+    }
+    val currentTabLabel = tabs.getOrNull(currentTab)
 
     LaunchedEffect(state.currentTrack) {
         state.currentTrack?.let { aiViewModel.updateSong(it) }
     }
     LaunchedEffect(playbackPosition) {
         aiViewModel.updateProgress(playbackPosition)
+    }
+    LaunchedEffect(currentTabLabel, state.currentTrack?.uri) {
+        if (currentTabLabel == "Catalog") {
+            catalogViewModel.refreshOnOpen(state.currentTrack)
+        }
     }
 
     Scaffold(
@@ -301,12 +315,6 @@ fun MusicPlayerScreen(
                         },
                         label = "TabContent"
                     ) { tabIndex ->
-                        val tabs = listOfNotNull(
-                            "Tracks",
-                            "Library",
-                            if (state.karaokeEnabled) "History" else null,
-                            if (state.isOnline) "Catalog" else null
-                        )
                         val tab = if (tabIndex < tabs.size) tabs[tabIndex] else "Tracks"
 
                         when (tab) {
@@ -333,8 +341,14 @@ fun MusicPlayerScreen(
                                 catalogViewModel = catalogViewModel,
                                 musicRepository = viewModel.repository,
                                 localTracks = state.tracks,
+                                currentTrack = state.currentTrack,
                                 onPlayTrack = { uri, title, artist, thumbUrl, sourceUrl ->
                                     viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
+                                },
+                                onPlayInKaraoke = { uri, title, artist, thumbUrl, sourceUrl ->
+                                    viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
+                                    viewModel.setKaraokeMode(true)
+                                    showFullPlayer = true
                                 },
                                 onEnqueue = { track, playNext ->
                                     viewModel.enqueueCatalogTrack(track, playNext)
@@ -426,6 +440,8 @@ fun MusicPlayerScreen(
                 onTogglePip = { viewModel.togglePipEnabled() },
                 onOpenAi = { viewModel.vibrationManager.vibrateClick(); showAiSheet = true },
                 onToggleMusicSettings = { viewModel.toggleMusicSettings() },
+                catalogStreamQuality = state.catalogStreamQuality,
+                onSetCatalogStreamQuality = { quality -> viewModel.setCatalogStreamQuality(quality) },
                 onSetPlaybackSpeed = { speed: Float -> viewModel.setPlaybackSpeed(speed) },
                 onSetEqualizerPreset = { preset: String -> viewModel.setEqualizerPreset(preset) },
                 onSetCustomEqualizerGain = { index: Int, gain: Float -> viewModel.setCustomEqualizerGain(index, gain) },
@@ -573,7 +589,7 @@ private fun ScreenTopBar(
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "MUSIC",
+                                    text = "MUSIC PLAYER",
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 3.sp,
                                     color = MaterialTheme.colorScheme.primary,
@@ -1163,11 +1179,15 @@ fun TrackItem(
         else       -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
     }
 
-    val scale by animateFloatAsState(
-        targetValue = if (isCurrent) 1.02f else 1f,
-        animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
-        label = "trackScale"
-    )
+    val scale = if (isCurrent) {
+        animateFloatAsState(
+            targetValue = 1.02f,
+            animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+            label = "trackScale"
+        ).value
+    } else {
+        1f
+    }
 
     Surface(
         modifier = modifier
@@ -1285,7 +1305,7 @@ fun TrackItem(
                     )
                 }
 
-                if (karaokeEnabled) {
+                if (karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null)) {
                     SmallKaraokeMicIcon(
                         isVisible = true,
                         onClick = onKaraokeClick,
@@ -2587,6 +2607,8 @@ fun FullPlayerView(
     onTogglePip: () -> Unit,
     onOpenAi: () -> Unit,
     onToggleMusicSettings: () -> Unit,
+    catalogStreamQuality: String,
+    onSetCatalogStreamQuality: (String) -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
     onSetEqualizerPreset: (String) -> Unit,
     onSetCustomEqualizerGain: (Int, Float) -> Unit,
@@ -2606,15 +2628,19 @@ fun FullPlayerView(
     var showSleepTimerPicker by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var showLyricsCustomization by remember { mutableStateOf(false) }
+    var showCatalogQualitySheet by remember { mutableStateOf(false) }
     val configuration = LocalConfiguration.current
+    val isOnlineCatalogTrack = remember(track.sourceUrl, track.path) {
+        track.sourceUrl != null && track.path == null
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "playerRot")
-    val rotation by if (state.performanceMode) {
+    val rotation by if (state.performanceMode || !state.rotationEnabled || !state.isPlaying) {
         remember { mutableFloatStateOf(0f) }
     } else {
         infiniteTransition.animateFloat(
             0f, 360f,
-            infiniteRepeatable(tween(28_000, easing = LinearEasing), RepeatMode.Restart),
+            infiniteRepeatable(tween(34_000, easing = LinearEasing), RepeatMode.Restart),
             label = "artRot"
         )
     }
@@ -2629,6 +2655,17 @@ fun FullPlayerView(
             onSetVisualizerSensitivity = onSetVisualizerSensitivity,
             onToggleVisualizer = onToggleVisualizer,
             onDismiss = onToggleMusicSettings
+        )
+    }
+
+    if (showCatalogQualitySheet && isOnlineCatalogTrack) {
+        CatalogStreamQualitySheet(
+            currentQuality = catalogStreamQuality,
+            onDismiss = { showCatalogQualitySheet = false },
+            onQualitySelected = {
+                onSetCatalogStreamQuality(it)
+                showCatalogQualitySheet = false
+            }
         )
     }
 
@@ -2654,7 +2691,7 @@ fun FullPlayerView(
             }
 
             // Blurred art background
-            if (!state.performanceMode) {
+            if (!state.performanceMode && !track.thumbnailUri.isNullOrBlank()) {
                 AsyncImage(
                     model = track.thumbnailUri,
                     contentDescription = null,
@@ -2662,9 +2699,9 @@ fun FullPlayerView(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            renderEffect = AndroidRenderEffect.createBlurEffect(130f, 130f, AndroidShader.TileMode.CLAMP)
+                            renderEffect = AndroidRenderEffect.createBlurEffect(72f, 72f, AndroidShader.TileMode.CLAMP)
                                     .asComposeRenderEffect()
-                            alpha = 0.11f
+                            alpha = 0.08f
                         },
                     error = rememberVectorPainter(Icons.Rounded.MusicNote)
                 )
@@ -2674,8 +2711,8 @@ fun FullPlayerView(
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.18f),
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.68f)
                                 )
                             )
                         )
@@ -2724,20 +2761,12 @@ fun FullPlayerView(
                             onSeek(it)
                             aiViewModel.seekTo(it)
                         },
+                        onSetVolume = onSetVolume,
                         onNextSongConfirmed = onNextSongConfirmed,
                         playbackPosition = playbackPosition,
                         visualizerData = visualizerData
                     )
                     
-                    // Sing Confidently Volume Sync
-                    LaunchedEffect(aiState.isSingConfidentlyActive) {
-                        if (aiState.isSingConfidentlyActive) {
-                            onSetVolume(0.0f)
-                        } else {
-                            onSetVolume(1.0f)
-                        }
-                    }
-
                     // Increment sing count when evaluation is triggered
                     LaunchedEffect(aiState.karaokeScore) {
                         if (aiState.karaokeScore > 0 && playbackPosition >= state.duration - 2000) {
@@ -2821,6 +2850,13 @@ fun FullPlayerView(
                                     HorizontalDivider(modifier = Modifier.alpha(0.08f).padding(vertical = 4.dp))
                                     DropdownMenuItem(text = { Text("Rotate art", fontWeight = FontWeight.Bold) }, onClick = { onToggleRotation(); showOverflowMenu = false }, leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) })
                                     DropdownMenuItem(text = { Text("Sleep timer", fontWeight = FontWeight.Bold) }, onClick = { showOverflowMenu = false; showSleepTimerPicker = true }, leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) })
+                                    if (isOnlineCatalogTrack) {
+                                        DropdownMenuItem(
+                                            text = { Text("Quality · ${catalogStreamQuality.lowercase().replaceFirstChar { it.uppercase() }}", fontWeight = FontWeight.Bold) },
+                                            onClick = { showOverflowMenu = false; showCatalogQualitySheet = true },
+                                            leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.primary) }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text("Music settings", fontWeight = FontWeight.Bold) },
                                         onClick = { showOverflowMenu = false; onToggleMusicSettings() },
@@ -2848,6 +2884,7 @@ fun FullPlayerView(
                                 },
                                 onToggleSeek = { aiViewModel.toggleSeekEnabled() },
                                 onToggleAlwaysSync = { aiViewModel.toggleAlwaysSync() },
+                                onToggleWordSync = { aiViewModel.toggleWordSyncEnabled() },
                                 onSetLayout = { layout -> aiViewModel.setLyricsLayout(layout) },
                                 onSetFont = { font -> aiViewModel.setLyricsFont(font) }
                             )
@@ -3016,7 +3053,7 @@ fun FullPlayerView(
                             }
                             // AI / Lyrics
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (state.karaokeEnabled) {
+                                if (state.karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null || aiState.instrumentalMatch != null)) {
                                     KaraokeMicIcon(
                                         isActive = state.isKaraokeActive,
                                         onClick = onToggleKaraoke,
@@ -4603,6 +4640,77 @@ fun MiniPlayer(
 // Dialogs
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CatalogStreamQualitySheet(
+    currentQuality: String,
+    onDismiss: () -> Unit,
+    onQualitySelected: (String) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 36.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Stream quality", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text(
+                "Only applies to online Catalog playback. Auto stays adaptive and is the default.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+
+            listOf(
+                "AUTO" to "Adaptive quality based on the resolved stream",
+                "HIGH" to "Prefer the highest bitrate stream",
+                "MEDIUM" to "Balanced quality with lighter data use",
+                "LOW" to "Use the smallest available audio stream"
+            ).forEach { (quality, description) ->
+                Surface(
+                    onClick = { onQualitySelected(quality) },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (currentQuality == quality) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = currentQuality == quality, onClick = null)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                quality.lowercase().replaceFirstChar { it.uppercase() },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun SleepTimerDialog(onDismiss: () -> Unit, onSet: (Int?) -> Unit) {
     AlertDialog(
@@ -4804,6 +4912,7 @@ fun LyricCustomizationSheet(
     onResetDefaults: () -> Unit,
     onToggleSeek: () -> Unit,
     onToggleAlwaysSync: () -> Unit,
+    onToggleWordSync: () -> Unit,
     onSetLayout: (LyricsLayout) -> Unit,
     onSetFont: (LyricsFont) -> Unit
 ) {
@@ -4914,6 +5023,31 @@ fun LyricCustomizationSheet(
                         Switch(
                             checked = state.alwaysSync,
                             onCheckedChange = { onToggleAlwaysSync() }
+                        )
+                    }
+                }
+
+                // Synced Words toggle
+                Surface(
+                    onClick = onToggleWordSync,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Synced Words", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                            Text("Highlights lyrics word by word", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = state.isWordSyncEnabled,
+                            onCheckedChange = { onToggleWordSync() }
                         )
                     }
                 }

@@ -22,7 +22,9 @@ data class AiLyricsState(
     val isSynced: Boolean = false,
     val layout: LyricsLayout = LyricsLayout.LEFT,
     val fontFamily: LyricsFont = LyricsFont.SANS_SERIF,
-    val alwaysSync: Boolean = false
+    val alwaysSync: Boolean = false,
+    val isWordSyncEnabled: Boolean = false,
+    val isKaraokeWordSyncEnabled: Boolean = true
 )
 
 enum class LyricsLayout {

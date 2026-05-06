@@ -24,7 +24,7 @@ object PlayerModule {
             .build()
 
         return ExoPlayer.Builder(context)
-            .setAudioAttributes(audioAttributes, true)
+            .setAudioAttributes(audioAttributes, false)
             .setHandleAudioBecomingNoisy(true)
             .build()
     }

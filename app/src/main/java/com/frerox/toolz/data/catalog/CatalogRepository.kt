@@ -1,6 +1,7 @@
 package com.frerox.toolz.data.catalog
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -84,6 +85,8 @@ class CatalogRepository @Inject constructor(
                     .map { it.toCatalogTrack() }
                 Pair(tracks, moreItems.nextPage)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             Pair(emptyList(), null)
@@ -106,14 +109,16 @@ class CatalogRepository @Inject constructor(
      * Resolve the audio-only stream URL for a given YouTube video URL.
      * STRICT: Only audio streams (M4A / Opus) are considered.
      * Never accesses video streams to save bandwidth and battery.
+     *
+     * @param quality "AUTO" (default, highest), "HIGH", "MEDIUM", or "LOW"
      */
-    suspend fun resolveAudioStream(sourceUrl: String): String? = withContext(Dispatchers.IO) {
+    suspend fun resolveAudioStream(sourceUrl: String, quality: String = "AUTO"): String? = withContext(Dispatchers.IO) {
         try {
             val streamInfo = StreamInfo.getInfo(youtubeService, sourceUrl)
             val audioStreams = streamInfo.audioStreams
 
-            // Prefer M4A (AAC), then Opus, then any audio
-            val preferred = audioStreams
+            // Prefer M4A (AAC), then Opus, then any audio — filter to audio-only formats
+            val filtered = audioStreams
                 .filter { stream ->
                     val format = stream.getFormat()
                     format != null && (
@@ -124,10 +129,20 @@ class CatalogRepository @Inject constructor(
                     )
                 }
                 .sortedByDescending { it.averageBitrate }
-                .firstOrNull()
-                ?: audioStreams.maxByOrNull { it.averageBitrate }
+                .ifEmpty { audioStreams.sortedByDescending { it.averageBitrate } }
+
+            val preferred = when (quality.uppercase()) {
+                "LOW" -> filtered.lastOrNull() ?: filtered.firstOrNull()
+                "MEDIUM" -> {
+                    if (filtered.size <= 1) filtered.firstOrNull()
+                    else filtered[filtered.size / 2]
+                }
+                else -> filtered.firstOrNull() // AUTO or HIGH → highest bitrate
+            }
 
             preferred?.content
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -160,6 +175,8 @@ class CatalogRepository @Inject constructor(
                     CaptionConverter.convertToLrc(vttContent)
                 } else null
             } else null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -222,6 +239,8 @@ class CatalogRepository @Inject constructor(
             }
             response.close()
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             if (outputFile.exists()) outputFile.delete()

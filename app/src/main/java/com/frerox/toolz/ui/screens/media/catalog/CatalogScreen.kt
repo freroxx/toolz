@@ -2,50 +2,118 @@ package com.frerox.toolz.ui.screens.media.catalog
 
 import android.net.Uri
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.util.lerp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.rounded.ViewList
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MicExternalOn
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.WifiTethering
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ProgressIndicatorDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,381 +123,690 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
-import com.frerox.toolz.data.music.Playlist
-import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.data.music.MusicTrack
+import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalIsDarkTheme
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Root Catalog Content
-// ─────────────────────────────────────────────────────────────────────────────
+import com.frerox.toolz.ui.theme.toolzBackground
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun CatalogContent(
     catalogViewModel: CatalogViewModel,
     musicRepository: MusicRepository,
-    localTracks: List<com.frerox.toolz.data.music.MusicTrack>,
+    localTracks: List<MusicTrack>,
+    currentTrack: MusicTrack?,
     onPlayTrack: (Uri, String, String, String, String) -> Unit,
+    onPlayInKaraoke: (Uri, String, String, String, String) -> Unit,
     onEnqueue: (CatalogTrack, Boolean) -> Unit
 ) {
     val state by catalogViewModel.uiState.collectAsState()
     val hasSeenOnboarding by catalogViewModel.hasSeenOnboarding.collectAsState()
-    val showBetaCard by catalogViewModel.showBetaCard.collectAsState()
-    val listState = rememberLazyListState()
-    val performanceMode = LocalPerformanceMode.current
     val view = LocalView.current
     val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
-    
-    var showBottomSheet by remember { mutableStateOf(false) }
-    var selectedTrackForMenu by remember { mutableStateOf<CatalogTrack?>(null) }
-    var showTrackMenu by remember { mutableStateOf(false) }
-    var trackForAction by remember { mutableStateOf<CatalogTrack?>(null) }
-    
-    var showPlaylistPicker by remember { mutableStateOf(false) }
-    val musicUiState by musicRepository.allPlaylists.collectAsState(initial = emptyList())
+    val configuration = LocalConfiguration.current
+    val isDark = LocalIsDarkTheme.current
+    val listState = rememberLazyListState()
 
-    // Onboarding Dialog
+    val playlists by musicRepository.allPlaylists.collectAsState(initial = emptyList())
+    val downloadedSourceUrls = remember(localTracks) {
+        localTracks
+            .filter { it.sourceUrl != null && (it.path != null || it.album == "Toolz Downloads") }
+            .mapNotNull { it.sourceUrl }
+            .toSet()
+    }
+
+    var selectedTrackForDownload by remember { mutableStateOf<CatalogTrack?>(null) }
+    var trackForAction by remember { mutableStateOf<CatalogTrack?>(null) }
+    var playlistTargetTrack by remember { mutableStateOf<CatalogTrack?>(null) }
+    var showPlaylistPicker by remember { mutableStateOf(false) }
+
+    val featuredTrack = state.quickPicks.firstOrNull()
+    val dynamicColors = rememberDynamicColors(
+        artworkUri = featuredTrack?.thumbnailUrl ?: currentTrack?.thumbnailUri,
+        isDark = isDark
+    )
+
     if (!hasSeenOnboarding) {
         CatalogOnboardingDialog(onDismiss = { catalogViewModel.dismissOnboarding() })
     }
 
-    // Quality Bottom Sheet
-    if (showBottomSheet && selectedTrackForMenu != null) {
+    selectedTrackForDownload?.let { track ->
         val format by catalogViewModel.downloadFormat.collectAsState()
         val quality by catalogViewModel.downloadQuality.collectAsState()
-        
         DownloadOptionsBottomSheet(
-            onDismiss = { showBottomSheet = false },
+            onDismiss = { selectedTrackForDownload = null },
             currentFormat = format,
             currentQuality = quality,
             onFormatSelected = { catalogViewModel.setDownloadFormat(it) },
             onQualitySelected = { catalogViewModel.setDownloadQuality(it) },
-            onStartDownload = selectedTrackForMenu?.let { track ->
-                {
-                    catalogViewModel.downloadTrack(track)
-                    showBottomSheet = false
-                }
-            } ?: {}
+            onStartDownload = {
+                catalogViewModel.downloadTrack(track)
+                selectedTrackForDownload = null
+            }
         )
     }
 
-    // Track Action Menu
-    if (showTrackMenu && trackForAction != null) {
-        ModalBottomSheet(
-            onDismissRequest = { showTrackMenu = false },
-            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
-            ) {
-                // Track Info Header
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    AsyncImage(
-                        model = trackForAction!!.thumbnailUrl,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(trackForAction!!.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(trackForAction!!.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+    trackForAction?.let { track ->
+        CatalogTrackActionsSheet(
+            track = track,
+            isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+            onDismiss = { trackForAction = null },
+            onPlayNow = {
+                catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                    onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
                 }
-                
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
-                
-                ListItem(
-                    headlineContent = { Text("Play Next") },
-                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) },
-                    modifier = Modifier.clickable { 
-                        onEnqueue(trackForAction!!, true)
-                        showTrackMenu = false 
-                    }
-                )
-                ListItem(
-                    headlineContent = { Text("Add to Playlist") },
-                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null) },
-                    modifier = Modifier.clickable { 
-                        showPlaylistPicker = true
-                        showTrackMenu = false 
-                    }
-                )
+                trackForAction = null
+            },
+            onPlayNext = {
+                onEnqueue(track, true)
+                trackForAction = null
+            },
+            onDownload = {
+                selectedTrackForDownload = track
+                trackForAction = null
+            },
+            onAddToPlaylist = {
+                playlistTargetTrack = track
+                trackForAction = null
+                showPlaylistPicker = true
+            },
+            onOpenKaraoke = {
+                catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                    onPlayInKaraoke(uri, title, artist, thumbUrl, sourceUrl)
+                }
+                trackForAction = null
             }
-        }
+        )
     }
 
-    if (showPlaylistPicker && trackForAction != null) {
+    if (showPlaylistPicker && playlistTargetTrack != null) {
         AlertDialog(
             onDismissRequest = { showPlaylistPicker = false },
-            title = { Text("Add to Playlist") },
+            title = { Text("Add to playlist", fontWeight = FontWeight.Black) },
             text = {
-                LazyColumn {
-                    items(musicUiState) { playlist ->
-                        ListItem(
-                            headlineContent = { Text(playlist.name) },
-                            leadingContent = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null) },
-                            modifier = Modifier.clickable {
-                                trackForAction?.let { track ->
-                                    catalogViewModel.addToPlaylist(playlist, track)
+                if (playlists.isEmpty()) {
+                    Text(
+                        "Create a playlist in Library first, then you can save catalog tracks here.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(playlists) { playlist ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                onClick = {
+                                    playlistTargetTrack?.let { selected ->
+                                        catalogViewModel.addToPlaylist(playlist, selected)
+                                    }
+                                    showPlaylistPicker = false
+                                    playlistTargetTrack = null
                                 }
-                                showPlaylistPicker = false
-                                trackForAction = null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null)
+                                    Spacer(Modifier.width(12.dp))
+                                    Column {
+                                        Text(playlist.name, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            "${playlist.trackUris.size} tracks",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
-                        )
+                        }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showPlaylistPicker = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = {
+                    showPlaylistPicker = false
+                    playlistTargetTrack = null
+                }) { Text("Close") }
             }
         )
     }
 
-    // Infinite scroll trigger
     val shouldLoadMore by remember {
         derivedStateOf {
-            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = listState.layoutInfo.totalItemsCount
-            lastVisibleItem >= totalItems - 5 && !state.isLoading && !state.isLoadingMore && totalItems > 0 && state.mode == CatalogMode.SEARCH
+            totalItems > 0 &&
+                lastVisible >= totalItems - 4 &&
+                !state.isLoading &&
+                !state.isLoadingMore &&
+                !state.isLoadingRecommendations &&
+                !state.isLoadingMoreRecommendations
         }
     }
 
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, state.query, state.justForYou.size, state.tracks.size) {
         if (shouldLoadMore) {
             catalogViewModel.loadMore()
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 120.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
     ) {
-        // Sticky Search & Header Area
-        item(key = "header") {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 16.dp, bottom = 8.dp)
-            ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            dynamicColors.primary.copy(alpha = if (isDark) 0.10f else 0.07f),
+                            Color.Transparent,
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                CatalogTopActions(
+                    onToggleLayout = {
+                        catalogViewModel.setLayoutMode(
+                            if (state.layoutMode == LayoutMode.GRID) LayoutMode.LIST else LayoutMode.GRID
+                        )
+                    },
+                    onRefresh = { catalogViewModel.loadStorefront(currentTrack) },
+                    layoutMode = state.layoutMode
+                )
+            }
+
+            item {
                 CatalogSearchBar(
                     query = state.query,
-                    performanceMode = performanceMode,
                     onQueryChange = { catalogViewModel.onSearchQueryChange(it) },
-                    onClear = { catalogViewModel.onSearchQueryChange(""); catalogViewModel.loadStorefront() }
+                    onClear = {
+                        catalogViewModel.onSearchQueryChange("")
+                        catalogViewModel.loadStorefront(currentTrack)
+                    }
                 )
-                
-                Spacer(Modifier.height(16.dp))
-                
+            }
+
+            item {
                 GenreFilterChips(
                     selectedGenre = state.selectedGenre,
                     onGenreSelected = { catalogViewModel.onGenreSelected(it) }
                 )
             }
-        }
 
-        // Beta Card Section
-        if (showBetaCard && state.query.isBlank()) {
-            item(key = "beta_card") {
-                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    BetaHeader(
-                        performanceMode = performanceMode,
-                        onHide = { catalogViewModel.setShowBetaCard(false) }
-                    )
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
-
-        if (state.query.isBlank()) {
-            // Storefront Mode (Spotify-style)
-            
-            // 1. Quick Picks (Grid Layout)
-            if (state.quickPicks.isNotEmpty()) {
-                item(key = "quick_picks_title") {
-                    SectionHeader(title = "Quick Picks", icon = Icons.Rounded.AutoAwesome)
-                }
-                item(key = "quick_picks_grid") {
-                    QuickPicksGrid(
-                        tracks = state.quickPicks,
-                        localTracks = localTracks,
-                        downloadingTracks = state.downloadingTracks,
-                        performanceMode = performanceMode,
-                        onTrackClick = { track ->
-                            catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
-                                onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                            }
-                        },
-                        onDownload = { track ->
-                            selectedTrackForMenu = track
-                            showBottomSheet = true
-                        },
-                        onLongClick = { track ->
-                            if (hapticEnabled) {
-                                if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                                else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            }
-                            trackForAction = track
-                            showTrackMenu = true
-                        }
-                    )
-                }
-            }
-
-            // 2. New Releases / Trending (Horizontal Carousel)
-            if (state.trending.isNotEmpty()) {
-                item(key = "trending_title") {
-                    SectionHeader(title = "Trending Now", icon = Icons.AutoMirrored.Rounded.TrendingUp)
-                }
-                item(key = "trending_carousel") {
-                    TrendingCarousel(
-                        tracks = state.trending.take(10),
-                        onTrackClick = { track ->
-                            catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
-                                onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                            }
-                        },
-                        onLongClick = { track ->
-                            if (hapticEnabled) {
-                                if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                                else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            }
-                            trackForAction = track
-                            showTrackMenu = true
-                        }
-                    )
-                }
-            }
-            
-            // 3. Just for you (Normal list)
-            item(key = "recommended_title") {
-                SectionHeader(title = "Based on your activity", icon = Icons.Rounded.History)
-            }
-            items(state.trending.drop(10).take(20)) { track ->
-                val isDownloaded = remember(localTracks, track) { 
-                    localTracks.any { it.sourceUrl == track.sourceUrl || it.uri == track.sourceUrl } 
-                }
-                ListTrackCard(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    track = track,
-                    isDownloaded = isDownloaded,
-                    downloadProgress = state.downloadingTracks[track.id],
-                    performanceMode = performanceMode,
-                    onDownload = { 
-                        selectedTrackForMenu = track
-                        showBottomSheet = true 
-                    },
-                    onLongClick = {
-                        if (hapticEnabled) {
-                            if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                            else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        }
-                        trackForAction = track
-                        showTrackMenu = true
-                    },
-                    onClick = {
-                        catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
-                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                        }
-                    }
-                )
-            }
-        } else {
-            // Search / Genre Mode (Standard list with results)
-            item(key = "search_results_title") {
-                SectionHeader(
-                    title = if (state.selectedGenre != null) state.selectedGenre!! else "Search Results",
-                    icon = if (state.selectedGenre != null) Icons.Rounded.Category else Icons.Rounded.Search
-                )
-            }
-
-            if (state.isLoading) {
-                items(8) { ShimmerTrackCard(isGrid = false) }
-            }
-
-            items(state.tracks) { track ->
-                val isDownloaded = remember(localTracks, track) { 
-                    localTracks.any { it.sourceUrl == track.sourceUrl || it.uri == track.sourceUrl } 
-                }
-                ListTrackCard(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    track = track,
-                    isDownloaded = isDownloaded,
-                    downloadProgress = state.downloadingTracks[track.id],
-                    performanceMode = performanceMode,
-                    onDownload = { 
-                        selectedTrackForMenu = track
-                        showBottomSheet = true 
-                    },
-                    onLongClick = {
-                        if (hapticEnabled) {
-                            if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                            else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        }
-                        trackForAction = track
-                        showTrackMenu = true
-                    },
-                    onClick = {
-                        catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
-                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                        }
-                    }
-                )
-            }
-
-            if (state.isLoadingMore) {
+            state.error?.let { message ->
                 item {
-                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                    ErrorCard(
+                        message = message,
+                        onRetry = {
+                            catalogViewModel.clearError()
+                            if (state.query.isBlank()) catalogViewModel.loadStorefront(currentTrack)
+                            else catalogViewModel.onSearchQueryChange(state.query)
+                        }
+                    )
+                }
+            }
+
+            if (state.query.isBlank()) {
+                if (state.isLoading) {
+                    item { HeroSkeleton() }
+                    item { CatalogSectionSkeleton(title = "Trending Now", listMode = state.layoutMode == LayoutMode.LIST) }
+                    item { CatalogSectionSkeleton(title = "Just for you", listMode = true) }
+                } else {
+                    if (state.quickPicks.isNotEmpty()) {
+                        item {
+                            SectionHeader(
+                                title = "Discover",
+                                subtitle = "Fresh picks that rotate when you reopen Catalog",
+                                icon = Icons.Rounded.AutoAwesome
+                            )
+                        }
+                        item {
+                            FeaturedCarousel(
+                                tracks = state.quickPicks,
+                                onTrackClick = { track ->
+                                    catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                                        onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                                    }
+                                },
+                                onLongClick = { track ->
+                                    if (hapticEnabled) {
+                                        vibrationManager?.vibrateLongClick()
+                                            ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    }
+                                    trackForAction = track
+                                }
+                            )
+                        }
                     }
+
+                    item {
+                        SectionHeader(
+                            title = "Trending Now",
+                            subtitle = "Eight sharper picks that rotate across refreshes",
+                            icon = Icons.AutoMirrored.Rounded.TrendingUp
+                        )
+                    }
+                    catalogTrackRows(
+                        tracks = state.trending.take(8),
+                        layoutMode = state.layoutMode,
+                        columns = if (configuration.screenWidthDp > 600) 3 else 2,
+                        downloadedSourceUrls = downloadedSourceUrls,
+                        downloadingTracks = state.downloadingTracks,
+                        onTrackClick = { track ->
+                            catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                                onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                            }
+                        },
+                        onTrackDownload = { selectedTrackForDownload = it },
+                        onTrackLongPress = { track ->
+                            if (hapticEnabled) {
+                                vibrationManager?.vibrateLongClick()
+                                    ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            }
+                            trackForAction = track
+                        }
+                    )
+
+                    item {
+                        SectionHeader(
+                            title = "Just for you",
+                            subtitle = state.recommendationTitle.removePrefix("Just for you · ").ifBlank {
+                                "Built from what you're listening to and coming back to"
+                            },
+                            icon = Icons.Rounded.Star
+                        )
+                    }
+                    if (state.isLoadingRecommendations && state.justForYou.isEmpty()) {
+                        item { RecommendationSkeleton() }
+                    } else {
+                        catalogTrackRows(
+                            tracks = state.justForYou,
+                            layoutMode = LayoutMode.LIST,
+                            columns = 1,
+                            downloadedSourceUrls = downloadedSourceUrls,
+                            downloadingTracks = state.downloadingTracks,
+                            onTrackClick = { track ->
+                                catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                                    onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                                }
+                            },
+                            onTrackDownload = { selectedTrackForDownload = it },
+                            onTrackLongPress = { track ->
+                                if (hapticEnabled) {
+                                    vibrationManager?.vibrateLongClick()
+                                        ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                }
+                                trackForAction = track
+                            }
+                        )
+                    }
+                    if (state.isLoadingMoreRecommendations) {
+                        item { RecommendationSkeleton(compact = true) }
+                    }
+                }
+            } else {
+                item {
+                    SectionHeader(
+                        title = if (state.selectedGenre != null) state.selectedGenre!! else "Search Results",
+                        subtitle = if (state.selectedGenre != null) "Genre mix with cleaner song-only results" else "Tap to play, long press for more actions",
+                        icon = if (state.selectedGenre != null) Icons.Rounded.Category else Icons.Rounded.Search
+                    )
+                }
+
+                if (state.isLoading) {
+                    item { CatalogSectionSkeleton(title = "Loading", listMode = state.layoutMode == LayoutMode.LIST) }
+                } else if (state.tracks.isEmpty()) {
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Rounded.SearchOff, null, modifier = Modifier.size(56.dp).alpha(0.35f))
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    "No songs found for \"${state.query}\"",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Try an artist name, a mood, or a cleaner title.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    catalogTrackRows(
+                        tracks = state.tracks,
+                        layoutMode = state.layoutMode,
+                        columns = if (configuration.screenWidthDp > 600) 3 else 2,
+                        downloadedSourceUrls = downloadedSourceUrls,
+                        downloadingTracks = state.downloadingTracks,
+                        onTrackClick = { track ->
+                            catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                                onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                            }
+                        },
+                        onTrackDownload = { selectedTrackForDownload = it },
+                        onTrackLongPress = { track ->
+                            if (hapticEnabled) {
+                                vibrationManager?.vibrateLongClick()
+                                    ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            }
+                            trackForAction = track
+                        }
+                    )
+                }
+
+                if (state.isLoadingMore) {
+                    item { RecommendationSkeleton(compact = true) }
                 }
             }
         }
     }
 }
 
+private fun androidx.compose.foundation.lazy.LazyListScope.catalogTrackRows(
+    tracks: List<CatalogTrack>,
+    layoutMode: LayoutMode,
+    columns: Int,
+    downloadedSourceUrls: Set<String>,
+    downloadingTracks: Map<String, Float>,
+    onTrackClick: (CatalogTrack) -> Unit,
+    onTrackDownload: (CatalogTrack) -> Unit,
+    onTrackLongPress: (CatalogTrack) -> Unit,
+    onTrackMore: (CatalogTrack) -> Unit = onTrackLongPress
+) {
+    if (layoutMode == LayoutMode.LIST || columns == 1) {
+        items(tracks, key = { it.sourceUrl }) { track ->
+            CatalogListCard(
+                track = track,
+                isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+                progress = downloadingTracks[track.id],
+                onClick = { onTrackClick(track) },
+                onDownload = { onTrackDownload(track) },
+                onLongPress = { onTrackLongPress(track) },
+                onMore = { onTrackMore(track) }
+            )
+        }
+        return
+    }
+
+    items(tracks.chunked(columns), key = { row -> row.joinToString(separator = "|") { it.id } }) { rowTracks ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            rowTracks.forEach { track ->
+                CatalogGridCard(
+                    modifier = Modifier.weight(1f),
+                    track = track,
+                    isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+                    progress = downloadingTracks[track.id],
+                    onClick = { onTrackClick(track) },
+                    onDownload = { onTrackDownload(track) },
+                    onLongPress = { onTrackLongPress(track) },
+                    onMore = { onTrackMore(track) }
+                )
+            }
+            repeat(columns - rowTracks.size) {
+                Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
 @Composable
-private fun SectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun CatalogTopActions(
+    layoutMode: LayoutMode,
+    onToggleLayout: () -> Unit,
+    onRefresh: () -> Unit
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 20.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalIconButton(onClick = onRefresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+            }
+            FilledTonalIconButton(onClick = onToggleLayout) {
+                Icon(
+                    imageVector = if (layoutMode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView,
+                    contentDescription = "Toggle layout"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogHeroHeader(
+    state: CatalogUiState,
+    accent: Color,
+    onToggleLayout: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.26f),
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            accent.copy(alpha = 0.10f),
+                            Color.Transparent
+                        )
+                    )
+                )
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Discover",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Black
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (state.query.isBlank()) "Catalog refreshes every time you step back in, so these picks stay lively."
+                        else "Song-first search with quick actions, cleaner results, and faster re-entry.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(
+                    onClick = onToggleLayout,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (state.layoutMode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView,
+                        contentDescription = "Toggle layout"
+                    )
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                MetricChip("Trending", "${state.trending.size} live picks", Icons.AutoMirrored.Rounded.TrendingUp)
+                MetricChip("For you", "${state.justForYou.size} tailored songs", Icons.Rounded.Star)
+                MetricChip("Layout", if (state.layoutMode == LayoutMode.GRID) "Grid cards" else "List flow", Icons.Rounded.Tune)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricChip(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-            shape = CircleShape,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(40.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.padding(8.dp),
-                tint = MaterialTheme.colorScheme.primary
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.width(16.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = (-0.5).sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+    }
+}
+
+@Composable
+private fun FeaturedCarousel(
+    tracks: List<CatalogTrack>,
+    onTrackClick: (CatalogTrack) -> Unit,
+    onLongClick: (CatalogTrack) -> Unit
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(tracks, key = { it.sourceUrl }) { track ->
+            val chipContainer = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
+            val chipContent = MaterialTheme.colorScheme.onSurface
+            Surface(
+                modifier = Modifier
+                    .width(250.dp)
+                    .combinedClickable(onClick = { onTrackClick(track) }, onLongClick = { onLongClick(track) }),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)
+            ) {
+                Box {
+                    AsyncImage(
+                        model = track.thumbnailUrl,
+                        contentDescription = track.title,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1.22f),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.10f),
+                                        Color.Black.copy(alpha = 0.72f)
+                                    )
+                                )
+                            )
+                    )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(18.dp)
+                    ) {
+                        AssistChip(
+                            onClick = { onTrackClick(track) },
+                            label = { Text("Play now") },
+                            leadingIcon = { Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp)) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = chipContainer,
+                                labelColor = chipContent,
+                                leadingIconContentColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            track.title,
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "${track.artist} · ${formatDuration(track.duration)}",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -438,714 +815,274 @@ private fun GenreFilterChips(
     selectedGenre: String?,
     onGenreSelected: (String?) -> Unit
 ) {
-    val genres = listOf("Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Lo-Fi", "Country")
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(horizontal = 0.dp)
-    ) {
+    val genres = listOf(
+        "Pop", "Hip Hop", "R&B", "Afrobeats", "Amapiano", "Electronic", "Rock", "Jazz", "K-Pop", "Lo-fi"
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             FilterChip(
                 selected = selectedGenre == null,
                 onClick = { onGenreSelected(null) },
                 label = { Text("All") },
-                shape = CircleShape
+                leadingIcon = if (selectedGenre == null) {
+                    { Icon(Icons.Rounded.LibraryMusic, null, modifier = Modifier.size(16.dp)) }
+                } else null,
+                colors = FilterChipDefaults.filterChipColors()
             )
         }
         items(genres) { genre ->
             FilterChip(
                 selected = selectedGenre == genre,
                 onClick = { onGenreSelected(if (selectedGenre == genre) null else genre) },
-                label = { Text(genre) },
-                shape = CircleShape
+                label = { Text(genre) }
             )
         }
     }
 }
-
-@Composable
-private fun QuickPicksGrid(
-    tracks: List<CatalogTrack>,
-    localTracks: List<com.frerox.toolz.data.music.MusicTrack>,
-    downloadingTracks: Map<String, Float>,
-    performanceMode: Boolean,
-    onTrackClick: (CatalogTrack) -> Unit,
-    onDownload: (CatalogTrack) -> Unit,
-    onLongClick: (CatalogTrack) -> Unit = {}
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        val rows = tracks.chunked(2)
-        rows.take(3).forEach { rowTracks ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                rowTracks.forEach { track ->
-                    val isDownloaded = remember(localTracks, track) { 
-                        localTracks.any { it.sourceUrl == track.sourceUrl || it.uri == track.sourceUrl } 
-                    }
-                    QuickPickItem(
-                        modifier = Modifier.weight(1f),
-                        track = track,
-                        isDownloaded = isDownloaded,
-                        downloadProgress = downloadingTracks[track.id],
-                        onClick = { onTrackClick(track) },
-                        onDownload = { onDownload(track) },
-                        onLongClick = { onLongClick(track) }
-                    )
-                }
-                if (rowTracks.size == 1) {
-                    Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickPickItem(
-    modifier: Modifier = Modifier,
-    track: CatalogTrack,
-    isDownloaded: Boolean,
-    downloadProgress: Float?,
-    onClick: () -> Unit,
-    onDownload: () -> Unit,
-    onLongClick: () -> Unit = {}
-) {
-    val isDark = LocalIsDarkTheme.current
-    Surface(
-        modifier = modifier
-            .height(72.dp)
-            .bouncyClick(scaleDown = 0.96f, onClick = onClick)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            ),
-        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f) 
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(end = 12.dp)
-        ) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                ),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            
-            if (downloadProgress != null) {
-                CircularProgressIndicator(
-                    progress = { downloadProgress },
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.5.dp,
-                    strokeCap = StrokeCap.Round
-                )
-            } else if (isDownloaded) {
-                Icon(
-                    Icons.Rounded.CheckCircle, 
-                    null, 
-                    tint = MaterialTheme.colorScheme.primary, 
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrendingCarousel(
-    tracks: List<CatalogTrack>,
-    onTrackClick: (CatalogTrack) -> Unit,
-    onLongClick: (CatalogTrack) -> Unit = {}
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp)
-    ) {
-        items(tracks) { track ->
-            Column(
-                modifier = Modifier
-                    .width(160.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .combinedClickable(
-                        onClick = { onTrackClick(track) },
-                        onLongClick = { onLongClick(track) }
-                    )
-            ) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(160.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = track.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Beta Header
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun BetaHeader(performanceMode: Boolean, onHide: () -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition(label = "betaGlow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowAlpha"
-    )
-    val glowScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowScale"
-    )
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Glowing Beta Badge
-            Box(contentAlignment = Alignment.Center) {
-                if (!performanceMode) {
-                    // Glow ring
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .scale(glowScale)
-                            .background(
-                                MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha * 0.15f),
-                                CircleShape
-                            )
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.scale(if (performanceMode) 1f else glowScale * 0.95f)
-                ) {
-                    Text(
-                        text = "BETA",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 1.5.sp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            }
-
-            Spacer(Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Experimental Feature",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "Stream music from the cloud. Results powered by NewPipe.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    lineHeight = 16.sp
-                )
-            }
-
-            IconButton(
-                onClick = onHide,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.Close,
-                    contentDescription = "Hide Beta Card",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                )
-            }
-
-            Icon(
-                Icons.Rounded.Science,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(24.dp)
-                    .padding(start = 4.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            )
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Catalog Search Bar
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun CatalogSearchBar(
     query: String,
-    performanceMode: Boolean,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit
 ) {
-    val borderAlpha by animateFloatAsState(
-        targetValue = if (query.isNotEmpty()) 1f else 0f,
-        animationSpec = tween(250),
-        label = "catalogSearchBorder"
-    )
-
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (performanceMode) 0.5f else 0.3f),
-        shape = RoundedCornerShape(32.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (query.isNotEmpty()) MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha * 0.3f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .animateContentSize()
-    ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text(
-                    "Search the cloud…",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    Icons.Rounded.Cloud,
-                    contentDescription = null,
-                    tint = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.size(20.dp)
-                )
-            },
-            trailingIcon = {
-                AnimatedVisibility(
-                    visible = query.isNotEmpty(),
-                    enter = fadeIn() + scaleIn(initialScale = 0.7f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.7f)
-                ) {
-                    IconButton(onClick = onClear, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            Icons.Rounded.Close,
-                            contentDescription = "Clear",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            },
-            shape = RoundedCornerShape(32.dp),
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent,
-                focusedBorderColor = Color.Transparent,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                focusedTextColor = MaterialTheme.colorScheme.onSurface
-            ),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Catalog Track Card
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun CatalogTrackCard(
-    modifier: Modifier = Modifier,
-    track: CatalogTrack,
-    isGrid: Boolean = false,
-    isDownloaded: Boolean = false,
-    downloadProgress: Float? = null,
-    performanceMode: Boolean,
-    onDownload: () -> Unit,
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit
-) {
-    if (isGrid) {
-        GridTrackCard(
-            track = track,
-            isDownloaded = isDownloaded,
-            downloadProgress = downloadProgress,
-            performanceMode = performanceMode,
-            onDownload = onDownload,
-            onLongClick = onLongClick,
-            onClick = onClick
-        )
-    } else {
-        ListTrackCard(
-            modifier = modifier,
-            track = track,
-            isDownloaded = isDownloaded,
-            downloadProgress = downloadProgress,
-            performanceMode = performanceMode,
-            onDownload = onDownload,
-            onLongClick = onLongClick,
-            onClick = onClick
-        )
-    }
-}
-
-@Composable
-private fun GridTrackCard(
-    track: CatalogTrack,
-    isDownloaded: Boolean,
-    downloadProgress: Float?,
-    performanceMode: Boolean,
-    onDownload: () -> Unit,
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit
-) {
-    val isDark = LocalIsDarkTheme.current
-    val surfaceColor = MaterialTheme.colorScheme.surface
-    val cardColor = remember(isDark, surfaceColor) {
-        if (isDark) surfaceColor.copy(alpha = 0.3f).compositeOver(Color.Black)
-        else surfaceColor.copy(alpha = 0.5f)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .background(cardColor)
-            .padding(4.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-        ) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = track.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-
-            // Glassmorphic Overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.2f),
-                                Color.Black.copy(alpha = 0.8f)
-                            )
-                        )
-                    )
-            )
-
-            // Content Overlay
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Top Row: Status Badges
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!isDownloaded) {
-                        Surface(
-                            modifier = Modifier.size(28.dp),
-                            shape = CircleShape,
-                            color = Color.White.copy(alpha = 0.2f),
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.3f))
-                        ) {
-                            Icon(
-                                Icons.Rounded.Cloud,
-                                contentDescription = null,
-                                modifier = Modifier.padding(6.dp),
-                                tint = Color.White
-                            )
-                        }
-                    } else {
-                        Surface(
-                            modifier = Modifier.size(28.dp),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.3f))
-                        ) {
-                            Icon(
-                                Icons.Rounded.Check,
-                                contentDescription = null,
-                                modifier = Modifier.padding(6.dp),
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-                    
-                    if (track.duration > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color.Black.copy(alpha = 0.5f),
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f))
-                        ) {
-                            Text(
-                                text = formatDuration(track.duration),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Bottom Row: Actions
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    DownloadButton(
-                        isDownloaded = isDownloaded,
-                        progress = downloadProgress,
-                        onDownload = onDownload,
-                        compact = true
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = (-0.2).sp
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = track.artist,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Medium
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-    }
-}
-
-@Composable
-private fun ListTrackCard(
-    modifier: Modifier = Modifier,
-    track: CatalogTrack,
-    isDownloaded: Boolean,
-    downloadProgress: Float?,
-    performanceMode: Boolean,
-    onDownload: () -> Unit,
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit
-) {
-    val isDark = LocalIsDarkTheme.current
-    val cardColor = if (isDark) {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
-    } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-    }
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .bouncyClick(scaleDown = 0.98f, onClick = onClick)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            ),
-        color = cardColor,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)),
-        tonalElevation = 1.dp
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box {
+            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                singleLine = true,
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                decorationBox = { innerTextField ->
+                    if (query.isBlank()) {
+                        Text(
+                            "Search songs, artists, moods...",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    innerTextField()
+                }
+            )
+            AnimatedVisibility(visible = query.isNotBlank()) {
+                IconButton(
+                    onClick = onClear,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    Icon(Icons.Rounded.Close, null)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogGridCard(
+    modifier: Modifier = Modifier,
+    track: CatalogTrack,
+    isDownloaded: Boolean,
+    progress: Float?,
+    onClick: () -> Unit,
+    onDownload: () -> Unit,
+    onLongPress: () -> Unit,
+    onMore: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .aspectRatio(0.74f)
+            .clip(RoundedCornerShape(26.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.weight(1f)) {
                 AsyncImage(
                     model = track.thumbnailUrl,
                     contentDescription = track.title,
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                if (isDownloaded) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(x = 6.dp, y = 6.dp)
-                            .size(24.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                            .border(3.dp, cardColor.compositeOver(MaterialTheme.colorScheme.surface), CircleShape),
-                        contentAlignment = Alignment.Center
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomStart)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f))
+                            )
+                        )
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
+                        DurationBadge(track.duration)
+                        DownloadButton(
+                            isDownloaded = isDownloaded,
+                            progress = progress,
+                            onDownload = onDownload,
+                            compact = true
                         )
                     }
                 }
+                IconButton(
+                    onClick = onMore,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = Color.Black.copy(alpha = 0.28f),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Rounded.MoreHoriz, contentDescription = "More")
+                }
             }
-
-            Spacer(Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
                 Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.3).sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
+                    track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    track.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = track.artist,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    maxLines = 1
-                )
-            }
-
-            if (downloadProgress != null) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(40.dp)) {
-                    CircularProgressIndicator(
-                        progress = { downloadProgress },
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 3.dp,
-                        strokeCap = StrokeCap.Round
-                    )
-                }
-            } else {
-                IconButton(
-                    onClick = onDownload,
-                    modifier = Modifier.size(40.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = if (isDownloaded) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) 
-                                        else Color.Transparent
-                    )
-                ) {
-                    Icon(
-                        if (isDownloaded) Icons.Rounded.CloudDone else Icons.Rounded.CloudDownload,
-                        contentDescription = "Download",
-                        tint = if (isDownloaded) MaterialTheme.colorScheme.primary 
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-            
-            IconButton(
-                onClick = onLongClick,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = "More",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.size(22.dp)
-                )
             }
         }
+    }
+}
+
+@Composable
+private fun CatalogListCard(
+    track: CatalogTrack,
+    isDownloaded: Boolean,
+    progress: Float?,
+    onClick: () -> Unit,
+    onDownload: () -> Unit,
+    onLongPress: () -> Unit,
+    onMore: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.24f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = track.thumbnailUrl,
+                contentDescription = track.title,
+                modifier = Modifier
+                    .size(74.dp)
+                    .clip(RoundedCornerShape(18.dp)),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    track.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(
+                        onClick = onClick,
+                        label = { Text(formatDuration(track.duration)) },
+                        leadingIcon = { Icon(Icons.Rounded.WifiTethering, null, modifier = Modifier.size(14.dp)) },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            labelColor = MaterialTheme.colorScheme.onSurface,
+                            leadingIconContentColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = onMore,
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Icon(Icons.Rounded.MoreHoriz, contentDescription = "More")
+            }
+            Spacer(Modifier.width(4.dp))
+            DownloadButton(
+                isDownloaded = isDownloaded,
+                progress = progress,
+                onDownload = onDownload
+            )
+        }
+    }
+}
+
+@Composable
+private fun DurationBadge(duration: Long) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    ) {
+        Text(
+            text = formatDuration(duration),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -1162,35 +1099,53 @@ private fun DownloadButton(
             progress != null -> 1
             else -> 0
         },
-        label = "DownloadState"
-    ) { targetState ->
-        when (targetState) {
-            2 -> Icon(
-                Icons.Rounded.CheckCircle,
-                contentDescription = "Downloaded",
-                modifier = Modifier.size(if (compact) 24.dp else 28.dp),
-                tint = Color(0xFF4CAF50)
-            )
-            1 -> Box(contentAlignment = Alignment.Center, modifier = Modifier.size(if (compact) 24.dp else 28.dp)) {
+        label = "catalogDownloadButton"
+    ) { state ->
+        when (state) {
+            2 -> Surface(
+                modifier = Modifier.size(if (compact) 34.dp else 40.dp),
+                shape = RoundedCornerShape(if (compact) 12.dp else 14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = "Downloaded",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(if (compact) 16.dp else 18.dp)
+                    )
+                }
+            }
+
+            1 -> Box(
+                modifier = Modifier
+                    .size(if (compact) 34.dp else 40.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(if (compact) 12.dp else 14.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator(
                     progress = { progress ?: 0f },
-                    modifier = Modifier.size(if (compact) 18.dp else 22.dp),
-                    strokeWidth = 2.dp,
-                    color = if (compact) Color.White else MaterialTheme.colorScheme.primary
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.size(if (compact) 24.dp else 28.dp),
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
-            0 -> IconButton(
+
+            else -> IconButton(
                 onClick = onDownload,
-                modifier = Modifier.size(if (compact) 32.dp else 36.dp),
+                modifier = Modifier.size(if (compact) 34.dp else 40.dp),
                 colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = if (compact) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.primary
                 )
             ) {
                 Icon(
                     Icons.Rounded.FileDownload,
                     contentDescription = "Download",
-                    modifier = Modifier.size(if (compact) 18.dp else 20.dp),
-                    tint = if (compact) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    modifier = Modifier.size(if (compact) 18.dp else 20.dp)
                 )
             }
         }
@@ -1198,166 +1153,273 @@ private fun DownloadButton(
 }
 
 @Composable
-private fun ShimmerTrackCard(isGrid: Boolean) {
-    if (isGrid) {
-        Column(modifier = Modifier.padding(4.dp)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .shimmerEffect()
-            )
-            Spacer(Modifier.height(8.dp))
-            Box(modifier = Modifier.fillMaxWidth(0.7f).height(14.dp).clip(CircleShape).shimmerEffect())
-            Spacer(Modifier.height(4.dp))
-            Box(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp).clip(CircleShape).shimmerEffect())
-        }
-    } else {
+private fun ErrorCard(message: String, onRetry: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.82f)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).shimmerEffect())
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Box(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp).clip(CircleShape).shimmerEffect())
-                Spacer(Modifier.height(8.dp))
-                Box(modifier = Modifier.fillMaxWidth(0.3f).height(12.dp).clip(CircleShape).shimmerEffect())
-            }
+            Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                message,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            TextButton(onClick = onRetry) { Text("Retry") }
         }
     }
 }
-
-private fun Modifier.shimmerEffect(): Modifier = this.drawBehind {
-    // Basic placeholder shim effect if not using a library
-    drawRect(Color.Gray.copy(alpha = 0.1f))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Error State
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CatalogErrorState(
-    message: String,
-    onRetry: () -> Unit
-) {
-    val isOffline = message.contains("internet", ignoreCase = true) ||
-            message.contains("network", ignoreCase = true) ||
-            message.contains("connect", ignoreCase = true)
-
-    val pulse = rememberInfiniteTransition(label = "errorPulse")
-    val scale by pulse.animateFloat(
-        1f, 1.06f,
-        infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "errorScale"
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 40.dp),
-        contentAlignment = Alignment.Center
+private fun HeroSkeleton() {
+    val brush = shimmerBrush()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Box(
-                    modifier = Modifier
-                        .size(100.dp)
-                        .scale(scale)
-                        .background(
-                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f),
-                            CircleShape
-                        )
-                )
-                Icon(
-                    if (isOffline) Icons.Rounded.WifiOff else Icons.Rounded.ErrorOutline,
-                    contentDescription = null,
-                    modifier = Modifier.size(52.dp),
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Text(
-                text = if (isOffline) "No Internet" else "Oops!",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.45f)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(brush)
             )
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = if (isOffline) "Connect to the internet to browse the catalog."
-                else message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(brush)
             )
-
-            Spacer(Modifier.height(24.dp))
-
-            FilledTonalButton(
-                onClick = onRetry,
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Retry", fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(brush)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(brush)
+                    )
+                }
             }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. Onboarding Dialog
-// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun CatalogSectionSkeleton(title: String, listMode: Boolean) {
+    val brush = shimmerBrush()
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        if (listMode) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(94.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(brush)
+                )
+            }
+        } else {
+            repeat(2) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    repeat(2) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(0.8f)
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(brush)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecommendationSkeleton(compact: Boolean = false) {
+    val brush = shimmerBrush()
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        repeat(if (compact) 2 else 4) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(brush)
+            )
+        }
+    }
+}
+
+@Composable
+private fun shimmerBrush(): Brush {
+    val transition = rememberInfiniteTransition(label = "catalogShimmer")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1_000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_350, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "catalogShimmerShift"
+    )
+
+    return Brush.linearGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f),
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
+        ),
+        start = Offset(shift - 320f, shift - 320f),
+        end = Offset(shift, shift)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogTrackActionsSheet(
+    track: CatalogTrack,
+    isDownloaded: Boolean,
+    onDismiss: () -> Unit,
+    onPlayNow: () -> Unit,
+    onPlayNext: () -> Unit,
+    onDownload: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onOpenKaraoke: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 28.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(76.dp)
+                        .clip(RoundedCornerShape(22.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(4.dp))
+                    Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = { Text(formatDuration(track.duration)) }
+                        )
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = { Text(if (isDownloaded) "Downloaded" else "Online") },
+                            leadingIcon = {
+                                Icon(
+                                    if (isDownloaded) Icons.Rounded.Check else Icons.Rounded.GraphicEq,
+                                    null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            CatalogActionRow("Play now", Icons.Rounded.PlayArrow, onPlayNow)
+            CatalogActionRow("Play next", Icons.AutoMirrored.Rounded.QueueMusic, onPlayNext)
+            CatalogActionRow(if (isDownloaded) "Download saved" else "Download", Icons.Rounded.Download, onDownload, enabled = !isDownloaded)
+            CatalogActionRow("Add to playlist", Icons.AutoMirrored.Rounded.PlaylistAdd, onAddToPlaylist)
+            CatalogActionRow("Play in karaoke", Icons.Rounded.MicExternalOn, onOpenKaraoke)
+        }
+    }
+}
+
+@Composable
+private fun CatalogActionRow(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (enabled) 0.95f else 0.55f),
+        onClick = if (enabled) onClick else { {} }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            Spacer(Modifier.width(14.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
 
 @Composable
 fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text("GOT IT", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
-            }
-        },
         title = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Box(contentAlignment = Alignment.Center) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                    val alpha by infiniteTransition.animateFloat(
-                        initialValue = 0.3f, targetValue = 0.8f,
-                        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse), label = "alpha"
-                    )
-                    Box(Modifier.size(80.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape))
-                    Icon(
-                        Icons.Rounded.Science,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                Surface(
+                    modifier = Modifier.size(78.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Science, null, modifier = Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Welcome to Catalog Beta",
+                    "Welcome to Catalog",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
@@ -1366,20 +1428,27 @@ fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
         },
         text = {
             Text(
-                "Experience the future of Toolz. Stream and download millions of tracks for free directly. And it only requires an active internet connection.",
+                "Search, stream, and download online songs with a cleaner Discover experience. Long press any track for quicker actions.",
                 textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         },
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surface
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Start exploring", fontWeight = FontWeight.Bold)
+            }
+        },
+        shape = RoundedCornerShape(32.dp)
     )
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. Quality Selection Bottom Sheet
-// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1394,16 +1463,22 @@ fun DownloadOptionsBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        dragHandle = { BottomSheetDefaults.DragHandle(width = 48.dp, height = 4.dp) },
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
                 .navigationBarsPadding()
         ) {
-            Text("Download Quality", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text("Download", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Choose how the track should be saved for offline playback.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(24.dp))
 
             Text("Format", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -1428,54 +1503,56 @@ fun DownloadOptionsBottomSheet(
                 listOf("HIGH", "MEDIUM", "LOW").forEach { quality ->
                     Surface(
                         onClick = { onQualitySelected(quality) },
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (currentQuality == quality) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                        border = if (currentQuality == quality) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (currentQuality == quality) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(selected = currentQuality == quality, onClick = { onQualitySelected(quality) })
+                            RadioButton(selected = currentQuality == quality, onClick = null)
                             Spacer(Modifier.width(12.dp))
-                            Text(quality, fontWeight = FontWeight.Bold)
+                            Column {
+                                Text(quality, fontWeight = FontWeight.Bold)
+                                Text(
+                                    when (quality) {
+                                        "HIGH" -> "Largest file, best detail"
+                                        "MEDIUM" -> "Balanced quality and size"
+                                        else -> "Smaller file, lighter download"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            val isGlobalSettings = onStartDownload == {} // Hacky but works for now as I passed it from UI
+            Spacer(Modifier.height(28.dp))
 
-            if (isGlobalSettings) {
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Settings are saved automatically.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+            Button(
+                onClick = onStartDownload,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
-            } else {
-                Spacer(Modifier.height(32.dp))
-
-                Button(
-                    onClick = onStartDownload,
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(28.dp)
-                ) {
-                    Icon(Icons.Rounded.Download, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Start Download", fontWeight = FontWeight.ExtraBold)
-                }
+            ) {
+                Icon(Icons.Rounded.Download, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Start download", fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Spinning Download Popup
-// ─────────────────────────────────────────────────────────────────────────────
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpinningDownloadPopup(
     track: CatalogTrack,
@@ -1483,127 +1560,80 @@ fun SpinningDownloadPopup(
     onCancel: () -> Unit,
     onHide: () -> Unit
 ) {
-    val rotation = rememberInfiniteTransition(label = "rotation")
+    val rotation = rememberInfiniteTransition(label = "catalogDownloadRotation")
     val angle by rotation.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(3000, easing = LinearEasing)), label = "angle"
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(2_800, easing = LinearEasing), RepeatMode.Restart),
+        label = "catalogDownloadAngle"
     )
-
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
-        label = "progress"
+        label = "catalogDownloadProgress"
     )
 
     AlertDialog(
         onDismissRequest = onHide,
         confirmButton = {},
-        dismissButton = {},
         title = null,
         text = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
                         progress = { animatedProgress },
-                        modifier = Modifier.size(180.dp),
+                        modifier = Modifier.size(164.dp),
                         strokeWidth = 10.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                         strokeCap = StrokeCap.Round
                     )
-                    
                     AsyncImage(
                         model = track.thumbnailUrl,
                         contentDescription = null,
                         modifier = Modifier
-                            .size(150.dp)
+                            .size(128.dp)
                             .clip(CircleShape)
                             .graphicsLayer { rotationZ = angle },
                         contentScale = ContentScale.Crop
                     )
-                    
-                    // Progress percentage overlay
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                        shape = CircleShape,
-                        modifier = Modifier.align(Alignment.BottomCenter).offset(y = 12.dp)
-                    ) {
-                        Text(
-                            text = "${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
-                
-                Spacer(Modifier.height(32.dp))
-                
-                Text(
-                    track.title, 
-                    style = MaterialTheme.typography.titleLarge, 
-                    fontWeight = FontWeight.Bold, 
-                    textAlign = TextAlign.Center, 
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    track.artist, 
-                    style = MaterialTheme.typography.bodyMedium, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                
-                Spacer(Modifier.height(32.dp))
-                
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Spacer(Modifier.height(20.dp))
+                Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(6.dp))
+                Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(10.dp))
+                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(22.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = onCancel,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(18.dp)
                     ) {
-                        Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
                         Text("Cancel")
                     }
                     Button(
                         onClick = onHide,
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                        shape = RoundedCornerShape(18.dp)
                     ) {
-                        Icon(Icons.Rounded.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
                         Text("Hide")
                     }
                 }
             }
         },
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 6.dp
+        shape = RoundedCornerShape(30.dp)
     )
 }
 
 private fun formatDuration(millis: Long): String {
-    val totalSeconds = millis / 1000
+    val totalSeconds = millis / 1_000L
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return if (minutes >= 60) {
         val hours = minutes / 60
         val remainingMinutes = minutes % 60
-        String.format("%d:%02d:%02d", hours, remainingMinutes, seconds)
+        String.format(Locale.getDefault(), "%d:%02d:%02d", hours, remainingMinutes, seconds)
     } else {
-        String.format("%d:%02d", minutes, seconds)
+        String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
     }
 }
