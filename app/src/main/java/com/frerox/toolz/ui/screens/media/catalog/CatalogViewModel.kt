@@ -18,8 +18,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Calendar
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +36,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Page
 
 enum class CatalogMode { TRENDING, SEARCH }
@@ -95,6 +100,8 @@ class CatalogViewModel @Inject constructor(
     private var recommendationCycle = 0
     private var storefrontRefreshCount = 0
     private var currentContextTrack: MusicTrack? = null
+    private var lastRefreshTime = 0L
+    private val REFRESH_THRESHOLD = 30_000L // 30 seconds
 
     init {
         WorkManager.getInstance(context).getWorkInfosByTagFlow("music_download")
@@ -126,9 +133,10 @@ class CatalogViewModel @Inject constructor(
         loadStorefront()
     }
 
-    fun refreshOnOpen(currentTrack: MusicTrack?) {
+    fun refreshOnOpen(currentTrack: MusicTrack?, force: Boolean = false) {
         currentContextTrack = currentTrack
-        if (_uiState.value.query.isBlank()) {
+        val now = System.currentTimeMillis()
+        if (_uiState.value.query.isBlank() && (force || now - lastRefreshTime > REFRESH_THRESHOLD)) {
             loadStorefront(currentTrack)
         }
     }
@@ -137,6 +145,7 @@ class CatalogViewModel @Inject constructor(
         currentContextTrack = currentTrack
         currentSearchJob?.cancel()
         currentSearchJob = viewModelScope.launch {
+            lastRefreshTime = System.currentTimeMillis()
             storefrontRefreshCount++
             _uiState.update {
                 it.copy(
@@ -154,18 +163,23 @@ class CatalogViewModel @Inject constructor(
             }
 
             try {
-                val quickPicks = fetchQuickPicks(currentTrack)
-                val trending = fetchTrendingTracks()
+                coroutineScope {
+                    val quickPicksDeferred = async { fetchQuickPicks(currentTrack) }
+                    val trendingDeferred = async { fetchTrendingTracks() }
 
-                _uiState.update {
-                    it.copy(
-                        quickPicks = quickPicks,
-                        trending = trending,
-                        isLoading = false
-                    )
+                    val quickPicks = quickPicksDeferred.await()
+                    val trending = trendingDeferred.await()
+
+                    _uiState.update {
+                        it.copy(
+                            quickPicks = quickPicks,
+                            trending = trending,
+                            isLoading = false
+                        )
+                    }
+
+                    loadJustForYou(reset = true, currentTrack = currentTrack)
                 }
-
-                loadJustForYou(reset = true, currentTrack = currentTrack)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -292,8 +306,14 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isResolving = true) }
             try {
+                // Pre-calculate quality to avoid reading from flow inside the heavy block
                 val quality = catalogStreamQuality.value
-                val streamUrl = repository.resolveAudioStream(track.sourceUrl, quality)
+                
+                // Use a separate scope or ensuring it's on IO for heavy network/resolution task
+                val streamUrl = withContext(Dispatchers.IO) {
+                    repository.resolveAudioStream(track.sourceUrl, quality)
+                }
+                
                 if (streamUrl != null) {
                     onStreamResolved(
                         Uri.parse(streamUrl),
@@ -303,9 +323,10 @@ class CatalogViewModel @Inject constructor(
                         track.sourceUrl
                     )
                 } else {
-                    _uiState.update { it.copy(error = "Could not resolve audio stream") }
+                    _uiState.update { it.copy(error = "Could not resolve audio stream. Check your connection.") }
                 }
             } catch (e: CancellationException) {
+                // Normal cancellation, don't show error
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.localizedMessage ?: "Stream resolution failed") }
@@ -414,7 +435,7 @@ class CatalogViewModel @Inject constructor(
 
         return rotateTracks(
             candidates = collectDistinctTracks(queries, limit = 40),
-            desired = 8,
+            desired = 9,
             seedOffset = storefrontRefreshCount * 5
         )
     }
@@ -482,18 +503,29 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    private suspend fun collectDistinctTracks(queries: List<String>, limit: Int): List<CatalogTrack> {
+    private suspend fun collectDistinctTracks(queries: List<String>, limit: Int): List<CatalogTrack> = coroutineScope {
+        val jobs = queries.distinct().take(12).map { query ->
+            async {
+                try {
+                    repository.search(query).first
+                } catch (e: Exception) {
+                    emptyList<CatalogTrack>()
+                }
+            }
+        }
+
+        val results = jobs.awaitAll()
         val collected = LinkedHashMap<String, CatalogTrack>()
-        for (query in queries.distinct()) {
-            val (tracks, _) = repository.search(query)
+        
+        results.forEach { tracks ->
             sanitizeTracks(tracks).forEach { track ->
                 if (collected.size < limit) {
                     collected.putIfAbsent(track.sourceUrl, track)
                 }
             }
-            if (collected.size >= limit) break
         }
-        return collected.values.toList()
+        
+        collected.values.toList()
     }
 
     private fun sanitizeTracks(tracks: List<CatalogTrack>): List<CatalogTrack> {
@@ -510,82 +542,116 @@ class CatalogViewModel @Inject constructor(
 
     private suspend fun buildRecommendationQueries(currentTrack: MusicTrack?, cycle: Int): List<String> {
         val now = System.currentTimeMillis()
-        val listenedSeeds = musicRepository.allTracks.first()
-            .filter { it.playCount > 0 || it.lastPlayed > 0L || it.isFavorite || it.uri == currentTrack?.uri }
+        val allTracks = musicRepository.allTracks.first()
+        
+        // --- 1. SEED SELECTION (Weighted Scoring) ---
+        val scoredSeeds = allTracks
+            .filter { it.playCount > 0 || it.lastPlayed > 0L || it.isFavorite || it.uri == currentTrack?.uri || it.album == "Toolz Downloads" }
             .sortedByDescending { track ->
                 val daysSinceLastPlay = if (track.lastPlayed > 0L) {
                     ((now - track.lastPlayed).coerceAtLeast(0L) / 86_400_000L).coerceAtMost(400L)
                 } else 400L
-                val recencyBoost = 400L - daysSinceLastPlay
-                val favoriteBoost = if (track.isFavorite) 600L else 0L
-                val currentBoost = if (track.uri == currentTrack?.uri) 1_200L else 0L
-                (track.playCount * 100L) + recencyBoost + favoriteBoost + currentBoost
+                
+                // Recency: 30% weight
+                val recencyScore = (400L - daysSinceLastPlay) * 1.5f
+                
+                // Frequency/Love: 50% weight (includes downloads)
+                val isDownloaded = track.album == "Toolz Downloads" || track.path != null
+                val frequencyScore = (track.playCount * 250L) + (if (track.isFavorite) 2000L else 0L) + (if (isDownloaded) 3000L else 0L)
+                
+                // Context: 15% weight
+                val currentBoost = if (track.uri == currentTrack?.uri) 4000L else 0L
+                
+                frequencyScore + recencyScore + currentBoost
             }
             .distinctBy { "${cleanSeedTitle(it.title)}|${it.artist.orEmpty().lowercase()}" }
-            .take(36)
 
-        val artists = listenedSeeds
-            .mapNotNull { track ->
-                track.artist?.takeIf { artist -> artist.isNotBlank() && artist != "Unknown Artist" }
-            }
-            .distinct()
-            .take(18)
+        val coreSeeds = scoredSeeds.take(20)
+        val recentSeeds = scoredSeeds.sortedByDescending { it.lastPlayed }.take(10)
 
-        val descriptors = listOf(
-            "songs like",
-            "similar songs",
-            "music mix",
-            "recommended songs",
-            "discover playlist"
+        // --- 2. GENRE EXTRACTION ---
+        val genres = coreSeeds.flatMap { track ->
+            listOfNotNull(track.album, track.artist).filter { it.length > 3 && it != "Unknown Artist" }
+        }.groupingBy { it }.eachCount().toList().sortedByDescending { it.second }.take(8).map { it.first }
+
+        val explorers = listOf(
+            "Indie discovery", "Experimental jazz", "Global underground hits",
+            "Neo soul discovery", "Ambient electronic exploration", "Synthwave essentials",
+            "Acoustic covers", "Lo-fi beats for focus", "Up-and-coming artists",
+            "Alternative rock gems", "Modern classical masterpieces",
+            "Chill lofi hip hop", "Energetic workout mix", "Phonk workout hits",
+            "Deep house underground", "Classical piano for studying",
+            "80s pop hits", "90s grunge essentials", "Reggaeton viral hits"
         )
 
+        // --- 3. QUERY GENERATION ---
         val queries = buildList {
-            listenedSeeds.forEachIndexed { index, track ->
+            // Priority: Favorites & Downloads (Reduced dominance for "messy" mix)
+            coreSeeds.take(8).forEach { track ->
                 val title = cleanSeedTitle(track.title)
                 val artist = track.artist.orEmpty().trim()
-                val descriptor = descriptors[(index + cycle) % descriptors.size]
-
-                if (title.isNotBlank()) {
-                    add("$title $artist $descriptor".trim())
-                    add("$title similar songs official audio")
+                if (title.isNotBlank() && artist.isNotBlank()) {
+                    add("$title $artist") // Direct match
+                    add("songs like $title $artist") // Similarity
                 }
+            }
+
+            // Recency: What they are listening to NOW
+            recentSeeds.take(6).forEach { track ->
+                val artist = track.artist.orEmpty().trim()
                 if (artist.isNotBlank() && artist != "Unknown Artist") {
-                    add("$artist radio")
-                    add("$artist related artists mix")
+                    add("$artist radio mix")
+                    add("similar to $artist music")
                 }
             }
 
-            listenedSeeds.windowed(size = 2, step = 2, partialWindows = false).take(10).forEach { pair ->
-                val firstTitle = cleanSeedTitle(pair[0].title)
-                val secondTitle = cleanSeedTitle(pair[1].title)
-                if (firstTitle.isNotBlank() && secondTitle.isNotBlank()) {
-                    add("$firstTitle $secondTitle similar songs")
-                }
-
-                val firstArtist = pair[0].artist.orEmpty().trim()
-                val secondArtist = pair[1].artist.orEmpty().trim()
-                if (firstArtist.isNotBlank() && secondArtist.isNotBlank() && firstArtist != secondArtist) {
-                    add("$firstArtist $secondArtist music mix")
-                }
+            // Genre-Based Discovery (Neighboring)
+            genres.forEach { genre ->
+                add("best of $genre")
+                add("modern $genre sounds")
+                if (cycle % 2 == 0) add("alternative $genre mix")
             }
 
-            artists.chunked(3).take(6).forEach { group ->
-                if (group.size >= 2) add("${group.joinToString(" ")} similar songs")
+            // --- 4. THE "MESSY MIX" (More Discovery/Randomness) ---
+            repeat(4) { i ->
+                add(explorers[(cycle + i) % explorers.size])
             }
-
-            add("discover new music official audio")
-            add("fresh songs official audio")
+            
+            add("fresh new music weekly")
+            add("global viral hits")
+            add("music for exploration")
+            
+            if (cycle % 3 == 0) {
+                add("new genres to explore")
+                add("best of world music")
+                add("underrated music gems")
+            }
         }
 
         return queries
             .map { it.replace(Regex("\\s+"), " ").trim() }
             .filter { it.isNotBlank() }
             .distinct()
+            .shuffled()
             .take(48)
     }
 
     private fun buildRecommendationTitle(currentTrack: MusicTrack?): String {
-        return if (currentTrack != null) "Just for you · Based on your listening" else "Just for you"
+         val topArtist = currentTrack?.artist?.takeIf { it != "Unknown Artist" }
+        val topAlbum = currentTrack?.album?.takeIf { it != "Toolz Downloads" }
+        
+        return when {
+            topArtist != null && Math.random() > 0.5 -> "Inspired by $topArtist"
+            topAlbum != null -> "More from $topAlbum"
+            topArtist != null -> "Deep dive into $topArtist"
+            else -> listOf(
+                "Just for you",
+                "Your daily mix",
+                "Discover new sounds",
+                "Fresh picks for you",
+                "Explore more styles"
+            ).random()
+        }
     }
 
     private fun cleanSeedTitle(title: String): String {
