@@ -543,17 +543,46 @@ class MusicPlayerViewModel @Inject constructor(
                 controller = controllerFuture?.get()
                 controller?.addListener(playerListener)
                 val dur = controller?.duration?.coerceAtLeast(0L) ?: 0L
+                val currentMediaItem = controller?.currentMediaItem
+                val mediaId = currentMediaItem?.mediaId ?: currentMediaItem?.requestMetadata?.mediaUri?.toString()
+                val metadata = currentMediaItem?.mediaMetadata
+                val sourceUrl = metadata?.extras?.getString("source_url")
+
                 _uiState.update {
                     it.copy(
                         isPlaying    = controller?.isPlaying ?: false,
                         isShuffleOn  = controller?.shuffleModeEnabled ?: false,
                         repeatMode   = controller?.repeatMode ?: Player.REPEAT_MODE_OFF,
-                        currentTrack = _uiState.value.tracks.find { t ->
-                            t.uri == controller?.currentMediaItem?.mediaId
-                        } ?: it.currentTrack,
                         duration     = dur
                     )
                 }
+
+                // Properly restore current track even if it's an online catalog track
+                if (mediaId != null) {
+                    viewModelScope.launch {
+                        var track = repository.getTrackByUri(mediaId)
+                        if (track == null && sourceUrl != null) {
+                            track = repository.getTrackBySourceUrl(sourceUrl)
+                        }
+                        
+                        // If still null, it might be an ephemeral track not yet persisted or a catalog track
+                        if (track == null && metadata != null) {
+                            track = MusicTrack(
+                                uri = mediaId,
+                                title = metadata.title?.toString() ?: "External Audio",
+                                artist = metadata.artist?.toString() ?: "Unknown",
+                                album = metadata.albumTitle?.toString() ?: "Unknown",
+                                duration = dur,
+                                thumbnailUri = metadata.artworkUri?.toString() ?: "",
+                                sourceUrl = sourceUrl,
+                                lastPlayed = System.currentTimeMillis()
+                            )
+                        }
+
+                        _uiState.update { it.copy(currentTrack = track) }
+                    }
+                }
+
                 _duration.value = dur
                 updateQueue()
                 pendingAction?.invoke()

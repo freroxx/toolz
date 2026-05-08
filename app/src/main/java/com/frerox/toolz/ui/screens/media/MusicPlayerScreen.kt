@@ -222,7 +222,7 @@ fun MusicPlayerScreen(
     LaunchedEffect(playbackPosition) {
         aiViewModel.updateProgress(playbackPosition)
     }
-    LaunchedEffect(currentTabLabel, state.currentTrack?.uri) {
+    LaunchedEffect(currentTabLabel) {
         if (currentTabLabel == "Catalog") {
             catalogViewModel.refreshOnOpen(state.currentTrack)
         }
@@ -4257,14 +4257,14 @@ fun MiniPlayer(
                         else -> RoundedCornerShape(16.dp)
                     }
 
-                    // Consolidated Thumbnail with Pulse and Download Indicator
+                    // Consolidated Thumbnail with Pulse and Download/Resolving Indicator
                     val infiniteTransitionPulse = rememberInfiniteTransition(label = "playerPulse")
-                    val pulseScalePlayer by if (downloadCount > 0 && !performanceMode) {
+                    val pulseScalePlayer by if ((downloadCount > 0 || isResolving) && !performanceMode) {
                         infiniteTransitionPulse.animateFloat(
                             initialValue = 1f,
-                            targetValue = 1.04f,
+                            targetValue = 1.05f,
                             animationSpec = infiniteRepeatable(
-                                animation = tween(1200, easing = FastOutSlowInEasing),
+                                animation = tween(1000, easing = FastOutSlowInEasing),
                                 repeatMode = RepeatMode.Reverse
                             ),
                             label = "playerPulseScale"
@@ -4280,7 +4280,7 @@ fun MiniPlayer(
                             .shadow(if (performanceMode) 2.dp else 6.dp, finalArtShape)
                             .clip(finalArtShape)
                             .then(
-                                if (downloadCount > 0) Modifier.border(2.dp, dynamicColors.primary.copy(alpha = 0.6f), finalArtShape)
+                                if (downloadCount > 0 || isResolving) Modifier.border(2.dp, dynamicColors.primary.copy(alpha = 0.6f), finalArtShape)
                                 else Modifier
                             )
                     ) {
@@ -4313,7 +4313,23 @@ fun MiniPlayer(
                             }
                         }
 
-                        if (downloadCount > 0) {
+                        if (isResolving && !performanceMode) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.45f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = Color.White,
+                                    strokeWidth = 3.dp,
+                                    strokeCap = StrokeCap.Round
+                                )
+                            }
+                        }
+
+                        if (downloadCount > 0 && !isResolving) {
                             val infiniteTransitionDownload = rememberInfiniteTransition(label = "download")
                             val pulseScale by if (performanceMode) {
                                 remember { mutableFloatStateOf(1f) }
