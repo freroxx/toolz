@@ -26,6 +26,9 @@ interface MusicDao {
     @Delete
     suspend fun deleteTrack(track: MusicTrack)
 
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    suspend fun getPlaylistById(id: Int): Playlist?
+
     @Query("SELECT * FROM playlists")
     fun getAllPlaylists(): Flow<List<Playlist>>
 
@@ -58,12 +61,6 @@ interface MusicDao {
 
     @Query("SELECT * FROM music_tracks")
     suspend fun getAllTracksSync(): List<MusicTrack>
-
-    @Query("SELECT * FROM playlists")
-    suspend fun getAllPlaylistsSync(): List<Playlist>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTracks(tracks: List<MusicTrack>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylists(playlists: List<Playlist>)

@@ -144,6 +144,7 @@ fun DashboardScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
     val aiSuggestedRoutes by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
+    val stats by viewModel.dashboardStats.collectAsStateWithLifecycle()
 
     val updateVersion by viewModel.updateAvailableVersion.collectAsStateWithLifecycle(initialValue = null)
     
@@ -201,7 +202,8 @@ fun DashboardScreen(
         notes = notes,
         categories = categories,
         offlineState = offlineState,
-        onToggleOfflineMode = viewModel::toggleOfflineMode
+        onToggleOfflineMode = viewModel::toggleOfflineMode,
+        stats = stats
     )
 }
 
@@ -248,7 +250,8 @@ fun DashboardContent(
     notes: List<Note>,
     categories: List<ToolCategory>,
     offlineState: OfflineState,
-    onToggleOfflineMode: (Boolean) -> Unit
+    onToggleOfflineMode: (Boolean) -> Unit,
+    stats: DashboardStats
 ) {
     var showOfflineModal by remember { mutableStateOf(false) }
     var selectedToolForDetail by remember { mutableStateOf<ToolItem?>(null) }
@@ -300,6 +303,13 @@ fun DashboardContent(
                             offlineState = offlineState,
                             onOfflinePillClick = { showOfflineModal = true }
                         )
+                    }
+                }
+
+                // Quick Stats
+                item {
+                    Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
+                        QuickStatsRow(stats = stats, onNavigate = onNavigate)
                     }
                 }
 
@@ -696,12 +706,11 @@ fun SmartSearchBar(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Search field
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(32.dp),
             color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
             border = BorderStroke(
                 width = 1.dp,
@@ -1008,7 +1017,7 @@ fun DashboardHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = 16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1018,18 +1027,22 @@ fun DashboardHeader(
             Column {
                 Text(
                     text = greeting,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black
+                    ),
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 0.5.sp
+                    letterSpacing = (-0.5).sp
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = if (userName.isBlank()) "Explorer" else userName,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    letterSpacing = (-1.2).sp
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = (-2).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
@@ -1039,7 +1052,7 @@ fun DashboardHeader(
                         vibrationManager?.vibrateClick()
                         onOfflinePillClick()
                     },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.bouncyClick {
                         vibrationManager?.vibrateClick()
@@ -1057,23 +1070,111 @@ fun DashboardHeader(
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = "Offline Mode",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = dateText,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+fun QuickStatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        StatCard(
+            modifier = Modifier.weight(1f),
+            title = "Battery",
+            value = "${stats.batteryLevel}%",
+            subValue = if (stats.isBatteryCharging) "Charging" else "In Use",
+            icon = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryFull,
+            color = if (stats.batteryLevel < 20) Color(0xFFEF5350) else Color(0xFF66BB6A),
+            progress = stats.batteryLevel / 100f,
+            onClick = { onNavigate(Screen.BatteryInfo.route) }
+        )
+        StatCard(
+            modifier = Modifier.weight(1f),
+            title = "Storage",
+            value = "${(stats.storageAvailableGb).toInt()}GB",
+            subValue = "Free Space",
+            icon = Icons.Rounded.Storage,
+            color = MaterialTheme.colorScheme.primary,
+            progress = stats.storageUsedPercentage,
+            onClick = { onNavigate(Screen.DeviceInfo.route) }
+        )
+    }
+}
+
+@Composable
+fun StatCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    value: String,
+    subValue: String,
+    icon: ImageVector,
+    color: Color,
+    progress: Float,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(110.dp),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = color.copy(alpha = 0.15f),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            Column {
+                Text(
+                    text = subValue,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    color = color,
+                    trackColor = color.copy(alpha = 0.1f)
+                )
+            }
+        }
     }
 }
 
@@ -1138,7 +1239,7 @@ fun QuickNotesSection(
                     modifier = Modifier
                         .size(width = 110.dp, height = 140.dp)
                         .bouncyClick { onNavigate(Screen.Notepad.route) },
-                    shape = RoundedCornerShape(30.dp),
+                    shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
                     border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 ) {
@@ -1191,9 +1292,9 @@ fun QuickNoteItem(note: Note, onNavigate: (String) -> Unit) {
             .bouncyClick { onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}") },
         shape = when {
             note.attachedAudioUri != null -> RoundedCornerShape(32.dp, 24.dp, 32.dp, 24.dp)
-            note.attachedImageUri != null -> RoundedCornerShape(30.dp, 18.dp, 30.dp, 18.dp)
-            note.attachedPdfUri != null -> RoundedCornerShape(24.dp)
-            else -> RoundedCornerShape(30.dp)
+            note.attachedImageUri != null -> RoundedCornerShape(32.dp, 18.dp, 32.dp, 18.dp)
+            note.attachedPdfUri != null -> RoundedCornerShape(32.dp)
+            else -> RoundedCornerShape(32.dp)
         },
         colors = CardDefaults.cardColors(
             containerColor = containerColor
@@ -1317,7 +1418,7 @@ fun PinnedToolItem(tool: ToolItem, onTogglePin: (String) -> Unit, onNavigate: (S
             .bouncyClick(
                 onLongClick = { onTogglePin(tool.route) }
             ) { onNavigate(tool.route) },
-        shape = RoundedCornerShape(30.dp),
+        shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(
             containerColor = tool.color.copy(alpha = 0.15f)
         ),
@@ -1361,7 +1462,7 @@ fun RecentToolCard(tool: ToolItem, onNavigate: (String) -> Unit) {
             .width(105.dp)
             .height(105.dp)
             .bouncyClick { onNavigate(tool.route) },
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(32.dp),
         color = tool.color.copy(alpha = 0.1f),
         border = BorderStroke(1.dp, tool.color.copy(alpha = 0.2f)),
         tonalElevation = 2.dp
@@ -1512,7 +1613,7 @@ fun ToolListItem(
                     onLongClick()
                 }
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
         ),
@@ -1526,7 +1627,7 @@ fun ToolListItem(
         ) {
             Surface(
                 modifier = Modifier.size(48.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = item.color.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -1590,7 +1691,7 @@ fun ToolGridItem(
                     onLongClick()
                 }
             ),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
         ),
@@ -1612,7 +1713,7 @@ fun ToolGridItem(
             ) {
                 Surface(
                     modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(15.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = item.color.copy(alpha = 0.15f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -1836,7 +1937,7 @@ fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(20.dp),
             color = tip.color.copy(alpha = 0.15f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1908,7 +2009,7 @@ fun MusicPillContent(state: MusicUiState, viewModel: MusicPlayerViewModel, onNav
         Box(contentAlignment = Alignment.Center) {
             val artShape = when (state.artShape) {
                 "CIRCLE" -> CircleShape
-                else -> RoundedCornerShape(18.dp)
+                else -> RoundedCornerShape(20.dp)
             }
             AsyncImage(
                 model = state.currentTrack?.thumbnailUri,
@@ -1987,7 +2088,7 @@ fun TimerPillContent(state: com.frerox.toolz.ui.screens.time.TimerState, viewMod
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2050,7 +2151,7 @@ fun StopwatchPillContent(state: com.frerox.toolz.ui.screens.time.StopwatchState,
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2102,7 +2203,7 @@ fun PomodoroPillContent(state: com.frerox.toolz.ui.screens.time.PomodoroState, v
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2158,7 +2259,7 @@ fun StepsPillContent(state: StepState, viewModel: StepCounterViewModel, onNaviga
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2219,7 +2320,7 @@ fun RecorderPillContent(state: RecordingState, viewModel: VoiceRecorderViewModel
         Box(
             modifier = Modifier
                 .size(52.dp)
-                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(18.dp)),
+                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(24.dp)),
             contentAlignment = Alignment.Center
         ) {
             val infiniteTransition = rememberInfiniteTransition(label = "recording")
@@ -2275,7 +2376,7 @@ fun TodoPillContent(task: com.frerox.toolz.data.todo.TaskEntry?, onNavigate: (St
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2347,7 +2448,7 @@ fun CatalogDownloadPillContent(progress: Float, count: Int, onNavigate: (String)
                 scaleX = pulse
                 scaleY = pulse
             },
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -2523,7 +2624,7 @@ fun CaffeinatePillContent(timeMillis: Long, onNavigate: (String) -> Unit) {
     ) {
         Surface(
             modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
         ) {
             Box(contentAlignment = Alignment.Center) {

@@ -31,7 +31,8 @@ fun KaraokeMicIcon(
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
     iconSize: Dp = 24.dp,
-    thumbnailUri: String? = null
+    thumbnailUri: String? = null,
+    isLoading: Boolean = false
 ) {
     val dynamicColors = rememberDynamicColors(thumbnailUri)
     val performanceMode = LocalPerformanceMode.current
@@ -138,12 +139,20 @@ fun KaraokeMicIcon(
             onClick = onClick
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Rounded.Mic,
-                    contentDescription = if (isActive) "Exit Karaoke" else "Enter Karaoke",
-                    tint = iconColor,
-                    modifier = Modifier.size(iconSize)
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(iconSize + 8.dp),
+                        color = dynamicColors.primary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Mic,
+                        contentDescription = if (isActive) "Exit Karaoke" else "Enter Karaoke",
+                        tint = iconColor,
+                        modifier = Modifier.size(iconSize)
+                    )
+                }
             }
         }
     }
@@ -159,7 +168,8 @@ fun SmallKaraokeMicIcon(
     isActive: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    thumbnailUri: String? = null
+    thumbnailUri: String? = null,
+    isLoading: Boolean = false
 ) {
     val scale by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
@@ -177,7 +187,8 @@ fun SmallKaraokeMicIcon(
             modifier = modifier.scale(scale),
             size = 36.dp,
             iconSize = 18.dp,
-            thumbnailUri = thumbnailUri
+            thumbnailUri = thumbnailUri,
+            isLoading = isLoading
         )
     }
 }

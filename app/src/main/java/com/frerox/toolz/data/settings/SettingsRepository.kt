@@ -47,6 +47,11 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_CUSTOM_DNS = stringPreferencesKey("search_custom_dns")
     private val SEARCH_CUSTOM_DNS_SECONDARY = stringPreferencesKey("search_custom_dns_secondary")
     private val SEARCH_RECENT_DNS = stringSetPreferencesKey("search_recent_dns")
+    private val SEARCH_ENGINE = stringPreferencesKey("search_engine") // "GOOGLE", "BING", "DUCKDUCKGO"
+    private val SEARCH_SAFE_SEARCH = booleanPreferencesKey("search_safe_search")
+    private val SEARCH_REGION = stringPreferencesKey("search_region")
+    private val SEARCH_CUSTOM_ENGINE_URL = stringPreferencesKey("search_custom_engine_url")
+    private val SEARCH_INCOGNITO_ENABLED = booleanPreferencesKey("search_incognito_enabled")
 
     val searchFirstTime: Flow<Boolean> = dataStore.data.map { it[SEARCH_FIRST_TIME] ?: true }
     val searchAdBlockEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_ENABLED] ?: true }
@@ -54,6 +59,27 @@ class SettingsRepository @Inject constructor(
     val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
     val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
+    val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "DUCKDUCKGO" }
+    val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: true }
+    val searchRegion: Flow<String> = dataStore.data.map { it[SEARCH_REGION] ?: "wt-wt" } // default: no region
+    val searchCustomEngineUrl: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_ENGINE_URL] ?: "" }
+    val searchIncognitoEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_INCOGNITO_ENABLED] ?: false }
+
+    companion object {
+        val SEARCH_AUTOFILL_ENABLED = booleanPreferencesKey("search_autofill_enabled")
+        val LAST_BIOMETRIC_VERIFICATION_TIME = longPreferencesKey("last_biometric_verification_time")
+    }
+
+    val searchAutofillEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_AUTOFILL_ENABLED] ?: true }
+    val lastBiometricVerificationTime: Flow<Long> = dataStore.data.map { it[LAST_BIOMETRIC_VERIFICATION_TIME] ?: 0L }
+
+    suspend fun setSearchAutofillEnabled(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_AUTOFILL_ENABLED] = enabled }
+    }
+
+    suspend fun setLastBiometricVerificationTime(time: Long) {
+        dataStore.edit { it[LAST_BIOMETRIC_VERIFICATION_TIME] = time }
+    }
 
     suspend fun setSearchFirstTime(isFirstTime: Boolean) {
         dataStore.edit { it[SEARCH_FIRST_TIME] = isFirstTime }
@@ -65,6 +91,26 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setDnsProvider(provider: String) {
         dataStore.edit { it[SEARCH_DNS_PROVIDER] = provider }
+    }
+
+    suspend fun setSearchEngine(engine: String) {
+        dataStore.edit { it[SEARCH_ENGINE] = engine }
+    }
+
+    suspend fun setSearchSafeSearch(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_SAFE_SEARCH] = enabled }
+    }
+
+    suspend fun setSearchRegion(region: String) {
+        dataStore.edit { it[SEARCH_REGION] = region }
+    }
+
+    suspend fun setSearchCustomEngineUrl(url: String) {
+        dataStore.edit { it[SEARCH_CUSTOM_ENGINE_URL] = url }
+    }
+
+    suspend fun setSearchIncognitoEnabled(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_INCOGNITO_ENABLED] = enabled }
     }
 
     suspend fun setCustomDns(dns: String) {

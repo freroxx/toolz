@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Page
@@ -309,9 +310,24 @@ class CatalogViewModel @Inject constructor(
                 // Pre-calculate quality to avoid reading from flow inside the heavy block
                 val quality = catalogStreamQuality.value
                 
-                // Use a separate scope or ensuring it's on IO for heavy network/resolution task
-                val streamUrl = withContext(Dispatchers.IO) {
-                    repository.resolveAudioStream(track.sourceUrl, quality)
+                var streamUrl: String? = null
+                var retryCount = 0
+                val maxRetries = 2
+                
+                while (streamUrl == null && retryCount <= maxRetries) {
+                    if (retryCount > 0) delay(1000 * retryCount.toLong())
+                    
+                    streamUrl = withContext(Dispatchers.IO) {
+                        repository.resolveAudioStream(track.sourceUrl, quality)
+                    }
+                    
+                    if (streamUrl == null && quality != "AUTO") {
+                        // Try AUTO quality as fallback
+                        streamUrl = withContext(Dispatchers.IO) {
+                            repository.resolveAudioStream(track.sourceUrl, "AUTO")
+                        }
+                    }
+                    retryCount++
                 }
                 
                 if (streamUrl != null) {
@@ -584,48 +600,57 @@ class CatalogViewModel @Inject constructor(
             "80s pop hits", "90s grunge essentials", "Reggaeton viral hits"
         )
 
-        // --- 3. QUERY GENERATION ---
+        // --- 4. THE "MESSY MIX" (Time & Mood based) ---
+        val calendar = Calendar.getInstance()
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        
+        val timeMoods = when {
+            hour in 5..11 -> listOf("Morning energy", "Coffee shop acoustic", "Productive focus", "Sunrise chill")
+            hour in 12..16 -> listOf("Midday boost", "Deep work", "Instrumental study", "Alternative afternoon")
+            hour in 17..21 -> listOf("Evening wind down", "Sunset vibes", "Chill electronic", "Dinner lounge")
+            else -> listOf("Midnight focus", "Sleepy piano", "Ambient night", "Late night lo-fi")
+        }
+        
         val queries = buildList {
-            // Priority: Favorites & Downloads (Reduced dominance for "messy" mix)
-            coreSeeds.take(8).forEach { track ->
+            // Priority: Favorites & Downloads
+            coreSeeds.take(10).forEach { track ->
                 val title = cleanSeedTitle(track.title)
                 val artist = track.artist.orEmpty().trim()
                 if (title.isNotBlank() && artist.isNotBlank()) {
-                    add("$title $artist") // Direct match
-                    add("songs like $title $artist") // Similarity
+                    add("$title $artist")
+                    add("songs like $title $artist")
+                    if (cycle % 2 == 0) add("$artist radio")
                 }
             }
 
             // Recency: What they are listening to NOW
-            recentSeeds.take(6).forEach { track ->
+            recentSeeds.take(8).forEach { track ->
                 val artist = track.artist.orEmpty().trim()
                 if (artist.isNotBlank() && artist != "Unknown Artist") {
-                    add("$artist radio mix")
+                    add("best of $artist")
                     add("similar to $artist music")
+                    add("$artist essential hits")
                 }
             }
 
-            // Genre-Based Discovery (Neighboring)
+            // Genre-Based Discovery
             genres.forEach { genre ->
                 add("best of $genre")
                 add("modern $genre sounds")
+                add("underground $genre gems")
                 if (cycle % 2 == 0) add("alternative $genre mix")
             }
 
-            // --- 4. THE "MESSY MIX" (More Discovery/Randomness) ---
-            repeat(4) { i ->
+            // Time & Mood based discovery
+            timeMoods.forEach { add(it) }
+
+            repeat(6) { i ->
                 add(explorers[(cycle + i) % explorers.size])
             }
             
             add("fresh new music weekly")
             add("global viral hits")
-            add("music for exploration")
-            
-            if (cycle % 3 == 0) {
-                add("new genres to explore")
-                add("best of world music")
-                add("underrated music gems")
-            }
+            add("underrated music gems")
         }
 
         return queries

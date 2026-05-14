@@ -1,8 +1,10 @@
 package com.frerox.toolz.ui.screens.media
 
+import com.frerox.toolz.ui.components.fadingEdges
 import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,10 +50,11 @@ data class RecordingMetadata(
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun KaraokeHistoryTab(
+fun KaraokeTab(
     viewModel: MusicPlayerViewModel,
     musicState: MusicUiState,
-    onStartKaraoke: (com.frerox.toolz.data.music.MusicTrack) -> Unit
+    onStartKaraoke: (com.frerox.toolz.data.music.MusicTrack) -> Unit,
+    onShowSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val historyFolder = remember { context.getExternalFilesDir(null) }
@@ -84,46 +87,55 @@ fun KaraokeHistoryTab(
 
     LaunchedEffect(Unit) { loadRecordings() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        AnimatedVisibility(
+            visible = true,
+            enter = fadeIn(tween(600)) + scaleIn(initialScale = 0.95f),
+            exit = fadeOut(tween(400))
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                KaraokeStudioHeader(
+                    recordingCount = recordings.size,
+                    onSettings = onShowSettings
+                )
 
-            HistoryHeader(
-                recordingCount = recordings.size,
-                onRefresh = { loadRecordings() }
-            )
+                StartKaraokeButton(onClick = { showSongPicker = true })
 
-            StartKaraokeButton(onClick = { showSongPicker = true })
+                Spacer(Modifier.height(12.dp))
 
-            Spacer(Modifier.height(8.dp))
-
-            if (recordings.isEmpty()) {
-                HistoryEmptyState()
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 160.dp, top = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(recordings, key = { it.absolutePath }) { file ->
-                        val metadata = remember(file) { getMetadata(file) }
-                        RecordingItem(
-                            file = file,
-                            metadata = metadata,
-                            onPlay = {
-                                viewModel.playUri(
-                                    uri = Uri.fromFile(file),
-                                    title = metadata?.title ?: file.nameWithoutExtension,
-                                    artist = metadata?.artist ?: "Karaoke Recording",
-                                    thumbUrl = metadata?.thumbnailUrl
-                                )
-                            },
-                            onDelete = {
-                                file.delete()
-                                val metaFile = File(file.parent, file.nameWithoutExtension + ".json")
-                                if (metaFile.exists()) metaFile.delete()
-                                loadRecordings()
-                            }
-                        )
+                if (recordings.isEmpty()) {
+                    KaraokeEmptyState()
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .fadingEdges(top = 16.dp, bottom = 20.dp),
+                        contentPadding = PaddingValues(bottom = 160.dp, top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(recordings, key = { it.absolutePath }) { file ->
+                            val metadata = remember(file) { getMetadata(file) }
+                            RecordingItem(
+                                file = file,
+                                metadata = metadata,
+                                onPlay = {
+                                    viewModel.playUri(
+                                        uri = Uri.fromFile(file),
+                                        title = metadata?.title ?: file.nameWithoutExtension,
+                                        artist = metadata?.artist ?: "Karaoke Recording",
+                                        thumbUrl = metadata?.thumbnailUrl
+                                    )
+                                },
+                                onDelete = {
+                                    file.delete()
+                                    val metaFile = File(file.parent, file.nameWithoutExtension + ".json")
+                                    if (metaFile.exists()) metaFile.delete()
+                                    loadRecordings()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -143,40 +155,43 @@ fun KaraokeHistoryTab(
 }
 
 @Composable
-private fun HistoryHeader(recordingCount: Int, onRefresh: () -> Unit) {
+private fun KaraokeStudioHeader(recordingCount: Int, onSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                "KARAOKE HISTORY",
-                style = MaterialTheme.typography.labelLarge,
+                text = "KARAOKE STUDIO",
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 2.sp,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.primary
             )
             Text(
-                if (recordingCount == 0) "No recordings yet"
-                else "$recordingCount recording${if (recordingCount != 1) "s" else ""}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                text = "$recordingCount RECORDINGS",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
-
-        IconButton(
-            onClick = onRefresh,
-            modifier = Modifier
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    CircleShape
-                )
-                .size(40.dp)
+        
+        Surface(
+            onClick = onSettings,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            modifier = Modifier.size(44.dp)
         ) {
-            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.Settings, 
+                    null, 
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
@@ -184,10 +199,14 @@ private fun HistoryHeader(recordingCount: Int, onRefresh: () -> Unit) {
 @Composable
 private fun StartKaraokeButton(onClick: () -> Unit) {
     val inf = rememberInfiniteTransition(label = "ctaPulse")
-    val gradientShift by inf.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(3000, easing = LinearEasing), RepeatMode.Reverse),
-        label = "gradShift"
+    val scale by inf.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
     )
 
     val primary = MaterialTheme.colorScheme.primary
@@ -197,67 +216,69 @@ private fun StartKaraokeButton(onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(72.dp),
-        shape = RoundedCornerShape(24.dp),
+            .padding(horizontal = 24.dp)
+            .height(80.dp)
+            .scale(scale),
+        shape = RoundedCornerShape(28.dp),
         color = Color.Transparent,
-        shadowElevation = 8.dp,
-        tonalElevation = 0.dp
+        shadowElevation = 12.dp
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.linearGradient(
-                        listOf(
-                            primary,
-                            androidx.compose.ui.graphics.lerp(primary, secondary, 0.6f),
-                            secondary.copy(alpha = 0.85f)
-                        )
+                        0f to primary,
+                        1f to androidx.compose.ui.graphics.lerp(primary, secondary, 0.7f)
                     ),
-                    RoundedCornerShape(24.dp)
+                    RoundedCornerShape(28.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(horizontal = 20.dp)
+                modifier = Modifier.padding(horizontal = 24.dp)
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.18f),
-                    modifier = Modifier.size(38.dp)
+                    color = Color.White.copy(alpha = 0.2f),
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.Mic,
+                            Icons.Rounded.MicExternalOn,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
+                
+                Spacer(Modifier.width(16.dp))
+                
                 Column {
                     Text(
-                        "START KARAOKE",
+                        "ENTER STUDIO",
                         fontWeight = FontWeight.Black,
                         color = Color.White,
-                        letterSpacing = 1.5.sp,
-                        style = MaterialTheme.typography.titleSmall
+                        letterSpacing = 2.sp,
+                        style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "Pick a song and start singing",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.7f)
+                        "Ready for your performance?",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontWeight = FontWeight.Bold
                     )
                 }
+                
                 Spacer(Modifier.weight(1f))
+                
                 Icon(
                     Icons.Rounded.ChevronRight,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.7f),
-                    modifier = Modifier.size(22.dp)
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -265,46 +286,42 @@ private fun StartKaraokeButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun HistoryEmptyState() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.padding(bottom = 80.dp)
+private fun KaraokeEmptyState() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            modifier = Modifier.size(100.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         ) {
-            val inf = rememberInfiniteTransition(label = "emptyPulse")
-            val alpha by inf.animateFloat(
-                0.3f, 0.7f,
-                infiniteRepeatable(tween(1400), RepeatMode.Reverse),
-                label = "emptyAlpha"
-            )
-            Surface(
-                modifier = Modifier.size(88.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.MicNone,
-                        null,
-                        modifier = Modifier.size(44.dp).alpha(alpha),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.MicExternalOn,
+                    null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
             }
-            Text(
-                "No recordings yet",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            )
-            Text(
-                "Sing in Karaoke Mode with recording\nenabled to save your performances",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
-                textAlign = TextAlign.Center
-            )
         }
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "NO RECORDINGS YET",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Start singing to create your first masterpiece",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -328,9 +345,10 @@ fun RecordingItem(
             .padding(horizontal = 16.dp)
             .animateContentSize(),
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
         onClick = onPlay,
-        tonalElevation = 2.dp
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
     ) {
         Column {
             Row(
@@ -369,7 +387,7 @@ fun RecordingItem(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         shadowElevation = 6.dp,
-                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceVariant)
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Icon(
                             Icons.Rounded.PlayArrow,

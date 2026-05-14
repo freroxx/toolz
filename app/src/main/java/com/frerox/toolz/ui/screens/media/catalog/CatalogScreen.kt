@@ -48,6 +48,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -172,6 +174,7 @@ fun CatalogContent(
     musicRepository: MusicRepository,
     localTracks: List<MusicTrack>,
     currentTrack: MusicTrack?,
+    gridState: LazyGridState = rememberLazyGridState(),
     onPlayTrack: (Uri, String, String, String, String) -> Unit,
     onPlayInKaraoke: (Uri, String, String, String, String) -> Unit,
     onEnqueue: (CatalogTrack, Boolean) -> Unit
@@ -184,7 +187,6 @@ fun CatalogContent(
     val performanceMode = LocalPerformanceMode.current
     val configuration = LocalConfiguration.current
     val isDark = LocalIsDarkTheme.current
-    val gridState = rememberLazyGridState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     val playlists by musicRepository.allPlaylists.collectAsState(initial = emptyList())
@@ -211,7 +213,7 @@ fun CatalogContent(
     fun resetFocus() {
         isReturning.value = true
         scope.launch {
-            delay(500)
+            delay(450) 
             focusedTrack = null
             isReturning.value = false
         }
@@ -229,7 +231,7 @@ fun CatalogContent(
 
     val blurAlpha by animateFloatAsState(
         targetValue = if (focusedTrack != null && !isReturning.value) 1f else 0f,
-        animationSpec = tween(if (isReturning.value) 600 else 800, easing = FastOutSlowInEasing),
+        animationSpec = tween(if (isReturning.value) 500 else 800, easing = FastOutSlowInEasing),
         label = "blurAlpha"
     )
 
@@ -388,10 +390,6 @@ fun CatalogContent(
     }
 
     val localDensity = LocalDensity.current
-    
-    val showScrollToTop by remember {
-        derivedStateOf { gridState.firstVisibleItemIndex > 10 }
-    }
 
     Box(
         modifier = Modifier
@@ -627,34 +625,6 @@ fun CatalogContent(
             }
         }
 
-        // Scroll to Top FAB
-        AnimatedVisibility(
-            visible = showScrollToTop,
-            enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.8f),
-            exit = fadeOut(tween(300)) + scaleOut(targetScale = 0.8f),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 130.dp, end = 20.dp)
-        ) {
-            Surface(
-                onClick = { scope.launch { gridState.animateScrollToItem(0) } },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                tonalElevation = 6.dp,
-                shadowElevation = 6.dp,
-                modifier = Modifier.size(52.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.KeyboardArrowUp,
-                        null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-        }
-
         if (showShockwave && !performanceMode) {
             val dynamicColorsForShockwave = rememberDynamicColors(
                 artworkUri = focusedTrack?.thumbnailUrl,
@@ -857,14 +827,14 @@ private fun FocusedTrackOverlay(
     val scale by animateFloatAsState(
         targetValue = if (isReturning) 1f else overlayScaleTarget,
         animationSpec = tween(
-            durationMillis = if (isReturning) 450 else 700,
-            easing = CubicBezierEasing(0.2f, 1f, 0.4f, 1f)
+            durationMillis = if (isReturning) 500 else 700,
+            easing = FastOutSlowInEasing
         ),
         label = "overlayScale"
     )
     val alpha by animateFloatAsState(
         targetValue = if (isReturning) 0f else 1f,
-        animationSpec = tween(if (isReturning) 350 else 500),
+        animationSpec = tween(if (isReturning) 450 else 500),
         label = "overlayAlpha"
     )
     
@@ -1049,31 +1019,42 @@ private fun FeaturedCarouselItem(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.1f),
-                                Color.Black.copy(alpha = 0.7f)
-                            )
+                            0.4f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.85f)
                         )
                     )
             )
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(16.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
                 Text(
-                    track.title,
+                    text = track.title,
                     color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.5f),
+                            offset = Offset(2f, 2f),
+                            blurRadius = 4f
+                        )
+                    ),
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    letterSpacing = 0.5.sp
                 )
                 Text(
-                    track.artist,
-                    color = Color.White.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = track.artist,
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.5f),
+                            offset = Offset(1f, 1f),
+                            blurRadius = 2f
+                        )
+                    ),
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1160,44 +1141,71 @@ private fun CatalogSearchBar(
     onClear: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                singleLine = true,
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                decorationBox = { innerTextField ->
-                    if (query.isBlank()) {
-                        Text(
-                            "Search songs, artists, moods...",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    innerTextField()
-                }
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
             )
-            AnimatedVisibility(visible = query.isNotBlank()) {
+            
+            Spacer(Modifier.width(12.dp))
+            
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (query.isEmpty()) {
+                    Text(
+                        text = "Search songs, artists, moods...",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    singleLine = true,
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary)
+                )
+            }
+            
+            AnimatedVisibility(
+                visible = query.isNotEmpty(),
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut()
+            ) {
                 IconButton(
                     onClick = onClear,
+                    modifier = Modifier.size(32.dp),
                     colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
                     )
                 ) {
-                    Icon(Icons.Rounded.Close, null)
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Clear",
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }
