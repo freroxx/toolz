@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import java.io.File
+import java.io.FileOutputStream
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -99,7 +100,8 @@ data class MusicUiState(
     val fastSeeking             : Boolean                   = true,
     val alwaysSync              : Boolean                   = true,
     val catalogResults          : List<CatalogTrack>        = emptyList(),
-    val catalogStreamQuality    : String                    = "AUTO"
+    val catalogStreamQuality    : String                    = "AUTO",
+    val isMutedByAi             : Boolean                   = false
 )
 
 data class QueueEntry(val id: String, val track: MusicTrack)
@@ -508,6 +510,10 @@ class MusicPlayerViewModel @Inject constructor(
 
                 withContext(Dispatchers.Main) {
                     _uiState.update { state ->
+                        val currentMediaId = player.currentMediaItem?.mediaId
+                        val newCurrentTrack = data.tracks.find { it.uri == currentMediaId || (it.sourceUrl != null && it.sourceUrl == currentMediaId) }
+                            ?: state.currentTrack
+
                         state.copy(
                             tracks          = sorted,
                             playlists       = data.playlists.sortedByDescending { it.createdAt },
@@ -515,9 +521,7 @@ class MusicPlayerViewModel @Inject constructor(
                             recentlyPlayed  = data.recent,
                             mostPlayed      = data.most,
                             folders         = folders,
-                            currentTrack    = sorted.find { t ->
-                                t.uri == (player.currentMediaItem?.mediaId ?: state.currentTrack?.uri)
-                            } ?: state.currentTrack,
+                            currentTrack    = newCurrentTrack,
                             isPlaying       = player.isPlaying,
                             isShuffleOn     = player.shuffleModeEnabled,
                             repeatMode      = player.repeatMode,
@@ -856,6 +860,35 @@ class MusicPlayerViewModel @Inject constructor(
 
         hapticClick()
 
+        viewModelScope.launch {
+            // Check if it's an online track that needs resolution
+            if (track.path == null && track.sourceUrl != null && !track.uri.startsWith("content://") && !track.uri.startsWith("file://")) {
+                _uiState.update { it.copy(isResolvingCatalog = true) }
+                try {
+                    val quality = settingsRepository.catalogStreamQuality.first()
+                    val resolvedUrl = withContext(Dispatchers.IO) {
+                        catalogRepository.resolveAudioStream(track.sourceUrl, quality)
+                    }
+                    if (resolvedUrl != null) {
+                        val resolvedTrack = track.copy(uri = resolvedUrl)
+                        val resolvedTracks = tracks.map { if (it.uri == track.uri) resolvedTrack else it }
+                        executePlay(resolvedTrack, resolvedTracks)
+                    } else {
+                        _uiState.update { it.copy(isResolvingCatalog = false) }
+                        // Show error toast or similar
+                    }
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(isResolvingCatalog = false) }
+                } finally {
+                    _uiState.update { it.copy(isResolvingCatalog = false) }
+                }
+            } else {
+                executePlay(track, tracks)
+            }
+        }
+    }
+
+    private suspend fun executePlay(track: MusicTrack, tracks: List<MusicTrack>) {
         viewModelScope.launch(Dispatchers.Default) {
             val trackUris  = tracks.map { it.uri }
             val isSameQueue = trackUris == currentQueueUris
@@ -1046,13 +1079,20 @@ class MusicPlayerViewModel @Inject constructor(
     // Playlist helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun playPlaylist(playlist: Playlist) {
+    fun playPlaylist(playlist: Playlist, shuffle: Boolean = false) {
         val tracks = playlist.trackUris.mapNotNull { uri -> _uiState.value.tracks.find { it.uri == uri } }
         if (tracks.isEmpty()) return
         val p: Player = controller ?: player
-        p.shuffleModeEnabled = true
-        _uiState.update { it.copy(isShuffleOn = true) }
-        playTrack(tracks.random(), tracks)
+        
+        if (shuffle) {
+            p.shuffleModeEnabled = true
+            _uiState.update { it.copy(isShuffleOn = true) }
+            playTrack(tracks.random(), tracks)
+        } else {
+            p.shuffleModeEnabled = false
+            _uiState.update { it.copy(isShuffleOn = false) }
+            playTrack(tracks.first(), tracks)
+        }
         hapticSuccess()
     }
 
@@ -1063,8 +1103,47 @@ class MusicPlayerViewModel @Inject constructor(
         hapticClick()
     }
 
-    fun play()  { startPlayerService(); val p: Player = controller ?: player; if (!p.isPlaying) p.play(); hapticClick() }
-    fun pause() { val p: Player = controller ?: player; if (p.isPlaying) p.pause(); hapticClick() }
+    private var fadeJob: Job? = null
+    private fun fadeVolume(toVolume: Float, duration: Long, onEnd: () -> Unit = {}) {
+        fadeJob?.cancel()
+        fadeJob = viewModelScope.launch {
+            val startVolume = player.volume
+            val steps = 15
+            val interval = duration / steps
+            val delta = (toVolume - startVolume) / steps
+            for (i in 1..steps) {
+                delay(interval)
+                player.volume = (startVolume + delta * i).coerceIn(0f, 1f)
+            }
+            player.volume = toVolume
+            onEnd()
+        }
+    }
+
+    fun play()  { 
+        startPlayerService()
+        val p: Player = controller ?: player
+        if (!p.isPlaying) {
+            p.volume = 0f
+            p.play()
+            if (!_uiState.value.isMutedByAi) {
+                fadeVolume(1f, 100)
+            }
+        }
+        hapticClick() 
+    }
+    fun pause() { 
+        val p: Player = controller ?: player
+        if (p.isPlaying) {
+            fadeVolume(0f, 100) {
+                p.pause()
+                if (!_uiState.value.isMutedByAi) {
+                    p.volume = 1f
+                }
+            }
+        }
+        hapticClick() 
+    }
 
     fun stop() {
         val p: Player = controller ?: player
@@ -1083,22 +1162,44 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun setVolume(volume: Float) {
+        fadeJob?.cancel()
         val p: Player = controller ?: player
         p.volume = volume
     }
 
+    fun setMutedByAi(muted: Boolean) {
+        _uiState.update { it.copy(isMutedByAi = muted) }
+        setVolume(if (muted) 0f else 1f)
+    }
+
     fun skipNext() {
         val p: Player = controller ?: player
-        if (p.hasNextMediaItem()) p.seekToNext()
-        else if (p.repeatMode == Player.REPEAT_MODE_ALL) p.seekTo(0, 0)
-        hapticClick()
+        fadeVolume(0f, 100) {
+            if (p.hasNextMediaItem()) p.seekToNext()
+            else if (p.repeatMode == Player.REPEAT_MODE_ALL) p.seekTo(0, 0)
+            
+            if (!_uiState.value.isMutedByAi) {
+                p.volume = 1f
+            } else {
+                p.volume = 0f
+            }
+            hapticClick()
+        }
     }
 
     fun skipPrevious() {
         val p: Player = controller ?: player
-        if (p.currentPosition > 3_000) p.seekTo(0)
-        else if (p.hasPreviousMediaItem()) p.seekToPrevious()
-        hapticClick()
+        fadeVolume(0f, 100) {
+            if (p.currentPosition > 3_000) p.seekTo(0)
+            else if (p.hasPreviousMediaItem()) p.seekToPrevious()
+            
+            if (!_uiState.value.isMutedByAi) {
+                p.volume = 1f
+            } else {
+                p.volume = 0f
+            }
+            hapticClick()
+        }
     }
 
     fun toggleShuffle() {
@@ -1207,12 +1308,24 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun addTrackToPlaylist(playlist: Playlist, track: MusicTrack) {
-        viewModelScope.launch { repository.updatePlaylist(playlist.copy(trackUris = (playlist.trackUris + track.uri).distinct())); hapticClick() }
+        viewModelScope.launch { 
+            // Ensure the track is in the database if it's an online track being added to a playlist
+            if (track.path == null && track.sourceUrl != null) {
+                repository.insertTrack(track)
+            }
+            // Fetch latest playlist state from repository to avoid erasing other songs
+            val latestPlaylist = repository.getPlaylistById(playlist.id) ?: playlist
+            val updatedUris = (latestPlaylist.trackUris + track.uri).distinct()
+            repository.updatePlaylist(latestPlaylist.copy(trackUris = updatedUris))
+            hapticClick() 
+        }
     }
 
     fun addSelectedTracksToPlaylist(playlist: Playlist) {
         viewModelScope.launch {
-            repository.updatePlaylist(playlist.copy(trackUris = (playlist.trackUris + _uiState.value.selectedTracks).distinct()))
+            val latestPlaylist = repository.getPlaylistById(playlist.id) ?: playlist
+            val updatedUris = (latestPlaylist.trackUris + _uiState.value.selectedTracks).distinct()
+            repository.updatePlaylist(latestPlaylist.copy(trackUris = updatedUris))
             clearSelection(); hapticSuccess()
         }
     }
@@ -1222,7 +1335,26 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun updatePlaylistThumbnail(playlist: Playlist, uri: Uri) {
-        viewModelScope.launch { repository.updatePlaylist(playlist.copy(thumbnailUri = uri.toString())); hapticClick() }
+        viewModelScope.launch {
+            try {
+                // Copy selected image to internal storage for persistence
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val fileName = "playlist_cover_${playlist.id}_${System.currentTimeMillis()}.jpg"
+                val file = File(context.filesDir, fileName)
+                
+                inputStream?.use { input ->
+                    java.io.FileOutputStream(file).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                val internalUri = Uri.fromFile(file)
+                repository.updatePlaylist(playlist.copy(thumbnailUri = internalUri.toString()))
+                hapticClick()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun createPlaylistWithTracks(name: String, trackUris: List<String>) {
@@ -1276,7 +1408,19 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun clearQueue()  { val p: Player = controller ?: player; p.clearMediaItems(); hapticClick() }
-    fun toggleFavorite(track: MusicTrack) { viewModelScope.launch { repository.toggleFavorite(track); hapticClick() } }
+    fun toggleFavorite(track: MusicTrack) { 
+        viewModelScope.launch { 
+            val isFav = !track.isFavorite
+            // Optimistic update
+            _uiState.update { state ->
+                if (state.currentTrack?.uri == track.uri) {
+                    state.copy(currentTrack = state.currentTrack?.copy(isFavorite = isFav))
+                } else state
+            }
+            repository.toggleFavorite(track)
+            hapticClick() 
+        } 
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Cleanup

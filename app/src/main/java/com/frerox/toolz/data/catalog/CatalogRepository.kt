@@ -114,8 +114,11 @@ class CatalogRepository @Inject constructor(
      */
     suspend fun resolveAudioStream(sourceUrl: String, quality: String = "AUTO"): String? = withContext(Dispatchers.IO) {
         try {
+            val startTime = System.currentTimeMillis()
             val streamInfo = StreamInfo.getInfo(youtubeService, sourceUrl)
             val audioStreams = streamInfo.audioStreams
+
+            android.util.Log.d("CatalogRepo", "Found ${audioStreams.size} audio streams for $sourceUrl")
 
             // Prefer M4A (AAC), then Opus, then any audio — filter to audio-only formats
             val filtered = audioStreams
@@ -140,10 +143,12 @@ class CatalogRepository @Inject constructor(
                 else -> filtered.firstOrNull() // AUTO or HIGH → highest bitrate
             }
 
+            android.util.Log.d("CatalogRepo", "Resolved stream in ${System.currentTimeMillis() - startTime}ms: ${preferred?.content != null}")
             preferred?.content
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            android.util.Log.e("CatalogRepo", "resolveAudioStream failed: ${e.message}")
             e.printStackTrace()
             null
         }

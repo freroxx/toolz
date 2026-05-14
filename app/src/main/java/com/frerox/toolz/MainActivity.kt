@@ -75,8 +75,10 @@ import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.screens.cleaner.CleanerScreen
+import com.frerox.toolz.ui.screens.browser.TabManagementScreen
 import com.frerox.toolz.ui.screens.search.SearchScreen
 import com.frerox.toolz.ui.screens.browser.WebViewScreen
+import com.frerox.toolz.ui.screens.browser.WebViewViewModel
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -614,6 +616,21 @@ fun ToolzNavHost(
                 onBackClick = { navController.popBackStack() },
                 onResultClick = { url ->
                     navController.navigate(Screen.Browser.createRoute(url))
+                },
+                onManageTabs = { navController.navigate(Screen.TabManagement.route) }
+            )
+        }
+
+        composable(Screen.TabManagement.route) {
+            TabManagementScreen(
+                onBack = { navController.popBackStack() },
+                onTabClick = { id, url ->
+                    navController.navigate(Screen.Browser.createRoute(url))
+                },
+                onNewTab = {
+                    navController.navigate(Screen.Search.route) {
+                        popUpTo(Screen.Search.route) { inclusive = true }
+                    }
                 }
             )
         }
@@ -626,7 +643,8 @@ fun ToolzNavHost(
             val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
             WebViewScreen(
                 url = decodedUrl,
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onManageTabs = { navController.navigate(Screen.TabManagement.route) }
             )
         }
         composable(Screen.WorldClock.route) {

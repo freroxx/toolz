@@ -76,9 +76,15 @@ fun NowPlayingAiBottomSheet(
     vibrationManager: VibrationManager,
     onSeek: (Long) -> Unit = {},
     onPlayRecommendation: (AiRecommendation) -> Unit = {},
-    onToggleKaraoke: () -> Unit = {}
+    onToggleKaraoke: () -> Unit = {},
+    onSetMutedByAi: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    
+    // Connect the volume callback
+    LaunchedEffect(Unit) {
+        viewModel.onSetMutedByAi = onSetMutedByAi
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -94,7 +100,8 @@ fun NowPlayingAiBottomSheet(
             vibrationManager = vibrationManager,
             onSeek = onSeek,
             onPlayRecommendation = onPlayRecommendation,
-            onToggleKaraoke = onToggleKaraoke
+            onToggleKaraoke = onToggleKaraoke,
+            onSetMutedByAi = onSetMutedByAi
         )
     }
 }
@@ -111,7 +118,8 @@ fun NowPlayingAiContent(
     vibrationManager: VibrationManager,
     onSeek: (Long) -> Unit = {},
     onPlayRecommendation: (AiRecommendation) -> Unit = {},
-    onToggleKaraoke: () -> Unit = {}
+    onToggleKaraoke: () -> Unit = {},
+    onSetMutedByAi: (Boolean) -> Unit = {}
 ) {
     val performanceMode = LocalPerformanceMode.current
 
@@ -268,10 +276,11 @@ fun AiHeader(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (uiState.isAiEnabled && (uiState.lyricsState.syncedLyrics.isNotEmpty() || uiState.instrumentalMatch != null)) {
                     KaraokeMicIcon(
-                        isActive = false, // Not active yet, just availability
+                        isActive = uiState.isSingConfidentlyActive,
                         onClick = onToggleKaraoke,
                         size = 36.dp,
-                        iconSize = 18.dp
+                        iconSize = 18.dp,
+                        isLoading = uiState.isResolvingInstrumental
                     )
                 }
 

@@ -2,6 +2,8 @@ package com.frerox.toolz.ui.screens.media.ai
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -85,6 +87,15 @@ class NowPlayingAiViewModel @Inject constructor(
     private val _scrollPosition = MutableStateFlow(0f)
     val scrollPosition: StateFlow<Float> = _scrollPosition.asStateFlow()
 
+    private data class TokenEvent(val token: String, val timestamp: Long)
+    private val recognitionBuffer = mutableListOf<TokenEvent>()
+    var onSetMutedByAi: ((Boolean) -> Unit)? = null
+
+    private val STOP_WORDS = setOf(
+        "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "be", "been", "being",
+        "in", "on", "at", "to", "for", "with", "by", "of", "from", "up", "down", "out", "over", "under"
+    )
+
     val keepScreenOn = settingsRepository.musicKeepScreenOnLyrics
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -101,19 +112,34 @@ class NowPlayingAiViewModel @Inject constructor(
     private var isListening        : Boolean           = false
     private var instrumentalSearchJob: Job?            = null
 
-    private val instrumentalPlayer: ExoPlayer by lazy {
-        ExoPlayer.Builder(context).build().apply {
-            val attr = AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build()
-            setAudioAttributes(attr, false) // false = Do NOT handle/steal audio focus
-            playWhenReady = true
+    private var _instrumentalPlayer: ExoPlayer? = null
+    private val instrumentalPlayer: ExoPlayer
+        get() {
+            if (_instrumentalPlayer == null) {
+                _instrumentalPlayer = ExoPlayer.Builder(context).build().apply {
+                    val attr = AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .build()
+                    setAudioAttributes(attr, false)
+                    addListener(object : Player.Listener {
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            Log.e(TAG, "Instrumental Player Error: ${error.message}", error)
+                        }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            Log.d(TAG, "Instrumental Player State: $state")
+                        }
+                    })
+                    playWhenReady = true
+                }
+            }
+            return _instrumentalPlayer!!
         }
-    }
 
     fun setInstrumentalPlayerVolume(volume: Float) {
-        instrumentalPlayer.volume = volume
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            instrumentalPlayer.volume = volume
+        }
     }
 
     private var currentTrackUri    : String?           = null
@@ -225,9 +251,17 @@ class NowPlayingAiViewModel @Inject constructor(
                     curatedRecommendations = track.aiRecommendationsJson?.let { json ->
                         runCatching { recommendationAdapter.fromJson(json) }.getOrNull()
                     } ?: emptyList()
-                )
+                ),
+                karaokeScore            = 0,
+                karaokeCorrectWords     = 0,
+                karaokeTotalWords       = 0,
+                karaokeStreak           = 0,
+                karaokeMaxStreak        = 0,
+                karaokeMissedStreak     = 0,
+                karaokeMostAccurateLine = null
             )
         }
+        synchronized(recognitionBuffer) { recognitionBuffer.clear() }
 
         if (_uiState.value.lyricsState.lyrics.isEmpty()) fetchLyrics()
         loadDataForTab(_uiState.value.selectedTab, forceRefresh = false)
@@ -260,7 +294,7 @@ class NowPlayingAiViewModel @Inject constructor(
                 val updatedLyrics = state.lyricsState.syncedLyrics.map { line ->
                     // Only check lines that have ended or are about to end
                     if (line.timeMs > currentTime) return@map line
-                    
+
                     val updatedWords = line.words.map { word ->
                         val missedGrace = word.startTimeMs + word.durationMs + 6000L
                         if (currentTime > missedGrace && word.karaokeStatus == KaraokeWordStatus.PENDING) {
@@ -277,7 +311,7 @@ class NowPlayingAiViewModel @Inject constructor(
                     val totalWords   = updatedLyrics.sumOf { it.words.size }
                     val correctWords = updatedLyrics.sumOf { l -> l.words.count { it.karaokeStatus == KaraokeWordStatus.CORRECT } }
                     val score        = if (totalWords > 0) (correctWords * 100 / totalWords) else 0
-                    
+
                     state.copy(
                         lyricsState = state.lyricsState.copy(syncedLyrics = updatedLyrics),
                         karaokeScore = score,
@@ -620,22 +654,26 @@ class NowPlayingAiViewModel @Inject constructor(
             try {
                 val query = "${track.title} ${track.artist} instrumental"
                 val (results, _) = catalogRepository.search(query)
-                
-                // Filtering/Validation: title contains instrumental/karaoke, duration +/- 2s
+
+                Log.d(TAG, "Instrumental search for '$query' found ${results.size} results")
+
+                // Filtering/Validation: title contains instrumental/karaoke, duration +/- 10s
                 val match = results.find { result ->
                     val lowTitle = result.title.lowercase()
                     val isInstrumental = lowTitle.contains("instrumental") || lowTitle.contains("karaoke")
-                    val isDurationMatch = kotlin.math.abs(result.duration - track.duration) <= 2000L
+                    val isDurationMatch = kotlin.math.abs(result.duration - track.duration) <= 10000L
                     isInstrumental && isDurationMatch
                 }
 
                 _uiState.update { it.copy(isSearchingInstrumental = false, instrumentalMatch = match) }
                 if (match != null) {
-                    Log.d(TAG, "Found instrumental match: ${match.title}")
+                    Log.d(TAG, "Found instrumental match: ${match.title} (${match.duration}ms)")
+                } else {
+                    Log.w(TAG, "No suitable instrumental match found among ${results.size} results")
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                Log.e(TAG, "Instrumental search failed", e)
+                Log.e(TAG, "Instrumental search failed: ${e.message}")
                 _uiState.update { it.copy(isSearchingInstrumental = false) }
             }
         }
@@ -647,16 +685,19 @@ class NowPlayingAiViewModel @Inject constructor(
 
     fun searchInstrumentalCustom(query: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { it.copy(isSearchingInstrumental = true) }
+            _uiState.update { it.copy(isSearchingInstrumental = true, instrumentalSearchResults = emptyList()) }
             try {
                 val (results, _) = catalogRepository.search(query)
-                val match = results.firstOrNull()
-                _uiState.update { it.copy(isSearchingInstrumental = false, instrumentalMatch = match) }
+                _uiState.update { it.copy(isSearchingInstrumental = false, instrumentalSearchResults = results) }
             } catch (e: Exception) {
                 Log.e(TAG, "Custom instrumental search failed", e)
                 _uiState.update { it.copy(isSearchingInstrumental = false) }
             }
         }
+    }
+
+    fun setInstrumentalMatch(track: CatalogTrack) {
+        _uiState.update { it.copy(instrumentalMatch = track, instrumentalStreamUrl = null) }
     }
 
     fun setSingConfidentlyEnabled(enabled: Boolean) {
@@ -669,46 +710,85 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     fun toggleSingConfidentlyActive(active: Boolean, onSync: (Long) -> Unit) {
+        Log.d(TAG, "toggleSingConfidentlyActive: active=$active")
         if (active) {
-            val match = _uiState.value.instrumentalMatch ?: return
+            val match = _uiState.value.instrumentalMatch ?: run {
+                Log.w(TAG, "No instrumental match found")
+                return
+            }
+            
+            // If already have a stream URL and it's the same track, just play
+            if (_uiState.value.instrumentalStreamUrl != null && _uiState.value.isSingConfidentlyActive) {
+                viewModelScope.launch(Dispatchers.Main.immediate) {
+                    instrumentalPlayer.play()
+                    onSetMutedByAi?.invoke(true)
+                }
+                Log.d(TAG, "Instrumental player resumed, original muted")
+                return
+            }
+
+            // Immediately mute original track and show loading state
+            _uiState.update { it.copy(isResolvingInstrumental = true) }
+            onSetMutedByAi?.invoke(true)
+
             viewModelScope.launch(Dispatchers.IO) {
-                val streamUrl = catalogRepository.resolveAudioStream(match.sourceUrl)
-                withContext(Dispatchers.Main) {
+                Log.d(TAG, "Resolving instrumental stream for: ${match.sourceUrl}")
+                val streamUrl = runCatching { catalogRepository.resolveAudioStream(match.sourceUrl) }.getOrNull()
+                withContext(Dispatchers.Main.immediate) {
                     if (streamUrl != null) {
-                        _uiState.update { it.copy(isSingConfidentlyActive = true, instrumentalStreamUrl = streamUrl) }
+                        Log.d(TAG, "Resolved instrumental stream: $streamUrl")
+                        _uiState.update { it.copy(
+                            isSingConfidentlyActive = true, 
+                            isResolvingInstrumental = false,
+                            instrumentalStreamUrl = streamUrl 
+                        ) }
                         instrumentalPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
                         instrumentalPlayer.prepare()
                         onSync(_playbackPositionMs.value)
                         instrumentalPlayer.seekTo(_playbackPositionMs.value)
                         instrumentalPlayer.play()
+                        onSetMutedByAi?.invoke(true) // Re-confirm muting
+                        Log.d(TAG, "Instrumental player started, original track muted")
                     } else {
-                        // If we can't resolve the stream, fall back to the original track
-                        _uiState.update { it.copy(isSingConfidentlyActive = true) }
+                        Log.w(TAG, "Failed to resolve instrumental stream, falling back to original")
+                        _uiState.update { it.copy(isSingConfidentlyActive = false, isResolvingInstrumental = false) }
+                        onSetMutedByAi?.invoke(false) // Restore original
                         onSync(_playbackPositionMs.value)
                     }
                 }
             }
         } else {
-            stopSingConfidently()
+            Log.d(TAG, "Pausing instrumental player, restoring original")
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (_instrumentalPlayer != null) {
+                    instrumentalPlayer.pause()
+                }
+                onSetMutedByAi?.invoke(false)
+            }
+            _uiState.update { it.copy(isSingConfidentlyActive = false, isResolvingInstrumental = false) }
         }
     }
 
     fun seekTo(positionMs: Long) {
         if (_uiState.value.isSingConfidentlyActive) {
-            instrumentalPlayer.seekTo(positionMs)
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                instrumentalPlayer.seekTo(positionMs)
+            }
         }
         updateProgress(positionMs)
     }
 
-    private fun stopSingConfidently() {
+    fun stopSingConfidently() {
+        Log.d(TAG, "Stopping Sing Confidently mode")
         _uiState.update { it.copy(isSingConfidentlyActive = false, instrumentalStreamUrl = null) }
-        instrumentalPlayer.pause()
-        instrumentalPlayer.stop()
-        instrumentalPlayer.clearMediaItems()
-    }
-
-    fun setInstrumentalSong(track: CatalogTrack) {
-        _uiState.update { it.copy(instrumentalMatch = track) }
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            if (_instrumentalPlayer != null) {
+                instrumentalPlayer.pause()
+                instrumentalPlayer.stop()
+                instrumentalPlayer.clearMediaItems()
+            }
+            onSetMutedByAi?.invoke(false)
+        }
     }
 
     private suspend fun <T> runGroqRequest(initialKey: String, requestBlock: suspend (String) -> T): T {
@@ -884,10 +964,10 @@ class NowPlayingAiViewModel @Inject constructor(
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val isOnline = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
             ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        
+
         val onDeviceAvailable = SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
         
-        // If online, use standard recognizer (prefers cloud). 
+        // If online, use standard recognizer (prefers cloud).
         // If offline and on-device is available, use on-device specifically.
         speechRecognizer = if (!isOnline && onDeviceAvailable) {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
@@ -898,12 +978,19 @@ class NowPlayingAiViewModel @Inject constructor(
 
         recognitionIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,  true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,      5)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            // Highest sensitivity: specify voice recognition as source for hardware optimization
+            // This ensures the mic is tuned for speech even with background music
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            }
             
+            // Improvements for singing: keep the mic open longer and be more sensitive to partials
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 20000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 7000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
+
             // Prefer offline only if we are actually offline
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, !isOnline)
         }
@@ -952,8 +1039,8 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     private val recognitionListener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) { 
-            isListening = true 
+        override fun onReadyForSpeech(params: Bundle?) {
+            isListening = true
             Log.v(TAG, "Recognizer ready")
         }
         override fun onBeginningOfSpeech() {
@@ -1033,19 +1120,27 @@ class NowPlayingAiViewModel @Inject constructor(
 
     private fun processRecognizedTexts(texts: List<String>) {
         viewModelScope.launch(Dispatchers.Default) {
-            val currentTime     = _playbackPositionMs.value
-            val speechCorrect   = _uiState.value.karaokeSpeechCorrectionEnabled
+            val currentTime = _playbackPositionMs.value
+            val speechCorrect = _uiState.value.karaokeSpeechCorrectionEnabled
 
-            // Flatten all tokens from all alternative results with enhanced normalization
-            val spokenTokens = texts
+            // 1. Update Buffer: Add new tokens with current playback timestamp
+            val newTokens = texts
                 .asSequence()
                 .flatMap { it.split(Regex("\\s+")) }
-                .map { token -> enhanceTokenNormalization(token) }
+                .map { normalizeAgnostic(it) }
                 .filter { it.isNotBlank() }
                 .distinct()
+                .map { TokenEvent(it, currentTime) }
                 .toList()
 
-            if (spokenTokens.isEmpty()) return@launch
+            synchronized(recognitionBuffer) {
+                recognitionBuffer.addAll(newTokens)
+                // Keep only last 5 seconds of tokens to compensate for bursty STT
+                recognitionBuffer.removeAll { currentTime - it.timestamp > 5000L }
+            }
+
+            val bufferedTokens = synchronized(recognitionBuffer) { recognitionBuffer.map { it.token }.distinct() }
+            if (bufferedTokens.isEmpty()) return@launch
 
             _uiState.update { state ->
                 var newWordsCounted = 0
@@ -1056,41 +1151,55 @@ class NowPlayingAiViewModel @Inject constructor(
                     if (kotlin.math.abs(line.timeMs - currentTime) > 40_000L) return@map line
 
                     val updatedWords = line.words.map { word ->
-                        val cleanWord = word.word.filter { it.isLetterOrDigit() }.lowercase()
-                        if (cleanWord.isBlank()) return@map word
+                        val cleanTarget = normalizeAgnostic(word.word)
+                        if (cleanTarget.isBlank()) return@map word
 
-                        // Enhanced window for matching (more forgiving timing)
+                        // Buffer compensation: check if word was spoken in the last 5 seconds
                         val windowStart = word.startTimeMs - 5000L
-                        val windowEnd   = word.startTimeMs + word.durationMs + 7000L
-                        // Extended grace period before marking as missed
+                        val windowEnd = word.startTimeMs + word.durationMs + 7000L
                         val missedGrace = word.startTimeMs + word.durationMs + 12000L
 
-                        if (currentTime in windowStart..windowEnd
-                            && word.karaokeStatus == KaraokeWordStatus.PENDING
-                        ) {
-                            val matched = spokenTokens.any { spoken ->
-                                isWordMatch(spoken, cleanWord)
+                        if (currentTime in windowStart..windowEnd && word.karaokeStatus == KaraokeWordStatus.PENDING) {
+                            val matched = bufferedTokens.any { spoken ->
+                                isWordMatch(spoken, cleanTarget)
                             }
                             if (matched) {
                                 newWordsCounted++
                                 word.copy(karaokeStatus = KaraokeWordStatus.CORRECT)
                             } else word
-                        } else if (currentTime > missedGrace
-                            && word.karaokeStatus == KaraokeWordStatus.PENDING
-                            && speechCorrect
-                        ) {
+                        } else if (currentTime > missedGrace && word.karaokeStatus == KaraokeWordStatus.PENDING && speechCorrect) {
                             missedCountInThisUpdate++
                             word.copy(karaokeStatus = KaraokeWordStatus.MISSED)
                         } else {
                             word
                         }
                     }
-                    line.copy(words = updatedWords)
+
+                    // Dynamic "Singer's Grace" Threshold
+                    val significantWords = updatedWords.filter { it.word.lowercase() !in STOP_WORDS }
+                    val correctSignificant = significantWords.count { it.karaokeStatus == KaraokeWordStatus.CORRECT }
+
+                    val threshold = when {
+                        significantWords.size <= 3 -> 0.8f
+                        significantWords.size >= 5 -> 0.6f
+                        else -> 0.7f
+                    }
+
+                    val finalWords = if (significantWords.isNotEmpty() && (correctSignificant.toFloat() / significantWords.size >= threshold)) {
+                        updatedWords.map {
+                            if (it.karaokeStatus == KaraokeWordStatus.PENDING) it.copy(karaokeStatus = KaraokeWordStatus.CORRECT)
+                            else it
+                        }
+                    } else {
+                        updatedWords
+                    }
+
+                    line.copy(words = finalWords)
                 }
 
-                val totalWords   = updatedLyrics.sumOf { it.words.size }
+                val totalWords = updatedLyrics.sumOf { it.words.size }
                 val correctWords = updatedLyrics.sumOf { l -> l.words.count { it.karaokeStatus == KaraokeWordStatus.CORRECT } }
-                val score        = if (totalWords > 0) (correctWords * 100 / totalWords) else 0
+                val score = if (totalWords > 0) (correctWords * 100 / totalWords) else 0
 
                 val bestLine = updatedLyrics
                     .filter { it.words.isNotEmpty() && it.words.any { w -> w.karaokeStatus != KaraokeWordStatus.PENDING } }
@@ -1098,22 +1207,13 @@ class NowPlayingAiViewModel @Inject constructor(
                         l.words.count { it.karaokeStatus == KaraokeWordStatus.CORRECT }.toFloat() / l.words.size
                     }?.content
 
-                val nextMissedStreak = if (newWordsCounted > 0) {
-                    0
-                } else if (missedCountInThisUpdate > 0) {
-                    state.karaokeMissedStreak + missedCountInThisUpdate
-                } else {
-                    state.karaokeMissedStreak
-                }
+                val nextMissedStreak = if (newWordsCounted > 0) 0
+                                      else if (missedCountInThisUpdate > 0) state.karaokeMissedStreak + missedCountInThisUpdate
+                                      else state.karaokeMissedStreak
 
-                // Enhanced streak logic: break on 3+ consecutive misses (more forgiving)
-                val currentStreak = if (newWordsCounted > 0) {
-                    state.karaokeStreak + newWordsCounted
-                } else if (nextMissedStreak >= 3) {
-                    0
-                } else {
-                    state.karaokeStreak
-                }
+                val currentStreak = if (newWordsCounted > 0) state.karaokeStreak + newWordsCounted
+                                   else if (nextMissedStreak >= 3) 0
+                                   else state.karaokeStreak
 
                 state.copy(
                     lyricsState             = state.lyricsState.copy(syncedLyrics = updatedLyrics),
@@ -1130,80 +1230,92 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     /**
-     * Enhanced token normalization for better speech recognition matching.
-     * Handles vowel elongation, consonant duplication, and common mispronunciations.
-     */
-    private fun enhanceTokenNormalization(token: String): String {
-        return token.lowercase()
-            .filter { it.isLetterOrDigit() }
-            // Handle elongated vowels common in singing (loooove -> love)
-            .replace(Regex("([aeiou])\\1+"), "$1")
-            // Handle elongated consonants (ssssun -> sun)
-            .replace(Regex("([bcdfg hjklmnpqrstvwxyz])\\1+"), "$1")
-            // Handle common phonetic approximations for singing
-            .replace("ght", "t")
-            .replace("ph", "f")
-            .replace("ck", "k")
-            .replace("qu", "kw")
-            .replace("wh", "w")
-            .replace("ion", "un") // common ending reduction
-            .replace("ing", "in")  // common ending reduction
-    }
-
-    /**
-     * Determine if two words match using multiple similarity metrics.
-     * More forgiving than pure Levenshtein for singing/variations.
+     * Multilingual Phonetic-Agnostic Scorer.
+     * 1. Normalizes diacritics and symbols.
+     * 2. Extracts Vowel Skeleton (loooove -> oe).
+     * 3. Uses Jaro-Winkler for character cluster similarity.
      */
     private fun isWordMatch(spoken: String, target: String): Boolean {
         if (spoken == target) return true
 
-        // Length checks - ignore tiny tokens
-        val minLength = kotlin.math.min(spoken.length, target.length)
-        if (minLength < 2) return spoken == target
+        // Jaro-Winkler similarity: rewards character "clusters" regardless of length
+        val similarity = jaroWinklerSimilarity(spoken, target)
+        if (similarity >= 0.85) return true
 
-        // Exact substring checks (for partial words or words joined with other sounds)
-        if (spoken.length >= 4 && target.contains(spoken)) return true
-        if (target.length >= 4 && spoken.contains(target)) return true
-
-        // Prefix/suffix checks - common when lyrics are held or cut short
-        if (minLength >= 3) {
-            if (target.startsWith(spoken.substring(0, 3))) return true
-            if (spoken.startsWith(target.substring(0, 3))) return true
-        }
-
-        // Adaptive Levenshtein threshold based on word length
-        val distance = levenshtein(spoken, target)
-        val maxAllowed = when {
-            target.length >= 10 -> 4
-            target.length >= 7  -> 3
-            target.length >= 5  -> 2
-            target.length >= 3  -> 1
-            else -> 0
-        }
-
-        return distance <= maxAllowed
-    }
-
-    /**
-     * Standard Levenshtein distance – O(m*n) but word strings are short (≤25 chars)
-     * so this is negligible CPU cost. Runs on Dispatchers.Default, never on Main.
-     */
-    private fun levenshtein(a: String, b: String): Int {
-        if (a == b)         return 0
-        if (a.isEmpty())    return b.length
-        if (b.isEmpty())    return a.length
-        val costs = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            costs[0] = i
-            var prev = i - 1
-            for (j in 1..b.length) {
-                val new = minOf(costs[j] + 1, costs[j - 1] + 1,
-                    prev + if (a[i - 1] == b[j - 1]) 0 else 1)
-                prev     = costs[j]
-                costs[j] = new
+        // Vowel Skeleton match: fallback if Jaro-Winkler is promising but not perfect.
+        // Also protects against "Vowel Collision" on very short words by requiring 2+ vowels.
+        if (similarity >= 0.7) {
+            val targetSkeleton = getVowelSkeleton(target)
+            if (targetSkeleton.length >= 2) {
+                val spokenSkeleton = getVowelSkeleton(spoken)
+                if (spokenSkeleton == targetSkeleton) return true
             }
         }
-        return costs[b.length]
+
+        return false
+    }
+
+    private fun normalizeAgnostic(text: String): String {
+        // Strip diacritics (café -> cafe) and handle non-English characters
+        val normalized = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+        return normalized.replace(Regex("\\p{M}"), "") // Remove marks
+            .lowercase()
+            .filter { it.isLetterOrDigit() }
+    }
+
+    private fun getVowelSkeleton(text: String): String {
+        val vowels = "aeiouy"
+        return text.lowercase()
+            .filter { it in vowels }
+            // deduplicate consecutive identical vowels: "loooove" -> "oe"
+            .replace(Regex("([aeiouy])\\1+"), "$1")
+    }
+
+    private fun jaroWinklerSimilarity(s1: String, s2: String): Double {
+        if (s1 == s2) return 1.0
+        val len1 = s1.length
+        val len2 = s2.length
+        if (len1 == 0 || len2 == 0) return 0.0
+
+        val matchDistance = (kotlin.math.max(len1, len2) / 2) - 1
+        val s1Matches = BooleanArray(len1)
+        val s2Matches = BooleanArray(len2)
+        var matches = 0
+
+        for (i in 0 until len1) {
+            val start = kotlin.math.max(0, i - matchDistance)
+            val end = kotlin.math.min(i + matchDistance + 1, len2)
+            for (j in start until end) {
+                if (s2Matches[j] || s1[i] != s2[j]) continue
+                s1Matches[i] = true
+                s2Matches[j] = true
+                matches++
+                break
+            }
+        }
+
+        if (matches == 0) return 0.0
+
+        var transpositions = 0.0
+        var k = 0
+        for (i in 0 until len1) {
+            if (!s1Matches[i]) continue
+            while (!s2Matches[k]) k++
+            if (s1[i] != s2[k]) transpositions++
+            k++
+        }
+
+        val m = matches.toDouble()
+        val jaro = (m / len1 + m / len2 + (m - transpositions / 2.0) / m) / 3.0
+
+        // Winkler enhancement
+        val p = 0.1 // scaling factor
+        var l = 0 // length of common prefix
+        while (l < kotlin.math.min(4, kotlin.math.min(len1, len2)) && s1[l] == s2[l]) {
+            l++
+        }
+
+        return jaro + (l * p * (1.0 - jaro))
     }
 
     // ─────────────────────────────────────────────────────────────────────────

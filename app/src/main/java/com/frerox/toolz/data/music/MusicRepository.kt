@@ -35,6 +35,10 @@ class MusicRepository @Inject constructor(
         musicDao.getTrackBySourceUrl(sourceUrl)
     }
 
+    suspend fun getPlaylistById(id: Int): Playlist? = withContext(Dispatchers.IO) {
+        musicDao.getPlaylistById(id)
+    }
+
     suspend fun updateTrackAiData(
         uri: String,
         lyrics: String? = null,

@@ -4,10 +4,12 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -29,14 +31,21 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+import com.frerox.toolz.ui.components.TabFloatingPills
+import com.frerox.toolz.ui.screens.search.FaviconDisplay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebViewScreen(
     url: String,
     onBack: () -> Unit,
+    onManageTabs: () -> Unit,
     viewModel: WebViewViewModel = hiltViewModel()
 ) {
+    val activity = LocalContext.current as AppCompatActivity
     var webView: WebView? by remember { mutableStateOf(null) }
     var progress by remember { mutableFloatStateOf(0f) }
     var isLoading by remember { mutableStateOf(true) }
@@ -50,11 +59,11 @@ fun WebViewScreen(
     val customDns by viewModel.customDns.collectAsState(initial = "")
     var showFindInPage by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
+    val tabs by viewModel.tabs.collectAsState(initial = emptyList())
+    val activeTabId by viewModel.activeTabId.collectAsState(initial = null)
+    val scope = rememberCoroutineScope()
 
     val context = LocalContext.current
-    val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
-    val currentDnsProvider by rememberUpdatedState(dnsProvider)
-    val currentCustomDns by rememberUpdatedState(customDns)
 
     BackHandler(enabled = canGoBack) {
         webView?.goBack()
@@ -150,155 +159,207 @@ fun WebViewScreen(
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            AnimatedVisibility(visible = showFindInPage) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextField(
-                        value = findQuery,
-                        onValueChange = { 
-                            findQuery = it
-                            webView?.findAllAsync(it)
-                        },
-                        placeholder = { Text("Find in page...") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                        keyboardActions = KeyboardActions(onNext = { webView?.findNext(true) }),
-                        trailingIcon = {
-                            if (findQuery.isNotEmpty()) {
-                                IconButton(onClick = { findQuery = ""; webView?.clearMatches() }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                AnimatedVisibility(visible = showFindInPage) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextField(
+                            value = findQuery,
+                            onValueChange = { 
+                                findQuery = it
+                                webView?.findAllAsync(it)
+                            },
+                            placeholder = { Text("Find in page...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                            keyboardActions = KeyboardActions(onNext = { webView?.findNext(true) }),
+                            trailingIcon = {
+                                if (findQuery.isNotEmpty()) {
+                                    IconButton(onClick = { findQuery = ""; webView?.clearMatches() }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
                                 }
                             }
+                        )
+                        IconButton(onClick = { webView?.findNext(false) }) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous")
                         }
-                    )
-                    IconButton(onClick = { webView?.findNext(false) }) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous")
-                    }
-                    IconButton(onClick = { webView?.findNext(true) }) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next")
+                        IconButton(onClick = { webView?.findNext(true) }) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next")
+                        }
                     }
                 }
-            }
-            if (isLoading) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                if (isLoading) {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
+                AndroidView(
+                    modifier = Modifier.weight(1f),
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                setSupportZoom(true)
+                                cacheMode = WebSettings.LOAD_DEFAULT
+                                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            }
+
+                            // Apply Dark Mode if available
+                            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
+                            }
+
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    super.onPageStarted(view, url, favicon)
+                                    isLoading = true
+                                    url?.let { 
+                                        currentUrl = it
+                                        viewModel.updateTab(url = it)
+                                    }
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    isLoading = false
+                                    canGoBack = view?.canGoBack() ?: false
+                                    canGoForward = view?.canGoForward() ?: false
+                                    view?.title?.let { 
+                                        pageTitle = it
+                                        viewModel.updateTab(title = it)
+                                    }
+                                    
+                                    // Autofill check
+                                    url?.let {
+                                        viewModel.tryAutofill(activity, it) { user, pass ->
+                                            view?.evaluateJavascript(
+                                                """
+                                                (function() {
+                                                    var userField = document.querySelector('input[type="text"], input[type="email"], input[name*="user"], input[name*="email"]');
+                                                    var passField = document.querySelector('input[type="password"]');
+                                                    if (userField) userField.value = '$user';
+                                                    if (passField) passField.value = '$pass';
+                                                })();
+                                                """.trimIndent(),
+                                                null
+                                            )
+                                        }
+                                    }
+
+                                    // Capture preview after a short delay to ensure rendering
+                                    if (view != null && activeTabId != null) {
+                                        scope.launch {
+                                            delay(1000)
+                                            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                                            val canvas = Canvas(bitmap)
+                                            view.draw(canvas)
+                                            viewModel.saveTabPreview(activeTabId!!, bitmap)
+                                        }
+                                    }
+                                }
+
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    val requestUrl = request?.url?.toString() ?: return false
+                                    if (requestUrl.startsWith("tel:") || requestUrl.startsWith("mailto:") || requestUrl.startsWith("intent:")) {
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(requestUrl))
+                                            context.startActivity(intent)
+                                            return true
+                                        } catch (e: Exception) {
+                                            return false
+                                        }
+                                    }
+                                    return false
+                                }
+
+                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                    if (adBlockEnabled) {
+                                        val host = request?.url?.host ?: ""
+                                        
+                                        // Block specific domains based on DNS provider selected
+                                        // AdGuard DNS known blocklists or patterns
+                                        val adguardBlocked = listOf(
+                                            "ads.", "googleads", "doubleclick", "adservice", "analytics.", "tracking", ".track", 
+                                            "googlesyndication.com", "adnxs.com", "outbrain.com", "taboola.com", "popads.net",
+                                            "adform.net", "adroll.com", "quantserve.com", "scorecardresearch.com", "moatads.com",
+                                            "zedo.com", "advertising.com", "amazon-adsystem.com", "casalemedia.com", "mathtag.com",
+                                            "criteo.com", "pubmatic.com", "rubiconproject.com", "yieldmo.com", "revcontent.com",
+                                            "ad-delivery.net", "adgrx.com", "adhigh.net", "adlightning.com", "popcash.net",
+                                            "ad-score.com", "ad-sys.com", "adtech.de", "ad-traffic.com", "adsco.re", "exelator.com",
+                                            "facebook.com/tr", "pixel.facebook.com", "static.ads-twitter.com", "ads-api.twitter.com",
+                                            "googletagservices.com", "googletagmanager.com", "pagead2.googlesyndication.com",
+                                            "ad.doubleclick.net", "google-analytics.com", "clarity.ms", "hotjar.com"
+                                        )
+                                        
+                                        val isBlocked = when (dnsProvider) {
+                                            "ADGUARD" -> adguardBlocked.any { host.contains(it) } || host.endsWith(".adguard.com")
+                                            "CLOUDFLARE" -> (host.contains("analytics") || host.contains("tracking") || host.contains("clarity")) && !host.contains("google")
+                                            "GOOGLE" -> host.contains("doubleclick") || host.contains("googleads") || host.contains("googlesyndication")
+                                            "CUSTOM" -> host.contains(customDns) && customDns.isNotEmpty()
+                                            else -> adguardBlocked.any { host.contains(it) }
+                                        }
+
+                                        if (isBlocked) {
+                                            return WebResourceResponse("text/plain", "UTF-8", null)
+                                        }
+                                    }
+                                    return super.shouldInterceptRequest(view, request)
+                                }
+                            }
+
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    progress = newProgress / 100f
+                                }
+
+                                override fun onReceivedTitle(view: WebView?, title: String?) {
+                                    pageTitle = title ?: ""
+                                    viewModel.updateTab(title = title)
+                                }
+                            }
+
+                            loadUrl(url)
+                            webView = this
+                        }
+                    },
+                    update = {
+                        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                            WebSettingsCompat.setForceDark(it.settings, WebSettingsCompat.FORCE_DARK_ON)
+                        }
+                    }
                 )
             }
-            AndroidView(
-                modifier = Modifier.weight(1f),
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            loadWithOverviewMode = true
-                            useWideViewPort = true
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            setSupportZoom(true)
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        }
 
-                        // Apply Dark Mode if available
-                        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                            WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                isLoading = true
-                                url?.let { currentUrl = it }
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                isLoading = false
-                                canGoBack = view?.canGoBack() ?: false
-                                canGoForward = view?.canGoForward() ?: false
-                                pageTitle = view?.title ?: ""
-                            }
-
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val requestUrl = request?.url?.toString() ?: return false
-                                if (requestUrl.startsWith("tel:") || requestUrl.startsWith("mailto:") || requestUrl.startsWith("intent:")) {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(requestUrl))
-                                        context.startActivity(intent)
-                                        return true
-                                    } catch (e: Exception) {
-                                        return false
-                                    }
-                                }
-                                return false
-                            }
-
-                            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                if (currentAdBlockEnabled) {
-                                    val host = request?.url?.host ?: ""
-                                    
-                                    // Block specific domains based on DNS provider selected
-                                    // AdGuard DNS known blocklists or patterns
-                                    val adguardBlocked = listOf(
-                                        "ads.", "googleads", "doubleclick", "adservice", "analytics.", "tracking", ".track", 
-                                        "googlesyndication.com", "adnxs.com", "outbrain.com", "taboola.com", "popads.net",
-                                        "adform.net", "adroll.com", "quantserve.com", "scorecardresearch.com", "moatads.com",
-                                        "zedo.com", "advertising.com", "amazon-adsystem.com", "casalemedia.com", "mathtag.com",
-                                        "criteo.com", "pubmatic.com", "rubiconproject.com", "yieldmo.com", "revcontent.com",
-                                        "ad-delivery.net", "adgrx.com", "adhigh.net", "adlightning.com", "popcash.net",
-                                        "ad-score.com", "ad-sys.com", "adtech.de", "ad-traffic.com", "adsco.re", "exelator.com",
-                                        "facebook.com/tr", "pixel.facebook.com", "static.ads-twitter.com", "ads-api.twitter.com",
-                                        "googletagservices.com", "googletagmanager.com", "pagead2.googlesyndication.com",
-                                        "ad.doubleclick.net", "google-analytics.com", "clarity.ms", "hotjar.com"
-                                    )
-                                    
-                                    val isBlocked = when (currentDnsProvider) {
-                                        "ADGUARD" -> adguardBlocked.any { host.contains(it) } || host.endsWith(".adguard.com")
-                                        "CLOUDFLARE" -> (host.contains("analytics") || host.contains("tracking") || host.contains("clarity")) && !host.contains("google")
-                                        "GOOGLE" -> host.contains("doubleclick") || host.contains("googleads") || host.contains("googlesyndication")
-                                        "CUSTOM" -> host.contains(currentCustomDns) && currentCustomDns.isNotEmpty()
-                                        else -> adguardBlocked.any { host.contains(it) }
-                                    }
-
-                                    if (isBlocked) {
-                                        return WebResourceResponse("text/plain", "UTF-8", null)
-                                    }
-                                }
-                                return super.shouldInterceptRequest(view, request)
-                            }
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                progress = newProgress / 100f
-                            }
-
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                pageTitle = title ?: ""
-                            }
-                        }
-
-                        loadUrl(url)
-                        webView = this
-                    }
+            TabFloatingPills(
+                tabs = tabs,
+                activeTabId = activeTabId,
+                onTabClick = { id, url ->
+                    viewModel.switchTab(id)
+                    currentUrl = url
+                    webView?.loadUrl(url)
                 },
-                update = {
-                    if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                        WebSettingsCompat.setForceDark(it.settings, WebSettingsCompat.FORCE_DARK_ON)
-                    }
-                }
+                onNewTab = {
+                    onBack()
+                },
+                onManageTabs = onManageTabs,
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
     }

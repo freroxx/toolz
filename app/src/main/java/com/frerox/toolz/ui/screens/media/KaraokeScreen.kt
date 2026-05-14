@@ -84,6 +84,7 @@ fun KaraokeView(
     onSkipNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onSetVolume: (Float) -> Unit,
+    onSetMutedByAi: (Boolean) -> Unit,
     onNextSongConfirmed: () -> Unit,
     playbackPosition: Long,
     visualizerData: FloatArray
@@ -525,6 +526,7 @@ fun KaraokeView(
             onSingConfidentlyToggle  = { aiViewModel.setSingConfidentlyEnabled(it) },
             wordSyncEnabled          = aiState.lyricsState.isKaraokeWordSyncEnabled,
             onWordSyncToggle         = { aiViewModel.toggleKaraokeWordSyncEnabled() },
+            onManualSearch           = { showInstrumentalSearch = true },
             onDismiss                = { showSettings = false }
         )
     }
@@ -535,10 +537,10 @@ fun KaraokeView(
     LaunchedEffect(aiState.isSingConfidentlyActive) {
         if (aiState.isSingConfidentlyActive) {
             aiViewModel.setInstrumentalPlayerVolume(1f)
-            onSetVolume(0f)
+            onSetMutedByAi(true)
         } else {
             aiViewModel.setInstrumentalPlayerVolume(0f)
-            onSetVolume(1f)
+            onSetMutedByAi(false)
         }
     }
 
@@ -1826,6 +1828,7 @@ fun KaraokeSettingsModal(
     onSingConfidentlyToggle : (Boolean) -> Unit,
     wordSyncEnabled         : Boolean,
     onWordSyncToggle        : (Boolean) -> Unit,
+    onManualSearch          : () -> Unit = {},
     onDismiss               : () -> Unit
 ) {
     ModalBottomSheet(
@@ -1911,6 +1914,24 @@ fun KaraokeSettingsModal(
                 checked        = wordSyncEnabled,
                 onCheckedChange = onWordSyncToggle
             )
+
+            Button(
+                onClick = {
+                    onManualSearch()
+                    onDismiss()
+                },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            ) {
+                Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Search for Backing Track",
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

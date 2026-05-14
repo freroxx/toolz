@@ -1,5 +1,9 @@
 package com.frerox.toolz.ui.screens.dashboard
 
+import android.content.Context
+import android.os.BatteryManager
+import android.os.Environment
+import android.os.StatFs
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
@@ -16,14 +20,24 @@ import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.util.OfflineManager
 import com.frerox.toolz.util.OfflineState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class DashboardStats(
+    val batteryLevel: Int = 0,
+    val isBatteryCharging: Boolean = false,
+    val storageUsedPercentage: Float = 0f,
+    val storageAvailableGb: Double = 0.0
+)
+
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val aiRepository: ChatRepository,
     private val noteDao: NoteDao,
     private val taskDao: TaskDao,
@@ -40,6 +54,9 @@ class DashboardViewModel @Inject constructor(
 
     private val _aiSuggestedRoutes = MutableStateFlow<List<String>>(emptyList())
     val aiSuggestedRoutes = _aiSuggestedRoutes.asStateFlow()
+
+    private val _dashboardStats = MutableStateFlow(DashboardStats())
+    val dashboardStats = _dashboardStats.asStateFlow()
 
     val offlineState = offlineManager.offlineState
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), OfflineState.ONLINE)
@@ -72,6 +89,38 @@ class DashboardViewModel @Inject constructor(
     init {
         setupSearchDebounce()
         checkForUpdates()
+        startStatsUpdate()
+    }
+
+    private fun startStatsUpdate() {
+        viewModelScope.launch {
+            while (true) {
+                updateStats()
+                delay(60000) // Update every minute
+            }
+        }
+    }
+
+    private fun updateStats() {
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val status = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || 
+                     status == BatteryManager.BATTERY_STATUS_FULL
+
+        val stat = StatFs(Environment.getDataDirectory().path)
+        val totalBytes = stat.totalBytes
+        val availableBytes = stat.availableBytes
+        val usedBytes = totalBytes - availableBytes
+        val usedPercentage = (usedBytes.toFloat() / totalBytes.toFloat())
+        val availableGb = availableBytes.toDouble() / (1024 * 1024 * 1024)
+
+        _dashboardStats.value = DashboardStats(
+            batteryLevel = level,
+            isBatteryCharging = isCharging,
+            storageUsedPercentage = usedPercentage,
+            storageAvailableGb = availableGb
+        )
     }
 
     private fun checkForUpdates() {

@@ -57,6 +57,7 @@ sealed class Screen(val route: String) {
     object Clipboard : Screen("clipboard")
     object DeviceInfo : Screen("device_info")
     object Search : Screen("search")
+    object TabManagement : Screen("tab_management")
     object Browser : Screen("browser?url={url}") {
         fun createRoute(url: String) = "browser?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
     }

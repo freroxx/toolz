@@ -111,7 +111,9 @@ data class NowPlayingAiUiState(
     val karaokeSingConfidentlyEnabled: Boolean = true,
     val isSearchingInstrumental: Boolean = false,
     val instrumentalMatch: CatalogTrack? = null,
+    val instrumentalSearchResults: List<CatalogTrack> = emptyList(),
     val isSingConfidentlyActive: Boolean = false,
+    val isResolvingInstrumental: Boolean = false,
     val instrumentalStreamUrl: String? = null,
     val karaokeMissedStreak: Int = 0
 )
