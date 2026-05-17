@@ -75,6 +75,7 @@ class SettingsViewModel @Inject constructor(
     val dashboardView = repository.dashboardView
     val showRecentTools = repository.showRecentTools
     val showQuickNotes = repository.showQuickNotes
+    val showDashboardStats = repository.showDashboardStats
 
     val notificationsEnabled = repository.notificationsEnabled
     val notificationVaultEnabled = repository.notificationVaultEnabled
@@ -128,6 +129,7 @@ class SettingsViewModel @Inject constructor(
     fun setDashboardView(view: String) = viewModelScope.launch { repository.setDashboardView(view) }
     fun setShowRecentTools(enabled: Boolean) = viewModelScope.launch { repository.setShowRecentTools(enabled) }
     fun setShowQuickNotes(enabled: Boolean) = viewModelScope.launch { repository.setShowQuickNotes(enabled) }
+    fun setShowDashboardStats(enabled: Boolean) = viewModelScope.launch { repository.setShowDashboardStats(enabled) }
 
     fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationsEnabled(enabled) }
     fun setNotificationVaultEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationVaultEnabled(enabled) }

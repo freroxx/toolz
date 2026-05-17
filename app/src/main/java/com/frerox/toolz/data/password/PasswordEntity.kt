@@ -15,4 +15,6 @@ data class PasswordEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val lastUsedAt: Long = System.currentTimeMillis(),
     val passwordHistory: List<String> = emptyList()
-)
+) {
+    val isComplete: Boolean get() = username.isNotBlank() && password.isNotBlank()
+}

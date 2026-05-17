@@ -17,7 +17,8 @@ import javax.inject.Inject
 
 private const val TAG          = "AiAssistantVM"
 private const val GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-private const val GROQ_MODEL   = "llama-3.3-70b-versatile"
+private const val GROQ_MODEL_HARD = "llama-3.3-70b-versatile"
+private const val GROQ_MODEL_EASY = "llama-3.1-8b-instant"
 
 // ─────────────────────────────────────────────────────────────
 //  UI State
@@ -200,7 +201,7 @@ class AiAssistantViewModel @Inject constructor(
                     url = GROQ_URL,
                     authHeader = "Bearer $groqKey",
                     request = OpenAiRequest(
-                        model = GROQ_MODEL,
+                        model = GROQ_MODEL_EASY,
                         messages = listOf(
                             OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that suggests chat prompts. Reply ONLY with prompts, one per line.")),
                             OpenAiMessage("user", MessageContent.Text(prompt)),
@@ -597,7 +598,7 @@ class AiAssistantViewModel @Inject constructor(
                     url        = GROQ_URL,
                     authHeader = "Bearer $groqKey",
                     request    = OpenAiRequest(
-                        model    = GROQ_MODEL,
+                        model    = GROQ_MODEL_EASY,
                         messages = listOf(
                             OpenAiMessage("system", MessageContent.Text("You generate short chat titles. Reply with ONLY the title — no explanation, no quotes.")),
                             OpenAiMessage("user",   MessageContent.Text(prompt)),
@@ -646,7 +647,7 @@ Summarize this AI conversation as 3-6 concise bullet points.
                         url        = GROQ_URL,
                         authHeader = "Bearer $groqKey",
                         request    = OpenAiRequest(
-                            model    = GROQ_MODEL,
+                            model    = GROQ_MODEL_HARD,
                             messages = listOf(
                                 OpenAiMessage("system", MessageContent.Text(systemPrompt)),
                                 OpenAiMessage("user",   MessageContent.Text(chatText)),

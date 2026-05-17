@@ -1,8 +1,17 @@
 package com.frerox.toolz.data.calendar
 
 import kotlinx.coroutines.flow.first
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 import javax.inject.Inject
+
+data class AiCalendarEvent(
+    val title: String,
+    val start_time_iso: String,
+    val duration_minutes: Int,
+    val description: String
+)
 
 data class AiEventResult(
     val title: String,
@@ -20,6 +29,43 @@ sealed class SyncResult {
 class SyncImageToCalendarUseCase @Inject constructor(
     private val repository: EventRepository
 ) {
+    suspend fun processAiCalendarEvents(aiEvents: List<AiCalendarEvent>): List<SyncResult> {
+        val existingEvents = repository.getAllEvents().first()
+        val results = mutableListOf<SyncResult>()
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+
+        aiEvents.forEach { aiEvent ->
+            val timestamp = try {
+                sdf.parse(aiEvent.start_time_iso)?.time ?: System.currentTimeMillis()
+            } catch (e: Exception) {
+                System.currentTimeMillis()
+            }
+
+            val newEvent = EventEntry(
+                title = aiEvent.title,
+                timestamp = timestamp,
+                description = aiEvent.description,
+                eventType = "GENERAL", // AI schema doesn't provide type anymore
+                subjectColor = "#9E9E9E" // Default grey
+            )
+
+            val similarTitleNearby = existingEvents.find {
+                it.title.equals(aiEvent.title, ignoreCase = true) &&
+                Math.abs(it.timestamp - timestamp) < 7L * 24 * 60 * 60 * 1000
+            }
+
+            if (similarTitleNearby != null) {
+                if (!isSameDay(similarTitleNearby.timestamp, timestamp) ||
+                    Math.abs(similarTitleNearby.timestamp - timestamp) > 60000) {
+                    results.add(SyncResult.Reschedule(similarTitleNearby, newEvent.copy(id = similarTitleNearby.id)))
+                }
+            } else {
+                results.add(SyncResult.New(newEvent))
+            }
+        }
+        return results
+    }
+
     suspend fun processAiEvents(aiEvents: List<AiEventResult>): List<SyncResult> {
         val existingEvents = repository.getAllEvents().first()
         val results = mutableListOf<SyncResult>()

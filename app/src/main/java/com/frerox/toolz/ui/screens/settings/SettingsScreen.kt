@@ -82,6 +82,7 @@ fun SettingsScreen(
     val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
     val pillTodoEnabled by viewModel.pillTodoEnabled.collectAsState(initial = true)
     val pillFocusEnabled by viewModel.pillFocusEnabled.collectAsState(initial = true)
+    val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = false)
 
     val userName by viewModel.userName.collectAsState(initial = "")
     var userNameInput by remember { mutableStateOf("") }
@@ -604,6 +605,16 @@ fun SettingsScreen(
                                     onCheckedChange = { viewModel.setPillFocusEnabled(it) }
                                 )
                             }
+                        }
+
+                        if (matches(searchQuery, "dashboard", "stats", "battery", "storage", "info")) {
+                            SettingsToggleItem(
+                                title = "Show Dashboard Stats",
+                                subtitle = "Battery and storage info cards",
+                                icon = Icons.Rounded.BarChart,
+                                checked = showDashboardStats,
+                                onCheckedChange = { viewModel.setShowDashboardStats(it) }
+                            )
                         }
 
                         if (matches(searchQuery, "vibration", "haptic", "intensity", "feedback")) {

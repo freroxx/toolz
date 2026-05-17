@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.browser
 
+import com.frerox.toolz.data.password.PasswordEntity
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,17 +24,31 @@ import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 
+import com.frerox.toolz.data.browser.BrowserDownloadManager
+import com.frerox.toolz.data.browser.DownloadItem
+
 @HiltViewModel
 class WebViewViewModel @Inject constructor(
     private val application: Application,
     private val repository: WebSearchRepository,
     private val settingsRepository: SettingsRepository,
     private val tabManager: TabManager,
-    private val passwordDao: PasswordDao
+    private val passwordDao: PasswordDao,
+    private val downloadManager: BrowserDownloadManager
 ) : ViewModel() {
 
     private val _isBookmarked = MutableStateFlow(false)
     val isBookmarked = _isBookmarked.asStateFlow()
+
+    private val _autofillSuggestions = MutableStateFlow<List<PasswordEntity>>(emptyList())
+    val autofillSuggestions = _autofillSuggestions.asStateFlow()
+
+    private val _autofillSuccess = MutableStateFlow(false)
+    val autofillSuccess = _autofillSuccess.asStateFlow()
+
+    fun clearAutofillSuccess() {
+        _autofillSuccess.value = false
+    }
 
     val adBlockEnabled = settingsRepository.searchAdBlockEnabled
     val dnsProvider = settingsRepository.searchDnsProvider
@@ -43,10 +58,100 @@ class WebViewViewModel @Inject constructor(
     val activeTabId = tabManager.activeTabId
     val autofillEnabled = settingsRepository.searchAutofillEnabled
 
-    fun tryAutofill(activity: AppCompatActivity, url: String, onCredentials: (String, String) -> Unit) {
+    val downloads = downloadManager.downloads
+
+    init {
+        // Ensure there's at least one tab if we are in browser
+        if (tabManager.tabs.value.isEmpty()) {
+            // We'll let the Screen call addTab with the initial URL if needed
+        }
+    }
+
+    fun ensureTabExists(url: String) {
+        if (tabManager.tabs.value.isEmpty()) {
+            tabManager.addTab(url)
+        }
+    }
+
+    fun findAutofillSuggestions(url: String, force: Boolean = false) {
         viewModelScope.launch {
             if (!settingsRepository.searchAutofillEnabled.first()) return@launch
 
+            val host = try { java.net.URI(url).host } catch (_: Exception) { null } ?: return@launch
+            val domain = if (host.startsWith("www.")) host.substring(4) else host
+
+            // Smart check: keywords in URL or forced by DOM detection
+            val isAuthPage = url.contains("login", ignoreCase = true) ||
+                    url.contains("signin", ignoreCase = true) ||
+                    url.contains("signup", ignoreCase = true) ||
+                    url.contains("register", ignoreCase = true) ||
+                    url.contains("auth", ignoreCase = true) ||
+                    url.contains("account", ignoreCase = true) ||
+                    force
+
+            if (!isAuthPage) {
+                _autofillSuggestions.value = emptyList()
+                return@launch
+            }
+
+            val exactMatch = passwordDao.getPasswordsByDomain(host)
+            val baseMatch = passwordDao.getPasswordsByDomain(domain)
+
+            val combined = (exactMatch + baseMatch).distinctBy { it.id }
+                .sortedWith(compareByDescending<PasswordEntity> { it.isComplete }.thenByDescending { it.lastUsedAt })
+            _autofillSuggestions.value = combined
+        }
+    }
+
+    fun clearAutofillSuggestions() {
+        _autofillSuggestions.value = emptyList()
+    }
+
+    private val _manualPasswords = MutableStateFlow<List<PasswordEntity>>(emptyList())
+    val manualPasswords: StateFlow<List<PasswordEntity>> = _manualPasswords
+
+    fun findManualPasswords(url: String) {
+        viewModelScope.launch {
+            val host = try { java.net.URI(url).host } catch (_: Exception) { null } ?: return@launch
+            val domain = if (host.startsWith("www.")) host.substring(4) else host
+
+            val exactMatch = passwordDao.getPasswordsByDomain(host)
+            val baseMatch = passwordDao.getPasswordsByDomain(domain)
+
+            val combined = (exactMatch + baseMatch).distinctBy { it.id }
+                .sortedByDescending { it.lastUsedAt }
+            _manualPasswords.value = combined
+        }
+    }
+
+    fun clearManualPasswords() {
+        _manualPasswords.value = emptyList()
+    }
+
+    fun verifyBiometric(activity: AppCompatActivity, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val lastVerification = settingsRepository.lastBiometricVerificationTime.first()
+            val now = System.currentTimeMillis()
+            val cooldown = 5 * 60 * 1000L
+
+            if (now - lastVerification > cooldown) {
+                BiometricPromptUtils.showBiometricPrompt(
+                    activity = activity,
+                    onSuccess = {
+                        viewModelScope.launch {
+                            settingsRepository.setLastBiometricVerificationTime(now)
+                            onSuccess()
+                        }
+                    }
+                )
+            } else {
+                onSuccess()
+            }
+        }
+    }
+
+    fun onCredentialSelected(activity: AppCompatActivity, password: PasswordEntity, onCredentials: (String, String) -> Unit) {
+        viewModelScope.launch {
             val lastVerification = settingsRepository.lastBiometricVerificationTime.first()
             val now = System.currentTimeMillis()
             val cooldown = 5 * 60 * 1000L // 5 minutes
@@ -57,31 +162,36 @@ class WebViewViewModel @Inject constructor(
                     onSuccess = {
                         viewModelScope.launch {
                             settingsRepository.setLastBiometricVerificationTime(now)
-                            performAutofillSearch(url, onCredentials)
+                            onCredentials(password.username, password.password)
+                            _autofillSuccess.value = true
+                            _autofillSuggestions.value = emptyList()
                         }
                     }
                 )
             } else {
-                performAutofillSearch(url, onCredentials)
+                onCredentials(password.username, password.password)
+                _autofillSuccess.value = true
+                _autofillSuggestions.value = emptyList()
             }
         }
     }
 
-    private suspend fun performAutofillSearch(url: String, onCredentials: (String, String) -> Unit) {
-        val host = try { java.net.URI(url).host } catch (_: Exception) { null } ?: return
-        val domain = if (host.startsWith("www.")) host.substring(4) else host
-        
-        val passwords = passwordDao.getPasswordsByDomain(domain)
-        if (passwords.isNotEmpty()) {
-            val bestMatch = passwords.first()
-            onCredentials(bestMatch.username, bestMatch.password)
+    fun updateTab(url: String? = null, title: String? = null, faviconUrl: String? = null, previewPath: String? = null, isDesktopMode: Boolean? = null) {
+        val currentActiveId = tabManager.activeTabId.value
+        if (currentActiveId != null) {
+            tabManager.updateTab(currentActiveId, url, title, faviconUrl, previewPath, isDesktopMode)
         }
     }
 
-    fun updateTab(url: String? = null, title: String? = null, faviconUrl: String? = null, previewPath: String? = null) {
-        val currentActiveId = tabManager.activeTabId.value
-        if (currentActiveId != null) {
-            tabManager.updateTab(currentActiveId, url, title, faviconUrl, previewPath)
+    fun toggleDesktopMode() {
+        val currentActiveId = tabManager.activeTabId.value ?: return
+        val currentTab = tabManager.tabs.value.find { it.id == currentActiveId } ?: return
+        updateTab(isDesktopMode = !currentTab.isDesktopMode)
+    }
+
+    fun setAdBlockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSearchAdBlockEnabled(enabled)
         }
     }
 
@@ -134,5 +244,17 @@ class WebViewViewModel @Inject constructor(
                 _isBookmarked.value = true
             }
         }
+    }
+
+    fun startDownload(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
+        downloadManager.startDownload(url, userAgent, contentDisposition, mimeType)
+    }
+
+    fun refreshDownloads() {
+        downloadManager.refreshDownloads()
+    }
+
+    fun deleteDownload(item: DownloadItem) {
+        downloadManager.deleteDownload(item)
     }
 }

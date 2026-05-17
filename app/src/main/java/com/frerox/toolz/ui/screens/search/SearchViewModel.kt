@@ -1,7 +1,11 @@
 package com.frerox.toolz.ui.screens.search
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.browser.TabEntry
+import com.frerox.toolz.data.browser.TabManager
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchHistoryEntry
@@ -11,384 +15,408 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import com.frerox.toolz.data.browser.TabManager
-import com.frerox.toolz.data.browser.TabEntry
 import javax.inject.Inject
 
-data class SearchUiState(
-    val query: String = "",
-    val results: List<SearchResult> = emptyList(),
-    val suggestions: List<String> = emptyList(),
-    val isLoading: Boolean = false,
-    val isLoadingMore: Boolean = false,
-    val canLoadMore: Boolean = false,
-    val error: String? = null,
-    val active: Boolean = false,
-    val adBlockEnabled: Boolean = true,
-    val dnsProvider: String = "ADGUARD",
-    val customDns: String = "",
-    val recentDns: List<String> = emptyList(),
-    val isIncognito: Boolean = false,
-    val searchEngine: String = "DUCKDUCKGO",
-    val safeSearch: Boolean = true,
-    val region: String = "wt-wt",
-    val customEngineUrl: String = "",
-    val tabs: List<TabEntry> = emptyList(),
-    val activeTabId: String? = null,
-    val userName: String = "",
-    val searchAutofillEnabled: Boolean = true
+// ─── Sealed error hierarchy ───────────────────────────────────────────────────
+
+sealed class SearchError {
+    data object NoResults    : SearchError()
+    data object NetworkError : SearchError()
+    data object RateLimited  : SearchError()
+    data class  Unknown(val message: String) : SearchError()
+
+    fun userMessage(): String = when (this) {
+        is NoResults    -> "Try different keywords or check your spelling."
+        is NetworkError -> "Please check your internet connection and try again."
+        is RateLimited  -> "Too many requests. Please wait a moment and try again."
+        is Unknown      -> message.takeIf { it.isNotBlank() } ?: "An unexpected error occurred."
+    }
+}
+
+// ─── Search phase ─────────────────────────────────────────────────────────────
+
+enum class SearchPhase { Idle, Loading, LoadingMore, Results }
+
+// ─── Stable settings state (rarely changes — settings + tabs) ────────────────
+// Marked @Immutable so Compose's compiler can skip stability checks.
+
+@Immutable
+data class SearchSettingsState(
+    val adBlockEnabled:        Boolean       = true,
+    val dnsProvider:           String        = "ADGUARD",
+    val customDns:             String        = "",
+    val recentDns:             List<String>  = emptyList(),
+    val isIncognito:           Boolean       = false,
+    val searchEngine:          String        = "DUCKDUCKGO",
+    val safeSearch:            Boolean       = true,
+    val region:                String        = "wt-wt",
+    val customEngineUrl:       String        = "",
+    val searchAutofillEnabled: Boolean       = true,
+    val userName:              String        = "",
+    val tabs:                  List<TabEntry> = emptyList(),
+    val activeTabId:           String?       = null,
 )
 
+// ─── Fast-changing query state (changes on every keystroke) ──────────────────
+
+@Immutable
+data class SearchQueryState(
+    val query:       String             = "",
+    val suggestions: List<String>       = emptyList(),
+    val phase:       SearchPhase        = SearchPhase.Idle,
+    val results:     List<SearchResult> = emptyList(),
+    val error:       SearchError?       = null,
+    val canLoadMore: Boolean            = false,
+    val isActive:    Boolean            = false,
+)
+
+// ─── Combined UI state (backward-compat — remove once screens are fully migrated) ──
+
+@Immutable
+data class SearchUiState(
+    val query:       String             = "",
+    val results:     List<SearchResult> = emptyList(),
+    val suggestions: List<String>       = emptyList(),
+    val phase:       SearchPhase        = SearchPhase.Idle,
+    val error:       SearchError?       = null,
+    val canLoadMore: Boolean            = false,
+    val isActive:    Boolean            = false,
+
+    // Settings
+    val adBlockEnabled:        Boolean      = true,
+    val dnsProvider:           String       = "ADGUARD",
+    val customDns:             String       = "",
+    val recentDns:             List<String> = emptyList(),
+    val isIncognito:           Boolean      = false,
+    val searchEngine:          String       = "DUCKDUCKGO",
+    val safeSearch:            Boolean      = true,
+    val region:                String       = "wt-wt",
+    val customEngineUrl:       String       = "",
+    val searchAutofillEnabled: Boolean      = true,
+    val userName:              String       = "",
+
+    // Tabs
+    val tabs:        List<TabEntry> = emptyList(),
+    val activeTabId: String?        = null,
+)
+
+// ─── ViewModel ────────────────────────────────────────────────────────────────
+
+@Stable
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val repository: WebSearchRepository,
+    private val repository:        WebSearchRepository,
     private val settingsRepository: SettingsRepository,
-    private val tabManager: TabManager
+    private val tabManager:        TabManager,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SearchUiState())
-    val uiState = _uiState.asStateFlow()
+    // ── Split flows ───────────────────────────────────────────────────────────
 
-    val history = repository.history
-    val bookmarks = repository.bookmarks
+    private val _settings = MutableStateFlow(SearchSettingsState())
+    val settingsState: StateFlow<SearchSettingsState> = _settings.asStateFlow()
+
+    private val _query = MutableStateFlow(SearchQueryState())
+    val queryState: StateFlow<SearchQueryState> = _query.asStateFlow()
+
+    // ── Backward-compat combined flow ─────────────────────────────────────────
+    // Only recomputes when either _settings or _query emit a new value.
+    // Because _settings rarely changes, fast typing only triggers _query updates —
+    // components that only read settings fields skip recomposition entirely.
+
+    val uiState: StateFlow<SearchUiState> = combine(_settings, _query) { s, q ->
+        SearchUiState(
+            query                = q.query,
+            results              = q.results,
+            suggestions          = q.suggestions,
+            phase                = q.phase,
+            error                = q.error,
+            canLoadMore          = q.canLoadMore,
+            isActive             = q.isActive,
+            adBlockEnabled       = s.adBlockEnabled,
+            dnsProvider          = s.dnsProvider,
+            customDns            = s.customDns,
+            recentDns            = s.recentDns,
+            isIncognito          = s.isIncognito,
+            searchEngine         = s.searchEngine,
+            safeSearch           = s.safeSearch,
+            region               = s.region,
+            customEngineUrl      = s.customEngineUrl,
+            searchAutofillEnabled = s.searchAutofillEnabled,
+            userName             = s.userName,
+            tabs                 = s.tabs,
+            activeTabId          = s.activeTabId,
+        )
+    }.stateIn(
+        scope       = viewModelScope,
+        started     = SharingStarted.WhileSubscribed(5_000),
+        initialValue = SearchUiState(),
+    )
+
+    // ── DAO-backed flows (stable, no Hilt needed in composable) ───────────────
+
+    val history    = repository.history
+    val bookmarks  = repository.bookmarks
     val quickLinks = repository.quickLinks
     val isFirstTime = settingsRepository.searchFirstTime
-    val adBlockEnabled = settingsRepository.searchAdBlockEnabled
-    val dnsProvider = settingsRepository.searchDnsProvider
-    val customDns = settingsRepository.searchCustomDns
-    val recentDns = settingsRepository.searchRecentDns
-    val searchEngine = settingsRepository.searchEngine
-    val safeSearch = settingsRepository.searchSafeSearch
-    val region = settingsRepository.searchRegion
-    val customEngineUrl = settingsRepository.searchCustomEngineUrl
-    val isIncognito = settingsRepository.searchIncognitoEnabled
-    val userName = settingsRepository.userName
-    val searchAutofillEnabled = settingsRepository.searchAutofillEnabled
+
+    // ── Coroutine job handles ─────────────────────────────────────────────────
+
+    private var suggestionJob: Job? = null
+    private var searchJob: Job?     = null
+
+    // ── Init: collect all settings into _settings ─────────────────────────────
 
     init {
         viewModelScope.launch {
-            userName.collect { name ->
-                _uiState.value = _uiState.value.copy(userName = name)
+            combine(
+                settingsRepository.userName,
+                settingsRepository.searchIncognitoEnabled,
+                settingsRepository.searchAdBlockEnabled,
+                settingsRepository.searchDnsProvider,
+                settingsRepository.searchCustomDns,
+            ) { name, incognito, adBlock, dns, customDns ->
+                _settings.update {
+                    it.copy(
+                        userName       = name,
+                        isIncognito    = incognito,
+                        adBlockEnabled = adBlock,
+                        dnsProvider    = dns,
+                        customDns      = customDns,
+                    )
+                }
+            }.catch { /* non-fatal */ }.collect {}
+        }
+
+        viewModelScope.launch {
+            combine(
+                settingsRepository.searchRecentDns,
+                settingsRepository.searchEngine,
+                settingsRepository.searchSafeSearch,
+                settingsRepository.searchRegion,
+                settingsRepository.searchCustomEngineUrl,
+            ) { recent, engine, safe, region, customUrl ->
+                _settings.update {
+                    it.copy(
+                        recentDns       = recent.toList(),
+                        searchEngine    = engine,
+                        safeSearch      = safe,
+                        region          = region,
+                        customEngineUrl = customUrl,
+                    )
+                }
+            }.catch { }.collect {}
+        }
+
+        viewModelScope.launch {
+            settingsRepository.searchAutofillEnabled.collect { enabled ->
+                _settings.update { it.copy(searchAutofillEnabled = enabled) }
             }
         }
+
         viewModelScope.launch {
-            isIncognito.collect { enabled ->
-                _uiState.value = _uiState.value.copy(isIncognito = enabled)
-            }
-        }
-        viewModelScope.launch {
-            tabManager.tabs.collect { tabs ->
-                _uiState.value = _uiState.value.copy(tabs = tabs)
-            }
-        }
-        viewModelScope.launch {
-            tabManager.activeTabId.collect { id ->
-                _uiState.value = _uiState.value.copy(activeTabId = id)
-            }
-        }
-        viewModelScope.launch {
-            adBlockEnabled.collect { enabled ->
-                _uiState.value = _uiState.value.copy(adBlockEnabled = enabled)
-            }
-        }
-        viewModelScope.launch {
-            dnsProvider.collect { provider ->
-                _uiState.value = _uiState.value.copy(dnsProvider = provider)
-            }
-        }
-        viewModelScope.launch {
-            searchAutofillEnabled.collect { enabled ->
-                _uiState.value = _uiState.value.copy(searchAutofillEnabled = enabled)
-            }
-        }
-        viewModelScope.launch {
-            customDns.collect { dns ->
-                _uiState.value = _uiState.value.copy(customDns = dns)
-            }
-        }
-        viewModelScope.launch {
-            recentDns.collect { recent ->
-                _uiState.value = _uiState.value.copy(recentDns = recent.toList())
-            }
-        }
-        viewModelScope.launch {
-            searchEngine.collect { engine ->
-                _uiState.value = _uiState.value.copy(searchEngine = engine)
-            }
-        }
-        viewModelScope.launch {
-            safeSearch.collect { enabled ->
-                _uiState.value = _uiState.value.copy(safeSearch = enabled)
-            }
-        }
-        viewModelScope.launch {
-            region.collect { value ->
-                _uiState.value = _uiState.value.copy(region = value)
-            }
-        }
-        viewModelScope.launch {
-            customEngineUrl.collect { url ->
-                _uiState.value = _uiState.value.copy(customEngineUrl = url)
-            }
+            combine(tabManager.tabs, tabManager.activeTabId) { tabs, activeId ->
+                _settings.update { it.copy(tabs = tabs, activeTabId = activeId) }
+            }.catch { }.collect {}
         }
     }
 
-    private var suggestionJob: Job? = null
+    // ─── Query / Suggestions ──────────────────────────────────────────────────
 
     fun onQueryChange(newQuery: String) {
-        _uiState.value = _uiState.value.copy(query = newQuery)
-        
+        // Only update the fast-changing query flow — settings composables unaffected
+        _query.update { it.copy(query = newQuery, error = null) }
+
         suggestionJob?.cancel()
         if (newQuery.length >= 2) {
             suggestionJob = viewModelScope.launch {
-                delay(300)
-                val suggestions = repository.fetchSuggestions(newQuery)
-                _uiState.value = _uiState.value.copy(suggestions = suggestions)
+                delay(280)
+                val suggestions = runCatching { repository.fetchSuggestions(newQuery) }
+                    .getOrDefault(emptyList())
+                _query.update { it.copy(suggestions = suggestions) }
             }
         } else {
-            _uiState.value = _uiState.value.copy(suggestions = emptyList())
+            _query.update { it.copy(suggestions = emptyList()) }
         }
     }
+
+    // ─── Search ───────────────────────────────────────────────────────────────
 
     fun onSearch(query: String) {
-        if (query.isEmpty()) {
-            _uiState.value = _uiState.value.copy(results = emptyList(), query = "", active = false, error = null, canLoadMore = false)
-            return
-        }
-        
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) { clearSearch(); return }
+
         suggestionJob?.cancel()
-        val currentState = _uiState.value
-        _uiState.value = currentState.copy(query = query, isLoading = true, active = false, error = null, suggestions = emptyList())
-        
-        viewModelScope.launch {
-            try {
-                if (!currentState.isIncognito) {
-                    repository.addHistory(query)
-                }
-                val results = repository.search(query)
-                _uiState.value = _uiState.value.copy(
-                    results = results, 
-                    isLoading = false, 
-                    canLoadMore = results.isNotEmpty(),
-                    error = if (results.isEmpty()) "No results found" else null
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.localizedMessage ?: "Search failed")
+        searchJob?.cancel()
+
+        _query.update {
+            it.copy(
+                query       = trimmed,
+                phase       = SearchPhase.Loading,
+                isActive    = false,
+                error       = null,
+                results     = emptyList(),
+                suggestions = emptyList(),
+                canLoadMore = false,
+            )
+        }
+
+        searchJob = viewModelScope.launch {
+            if (!_settings.value.isIncognito) {
+                runCatching { repository.addHistory(trimmed) }
             }
+
+            runCatching { repository.search(trimmed) }
+                .onSuccess { results ->
+                    _query.update {
+                        it.copy(
+                            results     = results,
+                            phase       = SearchPhase.Results,
+                            canLoadMore = results.isNotEmpty(),
+                            error       = if (results.isEmpty()) SearchError.NoResults else null,
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _query.update {
+                        it.copy(phase = SearchPhase.Results, error = mapThrowableToError(throwable))
+                    }
+                }
         }
     }
+
+    fun retrySearch() {
+        val q = _query.value.query
+        if (q.isNotEmpty()) onSearch(q)
+    }
+
+    // ─── Load More ────────────────────────────────────────────────────────────
 
     fun loadMore() {
-        val currentState = _uiState.value
-        if (currentState.isLoadingMore || !currentState.canLoadMore || currentState.query.isEmpty()) return
-        
-        if (currentState.results.size >= 500) {
-            _uiState.value = currentState.copy(canLoadMore = false)
-            return
-        }
+        val q = _query.value
+        if (q.phase == SearchPhase.LoadingMore || !q.canLoadMore || q.query.isEmpty()) return
+        if (q.results.size >= 500) { _query.update { it.copy(canLoadMore = false) }; return }
 
-        _uiState.value = currentState.copy(isLoadingMore = true)
+        _query.update { it.copy(phase = SearchPhase.LoadingMore) }
+
         viewModelScope.launch {
-            try {
-                val offset = currentState.results.size
-                val newResults = repository.search(currentState.query, offset)
-                
-                if (newResults.isEmpty()) {
-                    _uiState.value = _uiState.value.copy(isLoadingMore = false, canLoadMore = false)
-                } else {
-                    val combined = currentState.results + newResults
-                    val cappedResults = combined.take(500)
-                    _uiState.value = _uiState.value.copy(
-                        results = cappedResults,
-                        isLoadingMore = false,
-                        canLoadMore = cappedResults.size < 500 && newResults.isNotEmpty()
-                    )
+            runCatching { repository.search(q.query, q.results.size) }
+                .onSuccess { newResults ->
+                    if (newResults.isEmpty()) {
+                        _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
+                    } else {
+                        val combined = (q.results + newResults).distinctBy { it.url }.take(500)
+                        _query.update {
+                            it.copy(
+                                results     = combined,
+                                phase       = SearchPhase.Results,
+                                canLoadMore = combined.size < 500 && newResults.isNotEmpty(),
+                            )
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoadingMore = false)
+                .onFailure { _query.update { it.copy(phase = SearchPhase.Results) } }
+        }
+    }
+
+    // ─── UI state helpers ─────────────────────────────────────────────────────
+
+    fun onActiveChange(active: Boolean) = _query.update { it.copy(isActive = active) }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        suggestionJob?.cancel()
+        _query.update {
+            it.copy(
+                results     = emptyList(),
+                query       = "",
+                isActive    = false,
+                error       = null,
+                canLoadMore = false,
+                phase       = SearchPhase.Idle,
+                suggestions = emptyList(),
+            )
+        }
+    }
+
+    // ─── Settings mutations (always target _settings) ─────────────────────────
+
+    fun toggleIncognito(enabled: Boolean) = launch { settingsRepository.setSearchIncognitoEnabled(enabled) }
+    fun toggleAdBlock(enabled: Boolean)   = launch { settingsRepository.setSearchAdBlockEnabled(enabled) }
+    fun toggleAutofill(enabled: Boolean)  = launch { settingsRepository.setSearchAutofillEnabled(enabled) }
+    fun setDnsProvider(provider: String)  = launch { settingsRepository.setDnsProvider(provider) }
+    fun setCustomDns(dns: String)         = launch { settingsRepository.setCustomDns(dns) }
+    fun setSearchEngine(engine: String)   = launch { settingsRepository.setSearchEngine(engine) }
+    fun setSafeSearch(enabled: Boolean)   = launch { settingsRepository.setSearchSafeSearch(enabled) }
+    fun setRegion(region: String)         = launch { settingsRepository.setSearchRegion(region) }
+    fun setCustomEngineUrl(url: String)   = launch { settingsRepository.setSearchCustomEngineUrl(url) }
+    fun removeRecentDns(dns: String)      = launch { settingsRepository.removeRecentDns(dns) }
+    fun dismissFirstTime()                = launch { settingsRepository.setSearchFirstTime(false) }
+
+    fun setSecurityPreset(preset: String) = viewModelScope.launch {
+        when (preset) {
+            "LOW" -> {
+                settingsRepository.setSearchAdBlockEnabled(true)
+                settingsRepository.setDnsProvider("ADGUARD")
+                settingsRepository.setSearchIncognitoEnabled(false)
+            }
+            "BASIC" -> {
+                settingsRepository.setSearchAdBlockEnabled(true)
+                settingsRepository.setDnsProvider("CLOUDFLARE")
+                settingsRepository.setSearchEngine("DUCKDUCKGO")
+                settingsRepository.setSearchIncognitoEnabled(false)
+            }
+            "MAX" -> {
+                settingsRepository.setSearchAdBlockEnabled(true)
+                settingsRepository.setDnsProvider("QUAD9")
+                settingsRepository.setSearchEngine("DUCKDUCKGO")
+                settingsRepository.setSearchIncognitoEnabled(true)
             }
         }
     }
 
-    fun onActiveChange(active: Boolean) {
-        _uiState.value = _uiState.value.copy(active = active)
+    // ─── Data mutations ───────────────────────────────────────────────────────
+
+    fun deleteHistory(id: Long)     = launch { repository.deleteHistory(id) }
+    fun clearHistory()              = launch { repository.clearHistory() }
+    fun removeBookmark(url: String) = launch { repository.removeBookmark(url) }
+    fun addQuickLink(title: String, url: String) = launch { repository.addQuickLink(title, url) }
+    fun removeQuickLink(id: Long)   = launch { repository.removeQuickLink(id) }
+    fun updateBookmark(id: Long, title: String, url: String) = launch { repository.updateBookmark(id, title, url) }
+    fun updateQuickLink(id: Long, title: String, url: String) = launch { repository.updateQuickLink(id, title, url) }
+
+    fun toggleBookmark(result: SearchResult) = viewModelScope.launch {
+        if (repository.isBookmarked(result.url)) repository.removeBookmark(result.url)
+        else repository.addBookmark(result.title, result.url)
     }
 
-    fun toggleIncognito(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setSearchIncognitoEnabled(enabled)
-        }
+    fun reorderQuickLinks(from: Int, to: Int) = viewModelScope.launch {
+        val links = repository.quickLinks.firstOrNull() ?: return@launch
+        val mutable = links.toMutableList()
+        if (from !in mutable.indices || to !in mutable.indices) return@launch
+        val item = mutable.removeAt(from)
+        mutable.add(to, item)
+        repository.updateQuickLinks(mutable.mapIndexed { i, link -> link.copy(sortOrder = i) })
     }
 
-    fun toggleAdBlock(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setSearchAdBlockEnabled(enabled)
-        }
-    }
+    // ─── Tab actions ──────────────────────────────────────────────────────────
 
-    fun setDnsProvider(provider: String) {
-        viewModelScope.launch {
-            settingsRepository.setDnsProvider(provider)
-        }
-    }
+    fun openTab(url: String)  { tabManager.addTab(url) }
+    fun closeTab(id: String)  { tabManager.removeTab(id) }
+    fun switchTab(id: String) { tabManager.switchTab(id) }
 
-    fun setCustomDns(dns: String) {
-        viewModelScope.launch {
-            settingsRepository.setCustomDns(dns)
-        }
-    }
+    // ─── Private helpers ──────────────────────────────────────────────────────
 
-    fun setSearchEngine(engine: String) {
-        viewModelScope.launch {
-            settingsRepository.setSearchEngine(engine)
-        }
-    }
+    private fun launch(block: suspend () -> Unit): Job =
+        viewModelScope.launch { runCatching { block() } }
 
-    fun setSafeSearch(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setSearchSafeSearch(enabled)
-        }
-    }
-
-    fun setRegion(region: String) {
-        viewModelScope.launch {
-            settingsRepository.setSearchRegion(region)
-        }
-    }
-
-    fun setCustomEngineUrl(url: String) {
-        viewModelScope.launch {
-            settingsRepository.setSearchCustomEngineUrl(url)
-        }
-    }
-
-    fun removeRecentDns(dns: String) {
-        viewModelScope.launch {
-            settingsRepository.removeRecentDns(dns)
-        }
-    }
-
-    fun updateBookmark(id: Long, title: String, url: String) {
-        viewModelScope.launch {
-            repository.updateBookmark(id, title, url)
-        }
-    }
-
-    fun updateQuickLink(id: Long, title: String, url: String) {
-        viewModelScope.launch {
-            repository.updateQuickLink(id, title, url)
-        }
-    }
-
-    fun deleteHistory(id: Long) {
-        viewModelScope.launch {
-            repository.deleteHistory(id)
-        }
-    }
-
-    fun clearHistory() {
-        viewModelScope.launch {
-            repository.clearHistory()
-        }
-    }
-
-    fun removeBookmark(url: String) {
-        viewModelScope.launch {
-            repository.removeBookmark(url)
-        }
-    }
-
-    fun addQuickLink(title: String, url: String) {
-        viewModelScope.launch {
-            repository.addQuickLink(title, url)
-        }
-    }
-
-    fun removeQuickLink(id: Long) {
-        viewModelScope.launch {
-            repository.removeQuickLink(id)
-        }
-    }
-
-    fun reorderQuickLinks(from: Int, to: Int) {
-        viewModelScope.launch {
-            val currentLinks = repository.quickLinks.firstOrNull() ?: return@launch
-            val mutableLinks = currentLinks.toMutableList()
-            if (from !in mutableLinks.indices || to !in mutableLinks.indices) return@launch
-            
-            val item = mutableLinks.removeAt(from)
-            mutableLinks.add(to, item)
-            
-            // Update sortOrder for all items
-            val updatedLinks = mutableLinks.mapIndexed { index, link ->
-                link.copy(sortOrder = index)
-            }
-            repository.updateQuickLinks(updatedLinks)
-        }
-    }
-
-    fun dismissFirstTime() {
-        viewModelScope.launch {
-            settingsRepository.setSearchFirstTime(false)
-        }
-    }
-
-    fun setSecurityPreset(preset: String) {
-        viewModelScope.launch {
-            when (preset) {
-                "LOW" -> {
-                    settingsRepository.setSearchAdBlockEnabled(true)
-                    settingsRepository.setDnsProvider("ADGUARD")
-                    settingsRepository.setSearchSafeSearch(false)
-                }
-                "BASIC" -> {
-                    settingsRepository.setSearchAdBlockEnabled(true)
-                    settingsRepository.setDnsProvider("CLOUDFLARE")
-                    settingsRepository.setSearchEngine("DUCKDUCKGO")
-                    settingsRepository.setSearchSafeSearch(true)
-                }
-                "MAX" -> {
-                    settingsRepository.setSearchAdBlockEnabled(true)
-                    settingsRepository.setDnsProvider("QUAD9")
-                    settingsRepository.setSearchEngine("DUCKDUCKGO")
-                    settingsRepository.setSearchSafeSearch(true)
-                    settingsRepository.setSearchIncognitoEnabled(true)
-                }
-            }
-        }
-    }
-
-    fun toggleAutofill(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsRepository.setSearchAutofillEnabled(enabled)
-        }
-    }
-
-    fun openTab(url: String) {
-        tabManager.addTab(url)
-    }
-
-    fun closeTab(id: String) {
-        tabManager.removeTab(id)
-    }
-
-    fun switchTab(id: String) {
-        tabManager.switchTab(id)
-    }
-
-    fun toggleBookmark(result: SearchResult) {
-        viewModelScope.launch {
-            if (repository.isBookmarked(result.url)) {
-                repository.removeBookmark(result.url)
-            } else {
-                repository.addBookmark(result.title, result.url)
-            }
-        }
+    private fun mapThrowableToError(t: Throwable): SearchError = when {
+        t is java.net.UnknownHostException   -> SearchError.NetworkError
+        t is java.net.SocketTimeoutException -> SearchError.NetworkError
+        t is javax.net.ssl.SSLException      -> SearchError.NetworkError
+        t.message?.contains("429") == true   -> SearchError.RateLimited
+        t.message?.contains("403") == true   -> SearchError.RateLimited
+        else                                 -> SearchError.Unknown(t.localizedMessage ?: "")
     }
 }

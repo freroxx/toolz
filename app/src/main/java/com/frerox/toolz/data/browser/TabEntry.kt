@@ -8,5 +8,6 @@ data class TabEntry(
     val title: String = "New Tab",
     val faviconUrl: String? = null,
     val previewPath: String? = null,
+    val isDesktopMode: Boolean = false,
     val lastAccessed: Long = System.currentTimeMillis()
 )

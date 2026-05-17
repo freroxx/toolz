@@ -5,6 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +29,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -48,7 +52,9 @@ fun UpdateScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val preferredAbi by viewModel.preferredAbi.collectAsState()
+    val context = LocalContext.current
     var showAbiSettings by remember { mutableStateOf(false) }
+    var showHelpSheet by remember { mutableStateOf(false) }
     val performanceMode = LocalPerformanceMode.current
 
     Scaffold(
@@ -64,6 +70,13 @@ fun UpdateScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showHelpSheet = true },
+                        modifier = Modifier.padding(end = 4.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    ) {
+                        @Suppress("DEPRECATION")
+                        Text("Help", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(
                         onClick = { showAbiSettings = true },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -138,27 +151,66 @@ fun UpdateScreen(
                     when (state) {
                         is UpdateUiState.Downloading -> {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                @Suppress("DEPRECATION")
-                                Text(
-                                    "INTEGRATING PATCH...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    letterSpacing = 1.sp
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                ) {
+                                    @Suppress("DEPRECATION")
+                                    Text(
+                                        "DOWNLOADING PACKAGE",
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        letterSpacing = 1.sp
+                                    )
+                                }
+                                
+                                val animatedProgress by animateFloatAsState(
+                                    targetValue = state.progress / 100f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                    label = "progress"
                                 )
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(24.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(animatedProgress)
+                                            .fillMaxHeight()
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
+                                                )
+                                            )
+                                    )
+                                    
+                                    if (state.progress > 5f) {
+                                        Text(
+                                            "${state.progress.toInt()}%",
+                                            modifier = Modifier.padding(start = 12.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                                
                                 Spacer(Modifier.height(16.dp))
-                                LinearProgressIndicator(
-                                    progress = { state.progress / 100f },
-                                    modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
-                                )
-                                Spacer(Modifier.height(8.dp))
+                                
                                 Text(
-                                    "${state.progress.toInt()}%",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Black
+                                    "Your patch is being prepared for integration.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
@@ -208,6 +260,16 @@ fun UpdateScreen(
                 }
             }
         }
+    }
+
+    if (showHelpSheet) {
+        UpdateHelpBottomSheet(
+            onDismiss = { showHelpSheet = false },
+            onNavigateToUrl = { url ->
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+                context.startActivity(intent)
+            }
+        )
     }
 
     if (showAbiSettings) {
@@ -375,6 +437,100 @@ fun UpdateScreen(
                 }
                 Spacer(Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun UpdateHelpBottomSheet(
+    onDismiss: () -> Unit,
+    onNavigateToUrl: (String) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(36.dp, 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text(
+                text = "Update Mechanism",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black
+            )
+
+            Text(
+                text = "Toolz uses a multi-layered update system to ensure you always have access to the latest precision instruments.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            HelpSection(
+                title = "In-App Update",
+                description = "Toolz checks our project manifest and GitHub for new releases. When found, the app downloads and prompts you to install the APK directly.",
+                icon = Icons.Rounded.SystemUpdate
+            )
+
+            HelpSection(
+                title = "Manual Links",
+                description = "If the automated system fails, you can always grab the latest builds directly from our repository.",
+                icon = Icons.Rounded.Download
+            )
+
+            Button(
+                onClick = { onNavigateToUrl("https://github.com/freroxx/toolz/releases") },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Rounded.Download, null)
+                Spacer(Modifier.width(12.dp))
+                Text("OPEN RELEASES PAGE", fontWeight = FontWeight.Black)
+            }
+            
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("CLOSE", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun HelpSection(title: String, description: String, icon: ImageVector) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Surface(
+            modifier = Modifier.size(48.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
