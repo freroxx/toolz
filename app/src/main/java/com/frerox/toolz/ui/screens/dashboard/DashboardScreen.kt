@@ -139,6 +139,7 @@ fun DashboardScreen(
     
     val showRecentTools by settingsRepository.showRecentTools.collectAsState(initial = true)
     val showQuickNotes by settingsRepository.showQuickNotes.collectAsState(initial = true)
+    val showDashboardStats by settingsRepository.showDashboardStats.collectAsState(initial = false)
     val dashboardView by settingsRepository.dashboardView.collectAsState(initial = "DEFAULT")
 
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -173,6 +174,7 @@ fun DashboardScreen(
         recentTools = recentTools,
         showRecentTools = showRecentTools,
         showQuickNotes = showQuickNotes,
+        showDashboardStats = showDashboardStats,
         dashboardView = dashboardView,
         musicState = musicState,
         musicViewModel = musicViewModel,
@@ -221,6 +223,7 @@ fun DashboardContent(
     recentTools: List<String>,
     showRecentTools: Boolean,
     showQuickNotes: Boolean,
+    showDashboardStats: Boolean,
     dashboardView: String,
     musicState: MusicUiState,
     musicViewModel: MusicPlayerViewModel,
@@ -307,9 +310,11 @@ fun DashboardContent(
                 }
 
                 // Quick Stats
-                item {
-                    Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                        QuickStatsRow(stats = stats, onNavigate = onNavigate)
+                if (showDashboardStats) {
+                    item {
+                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
+                            QuickStatsRow(stats = stats, onNavigate = onNavigate)
+                        }
                     }
                 }
 

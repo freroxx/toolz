@@ -225,7 +225,6 @@ class CalendarViewModel @Inject constructor(
                     isScanning           = true,
                     errorMessage         = null,
                     rawAiFailureResponse = null,
-                    // Preserve the original prompt across retries
                     lastUserPrompt       = prompt.ifBlank { it.lastUserPrompt },
                 )
             }
@@ -237,14 +236,13 @@ class CalendarViewModel @Inject constructor(
             )
             val fullPrompt   = "$systemPrompt\n\n$userContent"
 
-            // Use .first() to consume exactly one response regardless of
-            // whether the Flow is cold single-shot or could emit multiple items.
             try {
                 val result = chatRepository
                     .getChatResponse(
-                        prompt  = fullPrompt,
-                        history = emptyList(),
-                        image   = _uiState.value.attachedImage,
+                        prompt        = fullPrompt,
+                        history       = emptyList(),
+                        image         = _uiState.value.attachedImage,
+                        modelOverride = "llama-3.3-70b-versatile"
                     )
                     .first()
 
@@ -431,151 +429,58 @@ class CalendarViewModel @Inject constructor(
      * - Includes worked examples for the most common failure modes.
      */
     private fun buildSystemPrompt(): String {
-        val tz       = TimeZone.getDefault()
-        val tzId     = tz.id
-        val tzOffset = formatUtcOffset(tz)
-
-        val now      = Calendar.getInstance(tz)
-        val isoFmt   = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply { timeZone = tz }
-        val humanFmt = SimpleDateFormat("EEEE, MMMM dd, yyyy 'at' HH:mm", Locale.US).apply { timeZone = tz }
-        val dateFmt  = SimpleDateFormat("EEEE, MMMM dd, yyyy", Locale.US).apply { timeZone = tz }
-        val shortFmt = SimpleDateFormat("EEE MMM dd", Locale.US).apply { timeZone = tz }
-
+        val now = Calendar.getInstance()
+        val humanFmt = SimpleDateFormat("EEEE, MMMM dd, yyyy, h:mm a", Locale.US)
         val nowHuman = humanFmt.format(now.time)
-        val nowIso   = isoFmt.format(now.time)
-        val selDate  = dateFmt.format(Date(_uiState.value.selectedDate))
-
-        // Week containing the selected date (Mon → Sun).
-        val weekCal = Calendar.getInstance(tz).apply {
-            timeInMillis = _uiState.value.selectedDate
-            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-        }
-        val weekDays = (0..6).map { offset ->
-            val d = Calendar.getInstance(tz).apply {
-                timeInMillis = weekCal.timeInMillis
-                add(Calendar.DAY_OF_YEAR, offset)
-            }
-            "${shortFmt.format(d.time)} → ${isoFmt.format(d.time)}"
-        }
-
-        // Next 14 days reference grid.
-        val next14 = (0..13).map { offset ->
-            val d = Calendar.getInstance(tz).apply {
-                timeInMillis = now.timeInMillis
-                add(Calendar.DAY_OF_YEAR, offset)
-            }
-            "${shortFmt.format(d.time)} → ${isoFmt.format(d.time)}"
-        }
-
-        // Existing events for conflict awareness.
-        val existingEventsSnippet = _uiState.value.events
-            .take(30)
-            .joinToString("\n") { ev ->
-                "  - \"${ev.title}\" on ${dateFmt.format(Date(ev.timestamp))}"
-            }
-            .ifBlank { "  (none)" }
 
         return """
-SYSTEM — Calendar Event Parser
-You are a high-precision calendar event parser for the "Toolz" productivity app.
-Your ONLY output must be a raw JSON array.  No markdown.  No prose.  No code fences.
+You are the core Calendar Parsing Engine for the "Toolz" utility ecosystem. Your sole purpose is to analyze natural language user requests, extract event metrics, and format them into a strict JSON payload for system execution.
 
-═══════════════════════════════
-DEVICE TIME CONTEXT
-═══════════════════════════════
-Current moment (ISO-8601) : $nowIso
-Current moment (human)    : $nowHuman
-Timezone ID               : $tzId
-UTC offset                : $tzOffset
-Calendar view date        : $selDate
+### CRITICAL CONTEXT
+- Current Reference Date/Time: $nowHuman
 
-Week containing "$selDate" (Mon–Sun):
-${weekDays.joinToString("\n")}
+### STRICT OPERATIONAL RULES
+1. OUTPUT ONLY JSON. Do not include introductory text, conversational pleasantries, markdown blocks (other than the raw JSON), or concluding remarks. 
+2. DATE MATHEMATICS: Use the Current Reference Date to resolve all relative time statements ("tomorrow", "next Friday", "in 3 hours", "at 2pm").
+3. IMPLICIT DURATION: If the user does not specify an end time or duration, default "duration_minutes" to 60.
+4. UNRESOLVABLE INPUT: If the input contains absolutely no date or event intent, return an empty JSON object: {}.
 
-Next 14 days reference grid (use these ISO timestamps to anchor relative terms):
-${next14.joinToString("\n")}
+### EXPECTED OUTPUT SCHEMA
+{
+  "title": "String (Clear, concise title of the event)",
+  "start_time_iso": "String (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)",
+  "duration_minutes": Integer,
+  "description": "String (Any extra context, location, or notes extracted, or empty string)"
+}
 
-Already-existing events (do NOT duplicate these unless the user explicitly asks):
-$existingEventsSnippet
+### FEW-SHOT GOLDEN EXAMPLES
 
-═══════════════════════════════
-DATE & TIME RESOLUTION RULES
-═══════════════════════════════
-1. TIMEZONE: All output timestamps MUST represent times in timezone "$tzId".
-   Never default to UTC.  Never shift the hour.
+User: "i have a job interview tomorrow at 2pm"
+AI:
+{
+  "title": "Job Interview",
+  "start_time_iso": "2026-05-18T14:00:00",
+  "duration_minutes": 60,
+  "description": "Added via Toolz AI"
+}
 
-2. ANCHOR: Relative terms ("next Monday", "this Friday", "the 15th") are
-   anchored to "$selDate" UNLESS the user says "today", "right now", or names
-   a different month/year explicitly.
+User: "Remind me to study physics with Omar this Friday from 4 to 6 PM at the café"
+AI:
+{
+  "title": "Study Physics with Omar",
+  "start_time_iso": "2026-05-22T16:00:00",
+  "duration_minutes": 120,
+  "description": "Location: Café"
+}
 
-3. "THIS [DAY]"  → the occurrence of that weekday within the SAME calendar
-   week as "$selDate" shown in the week grid above.
-
-4. "NEXT [DAY]"  → the FIRST occurrence of that weekday STRICTLY AFTER
-   "$selDate".  If "$selDate" is already that weekday, go to the following week.
-
-5. BARE DATE ("the 15th", "Jan 5"):  choose the nearest future occurrence
-   relative to "$selDate".  Prefer the current month; if already past, use
-   the next month.
-
-6. YEAR RESOLUTION: When no year is given, pick the year that puts the date
-   closest to (and after) "$selDate".
-
-7. MISSING TIME: Default to 09:00 in timezone "$tzId".
-
-8. TIMESTAMP FORMAT: Output MUST be a 13-digit Unix milliseconds Long.
-   Correct: 1741257000000   Wrong: 1741257000 (10-digit seconds).
-
-9. SANITY CHECK: If a resolved timestamp falls more than $MAX_YEARS_IN_PAST year in
-   the past or more than $MAX_YEARS_IN_FUTURE years in the future, re-evaluate
-   before outputting.
-
-═══════════════════════════════
-OUTPUT CONTRACT
-═══════════════════════════════
-• Output ONLY a raw JSON array — no ```json, no preamble, no explanations.
-• If no events are found, output exactly: []
-• Each element must match this schema exactly:
-
-[
-  {
-    "title"       : "string — clear, concise event name",
-    "timestamp"   : 1234567890000,
-    "eventType"   : "EXAM | EVALUATION | DEADLINE | BIRTHDAY | MEETING | HOLIDAY | GENERAL",
-    "subjectColor": "#RRGGBB — pick from palette below",
-    "description" : "string | null — location, notes, or any extra detail"
-  }
-]
-
-Color palette:
-  EXAM / EVALUATION  →  #FF5252
-  DEADLINE           →  #FF6D00
-  BIRTHDAY           →  #E040FB
-  MEETING            →  #448AFF
-  HOLIDAY            →  #00BFA5
-  GENERAL            →  #9E9E9E
-
-═══════════════════════════════
-EXAMPLES OF CORRECT OUTPUT
-═══════════════════════════════
-Input: "Math exam next Monday at 10am"
-(Assuming $selDate is Wednesday March 19 2025, timezone Africa/Algiers UTC+01:00)
-→ [{"title":"Math Exam","timestamp":1742464800000,"eventType":"EXAM","subjectColor":"#FF5252","description":null}]
-
-Input: "Team standup every day this week at 9am" (same anchor)
-→ Emit one entry per day (Mon–Fri) with the correct per-day timestamp.
-
-Input: "birthday party"  (no date at all)
-→ []
-
-═══════════════════════════════
-CRITICAL RULES (never break)
-═══════════════════════════════
-• NEVER invent a date if none is inferable from the text.
-• NEVER output seconds-based (10-digit) timestamps.
-• NEVER wrap output in markdown code fences.
-• NEVER emit duplicate events that already exist in the "existing events" list
-  unless the user explicitly requests a new one with the same name.
+User: "Gym in 30 minutes"
+AI:
+{
+  "title": "Gym",
+  "start_time_iso": "2026-05-17T22:12:00",
+  "duration_minutes": 60,
+  "description": ""
+}
         """.trimIndent()
     }
 
@@ -623,8 +528,7 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
                 return
             }
 
-            val validated   = withContext(Dispatchers.Default) { events.map { validateAndFixTimestamp(it) } }
-            val syncResults = syncUseCase.processAiEvents(validated)
+            val syncResults = syncUseCase.processAiCalendarEvents(events)
 
             _uiState.update {
                 it.copy(
@@ -664,36 +568,35 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
      * Handles: leading/trailing whitespace, markdown fences, BOM characters,
      * single-object responses (not wrapped in an array), mixed 10/13-digit timestamps.
      */
-    private fun parseAiJson(raw: String): List<AiEventResult> {
+    private fun parseAiJson(raw: String): List<AiCalendarEvent> {
         val cleaned = raw
             .trimStart('\uFEFF')                 // strip BOM
             .replace(Regex("```[a-z]*"), "")     // strip ```json
             .replace("```", "")
             .trim()
 
-        if (cleaned == "[]" || cleaned.isBlank()) return emptyList()
+        if (cleaned == "{}" || cleaned.isBlank()) return emptyList()
 
-        // Extract outermost JSON array.
+        // Extract outermost JSON array if present
         val arrayStart = cleaned.indexOf('[')
         val arrayEnd   = cleaned.lastIndexOf(']')
         if (arrayStart != -1 && arrayEnd > arrayStart) {
             return parseJsonArray(cleaned.substring(arrayStart, arrayEnd + 1))
         }
 
-        // Fallback: single object not wrapped in an array.
+        // Handle single object {} as per instructions
         val objStart = cleaned.indexOf('{')
         val objEnd   = cleaned.lastIndexOf('}')
         if (objStart != -1 && objEnd > objStart) {
-            Log.w(TAG, "AI returned single object; wrapping in array.")
             return parseJsonArray("[${cleaned.substring(objStart, objEnd + 1)}]")
         }
 
         throw IllegalArgumentException("No JSON structure found in AI response.")
     }
 
-    private fun parseJsonArray(json: String): List<AiEventResult> {
-        val type    = Types.newParameterizedType(List::class.java, AiEventResult::class.java)
-        val adapter = moshi.adapter<List<AiEventResult>>(type)
+    private fun parseJsonArray(json: String): List<AiCalendarEvent> {
+        val type    = Types.newParameterizedType(List::class.java, AiCalendarEvent::class.java)
+        val adapter = moshi.adapter<List<AiCalendarEvent>>(type)
         return adapter.fromJson(json) ?: emptyList()
     }
 

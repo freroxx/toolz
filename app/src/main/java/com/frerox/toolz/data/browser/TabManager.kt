@@ -47,14 +47,15 @@ class TabManager @Inject constructor() {
         }
     }
 
-    fun updateTab(tabId: String, url: String? = null, title: String? = null, faviconUrl: String? = null, previewPath: String? = null) {
+    fun updateTab(tabId: String, url: String? = null, title: String? = null, faviconUrl: String? = null, previewPath: String? = null, isDesktopMode: Boolean? = null) {
         _tabs.value = _tabs.value.map {
             if (it.id == tabId) {
                 it.copy(
                     url = url ?: it.url,
                     title = title ?: it.title,
                     faviconUrl = faviconUrl ?: it.faviconUrl,
-                    previewPath = previewPath ?: it.previewPath
+                    previewPath = previewPath ?: it.previewPath,
+                    isDesktopMode = isDesktopMode ?: it.isDesktopMode
                 )
             } else it
         }

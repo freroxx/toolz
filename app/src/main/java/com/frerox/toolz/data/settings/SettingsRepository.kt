@@ -30,6 +30,7 @@ class SettingsRepository @Inject constructor(
     private val RECENT_TOOLS = stringSetPreferencesKey("recent_tools") // Stored as "timestamp:route"
     private val SHOW_RECENT_TOOLS = booleanPreferencesKey("show_recent_tools")
     private val SHOW_QUICK_NOTES = booleanPreferencesKey("show_quick_notes")
+    private val SHOW_DASHBOARD_STATS = booleanPreferencesKey("show_dashboard_stats")
 
     // Notifications
     private val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
@@ -267,6 +268,7 @@ class SettingsRepository @Inject constructor(
     }
     val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
     val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
+    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: false }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
@@ -424,6 +426,7 @@ class SettingsRepository @Inject constructor(
     
     suspend fun setShowRecentTools(enabled: Boolean) { dataStore.edit { it[SHOW_RECENT_TOOLS] = enabled } }
     suspend fun setShowQuickNotes(enabled: Boolean) { dataStore.edit { it[SHOW_QUICK_NOTES] = enabled } }
+    suspend fun setShowDashboardStats(enabled: Boolean) { dataStore.edit { it[SHOW_DASHBOARD_STATS] = enabled } }
 
     // Notification setters
     suspend fun setNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled } }

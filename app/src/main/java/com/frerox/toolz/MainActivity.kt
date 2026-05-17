@@ -641,10 +641,18 @@ fun ToolzNavHost(
         ) { backStackEntry ->
             val url = backStackEntry.arguments?.getString("url") ?: ""
             val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
+            val musicViewModel: MusicPlayerViewModel = hiltViewModel()
             WebViewScreen(
                 url = decodedUrl,
                 onBack = { navController.popBackStack() },
-                onManageTabs = { navController.navigate(Screen.TabManagement.route) }
+                onManageTabs = { navController.navigate(Screen.TabManagement.route) },
+                onNavigateToPdf = { uri, title ->
+                    pdfViewModel.openPdf(Uri.parse(uri), title)
+                    navController.navigate(Screen.PdfReader.route)
+                },
+                onNavigateToMusic = { tab ->
+                    navController.navigate(Screen.MusicPlayer.createRoute(tab))
+                }
             )
         }
         composable(Screen.WorldClock.route) {
