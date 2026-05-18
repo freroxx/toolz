@@ -67,6 +67,7 @@ import com.frerox.toolz.ui.screens.settings.SettingsScreen
 import com.frerox.toolz.ui.screens.settings.UpdateScreen
 import com.frerox.toolz.ui.screens.time.*
 import com.frerox.toolz.ui.screens.todo.TodoScreen
+import com.frerox.toolz.ui.screens.utils.SmartEncrypterScreen
 import com.frerox.toolz.ui.screens.utils.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
@@ -757,6 +758,9 @@ fun ToolzNavHost(
 
         composable(Screen.Ruler.route) {
             RulerScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.SmartEncrypter.route) {
+            SmartEncrypterScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.SoundMeter.route) {
             SoundMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
