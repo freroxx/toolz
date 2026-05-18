@@ -55,6 +55,7 @@ sealed class Screen(val route: String) {
     object PdfReader : Screen("pdf_reader")
     object NotificationVault : Screen("notification_vault")
     object Clipboard : Screen("clipboard")
+    object SmartEncrypter : Screen("smart_encrypter")
     object DeviceInfo : Screen("device_info")
     object Search : Screen("search")
     object TabManagement : Screen("tab_management")
