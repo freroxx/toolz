@@ -220,7 +220,7 @@ fun MusicPlayerScreen(
         listOfNotNull(
             "Tracks",
             "Library",
-            if (state.karaokeEnabled) "Karaoke" else null,
+            if (state.isOnline && state.karaokeEnabled) "Karaoke" else null,
             if (state.isOnline) "Catalog" else null
         )
     }
@@ -3506,23 +3506,30 @@ fun FullPlayerView(
                                 Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f), modifier = Modifier.size(24.dp))
                             }
                             // AI / Lyrics
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (state.karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null || aiState.instrumentalMatch != null)) {
-                                    KaraokeMicIcon(
-                                        isActive = state.isKaraokeActive,
-                                        onClick = onToggleKaraoke,
-                                        size = 48.dp,
-                                        iconSize = 24.dp,
-                                        thumbnailUri = track.thumbnailUri,
-                                        isLoading = aiState.isResolvingInstrumental
-                                    )
-                                }
+                            if (state.isOnline) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (state.karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null || aiState.instrumentalMatch != null)) {
+                                        KaraokeMicIcon(
+                                            isActive = state.isKaraokeActive,
+                                            onClick = onToggleKaraoke,
+                                            size = 48.dp,
+                                            iconSize = 24.dp,
+                                            thumbnailUri = track.thumbnailUri,
+                                            isLoading = aiState.isResolvingInstrumental
+                                        )
+                                    }
 
-                                if (aiState.isAiEnabled) {
-                                    AiSparkleButton(onClick = onOpenAi)
-                                } else {
-                                    IconButton(onClick = onOpenAi, modifier = Modifier.size(48.dp)) {
-                                        Icon(Icons.Rounded.Lyrics, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f), modifier = Modifier.size(24.dp))
+                                    if (aiState.isAiEnabled) {
+                                        AiSparkleButton(onClick = onOpenAi)
+                                    } else {
+                                        IconButton(onClick = onOpenAi, modifier = Modifier.size(48.dp)) {
+                                            Icon(
+                                                Icons.Rounded.Lyrics,
+                                                null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }

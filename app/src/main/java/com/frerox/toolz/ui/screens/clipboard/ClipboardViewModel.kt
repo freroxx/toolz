@@ -45,6 +45,9 @@ class ClipboardViewModel @Inject constructor(
     val entries: StateFlow<List<ClipboardEntry>> = clipboardDao.getAllEntries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val offlineModeEnabled = settingsRepository.offlineModeEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     private val _isSummarizing = MutableStateFlow<Int?>(null)
     val isSummarizing = _isSummarizing.asStateFlow()
 

@@ -188,7 +188,8 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
             floatingActionButton = {
                 CalendarFabs(
                     onAiClick  = { showAiSheet = true },
-                    onAddClick = { showAddDialog = true }
+                    onAddClick = { showAddDialog = true },
+                    offlineMode = uiState.offlineModeEnabled
                 )
             }
         ) { paddingValues ->
@@ -225,7 +226,8 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                             tasks         = uiState.tasks,
                             onEventToggle = viewModel::toggleEventCompletion,
                             onDelete      = viewModel::deleteEvent,
-                            onEdit        = { editingEvent = it }
+                            onEdit        = { editingEvent = it },
+                            offlineMode   = uiState.offlineModeEnabled
                         )
                     }
                 }
@@ -476,21 +478,23 @@ private fun TopBarIconButton(icon: ImageVector, desc: String, onClick: () -> Uni
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun CalendarFabs(onAiClick: () -> Unit, onAddClick: () -> Unit) {
+private fun CalendarFabs(onAiClick: () -> Unit, onAddClick: () -> Unit, offlineMode: Boolean = false) {
     Column(
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.padding(bottom = 12.dp)
     ) {
-        FloatingActionButton(
-            onClick = onAiClick,
-            modifier = Modifier.size(48.dp),
-            shape    = RoundedCornerShape(16.dp),
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor   = MaterialTheme.colorScheme.onTertiaryContainer,
-            elevation = FloatingActionButtonDefaults.elevation(2.dp, 4.dp)
-        ) {
-            Icon(Icons.Rounded.AutoAwesome, "AI Scheduler", modifier = Modifier.size(22.dp))
+        if (!offlineMode) {
+            FloatingActionButton(
+                onClick = onAiClick,
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(16.dp),
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                elevation = FloatingActionButtonDefaults.elevation(2.dp, 4.dp)
+            ) {
+                Icon(Icons.Rounded.AutoAwesome, "AI Scheduler", modifier = Modifier.size(22.dp))
+            }
         }
         LargeFloatingActionButton(
             onClick = onAddClick,
@@ -1181,6 +1185,7 @@ fun AgendaView(
     onEventToggle: (EventEntry) -> Unit,
     onDelete: (EventEntry) -> Unit,
     onEdit: (EventEntry) -> Unit,
+    offlineMode: Boolean = false,
 ) {
     val itemsByDay = remember(events, tasks) {
         (events.map { CalendarItem.Event(it) } +
@@ -1212,7 +1217,7 @@ fun AgendaView(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Tap + to add one, or use AI Scan",
+                    if (offlineMode) "Tap + to add one" else "Tap + to add one, or use AI Scan",
                     style    = MaterialTheme.typography.bodySmall,
                     color    = MaterialTheme.colorScheme.outline,
                     textAlign = TextAlign.Center

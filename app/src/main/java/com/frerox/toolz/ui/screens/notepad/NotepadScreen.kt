@@ -1227,17 +1227,19 @@ fun NoteViewerSheet(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // AI Summarize
-                        ViewerActionButton(
-                            icon    = Icons.Rounded.AutoAwesome,
-                            tint    = onColor,
-                            bgAlpha = 0.15f,
-                            bgColor = onColor,
-                            onClick = {
-                                vibration?.vibrateTick()
-                                if (!isSummarizing) viewModel.summarizeNote(note)
-                                showSummary = true
-                            },
-                        )
+                        if (!viewModel.offlineModeEnabled.collectAsStateWithLifecycle(initialValue = false).value) {
+                            ViewerActionButton(
+                                icon = Icons.Rounded.AutoAwesome,
+                                tint = onColor,
+                                bgAlpha = 0.15f,
+                                bgColor = onColor,
+                                onClick = {
+                                    vibration?.vibrateTick()
+                                    if (!isSummarizing) viewModel.summarizeNote(note)
+                                    showSummary = true
+                                },
+                            )
+                        }
                         // Edit
                         ViewerActionButton(
                             icon    = Icons.Rounded.Edit,
@@ -1743,30 +1745,37 @@ fun NoteEditorDialog(
                             }
                             Spacer(Modifier.width(10.dp))
                             // AI "Choose the Look" button
-                            Surface(
-                                onClick  = {
-                                    vibration?.vibrateClick()
-                                    if (content.isNotBlank() || title.isNotBlank()) {
-                                        val tempNote = (note ?: Note(title = title, content = content, color = selectedColor)).copy(title = title, content = content)
-                                        viewModel.suggestStyleForNote(tempNote)
-                                    }
-                                },
-                                modifier = Modifier.size(42.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                color = onBgColor.copy(0.08f),
-                                border = BorderStroke(1.dp, onBgColor.copy(0.05f))
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    if (isAiStyling) {
-                                        CircularProgressIndicator(
-                                            modifier     = Modifier.size(18.dp),
-                                            strokeWidth  = 2.5.dp,
-                                            color        = onBgColor,
-                                        )
-                                    } else {
-                                        Icon(Icons.Rounded.AutoAwesome, "AI Look", Modifier.size(20.dp), tint = onBgColor)
+                            if (!viewModel.offlineModeEnabled.collectAsStateWithLifecycle(initialValue = false).value) {
+                                Surface(
+                                    onClick = {
+                                        vibration?.vibrateClick()
+                                        if (content.isNotBlank() || title.isNotBlank()) {
+                                            val tempNote =
+                                                (note ?: Note(title = title, content = content, color = selectedColor)).copy(
+                                                    title = title,
+                                                    content = content
+                                                )
+                                            viewModel.suggestStyleForNote(tempNote)
+                                        }
+                                    },
+                                    modifier = Modifier.size(42.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = onBgColor.copy(0.08f),
+                                    border = BorderStroke(1.dp, onBgColor.copy(0.05f))
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        if (isAiStyling) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.5.dp,
+                                                color = onBgColor,
+                                            )
+                                        } else {
+                                            Icon(Icons.Rounded.AutoAwesome, "AI Look", Modifier.size(20.dp), tint = onBgColor)
+                                        }
                                     }
                                 }
+                                Spacer(Modifier.width(10.dp))
                             }
                             // Save
                             Spacer(Modifier.width(12.dp))
