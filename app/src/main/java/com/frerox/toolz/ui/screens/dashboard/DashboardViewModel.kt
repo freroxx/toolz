@@ -80,9 +80,15 @@ class DashboardViewModel @Inject constructor(
     private val _localSearchResults = MutableStateFlow<List<ToolItem>>(emptyList())
     val localSearchResults = _localSearchResults.asStateFlow()
 
-    val updateAvailableVersion = settingsRepository.updateAvailableVersion
-    val updateChangelog = settingsRepository.updateChangelog
-    val updateApkUrl = settingsRepository.updateApkUrl
+    val updateAvailableVersion = combine(settingsRepository.updateAvailableVersion, offlineState) { version, state ->
+        if (state == OfflineState.OFFLINE) null else version
+    }
+    val updateChangelog = combine(settingsRepository.updateChangelog, offlineState) { changelog, state ->
+        if (state == OfflineState.OFFLINE) null else changelog
+    }
+    val updateApkUrl = combine(settingsRepository.updateApkUrl, offlineState) { url, state ->
+        if (state == OfflineState.OFFLINE) null else url
+    }
 
     private var searchJob: Job? = null
 
@@ -285,7 +291,7 @@ class DashboardViewModel @Inject constructor(
             listOf(
                 ToolItem("Calculator", Icons.Rounded.Calculate, Screen.Calculator.route, "Standard math", Color(0xFF00ACC1)),
                 ToolItem("Unit Converter", Icons.Rounded.SyncAlt, Screen.UnitConverter.route, "Instant swap", Color(0xFF3949AB)),
-                ToolItem("Smart Encrypter", Icons.Rounded.EnhancedEncryption, Screen.SmartEncrypter.route, "Secure data", Color(0xFF2E7D32)),
+                ToolItem("Encrypter", Icons.Rounded.EnhancedEncryption, Screen.SmartEncrypter.route, "Secure data", Color(0xFF2E7D32)),
                 ToolItem("Equation Solver", Icons.Rounded.Functions, Screen.EquationSolver.route, "Solve math", Color(0xFF5E35B1)),
                 ToolItem("PDF Reader", Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, "View docs", Color(0xFFE53935)),
                 ToolItem("Tip Calc", Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, "Split bills", Color(0xFFD81B60)),

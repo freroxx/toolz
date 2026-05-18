@@ -399,6 +399,7 @@ class FocusFlowViewModel @Inject constructor(
     // ── AI categorization ──────────────────────────────────────────────────
 
     private suspend fun categorizeAppsWithAi(apps: List<AppUsageInfo>) {
+        if (settingsRepository.offlineModeEnabled.first()) return
         val currentMappings = userMappings.value
         val currentAiCache  = _aiCategoryCache.value
 
@@ -477,6 +478,11 @@ class FocusFlowViewModel @Inject constructor(
         _isLoadingTips.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (settingsRepository.offlineModeEnabled.first()) {
+                    _screenTips.value = "AI Tips are disabled in Offline Mode."
+                    _isLoadingTips.value = false
+                    return@launch
+                }
                 val groqKey = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
                 if (groqKey.isBlank()) {
                     _screenTips.value = "AI key not configured. Please supply a Groq key in AI Settings."

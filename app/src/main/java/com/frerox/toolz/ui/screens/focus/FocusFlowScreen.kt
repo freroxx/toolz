@@ -136,63 +136,68 @@ fun FocusFlowScreen(
                         }
                     },
                     actions = {
-                        // Pulsing "AI" pill while Groq is classifying
-                        AnimatedVisibility(
-                            visible = isAiClassifying,
-                            enter   = fadeIn() + scaleIn(),
-                            exit    = fadeOut() + scaleOut(),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.tertiaryContainer)
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center,
+                        val offlineMode by viewModel.offlineModeEnabled.collectAsState(initial = false)
+                        if (!offlineMode) {
+                            // Pulsing "AI" pill while Groq is classifying
+                            AnimatedVisibility(
+                                visible = isAiClassifying,
+                                enter = fadeIn() + scaleIn(),
+                                exit = fadeOut() + scaleOut(),
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 4.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    val inf = rememberInfiniteTransition(label = "ai_dot")
-                                    val dotAlpha by inf.animateFloat(
-                                        0.3f, 1f,
-                                        infiniteRepeatable(tween(600), RepeatMode.Reverse),
-                                        label = "ai_dot_alpha",
-                                    )
-                                    Box(
-                                        Modifier
-                                            .size(6.dp)
-                                            .alpha(dotAlpha)
-                                            .background(MaterialTheme.colorScheme.tertiary, CircleShape)
-                                    )
-                                    Text(
-                                        "AI",
-                                        style      = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Black,
-                                        color      = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        val inf = rememberInfiniteTransition(label = "ai_dot")
+                                        val dotAlpha by inf.animateFloat(
+                                            0.3f, 1f,
+                                            infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                                            label = "ai_dot_alpha",
+                                        )
+                                        Box(
+                                            Modifier
+                                                .size(6.dp)
+                                                .alpha(dotAlpha)
+                                                .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                                        )
+                                        Text(
+                                            "AI",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        // AI refresh — clears cache and re-classifies all apps
-                        AnimatedVisibility(
-                            visible = !isAiClassifying,
-                            enter   = fadeIn() + scaleIn(spring(Spring.DampingRatioMediumBouncy)),
-                            exit    = fadeOut() + scaleOut(),
-                        ) {
-                            IconButton(
-                                onClick  = { vibrationManager?.vibrateTick(); viewModel.refreshAiCategories() },
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(MaterialTheme.colorScheme.tertiaryContainer.copy(0.55f)),
+                            // AI refresh — clears cache and re-classifies all apps
+                            AnimatedVisibility(
+                                visible = !isAiClassifying,
+                                enter = fadeIn() + scaleIn(spring(Spring.DampingRatioMediumBouncy)),
+                                exit = fadeOut() + scaleOut(),
                             ) {
-                                Icon(
-                                    Icons.Rounded.AutoAwesome, "Refresh AI",
-                                    modifier = Modifier.size(18.dp),
-                                    tint     = MaterialTheme.colorScheme.onTertiaryContainer,
-                                )
+                                IconButton(
+                                    onClick = {
+                                        vibrationManager?.vibrateTick(); viewModel.refreshAiCategories()
+                                    },
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(0.55f)),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.AutoAwesome, "Refresh AI",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    )
+                                }
                             }
                         }
 
@@ -795,16 +800,18 @@ fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick
                 }
             }
             
-            Surface(
-                onClick = onLongClick,
-                shape = RoundedCornerShape(16.dp),
-                color = accentColor.copy(alpha = 0.1f),
-                modifier = Modifier.fillMaxWidth().height(44.dp)
-            ) {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = accentColor)
-                    Spacer(Modifier.width(8.dp))
-                    Text("ANALYZE WITH AI TIPS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = accentColor)
+            if (!performanceMode && !viewModel.offlineModeEnabled.collectAsState(initial = false).value) {
+                Surface(
+                    onClick = onLongClick,
+                    shape = RoundedCornerShape(16.dp),
+                    color = accentColor.copy(alpha = 0.1f),
+                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                ) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = accentColor)
+                        Spacer(Modifier.width(8.dp))
+                        Text("ANALYZE WITH AI TIPS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = accentColor)
+                    }
                 }
             }
         }

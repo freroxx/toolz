@@ -121,19 +121,23 @@ fun ToolzPdfScreen(
                                     Icon(Icons.AutoMirrored.Rounded.Notes, "Extracted Text")
                                 }
                             }
-                            Surface(
-                                onClick = { viewModel.updateLastTool(PdfToolMode.OCR) },
-                                shape   = RoundedCornerShape(12.dp),
-                                color   = if (activeTab?.lastTool == PdfToolMode.OCR) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                contentColor = if (activeTab?.lastTool == PdfToolMode.OCR) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(end = 12.dp).size(40.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(if (activeTab?.lastTool == PdfToolMode.OCR) Icons.Rounded.AutoAwesome
-                                    else Icons.Rounded.DocumentScanner,
-                                        contentDescription = "OCR", modifier = Modifier.size(20.dp))
+                            if (!offlineMode) {
+                                Surface(
+                                    onClick = { viewModel.updateLastTool(PdfToolMode.OCR) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (activeTab?.lastTool == PdfToolMode.OCR) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = if (activeTab?.lastTool == PdfToolMode.OCR) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(end = 12.dp).size(40.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            if (activeTab?.lastTool == PdfToolMode.OCR) Icons.Rounded.AutoAwesome
+                                            else Icons.Rounded.DocumentScanner,
+                                            contentDescription = "OCR", modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
 

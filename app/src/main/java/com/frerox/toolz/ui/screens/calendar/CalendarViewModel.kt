@@ -49,6 +49,7 @@ data class CalendarUiState(
     val isAcademicMode: Boolean          = false,
     val isLoading: Boolean               = false,
     val isScanning: Boolean              = false,
+    val offlineModeEnabled: Boolean      = false,
     val syncResults: List<SyncResult>    = emptyList(),
     val errorMessage: String?            = null,
     val availableConfigs: List<AiConfig> = emptyList(),
@@ -79,6 +80,7 @@ class CalendarViewModel @Inject constructor(
     private val syncUseCase: SyncImageToCalendarUseCase,
     private val alarmScheduler: CalendarAlarmScheduler,
     private val taskAlarmScheduler: TaskAlarmScheduler,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
     private val moshi: Moshi,
 ) : ViewModel() {
 
@@ -115,9 +117,10 @@ class CalendarViewModel @Inject constructor(
     val uiState: StateFlow<CalendarUiState> = combine(
         repository.getAllEvents(),
         repository.getTasksWithDueDate(),
+        settingsRepository.offlineModeEnabled,
         _uiState,
         _configFlow,
-    ) { events, tasks, internal, (configs, matchedName, _) ->
+    ) { events, tasks, offline, internal, (configs, matchedName, _) ->
 
         val filteredEvents = if (internal.isAcademicMode) {
             events.filter { it.eventType == "EXAM" || it.eventType == "EVALUATION" }
@@ -128,6 +131,7 @@ class CalendarViewModel @Inject constructor(
         internal.copy(
             events           = filteredEvents,
             tasks            = tasks,
+            offlineModeEnabled = offline,
             availableConfigs = configs,
             currentConfig    = matchedName,
         )

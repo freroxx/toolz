@@ -533,36 +533,38 @@ fun SettingsScreen(
                                 onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
                             )
                         }
-                        if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
-                            val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
-                            SettingsToggleItem(
-                                title = "AI Clipboard Monitoring",
-                                subtitle = "Smart classification and summaries",
-                                icon = Icons.Rounded.AutoAwesome,
-                                checked = aiMonitoring,
-                                onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
-                                enabled = !offlineModeEnabled
-                            )
-                        }
-                        if (matches(searchQuery, "pdf", "ocr", "enhance", "ai", "text", "scan")) {
-                            SettingsToggleItem(
-                                title = "AI OCR Enhance",
-                                subtitle = "Improve PDF text recognition with AI",
-                                icon = Icons.Rounded.DocumentScanner,
-                                checked = pdfAiOcrEnhance,
-                                onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) },
-                                enabled = !offlineModeEnabled
-                            )
-                        }
-                        if (matches(searchQuery, "now playing", "lyrics", "meaning", "smart", "ai")) {
-                            SettingsToggleItem(
-                                title = "Now Playing AI",
-                                subtitle = "Smart lyrics meanings and recommendations",
-                                icon = Icons.Rounded.MusicNote,
-                                checked = musicAiEnabled,
-                                onCheckedChange = { viewModel.setMusicAiEnabled(it) },
-                                enabled = !offlineModeEnabled
-                            )
+                        if (!offlineModeEnabled) {
+                            if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
+                                val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
+                                SettingsToggleItem(
+                                    title = "AI Clipboard Monitoring",
+                                    subtitle = "Smart classification and summaries",
+                                    icon = Icons.Rounded.AutoAwesome,
+                                    checked = aiMonitoring,
+                                    onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
+                                    enabled = !offlineModeEnabled
+                                )
+                            }
+                            if (matches(searchQuery, "pdf", "ocr", "enhance", "ai", "text", "scan")) {
+                                SettingsToggleItem(
+                                    title = "AI OCR Enhance",
+                                    subtitle = "Improve PDF text recognition with AI",
+                                    icon = Icons.Rounded.DocumentScanner,
+                                    checked = pdfAiOcrEnhance,
+                                    onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) },
+                                    enabled = !offlineModeEnabled
+                                )
+                            }
+                            if (matches(searchQuery, "now playing", "lyrics", "meaning", "smart", "ai")) {
+                                SettingsToggleItem(
+                                    title = "Now Playing AI",
+                                    subtitle = "Smart lyrics meanings and recommendations",
+                                    icon = Icons.Rounded.MusicNote,
+                                    checked = musicAiEnabled,
+                                    onCheckedChange = { viewModel.setMusicAiEnabled(it) },
+                                    enabled = !offlineModeEnabled
+                                )
+                            }
                         }
                     }
 
@@ -921,28 +923,32 @@ fun SettingsScreen(
                     }
 
                     // 9. Section: UPDATE
-                    SettingsExpandableSection(
-                        title = "UPDATE",
-                        icon = Icons.Rounded.SystemUpdate,
-                        isExpanded = expandedSection == "UPDATE" || searchQuery.isNotEmpty(),
-                        onExpandToggle = { expandedSection = if (expandedSection == "UPDATE") null else "UPDATE" }
-                    ) {
-                        if (matches(searchQuery, "update", "auto", "patch", "background")) {
-                            SettingsToggleItem(
-                                title = "Automatic Updates",
-                                subtitle = "Download patches in background",
-                                icon = Icons.Rounded.AutoFixHigh,
-                                checked = autoUpdateEnabled,
-                                onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
-                            )
-                        }
-                        if (matches(searchQuery, "update", "check", "version", "new")) {
-                            SettingsItem(
-                                title = "Check for Updates",
-                                subtitle = "See if a new version is available",
-                                icon = Icons.Rounded.Update,
-                                onClick = onNavigateToUpdate
-                            )
+                    if (!offlineModeEnabled) {
+                        SettingsExpandableSection(
+                            title = "UPDATE",
+                            icon = Icons.Rounded.SystemUpdate,
+                            isExpanded = expandedSection == "UPDATE" || searchQuery.isNotEmpty(),
+                            onExpandToggle = {
+                                expandedSection = if (expandedSection == "UPDATE") null else "UPDATE"
+                            }
+                        ) {
+                            if (matches(searchQuery, "update", "auto", "patch", "background")) {
+                                SettingsToggleItem(
+                                    title = "Automatic Updates",
+                                    subtitle = "Download patches in background",
+                                    icon = Icons.Rounded.AutoFixHigh,
+                                    checked = autoUpdateEnabled,
+                                    onCheckedChange = { viewModel.setAutoUpdateEnabled(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "update", "check", "version", "new")) {
+                                SettingsItem(
+                                    title = "Check for Updates",
+                                    subtitle = "See if a new version is available",
+                                    icon = Icons.Rounded.Update,
+                                    onClick = onNavigateToUpdate
+                                )
+                            }
                         }
                     }
 

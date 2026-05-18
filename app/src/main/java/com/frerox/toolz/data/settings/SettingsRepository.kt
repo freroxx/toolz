@@ -242,6 +242,8 @@ class SettingsRepository @Inject constructor(
         android.provider.Settings.System.DEFAULT_NOTIFICATION_URI.toString()
     }
 
+    val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
+
     val stepGoal: Flow<Int> = dataStore.data.map { it[STEP_GOAL] ?: 10000 }
     val ringtoneUri: Flow<String?> = dataStore.data.map { it[RINGTONE_URI] ?: defaultAlarmUri }
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "SYSTEM" }
@@ -277,7 +279,10 @@ class SettingsRepository @Inject constructor(
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
     val musicNotifications: Flow<Boolean> = dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
-    val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
+    val karaokeEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[KARAOKE_ENABLED] ?: true },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
     val hiddenNotificationApps: Flow<Set<String>> = dataStore.data.map { it[HIDDEN_NOTIFICATION_APPS] ?: emptySet() }
     val customNotificationCategories: Flow<Set<String>> = dataStore.data.map { it[CUSTOM_NOTIFICATION_CATEGORIES] ?: setOf("Social", "Finance", "Work", "General") }
@@ -315,7 +320,6 @@ class SettingsRepository @Inject constructor(
     val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
     val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
-    val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
 
     val musicAiEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[MUSIC_AI_ENABLED] ?: true },

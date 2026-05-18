@@ -398,6 +398,7 @@ class NowPlayingAiViewModel @Inject constructor(
         val album  = song.album.takeUnless  { it.contains("Unknown", true) } ?: ""
 
         viewModelScope.launch {
+            val offline = settingsRepository.offlineModeEnabled.first()
             _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isLoading = true, lyrics = ""), error = null) }
             try {
                 val allTracks = musicRepository.allTracks.first()
@@ -420,42 +421,44 @@ class NowPlayingAiViewModel @Inject constructor(
                     }
                 }
 
-                // 2. LrcLib
-                if (lyricsContent == null) {
-                    runCatching {
-                        val cleanTitle = song.title
-                            .replace(Regex("\\(.*?\\)"), "")
-                            .replace(Regex("\\[.*?\\]"), "")
-                            .replace(Regex("(?i)- (Official|Lyric|Music).*"), "")
-                            .replace(Regex("(?i)(feat|ft)\\..*"), "")
-                            .trim()
+                if (!offline) {
+                    // 2. LrcLib
+                    if (lyricsContent == null) {
+                        runCatching {
+                            val cleanTitle = song.title
+                                .replace(Regex("\\(.*?\\)"), "")
+                                .replace(Regex("\\[.*?\\]"), "")
+                                .replace(Regex("(?i)- (Official|Lyric|Music).*"), "")
+                                .replace(Regex("(?i)(feat|ft)\\..*"), "")
+                                .trim()
 
-                        var response = runCatching {
-                            lrcLibService.getLyrics(
-                                trackName         = cleanTitle,
-                                artistName        = artist,
-                                albumName         = album.ifEmpty { null },
-                                durationInSeconds = (song.durationInMillis / 1000).toInt()
-                            )
-                        }.getOrNull()
+                            var response = runCatching {
+                                lrcLibService.getLyrics(
+                                    trackName = cleanTitle,
+                                    artistName = artist,
+                                    albumName = album.ifEmpty { null },
+                                    durationInSeconds = (song.durationInMillis / 1000).toInt()
+                                )
+                            }.getOrNull()
 
-                        if (response?.syncedLyrics == null) {
-                            val results = lrcLibService.searchLyrics(cleanTitle, artist)
-                            response = results.firstOrNull { it.syncedLyrics != null }
-                                ?: results.firstOrNull { it.plainLyrics != null }
-                                        ?: response
+                            if (response?.syncedLyrics == null) {
+                                val results = lrcLibService.searchLyrics(cleanTitle, artist)
+                                response = results.firstOrNull { it.syncedLyrics != null }
+                                    ?: results.firstOrNull { it.plainLyrics != null }
+                                            ?: response
+                            }
+
+                            lyricsContent = response?.syncedLyrics ?: response?.plainLyrics
+                            isSynced = response?.syncedLyrics != null
                         }
-
-                        lyricsContent = response?.syncedLyrics ?: response?.plainLyrics
-                        isSynced      = response?.syncedLyrics != null
                     }
-                }
 
-                // 3. YouTube captions (catalog tracks)
-                if (lyricsContent == null && sourceUrl != null) {
-                    runCatching {
-                        lyricsContent = catalogRepository.fetchCaptions(sourceUrl)
-                        isSynced      = lyricsContent?.contains("[0") == true
+                    // 3. YouTube captions (catalog tracks)
+                    if (lyricsContent == null && sourceUrl != null) {
+                        runCatching {
+                            lyricsContent = catalogRepository.fetchCaptions(sourceUrl)
+                            isSynced = lyricsContent?.contains("[0") == true
+                        }
                     }
                 }
 
@@ -470,11 +473,11 @@ class NowPlayingAiViewModel @Inject constructor(
                     }
                     musicRepository.updateTrackAiData(uri, lyrics = lyricsContent)
                 } else {
-                    _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isLoading = false), error = "Lyrics not found.") }
+                    _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isLoading = false), error = if (offline) null else "Lyrics not found.") }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "fetchLyrics error", e)
-                _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isLoading = false), error = "Lyrics not found.") }
+                _uiState.update { it.copy(lyricsState = it.lyricsState.copy(isLoading = false), error = if (offline) null else "Lyrics not found.") }
             }
         }
     }
@@ -554,6 +557,7 @@ class NowPlayingAiViewModel @Inject constructor(
         val song = _uiState.value.currentSong ?: return
 
         viewModelScope.launch {
+            if (settingsRepository.offlineModeEnabled.first()) return@launch
             val key = getGroqKey()
             if (key.isBlank()) {
                 _uiState.update { it.copy(error = "Configure Groq key in AI Settings.") }
@@ -590,6 +594,7 @@ class NowPlayingAiViewModel @Inject constructor(
         val song = _uiState.value.currentSong ?: return
 
         viewModelScope.launch {
+            if (settingsRepository.offlineModeEnabled.first()) return@launch
             val key = getGroqKey()
             if (key.isBlank()) return@launch
 

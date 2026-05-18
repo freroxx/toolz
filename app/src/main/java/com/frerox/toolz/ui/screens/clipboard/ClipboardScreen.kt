@@ -64,6 +64,7 @@ fun ClipboardScreen(
     val isSummarizingId by viewModel.isSummarizing.collectAsStateWithLifecycle()
     val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val offlineMode by viewModel.offlineModeEnabled.collectAsStateWithLifecycle()
     
     val context = LocalContext.current
     val performanceMode = LocalPerformanceMode.current
@@ -148,11 +149,16 @@ fun ClipboardScreen(
                                 onValueChange = { viewModel.onSearchQueryChanged(it) },
                                 modifier = Modifier.fillMaxWidth(),
                                 placeholder = { Text("Search by subject or keyword...", style = MaterialTheme.typography.bodyMedium) },
-                                leadingIcon = { 
+                                leadingIcon = {
                                     if (isAiSearching) {
                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                                     } else {
-                                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Icon(
+                                            if (offlineMode) Icons.Rounded.Search else Icons.Rounded.AutoAwesome,
+                                            null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
                                     }
                                 },
                                 trailingIcon = {
@@ -237,6 +243,7 @@ fun ClipboardScreen(
                             LiquidStackCard(
                                 entry = entry,
                                 isSummarizing = isSummarizingId == entry.id,
+                                offlineMode = offlineMode,
                                 scrollOffset = index,
                                 onCopy = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -312,6 +319,7 @@ private fun EmptyClipboardState() {
 private fun LiquidStackCard(
     entry: ClipboardEntry,
     isSummarizing: Boolean,
+    offlineMode: Boolean,
     scrollOffset: Int,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
@@ -417,7 +425,7 @@ private fun LiquidStackCard(
             ) {
                 ActionChip("Copy", Icons.Rounded.ContentCopy) { onCopy() }
                 
-                if (entry.summary == null) {
+                if (entry.summary == null && !offlineMode) {
                     ActionChip(
                         label = if (isSummarizing) "Summarizing..." else "AI Summarize",
                         icon = Icons.Rounded.AutoAwesome,
