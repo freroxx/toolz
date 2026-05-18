@@ -3,6 +3,7 @@ package com.frerox.toolz.data.browser
 import java.net.URI
 
 /**
+ * Hello gang lol, so here's the ad block list I made (i didn't use ai, i mean just a little bit)
  * Aggressive blocklist for ad/tracker/malware URLs.
  * Optimized for HashSet lookups and segment‑based suffix matching.
  * Aims to score 99%+ on standard adblock tests.
