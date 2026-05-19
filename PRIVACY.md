@@ -8,4 +8,4 @@ No data is transmitted to external servers.
 
 If any features in the future require data collection, this policy will be updated accordingly.
 
-For any questions, contact: frerox.toolz@email.com
+For any questions, contact: frerox.toolz@gmail.com
