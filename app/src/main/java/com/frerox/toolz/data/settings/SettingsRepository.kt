@@ -231,6 +231,9 @@ class SettingsRepository @Inject constructor(
     // AI Clipboard Monitoring
     private val AI_CLIPBOARD_MONITORING = booleanPreferencesKey("ai_clipboard_monitoring")
 
+    // Crypto Settings
+    private val CRYPTO_LAST_ALGORITHM = stringPreferencesKey("crypto_last_algorithm")
+
     // Loading Screen Persistence
     private val LAST_LOADING_TIME = longPreferencesKey("last_loading_time")
 
@@ -388,6 +391,8 @@ class SettingsRepository @Inject constructor(
         dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
+
+    val lastCryptoAlgorithm: Flow<String?> = dataStore.data.map { it[CRYPTO_LAST_ALGORITHM] }
 
     val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
 
@@ -577,6 +582,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiClipboardMonitoringEnabled(enabled: Boolean) {
         dataStore.edit { it[AI_CLIPBOARD_MONITORING] = enabled }
+    }
+
+    suspend fun setLastCryptoAlgorithm(algorithm: String) {
+        dataStore.edit { it[CRYPTO_LAST_ALGORITHM] = algorithm }
     }
 
     suspend fun setOfflineModeEnabled(enabled: Boolean) {

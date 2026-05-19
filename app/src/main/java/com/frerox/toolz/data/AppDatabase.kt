@@ -35,6 +35,8 @@ import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.calendar.EventDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.password.PasswordDao
+import com.frerox.toolz.data.crypto.CryptoDao
+import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchDao
@@ -60,9 +62,10 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
         PasswordEntity::class,
         SearchHistoryEntry::class,
         BookmarkEntry::class,
-        QuickLinkEntry::class
+        QuickLinkEntry::class,
+        CryptoHistoryEntry::class
     ], 
-    version = 37,
+    version = 38,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class)
@@ -82,4 +85,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun passwordDao(): PasswordDao
     abstract fun searchDao(): SearchDao
+    abstract fun cryptoDao(): CryptoDao
 }
