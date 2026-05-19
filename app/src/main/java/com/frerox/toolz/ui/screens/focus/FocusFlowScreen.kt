@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.focus
 
+import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
 import android.content.Intent
 import android.graphics.drawable.Drawable
 import android.net.Uri
@@ -7,7 +8,6 @@ import android.provider.Settings
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -84,6 +84,7 @@ fun FocusFlowScreen(
     val aiClassifiedPkgs  by viewModel.aiClassifiedPackages.collectAsState()
     val hasUsagePermission by viewModel.hasUsagePermission.collectAsState()
     val top5Apps          by viewModel.top5Apps.collectAsState()
+    val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
 
     val performanceMode   = LocalPerformanceMode.current
     val vibrationManager  = LocalVibrationManager.current
@@ -275,6 +276,7 @@ fun FocusFlowScreen(
                     EnhancedProductivityHeader(
                         score = productivityScore,
                         performanceMode = performanceMode,
+                        offlineModeEnabled = offlineModeEnabled,
                         onLongClick = {
                             vibrationManager?.vibrateLongClick()
                             showTipsSheet = true
@@ -628,7 +630,12 @@ fun MetricCard(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick: () -> Unit) {
+fun EnhancedProductivityHeader(
+    score: Int,
+    performanceMode: Boolean,
+    offlineModeEnabled: Boolean,
+    onLongClick: () -> Unit
+) {
     val successColor = Color(0xFF43A047)
     val warningColor = Color(0xFFFFA726)
     val errorColor = MaterialTheme.colorScheme.error
@@ -800,7 +807,7 @@ fun EnhancedProductivityHeader(score: Int, performanceMode: Boolean, onLongClick
                 }
             }
             
-            if (!performanceMode && !viewModel.offlineModeEnabled.collectAsState(initial = false).value) {
+            if (!performanceMode && !offlineModeEnabled) {
                 Surface(
                     onClick = onLongClick,
                     shape = RoundedCornerShape(16.dp),

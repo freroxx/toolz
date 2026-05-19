@@ -13,6 +13,7 @@ import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.pdf.PdfRepository
+import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -54,12 +55,16 @@ class NotepadViewModel @Inject constructor(
     private val pdfRepository    : PdfRepository,
     private val openAiService    : OpenAiService,
     private val aiSettingsManager: AiSettingsManager,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     // ── DB / repository streams ────────────────────────────────────────────
 
     val notes: StateFlow<List<Note>> = noteDao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val offlineModeEnabled = settingsRepository.offlineModeEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val availableTracks = musicRepository.allTracks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

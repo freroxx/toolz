@@ -129,6 +129,8 @@ class FocusFlowViewModel @Inject constructor(
     val customInstructions = settingsRepository.focusAiCustomInstructions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
+    val offlineModeEnabled: Flow<Boolean> = settingsRepository.offlineModeEnabled
+
     // ── Combined stats ─────────────────────────────────────────────────────
 
     /**
