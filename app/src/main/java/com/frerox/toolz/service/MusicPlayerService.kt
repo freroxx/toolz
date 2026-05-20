@@ -39,7 +39,6 @@ import java.io.FileOutputStream
 import javax.inject.Inject
 import kotlin.math.sqrt
 
-@UnstableApi
 @AndroidEntryPoint
 class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
@@ -124,7 +123,6 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
     }
 
-    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         
