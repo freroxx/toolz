@@ -25,6 +25,7 @@ sealed class Screen(val route: String) {
     object ScreenLight : Screen("screen_light")
     object Magnifier : Screen("magnifier")
     object Scanner : Screen("scanner")
+    object QrGenerator : Screen("qr_generator")
     object LightMeter : Screen("light_meter")
     
     // Sensors & Navigation

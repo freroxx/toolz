@@ -61,6 +61,12 @@ class DashboardViewModel @Inject constructor(
     val offlineState = offlineManager.offlineState
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), OfflineState.ONLINE)
 
+    val pinnedTools = settingsRepository.pinnedTools
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+    
+    val recentTools = settingsRepository.recentTools
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val categories = offlineState.map { state ->
         val baseCategories = getDashboardCategories()
         if (state == OfflineState.OFFLINE) {
@@ -303,6 +309,7 @@ class DashboardViewModel @Inject constructor(
             "SENSORS & VISION",
             listOf(
                 ToolItem("Scanner", Icons.Rounded.QrCodeScanner, Screen.Scanner.route, "QR / Barcode", Color(0xFF546E7A)),
+                ToolItem("QR Generator", Icons.Rounded.QrCode, Screen.QrGenerator.route, "Create custom codes", Color(0xFF26A69A)),
                 ToolItem("Flashlight", Icons.Rounded.FlashlightOn, Screen.Flashlight.route, "Torch tools", Color(0xFFFFD600)),
                 ToolItem("Screen Light", Icons.Rounded.Laptop, Screen.ScreenLight.route, "Bright display", Color(0xFF81D4FA)),
                 ToolItem("Magnifier", Icons.Rounded.ZoomIn, Screen.Magnifier.route, "Camera zoom", Color(0xFF00ACC1)),
