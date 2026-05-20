@@ -33,11 +33,43 @@ fun Modifier.fadingEdges(
             drawRect(
                 brush = Brush.verticalGradient(
                     0f to Color.Transparent,
-                    // Add middle stops for a smoother, "lighter" fade
                     (topStop * 0.5f) to Color.Black.copy(alpha = 0.5f),
                     topStop to Color.Black,
                     bottomStop to Color.Black,
                     (bottomStop + (1f - bottomStop) * 0.5f) to Color.Black.copy(alpha = 0.5f),
+                    1f to Color.Transparent
+                ),
+                blendMode = BlendMode.DstIn
+            )
+        }
+    }
+
+/**
+ * Horizontal version of fading edges for LazyRow or other horizontal scrolls.
+ */
+fun Modifier.horizontalFadingEdges(
+    left: Dp = 0.dp,
+    right: Dp = 0.dp
+): Modifier = this
+    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    .drawWithContent {
+        drawContent()
+        
+        val leftPx = left.toPx()
+        val rightPx = right.toPx()
+        val width = size.width
+        
+        if (width > 0f && (leftPx > 0f || rightPx > 0f)) {
+            val leftStop = (leftPx / width).coerceIn(0f, 1f)
+            val rightStop = ((width - rightPx) / width).coerceIn(0f, 1f)
+            
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0f to Color.Transparent,
+                    (leftStop * 0.5f) to Color.Black.copy(alpha = 0.5f),
+                    leftStop to Color.Black,
+                    rightStop to Color.Black,
+                    (rightStop + (1f - rightStop) * 0.5f) to Color.Black.copy(alpha = 0.5f),
                     1f to Color.Transparent
                 ),
                 blendMode = BlendMode.DstIn

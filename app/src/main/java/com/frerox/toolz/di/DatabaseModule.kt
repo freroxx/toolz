@@ -18,6 +18,7 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.ai.AiDao
 import com.frerox.toolz.data.calendar.EventDao
+import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.util.security.KeyManager
@@ -125,5 +126,10 @@ object DatabaseModule {
     @Provides
     fun provideSearchDao(database: AppDatabase): SearchDao {
         return database.searchDao()
+    }
+
+    @Provides
+    fun provideCryptoDao(database: AppDatabase): CryptoDao {
+        return database.cryptoDao()
     }
 }

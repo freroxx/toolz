@@ -159,6 +159,7 @@ dependencies {
     implementation("org.jsoup:jsoup:1.22.1")
     implementation(libs.commonmark)
     implementation(libs.androidsvg)
+    implementation(libs.zxing.core)
     implementation("androidx.webkit:webkit:1.12.1")
     
     // WorkManager

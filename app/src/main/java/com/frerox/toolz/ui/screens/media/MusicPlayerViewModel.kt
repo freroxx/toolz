@@ -106,7 +106,6 @@ data class MusicUiState(
 
 data class QueueEntry(val id: String, val track: MusicTrack)
 
-@UnstableApi
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
     val repository          : MusicRepository,
@@ -161,7 +160,6 @@ class MusicPlayerViewModel @Inject constructor(
     // Player listener
     // ─────────────────────────────────────────────────────────────────────────
 
-    @UnstableApi
     private val playerListener = object : Player.Listener {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -538,7 +536,6 @@ class MusicPlayerViewModel @Inject constructor(
     // MediaController
     // ─────────────────────────────────────────────────────────────────────────
 
-    @UnstableApi
     private fun connectToMediaController() {
         val token = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
         controllerFuture = MediaController.Builder(context, token).buildAsync()
@@ -618,7 +615,6 @@ class MusicPlayerViewModel @Inject constructor(
     // Equalizer
     // ─────────────────────────────────────────────────────────────────────────
 
-    @UnstableApi
     private fun initEqualizer() {
         if (equalizer != null || player.audioSessionId == 0) return
         runCatching {
@@ -765,7 +761,6 @@ class MusicPlayerViewModel @Inject constructor(
     // Service
     // ─────────────────────────────────────────────────────────────────────────
 
-    @UnstableApi
     private fun startPlayerService() {
         runCatching {
             context.startService(Intent(context, MusicPlayerService::class.java))
