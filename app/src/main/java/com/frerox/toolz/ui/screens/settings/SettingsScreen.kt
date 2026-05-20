@@ -70,6 +70,11 @@ fun SettingsScreen(
     val notificationVaultEnabled by viewModel.notificationVaultEnabled.collectAsState(initial = true)
     val stepNotifications by viewModel.stepNotifications.collectAsState(initial = true)
     val timerNotifications by viewModel.timerNotifications.collectAsState(initial = true)
+    val musicNotifications by viewModel.musicNotifications.collectAsState(initial = true)
+    val fileConversionNotifications by viewModel.fileConversionNotifications.collectAsState(initial = true)
+    val appUpdateNotifications by viewModel.appUpdateNotifications.collectAsState(initial = true)
+    val taskReminderNotifications by viewModel.taskReminderNotifications.collectAsState(initial = true)
+    val eventReminderNotifications by viewModel.eventReminderNotifications.collectAsState(initial = true)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
@@ -816,10 +821,55 @@ fun SettingsScreen(
                                 if (matches(searchQuery, "timer", "alert", "task")) {
                                     SettingsToggleItem(
                                         title = "Timer Alerts",
-                                        subtitle = "Alarms for timers and tasks",
+                                        subtitle = "Alarms for timers and focus sessions",
                                         icon = Icons.Rounded.Timer,
                                         checked = timerNotifications,
                                         onCheckedChange = { viewModel.setTimerNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "music", "playback", "media")) {
+                                    SettingsToggleItem(
+                                        title = "Music Player",
+                                        subtitle = "Playback controls and track info",
+                                        icon = Icons.Rounded.MusicNote,
+                                        checked = musicNotifications,
+                                        onCheckedChange = { viewModel.setMusicNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "conversion", "file", "progress")) {
+                                    SettingsToggleItem(
+                                        title = "File Conversion",
+                                        subtitle = "Progress of your file operations",
+                                        icon = Icons.Rounded.Transform,
+                                        checked = fileConversionNotifications,
+                                        onCheckedChange = { viewModel.setFileConversionNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "task", "reminder", "deadline")) {
+                                    SettingsToggleItem(
+                                        title = "Task Reminders",
+                                        subtitle = "Deadlines and scheduled tasks",
+                                        icon = Icons.Rounded.TaskAlt,
+                                        checked = taskReminderNotifications,
+                                        onCheckedChange = { viewModel.setTaskReminderNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "event", "calendar", "reminder")) {
+                                    SettingsToggleItem(
+                                        title = "Event Reminders",
+                                        subtitle = "Upcoming calendar events",
+                                        icon = Icons.Rounded.Event,
+                                        checked = eventReminderNotifications,
+                                        onCheckedChange = { viewModel.setEventReminderNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "update", "app", "version")) {
+                                    SettingsToggleItem(
+                                        title = "App Updates",
+                                        subtitle = "New versions and patches",
+                                        icon = Icons.Rounded.SystemUpdate,
+                                        checked = appUpdateNotifications,
+                                        onCheckedChange = { viewModel.setAppUpdateNotifications(it) }
                                     )
                                 }
                             }

@@ -39,6 +39,10 @@ class SettingsRepository @Inject constructor(
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
     private val MUSIC_NOTIFICATIONS = booleanPreferencesKey("music_notifications")
+    private val FILE_CONVERSION_NOTIFICATIONS = booleanPreferencesKey("file_conversion_notifications")
+    private val APP_UPDATE_NOTIFICATIONS = booleanPreferencesKey("app_update_notifications")
+    private val TASK_REMINDER_NOTIFICATIONS = booleanPreferencesKey("task_reminder_notifications")
+    private val EVENT_REMINDER_NOTIFICATIONS = booleanPreferencesKey("event_reminder_notifications")
     private val KARAOKE_ENABLED = booleanPreferencesKey("karaoke_enabled")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
 
@@ -282,6 +286,10 @@ class SettingsRepository @Inject constructor(
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
     val musicNotifications: Flow<Boolean> = dataStore.data.map { it[MUSIC_NOTIFICATIONS] ?: true }
+    val fileConversionNotifications: Flow<Boolean> = dataStore.data.map { it[FILE_CONVERSION_NOTIFICATIONS] ?: true }
+    val appUpdateNotifications: Flow<Boolean> = dataStore.data.map { it[APP_UPDATE_NOTIFICATIONS] ?: true }
+    val taskReminderNotifications: Flow<Boolean> = dataStore.data.map { it[TASK_REMINDER_NOTIFICATIONS] ?: true }
+    val eventReminderNotifications: Flow<Boolean> = dataStore.data.map { it[EVENT_REMINDER_NOTIFICATIONS] ?: true }
     val karaokeEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[KARAOKE_ENABLED] ?: true },
         offlineModeEnabled
@@ -444,6 +452,10 @@ class SettingsRepository @Inject constructor(
     suspend fun setTimerNotifications(enabled: Boolean) { dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }
     suspend fun setMusicNotifications(enabled: Boolean) { dataStore.edit { it[MUSIC_NOTIFICATIONS] = enabled } }
+    suspend fun setFileConversionNotifications(enabled: Boolean) { dataStore.edit { it[FILE_CONVERSION_NOTIFICATIONS] = enabled } }
+    suspend fun setAppUpdateNotifications(enabled: Boolean) { dataStore.edit { it[APP_UPDATE_NOTIFICATIONS] = enabled } }
+    suspend fun setTaskReminderNotifications(enabled: Boolean) { dataStore.edit { it[TASK_REMINDER_NOTIFICATIONS] = enabled } }
+    suspend fun setEventReminderNotifications(enabled: Boolean) { dataStore.edit { it[EVENT_REMINDER_NOTIFICATIONS] = enabled } }
     suspend fun setKaraokeEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_ENABLED] = enabled } }
     suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
     suspend fun addHiddenNotificationApp(packageName: String) { dataStore.edit { it[HIDDEN_NOTIFICATION_APPS] = (it[HIDDEN_NOTIFICATION_APPS] ?: emptySet()) + packageName } }

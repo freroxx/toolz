@@ -83,6 +83,10 @@ class SettingsViewModel @Inject constructor(
     val timerNotifications = repository.timerNotifications
     val voiceRecordNotifications = repository.voiceRecordNotifications
     val musicNotifications = repository.musicNotifications
+    val fileConversionNotifications = repository.fileConversionNotifications
+    val appUpdateNotifications = repository.appUpdateNotifications
+    val taskReminderNotifications = repository.taskReminderNotifications
+    val eventReminderNotifications = repository.eventReminderNotifications
     val notificationRetentionDays = repository.notificationRetentionDays
 
     val widgetBackgroundColor = repository.widgetBackgroundColor
@@ -137,6 +141,10 @@ class SettingsViewModel @Inject constructor(
     fun setTimerNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTimerNotifications(enabled) }
     fun setVoiceRecordNotifications(enabled: Boolean) = viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) }
     fun setMusicNotifications(enabled: Boolean) = viewModelScope.launch { repository.setMusicNotifications(enabled) }
+    fun setFileConversionNotifications(enabled: Boolean) = viewModelScope.launch { repository.setFileConversionNotifications(enabled) }
+    fun setAppUpdateNotifications(enabled: Boolean) = viewModelScope.launch { repository.setAppUpdateNotifications(enabled) }
+    fun setTaskReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTaskReminderNotifications(enabled) }
+    fun setEventReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setEventReminderNotifications(enabled) }
     fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }
 
     fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color) }

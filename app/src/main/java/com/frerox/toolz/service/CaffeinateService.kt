@@ -77,7 +77,9 @@ class CaffeinateService : Service() {
             ACTION_STOP -> {
                 stopCaffeinate()
             }
-            ACTION_KEEP_GOING -> resetReminder()
+            ACTION_KEEP_GOING -> {
+                // Do nothing for now, since we removed reminders
+            }
             else -> {
                 if (intent == null && isRunning) {
                      startCaffeinate()
@@ -101,7 +103,6 @@ class CaffeinateService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        startReminderTimer()
         updateNotificationLoop()
         requestTileUpdate()
     }
@@ -110,14 +111,11 @@ class CaffeinateService : Service() {
         isRunning = false
         startTimeMillis = 0
         _elapsedTimeFlow.value = 0
-        reminderJob?.cancel()
-        reminderJob = null
         notificationJob?.cancel()
         notificationJob = null
         releaseWakeLocks()
         removeKeepScreenOnOverlay()
         stopForeground(STOP_FOREGROUND_REMOVE)
-        cancelNotifications()
         requestTileUpdate()
         stopSelf()
     }
@@ -194,7 +192,7 @@ class CaffeinateService : Service() {
     }
 
     private fun createNotification(contentText: String = "Screen will stay awake"): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, "caffeinate_channel")
             .setContentTitle("Caffeinate is Active")
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_coffee)
@@ -205,7 +203,6 @@ class CaffeinateService : Service() {
             .setColorized(true)
             .setContentIntent(createOpenCaffeinatePendingIntent())
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", createStopPendingIntent())
-            .addAction(android.R.drawable.ic_menu_add, "Keep Going", createKeepGoingPendingIntent())
             .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -224,54 +221,6 @@ class CaffeinateService : Service() {
                 delay(1000)
             }
         }
-    }
-    
-    private fun startReminderTimer() {
-        reminderJob?.cancel()
-        reminderJob = null
-        if (isInfinite) {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancel(NOTIFICATION_ID + 1)
-            return
-        }
-
-        reminderJob = serviceScope.launch {
-            delay(TimeUnit.MINUTES.toMillis(reminderIntervalMinutes.toLong()))
-            showReminderAlert()
-        }
-    }
-
-    private fun resetReminder() {
-        startReminderTimer()
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(NOTIFICATION_ID + 1)
-        
-        if (screenWakeLock?.isHeld == false) {
-            screenWakeLock?.acquire()
-        }
-        
-        // Ensure overlay is still there
-        if (overlayView == null) {
-            showKeepScreenOnOverlay()
-        }
-    }
-
-    private fun showReminderAlert() {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val alertNotification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Caffeinate Reminder")
-            .setContentText("Still using the screen? Open Caffeinate or tap Keep Going to continue.")
-            .setSmallIcon(R.drawable.ic_coffee)
-            .setColor(themeColor)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(createOpenCaffeinatePendingIntent())
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", createStopPendingIntent())
-            .addAction(android.R.drawable.ic_menu_add, "Keep Going", createKeepGoingPendingIntent())
-            .setAutoCancel(true)
-            .build()
-
-        notificationManager.notify(NOTIFICATION_ID + 1, alertNotification)
     }
     
     private fun createNotificationChannel() {
@@ -300,18 +249,6 @@ class CaffeinateService : Service() {
             this,
             0,
             stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun createKeepGoingPendingIntent(): PendingIntent {
-        val keepGoingIntent = Intent(this, CaffeinateService::class.java).apply {
-            action = ACTION_KEEP_GOING
-        }
-        return PendingIntent.getService(
-            this,
-            1,
-            keepGoingIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }

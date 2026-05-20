@@ -17,6 +17,7 @@ object NotificationHelper {
     const val CHANNEL_STEP_COUNTER = "step_counter_channel"
     const val CHANNEL_VOICE_RECORDER = "voice_recorder_channel"
     const val CHANNEL_FILE_CONVERSION = "file_conversion_channel"
+    const val CHANNEL_CAFFEINATE = "caffeinate_channel"
     const val CHANNEL_APP_UPDATES = "app_updates"
     const val CHANNEL_TASK_REMINDERS = "task_reminders"
     const val CHANNEL_EVENT_REMINDERS = "event_reminders"
@@ -88,7 +89,15 @@ object NotificationHelper {
                 "File Conversion",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Progress of file format conversions"
+                description = "Progress and status of file format conversions"
+            },
+            NotificationChannel(
+                CHANNEL_CAFFEINATE,
+                "Caffeinate",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Background status for keeping the screen awake"
+                setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_APP_UPDATES,

@@ -21,25 +21,23 @@ class CaffeinateTileService : TileService() {
                 action = CaffeinateService.ACTION_STOP
             }
             startService(intent)
+            updateTile()
         } else {
-            val intent = Intent(this, CaffeinateService::class.java).apply {
-                action = CaffeinateService.ACTION_START
-                putExtra(CaffeinateService.EXTRA_INTERVAL, 30) // Default
-                putExtra(CaffeinateService.EXTRA_INFINITE, false)
-                putExtra(CaffeinateService.EXTRA_COLOR, android.graphics.Color.BLUE)
+            val intent = Intent(this, CaffeinatePopupActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val pendingIntent = android.app.PendingIntent.getActivity(
+                    this, 0, intent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                startActivityAndCollapse(pendingIntent)
             } else {
-                startService(intent)
+                @Suppress("DEPRECATION")
+                startActivityAndCollapse(intent)
             }
         }
-        
-        // Immediate update and another one after a short delay
-        updateTile()
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            updateTile()
-        }, 500)
     }
 
     private fun updateTile() {

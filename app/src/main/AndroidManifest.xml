@@ -218,6 +218,31 @@
         </service>
 
         <service
+            android:name=".service.QuickToolzTileService"
+            android:label="Toolz: Quick Access"
+            android:icon="@drawable/ic_launcher_foreground"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".service.QuickToolzActivity"
+            android:theme="@style/Theme.Toolz.Transparent"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="" />
+
+        <activity
+            android:name=".service.CaffeinatePopupActivity"
+            android:theme="@style/Theme.Toolz.Transparent"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="" />
+
+        <service
             android:name=".service.ToolzAutofillService"
             android:label="Toolz Autofill"
             android:permission="android.permission.BIND_AUTOFILL_SERVICE"
