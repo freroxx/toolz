@@ -89,6 +89,7 @@ android {
         compose = true
         buildConfig = true
         viewBinding = true
+        aidl = true
     }
 }
 
@@ -191,6 +192,10 @@ dependencies {
 
     // Security Crypto
     implementation(libs.androidx.security.crypto)
+
+    // Shizuku
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     // FFmpeg & Lottie
     implementation(libs.ffmpeg.kit.standard)
