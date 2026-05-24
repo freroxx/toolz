@@ -198,6 +198,20 @@ class SettingsRepository @Inject constructor(
     private val CATALOG_ONBOARDING_COMPLETED = booleanPreferencesKey("catalog_onboarding_completed")
     private val SHOW_CATALOG_BETA_CARD = booleanPreferencesKey("show_catalog_beta_card")
 
+    private val LIVE_VPN_NOTIFICATIONS = booleanPreferencesKey("live_vpn_notifications")
+    private val LIVE_DNS_NOTIFICATIONS = booleanPreferencesKey("live_dns_notifications")
+
+    val liveVpnNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_VPN_NOTIFICATIONS] ?: true }
+    val liveDnsNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_DNS_NOTIFICATIONS] ?: true }
+
+    suspend fun setLiveVpnNotifications(enabled: Boolean) {
+        dataStore.edit { it[LIVE_VPN_NOTIFICATIONS] = enabled }
+    }
+
+    suspend fun setLiveDnsNotifications(enabled: Boolean) {
+        dataStore.edit { it[LIVE_DNS_NOTIFICATIONS] = enabled }
+    }
+
     // Download Settings
     private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format") // "M4A", "OPUS", "MP3"
     private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality") // "HIGH", "MEDIUM", "LOW"

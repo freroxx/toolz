@@ -580,6 +580,26 @@ fun SettingsScreen(
                         isExpanded = expandedSection == "INTERACTION" || searchQuery.isNotEmpty(),
                         onExpandToggle = { expandedSection = if (expandedSection == "INTERACTION") null else "INTERACTION" }
                     ) {
+                        if (matches(searchQuery, "vpn", "dns", "live", "notification", "network")) {
+                            val liveVpn by viewModel.liveVpnNotifications.collectAsState(initial = true)
+                            val liveDns by viewModel.liveDnsNotifications.collectAsState(initial = true)
+                            
+                            SettingsToggleItem(
+                                title = "Live VPN Notifications",
+                                subtitle = "Show active VPN status in system tray",
+                                icon = Icons.Rounded.VpnLock,
+                                checked = liveVpn,
+                                onCheckedChange = { viewModel.setLiveVpnNotifications(it) }
+                            )
+                            SettingsToggleItem(
+                                title = "Live DNS Notifications",
+                                subtitle = "Alert on DNS latency changes",
+                                icon = Icons.Rounded.Dns,
+                                checked = liveDns,
+                                onCheckedChange = { viewModel.setLiveDnsNotifications(it) }
+                            )
+                        }
+
                         if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill", "hud")) {
                             SettingsToggleItem(
                                 title = "Smart Overlay (Pill)",
