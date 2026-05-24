@@ -58,6 +58,8 @@ sealed class Screen(val route: String) {
     object Clipboard : Screen("clipboard")
     object SmartEncrypter : Screen("smart_encrypter")
     object DeviceInfo : Screen("device_info")
+    object NetworkPowerSuite : Screen("network_power_suite")
+    object WifiTweaks : Screen("wifi_tweaks")
     object Search : Screen("search")
     object TabManagement : Screen("tab_management")
     object Browser : Screen("browser?url={url}") {

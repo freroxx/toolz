@@ -64,7 +64,8 @@ import com.google.mlkit.vision.barcode.common.Barcode
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannerScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToGenerator: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -135,6 +136,18 @@ fun ScannerScreen(
                     }
                 },
                 actions = {
+                    if (onNavigateToGenerator != null) {
+                        IconButton(
+                            onClick = onNavigateToGenerator,
+                            modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Icon(
+                                Icons.Rounded.QrCode,
+                                contentDescription = "QR Generator",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = { 
                             isFlashOn = !isFlashOn

@@ -69,6 +69,7 @@ import com.frerox.toolz.ui.screens.time.*
 import com.frerox.toolz.ui.screens.todo.TodoScreen
 import com.frerox.toolz.ui.screens.utils.SmartEncrypterScreen
 import com.frerox.toolz.ui.screens.utils.*
+import com.frerox.toolz.ui.screens.qr.*
 import com.frerox.toolz.ui.screens.notifications.NotificationVaultScreen
 import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
 import com.frerox.toolz.ui.screens.focus.CaffeinateScreen
@@ -81,6 +82,8 @@ import com.frerox.toolz.ui.screens.search.SearchScreen
 import com.frerox.toolz.ui.screens.browser.WebViewScreen
 import com.frerox.toolz.ui.screens.browser.WebViewViewModel
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
+import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
+import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.service.StepCounterService
@@ -97,16 +100,18 @@ import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListener {
 
     companion object {
         const val EXTRA_NAVIGATE_TO = "navigate_to"
         const val EXTRA_SHOW_UPDATE = "show_update"
         const val EXTRA_SHOW_UPDATE_DIALOG = "show_update_dialog"
+        const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
     }
     @Inject
     lateinit var settingsRepository: SettingsRepository
@@ -126,6 +131,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Shizuku.addRequestPermissionResultListener(this)
         currentIntentState.value = intent
         currentIntentVersion.value += 1
 
@@ -263,6 +269,17 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         currentIntentState.value = intent
         currentIntentVersion.value += 1
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Shizuku.removeRequestPermissionResultListener(this)
+    }
+
+    override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+        if (requestCode == SHIZUKU_PERMISSION_REQUEST_CODE) {
+            // Permission result handled
+        }
     }
 
     private fun scheduleCleanup() {
@@ -551,8 +568,6 @@ fun ToolzNavHost(
 
         composable("onboarding") {
             OnboardingScreen(
-                settingsRepository = settingsRepository,
-                aiSettingsManager = aiSettingsManager,
                 onFinish = {
                     navController.navigate(Screen.Dashboard.route) {
                         popUpTo("onboarding") { inclusive = true }
@@ -715,7 +730,26 @@ fun ToolzNavHost(
             MagnifierScreen(onBack = { navController.popBackStack() }, settingsRepository = vm.repository)
         }
         composable(Screen.Scanner.route) {
-            ScannerScreen(onBack = { navController.popBackStack() })
+            ScannerScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToGenerator = {
+                    navController.navigate(Screen.QrGenerator.route) {
+                        popUpTo(Screen.Scanner.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+        composable(Screen.QrGenerator.route) {
+            val qrVm: QRViewModel = hiltViewModel()
+            QRGeneratorScreen(
+                viewModel = qrVm,
+                onBack = { navController.popBackStack() },
+                onNavigateToScanner = {
+                    navController.navigate(Screen.Scanner.route) {
+                        popUpTo(Screen.QrGenerator.route) { inclusive = true }
+                    }
+                }
+            )
         }
         composable(Screen.LightMeter.route) {
             LightMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -824,6 +858,12 @@ fun ToolzNavHost(
         }
         composable(Screen.Clipboard.route) {
             ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+        }
+        composable(Screen.NetworkPowerSuite.route) {
+            NetworkPowerSuiteScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.WifiTweaks.route) {
+            WifiTweaksScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.FileCleaner.route) {
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()

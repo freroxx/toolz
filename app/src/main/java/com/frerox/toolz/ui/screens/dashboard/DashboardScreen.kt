@@ -1799,6 +1799,7 @@ fun UniversalPill(
             AppTip("Solve your equations", "With the Equation solver", Icons.Rounded.Functions, Screen.EquationSolver.route, Color(0xFF3F51B5)),
             AppTip("Customize the app", "In Settings", Icons.Rounded.Tune, Screen.Settings.route, Color(0xFF607D8B)),
             AppTip("Clean up junk", "File Cleaner", Icons.Rounded.CleaningServices, Screen.FileCleaner.route, Color(0xFF00BCD4)),
+            AppTip("Network Tweaks", "Check latency & router", Icons.Rounded.NetworkCheck, Screen.NetworkPowerSuite.route, Color(0xFF1976D2)),
             AppTip("Take a coffee", "And your screen will never sleep", Icons.Rounded.Coffee, Screen.Caffeinate.route, Color(0xFF795548))
         )
     }
