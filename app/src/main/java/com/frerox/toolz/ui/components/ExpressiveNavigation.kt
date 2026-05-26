@@ -1,0 +1,298 @@
+package com.frerox.toolz.ui.components
+
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
+import androidx.compose.material3.adaptive.WindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteItemColors
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScope
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
+import kotlinx.coroutines.launch
+
+@Composable
+fun ExpressiveNavigationBar(
+    modifier: Modifier = Modifier,
+    containerColor: Color = Color.Transparent,
+    contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    tonalElevation: Dp = 0.dp,
+    windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
+    content: @Composable RowScope.() -> Unit
+) {
+    NavigationBar(
+        modifier = modifier,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        tonalElevation = tonalElevation,
+        windowInsets = windowInsets,
+        content = content
+    )
+}
+
+@Composable
+fun RowScope.ExpressiveNavigationBarItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    selectedIcon: @Composable () -> Unit = icon,
+    enabled: Boolean = true,
+    label: @Composable (() -> Unit)? = null,
+    alwaysShowLabel: Boolean = true,
+    colors: NavigationBarItemColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+    ),
+    interactionSource: MutableInteractionSource? = null,
+) {
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+    val currentOnClick by rememberUpdatedState(onClick)
+    val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+    val isPressed by resolvedInteractionSource.collectIsPressedAsState()
+    
+    val scale by animateFloatAsState(
+        targetValue = when {
+            performanceMode -> 1f
+            isPressed -> 0.92f
+            selected -> 1.08f
+            else -> 1f
+        },
+        animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
+            dampingRatio = 0.5f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "navItemScale",
+    )
+
+    NavigationBarItem(
+        selected = selected,
+        onClick = {
+            vibrationManager?.vibrateTick()
+            currentOnClick()
+        },
+        icon = {
+            Box(modifier = Modifier.graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }) {
+                if (selected) selectedIcon() else icon()
+            }
+        },
+        modifier = modifier,
+        enabled = enabled,
+        label = label,
+        alwaysShowLabel = alwaysShowLabel,
+        colors = colors,
+        interactionSource = resolvedInteractionSource
+    )
+}
+
+/**
+ * Premium Wide Navigation Rail with expanded/collapsed expressive transitions.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzWideNavigationRail(
+    selectedItem: Int,
+    onItemSelected: (Int) -> Unit,
+    items: List<Pair<String, ImageVector>>,
+    modifier: Modifier = Modifier,
+    header: @Composable (() -> Unit)? = null,
+    expandedHeaderTopPadding: Dp = 64.dp,
+) {
+    val state = rememberWideNavigationRailState()
+    val scope = rememberCoroutineScope()
+    val vibrationManager = LocalVibrationManager.current
+
+    ModalWideNavigationRail(
+        modifier = modifier,
+        state = state,
+        expandedHeaderTopPadding = expandedHeaderTopPadding,
+        header = {
+            Column(modifier = Modifier.padding(start = 24.dp)) {
+                if (header != null) {
+                    header()
+                    Spacer(Modifier.height(16.dp))
+                }
+                IconButton(
+                    onClick = {
+                        vibrationManager?.vibrateTick()
+                        scope.launch {
+                            if (state.targetValue == WideNavigationRailValue.Expanded) {
+                                state.collapse()
+                            } else {
+                                state.expand()
+                            }
+                        }
+                    },
+                ) {
+                    Icon(
+                        if (state.targetValue == WideNavigationRailValue.Expanded) 
+                            Icons.Rounded.KeyboardDoubleArrowLeft else Icons.Rounded.Menu,
+                        contentDescription = "Toggle Rail"
+                    )
+                }
+            }
+        },
+    ) {
+        items.forEachIndexed { index, item ->
+            WideNavigationRailItem(
+                railExpanded = state.targetValue == WideNavigationRailValue.Expanded,
+                icon = { Icon(item.second, contentDescription = item.first) },
+                label = { Text(item.first) },
+                selected = selectedItem == index,
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    onItemSelected(index) 
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Adaptive Navigation Suite Scaffold for Toolz.
+ */
+@Composable
+fun ToolzNavigationSuiteScaffold(
+    navigationSuiteItems: NavigationSuiteScope.() -> Unit,
+    modifier: Modifier = Modifier,
+    windowAdaptiveInfo: WindowAdaptiveInfo = currentWindowAdaptiveInfo(),
+    content: @Composable () -> Unit,
+) {
+    val layoutType = NavigationSuiteScaffoldDefaults
+        .calculateFromAdaptiveInfo(windowAdaptiveInfo)
+    
+    NavigationSuiteScaffold(
+        navigationSuiteItems = navigationSuiteItems,
+        layoutType = layoutType,
+        containerColor = Color.Transparent,
+        navigationSuiteColors = NavigationSuiteDefaults.colors(
+            navigationBarContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            navigationRailContainerColor = Color.Transparent,
+        ),
+        modifier = modifier,
+        content = content
+    )
+}
+
+/**
+ * Floating Action Button Menu for complex multi-action entries.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ExpressiveFabMenu(
+    items: List<Triple<String, ImageVector, () -> Unit>>,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val vibrationManager = LocalVibrationManager.current
+
+    FloatingActionButtonMenu(
+        modifier = modifier,
+        expanded = expanded,
+        button = {
+            ToggleFloatingActionButton(
+                checked = expanded,
+                onCheckedChange = { 
+                    vibrationManager?.vibrateTick()
+                    expanded = it 
+                },
+            ) {
+                val imageVector by remember {
+                    derivedStateOf {
+                        if (checkedProgress > 0.5f) Icons.Rounded.Close else Icons.Rounded.Add
+                    }
+                }
+                Icon(
+                    painter = rememberVectorPainter(imageVector),
+                    contentDescription = contentDescription,
+                    modifier = Modifier.animateIcon({ checkedProgress }),
+                )
+            }
+        },
+    ) {
+        items.forEach { item ->
+            FloatingActionButtonMenuItem(
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    expanded = false
+                    item.third()
+                },
+                icon = { Icon(item.second, contentDescription = null) },
+                text = { Text(text = item.first) },
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun ExpressiveNavigationPreview() {
+    ToolzTheme {
+        Row(modifier = Modifier.fillMaxSize()) {
+            ToolzWideNavigationRail(
+                selectedItem = 0,
+                onItemSelected = {},
+                items = listOf("Dashboard" to Icons.Rounded.Dashboard, "Settings" to Icons.Rounded.Settings),
+                header = { Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(32.dp)) }
+            )
+            
+            Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.BottomCenter) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Add Item", Icons.Rounded.Add, {}),
+                            Triple("Save", Icons.Rounded.Save, {})
+                        )
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    ExpressiveNavigationBar {
+                        ExpressiveNavigationBarItem(
+                            selected = true,
+                            onClick = {},
+                            icon = { Icon(Icons.Rounded.Person, contentDescription = null) },
+                            label = { Text("Profile") }
+                        )
+                        ExpressiveNavigationBarItem(
+                            selected = false,
+                            onClick = {},
+                            icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+                            label = { Text("Settings") }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
