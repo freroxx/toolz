@@ -1,6 +1,5 @@
 package com.frerox.toolz.ui.screens.math
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -10,365 +9,424 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Backspace
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.rounded.Calculate
-import androidx.compose.material.icons.rounded.DeleteOutline
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ═══════════════════════════════════════════════════════════════════════════════
+// BUTTON TYPE — drives M3 surface color role selection
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum class CalcKeyType {
+    DIGIT,      // surfaceContainerHigh + onSurface
+    OPERATOR,   // secondaryContainer + onSecondaryContainer
+    EQUALS,     // primary + onPrimary
+    CLEAR,      // errorContainer + error
+    FUNCTION,   // surfaceContainerHighest + onSurfaceVariant
+    SPECIAL,    // tertiaryContainer + onTertiary
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT SCREEN
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun CalculatorScreen(
     viewModel: CalculatorViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
-    val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    var showHistory by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState()
+    var showHistorySheet by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        @Suppress("DEPRECATION")
-                        Text(
-                            text = "MATH ENGINE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 3.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    },
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground(),
+    ) {
+        Scaffold(
+            topBar = {
+                ExpressiveTopAppBar(
+                    title = "Math Engine",
+                    subtitle = if (state.isScientific) "Scientific mode" else "Standard mode",
                     navigationIcon = {
-                        IconButton(
+                        ToolzExpressiveIconButton(
                             onClick = {
                                 vibrationManager?.vibrateClick()
                                 onBack()
                             },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                            shape = MediumExpressiveShape,
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = { 
-                                vibrationManager?.vibrateClick()
-                                showHistory = true
+                        ToolzExpressiveIconButton(
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                showHistorySheet = true
                             },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                            shape = MediumExpressiveShape,
                         ) {
-                            Icon(Icons.Rounded.History, contentDescription = "History")
+                            Icon(Icons.Rounded.History, contentDescription = "Calculation history")
                         }
+                        Spacer(Modifier.width(4.dp))
                     },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    modifier = Modifier.statusBarsPadding(),
                 )
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
-                    modifier = Modifier.padding(top = 4.dp)
+            },
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { padding ->
+            ExpressiveSupportingPaneScaffold(
+                modifier = Modifier.padding(top = padding.calculateTopPadding()),
+                mainPane = {
+                    CalculatorMainContent(state = state, viewModel = viewModel)
+                },
+                supportingPane = {
+                    CalculatorHistoryContent(
+                        state = state,
+                        viewModel = viewModel,
+                    )
+                },
+            )
+        }
+    }
+
+    // History bottom sheet (compact screens)
+    if (showHistorySheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showHistorySheet = false },
+            shape = RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = {
+                BottomSheetDefaults.DragHandle(
+                    width = 56.dp,
+                    height = 4.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
                 )
-            }
-        },
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // Display Area
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
-                    color = Color.Transparent
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 8.dp)
-                            .bouncyClick { 
-                                vibrationManager?.vibrateLongClick()
-                                viewModel.onCopyResult()
-                            },
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.Bottom
-                    ) {
-                        // Formula
-                        AnimatedContent(
-                            targetState = state.formula,
-                            transitionSpec = { fadeIn() togetherWith fadeOut() },
-                            label = "formula"
-                        ) { formula ->
-                            Text(
-                                text = formula,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                textAlign = TextAlign.End,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+            },
+        ) {
+            CalculatorHistoryContent(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.navigationBarsPadding(),
+            )
+        }
+    }
+}
 
-                        Spacer(Modifier.height(8.dp))
-                        
-                        // Main Display
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                            Text(
-                                text = state.display,
-                                style = MaterialTheme.typography.displayLarge.copy(
-                                    fontSize = if (state.display.length > 10) 48.sp else 72.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = (-2).sp
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.End,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN CONTENT — display + mode toggle + keypad
+// ═══════════════════════════════════════════════════════════════════════════════
 
-                        // Live Result
-                        AnimatedVisibility(
-                            visible = state.liveResult != null && state.liveResult != state.display,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            Text(
-                                text = "= ${state.liveResult ?: ""}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                        
-                        state.error?.let {
-                            Text(
-                                text = it,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-                    }
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun CalculatorMainContent(state: CalculatorState, viewModel: CalculatorViewModel) {
+    val vibrationManager = LocalVibrationManager.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        // ── Display Panel ─────────────────────────────────────────────────────
+        CalculatorDisplay(
+            state = state,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1.25f),
+            onCopyResult = {
+                vibrationManager?.vibrateLongClick()
+                viewModel.onCopyResult()
+            },
+        )
+
+        // ── Standard / Scientific mode toggle ─────────────────────────────────
+        ToolzConnectedButtonGroup(
+            selectedIndex = if (state.isScientific) 1 else 0,
+            options = listOf("Standard", "Scientific"),
+            onOptionSelected = { idx ->
+                val wantScientific = idx == 1
+                if (wantScientific != state.isScientific) {
+                    vibrationManager?.vibrateTick()
+                    viewModel.onToggleMode()
                 }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
 
-                // Keypad Area
-                Box(
-                    modifier = Modifier
-                        .weight(3.5f)
-                        .fillMaxWidth()
-                ) {
-                    Column {
-                        // Scientific Toggle Row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Surface(
-                                onClick = { 
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.onToggleMode() 
-                                },
-                                shape = CircleShape,
-                                color = if (state.isScientific) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(44.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        if (state.isScientific) Icons.Rounded.Science else Icons.Rounded.Calculate,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(22.dp),
-                                        tint = if (state.isScientific) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            AnimatedContent(
-                                targetState = state.isScientific,
-                                transitionSpec = {
-                                    (fadeIn(tween(400)) + scaleIn(initialScale = 0.95f))
-                                        .togetherWith(fadeOut(tween(300)) + scaleOut(targetScale = 0.95f))
-                                }, label = "keypad"
-                            ) { isScientific ->
-                                if (isScientific) {
-                                    ScientificKeypad(viewModel)
-                                } else {
-                                    StandardKeypad(viewModel)
-                                }
-                            }
-                        }
-                    }
+        // ── Keypad — cross-fades between Standard and Scientific ──────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(if (state.isScientific) 4f else 3.2f),
+        ) {
+            AnimatedContent(
+                targetState = state.isScientific,
+                transitionSpec = {
+                    val enter = fadeIn(tween(380)) + scaleIn(
+                        initialScale = 0.93f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                    )
+                    val exit = fadeOut(tween(280)) + scaleOut(targetScale = 0.96f)
+                    enter togetherWith exit
+                },
+                label = "keypad_mode_switch",
+            ) { isScientific ->
+                if (isScientific) {
+                    ScientificKeypad(viewModel = viewModel, state = state)
+                } else {
+                    StandardKeypad(viewModel = viewModel)
                 }
-                
-                Spacer(modifier = Modifier.navigationBarsPadding())
             }
         }
 
-        if (showHistory) {
-            ModalBottomSheet(
-                onDismissRequest = { showHistory = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp)
+        Spacer(modifier = Modifier.navigationBarsPadding())
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DISPLAY PANEL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun CalculatorDisplay(
+    state: CalculatorState,
+    modifier: Modifier = Modifier,
+    onCopyResult: () -> Unit,
+) {
+    Surface(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .bouncyClick { onCopyResult() },
+        shape = ExtraLargeExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        tonalElevation = 0.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 28.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.Bottom,
+        ) {
+
+            // ── Formula (previous expression) ─────────────────────────────────
+            AnimatedContent(
+                targetState = state.formula,
+                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+                label = "formula_text",
+                modifier = Modifier.fillMaxWidth(),
+            ) { formula ->
+                Text(
+                    text = formula.ifEmpty { " " },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                    textAlign = TextAlign.End,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // ── Main display number — spring-physics slide on change ───────────
+            val displayFontSp = when {
+                state.display.length > 15 -> 32.sp
+                state.display.length > 11 -> 48.sp
+                state.display.length > 8  -> 64.sp
+                else                      -> 78.sp
+            }
+
+            AnimatedContent(
+                targetState = state.display,
+                transitionSpec = {
+                    val enter = slideInVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                    ) { it / 4 } + fadeIn(tween(180))
+                    val exit = slideOutVertically(tween(140)) { -it / 4 } + fadeOut(tween(140))
+                    enter togetherWith exit
+                },
+                label = "display_value",
+                modifier = Modifier.fillMaxWidth(),
+            ) { display ->
+                Text(
+                    text = display,
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = displayFontSp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = (-2).sp,
+                    ),
+                    color = when {
+                        state.error != null -> MaterialTheme.colorScheme.error
+                        else               -> MaterialTheme.colorScheme.onSurface
+                    },
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // ── Live "preview" result ─────────────────────────────────────────
+            AnimatedVisibility(
+                visible = state.liveResult != null &&
+                        state.liveResult != state.display &&
+                        state.error == null,
+                enter = expandVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                ) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
             ) {
-                Column(
+                Text(
+                    text = "= ${state.liveResult ?: ""}",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                    textAlign = TextAlign.End,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .padding(bottom = 32.dp)
+                        .padding(top = 4.dp),
+                )
+            }
+
+            // ── Error toast ───────────────────────────────────────────────────
+            AnimatedVisibility(
+                visible = state.error != null,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Surface(
+                    modifier = Modifier.padding(top = 8.dp),
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "HISTORY",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 2.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        IconButton(onClick = { viewModel.clearHistory() }) {
-                            Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    
-                    if (state.history.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("No history yet", color = MaterialTheme.colorScheme.outline)
-                        }
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(state.history) { item ->
-                                Column(modifier = Modifier.fillMaxWidth().bouncyClick {
-                                    viewModel.onClear()
-                                    showHistory = false
-                                }) {
-                                    Text(
-                                        item.first,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.End
-                                    )
-                                    Text(
-                                        "= ${item.second}",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.End
-                                    )
-                                    HorizontalDivider(modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        text = state.error ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    )
                 }
+            }
+
+            // ── Tap-to-copy hint ──────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Rounded.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(11.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "tap to copy",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                )
             }
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// STANDARD KEYPAD  (5 rows × 4 columns)
+// ═══════════════════════════════════════════════════════════════════════════════
+
 @Composable
 fun StandardKeypad(viewModel: CalculatorViewModel) {
-    val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
-    val buttons = listOf(
-        "C", "÷", "×", "DEL",
-        "7", "8", "9", "-",
-        "4", "5", "6", "+",
-        "1", "2", "3", "=",
-        "0", "00", ".", "%"
+    val hapticEnabled = LocalHapticEnabled.current
+
+    // Row-by-row definition: label → CalcKeyType
+    val rows: List<List<Pair<String, CalcKeyType>>> = listOf(
+        listOf("C" to CalcKeyType.CLEAR, "÷" to CalcKeyType.OPERATOR, "×" to CalcKeyType.OPERATOR, "DEL" to CalcKeyType.FUNCTION),
+        listOf("7" to CalcKeyType.DIGIT,  "8" to CalcKeyType.DIGIT,   "9" to CalcKeyType.DIGIT,   "-" to CalcKeyType.OPERATOR),
+        listOf("4" to CalcKeyType.DIGIT,  "5" to CalcKeyType.DIGIT,   "6" to CalcKeyType.DIGIT,   "+" to CalcKeyType.OPERATOR),
+        listOf("1" to CalcKeyType.DIGIT,  "2" to CalcKeyType.DIGIT,   "3" to CalcKeyType.DIGIT,   "=" to CalcKeyType.EQUALS),
+        listOf("0" to CalcKeyType.DIGIT,  "00" to CalcKeyType.DIGIT,  "." to CalcKeyType.DIGIT,   "%" to CalcKeyType.OPERATOR),
     )
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        userScrollEnabled = false
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.SpaceEvenly,
     ) {
-        items(buttons) { btn ->
-            when (btn) {
-                "DEL" -> CalculatorIconButton(Icons.AutoMirrored.Rounded.Backspace, {
-                    if (hapticEnabled) vibrationManager?.vibrateTick()
-                    viewModel.onBackspace() 
-                })
-                else -> {
-                    CalculatorButton(
-                        text = btn,
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                row.forEach { (label, type) ->
+                    CalcKey(
+                        label = label,
+                        keyType = type,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(vertical = 5.dp),
                         onClick = {
                             if (hapticEnabled) {
-                                if (btn == "=") vibrationManager?.vibrateLongClick()
-                                else vibrationManager?.vibrateClick()
+                                when (type) {
+                                    CalcKeyType.EQUALS, CalcKeyType.CLEAR -> vibrationManager?.vibrateLongClick()
+                                    else -> vibrationManager?.vibrateClick()
+                                }
                             }
-                            when (btn) {
-                                "C" -> viewModel.onClear()
-                                "=" -> viewModel.onEquals()
-                                "+" -> viewModel.onOperator("+")
-                                "-" -> viewModel.onOperator("-")
-                                "×" -> viewModel.onOperator("×")
-                                "÷" -> viewModel.onOperator("÷")
-                                "%" -> viewModel.onOperator("/100")
-                                else -> viewModel.onDigit(btn)
-                            }
-                        }
+                            dispatchCalcAction(label, viewModel)
+                        },
                     )
                 }
             }
@@ -376,82 +434,117 @@ fun StandardKeypad(viewModel: CalculatorViewModel) {
     }
 }
 
-@Composable
-fun ScientificKeypad(viewModel: CalculatorViewModel) {
-    val hapticEnabled = LocalHapticEnabled.current
-    val vibrationManager = LocalVibrationManager.current
-    val state by viewModel.uiState.collectAsState()
-    
-    // Popular scientific layout: Functions in upper grid, basic keys below
-    val functions = listOf(
-        "sin", "cos", "tan", "log", "ln",
-        "√", "xⁿ", "π", "e", "(",
-        ")", "deg", "inv", "abs", "CONST"
-    )
-    
-    val basics = listOf(
-        "AC", "DEL", "%", "÷",
-        "7", "8", "9", "×",
-        "4", "5", "6", "-",
-        "1", "2", "3", "+",
-        "0", ".", "!", "="
-    )
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCIENTIFIC KEYPAD  (function strip + 5 rows × 4 columns)
+// ═══════════════════════════════════════════════════════════════════════════════
 
+@Composable
+fun ScientificKeypad(viewModel: CalculatorViewModel, state: CalculatorState) {
+    val vibrationManager = LocalVibrationManager.current
+    val hapticEnabled = LocalHapticEnabled.current
     var showConstants by remember { mutableStateOf(false) }
 
+    // Scientific function strip — 3 rows × 5 cols
+    val functionRows = listOf(
+        listOf("sin", "cos", "tan", "log", "ln"),
+        listOf("√", "xⁿ", "π", "e", "("),
+        listOf(")", "DEG/RAD", "inv", "abs", "CONST"),
+    )
+
+    // Main number grid
+    val mainRows: List<List<Pair<String, CalcKeyType>>> = listOf(
+        listOf("AC" to CalcKeyType.CLEAR, "DEL" to CalcKeyType.FUNCTION, "%" to CalcKeyType.OPERATOR, "÷" to CalcKeyType.OPERATOR),
+        listOf("7" to CalcKeyType.DIGIT,  "8" to CalcKeyType.DIGIT,      "9" to CalcKeyType.DIGIT,   "×" to CalcKeyType.OPERATOR),
+        listOf("4" to CalcKeyType.DIGIT,  "5" to CalcKeyType.DIGIT,      "6" to CalcKeyType.DIGIT,   "-" to CalcKeyType.OPERATOR),
+        listOf("1" to CalcKeyType.DIGIT,  "2" to CalcKeyType.DIGIT,      "3" to CalcKeyType.DIGIT,   "+" to CalcKeyType.OPERATOR),
+        listOf("0" to CalcKeyType.DIGIT,  "." to CalcKeyType.DIGIT,      "!" to CalcKeyType.SPECIAL, "=" to CalcKeyType.EQUALS),
+    )
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Functions Grid (Top half, smaller buttons, tight)
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(5),
-            modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(0.1f)),
-            userScrollEnabled = false
+
+        // ── Scientific function strip ──────────────────────────────────────────
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            items(functions) { btn ->
-                ScientificFunctionButton(
-                    text = if (btn == "deg") (if (state.isDegreeMode) "DEG" else "RAD") else btn,
-                    onClick = {
-                        if (hapticEnabled) vibrationManager?.vibrateTick()
-                        when (btn) {
-                            "deg" -> viewModel.onToggleAngleMode()
-                            "xⁿ" -> viewModel.onOperator("^")
-                            "π" -> viewModel.onDigit("π")
-                            "e" -> viewModel.onDigit("e")
-                            "(", ")" -> viewModel.onOperator(btn)
-                            "CONST" -> showConstants = true
-                            else -> viewModel.onFunction(btn)
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                functionRows.forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        row.forEach { func ->
+                            val displayLabel = if (func == "DEG/RAD") {
+                                if (state.isDegreeMode) "DEG" else "RAD"
+                            } else {
+                                func
+                            }
+                            val isAngleMode = func == "DEG/RAD"
+
+                            SciFunctionKey(
+                                label = displayLabel,
+                                isAngleModeActive = isAngleMode,
+                                isDeg = state.isDegreeMode,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    if (hapticEnabled) vibrationManager?.vibrateTick()
+                                    when (func) {
+                                        "DEG/RAD" -> viewModel.onToggleAngleMode()
+                                        "xⁿ"     -> viewModel.onOperator("^")
+                                        "π"      -> viewModel.onDigit("π")
+                                        "e"      -> viewModel.onDigit("e")
+                                        "(", ")" -> viewModel.onOperator(func)
+                                        "CONST"  -> showConstants = true
+                                        else     -> viewModel.onFunction(func)
+                                    }
+                                },
+                            )
                         }
                     }
-                )
+                }
             }
         }
 
-        // Main Keypad (Bottom half, standard grid, no gaps)
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = false
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.14f),
+        )
+
+        // ── Main number grid ──────────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.SpaceEvenly,
         ) {
-            items(basics) { btn ->
-                when (btn) {
-                    "DEL" -> ScientificMainIconButton(Icons.AutoMirrored.Rounded.Backspace, {
-                        if (hapticEnabled) vibrationManager?.vibrateTick()
-                        viewModel.onBackspace() 
-                    })
-                    "AC" -> ScientificMainButton("AC", { 
-                        if (hapticEnabled) vibrationManager?.vibrateLongClick()
-                        viewModel.onClear() 
-                    }, isClear = true)
-                    "=" -> ScientificMainButton("=", { 
-                        if (hapticEnabled) vibrationManager?.vibrateLongClick()
-                        viewModel.onEquals() 
-                    }, isEquals = true)
-                    else -> ScientificMainButton(btn, {
-                        if (hapticEnabled) vibrationManager?.vibrateClick()
-                        when (btn) {
-                            "+", "-", "×", "÷", "%" -> viewModel.onOperator(btn)
-                            else -> viewModel.onDigit(btn)
-                        }
-                    })
+            mainRows.forEach { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    row.forEach { (label, type) ->
+                        CalcKey(
+                            label = label,
+                            keyType = type,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(vertical = 4.dp),
+                            onClick = {
+                                if (hapticEnabled) {
+                                    when (type) {
+                                        CalcKeyType.EQUALS, CalcKeyType.CLEAR -> vibrationManager?.vibrateLongClick()
+                                        else -> vibrationManager?.vibrateClick()
+                                    }
+                                }
+                                dispatchCalcAction(label, viewModel)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -463,164 +556,628 @@ fun ScientificKeypad(viewModel: CalculatorViewModel) {
             onSelect = { value ->
                 viewModel.onDigit(value)
                 showConstants = false
-            }
+            },
         )
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CALC KEY — unified button composable for all grid buttons
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun CalcKey(
+    label: String,
+    keyType: CalcKeyType,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val containerColor = when (keyType) {
+        CalcKeyType.EQUALS   -> MaterialTheme.colorScheme.primary
+        CalcKeyType.CLEAR    -> MaterialTheme.colorScheme.errorContainer
+        CalcKeyType.OPERATOR -> MaterialTheme.colorScheme.secondaryContainer
+        CalcKeyType.FUNCTION -> MaterialTheme.colorScheme.surfaceContainerHighest
+        CalcKeyType.SPECIAL  -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.75f)
+        CalcKeyType.DIGIT    -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val contentColor = when (keyType) {
+        CalcKeyType.EQUALS   -> MaterialTheme.colorScheme.onPrimary
+        CalcKeyType.CLEAR    -> MaterialTheme.colorScheme.error
+        CalcKeyType.OPERATOR -> MaterialTheme.colorScheme.onSecondaryContainer
+        CalcKeyType.FUNCTION -> MaterialTheme.colorScheme.onSurfaceVariant
+        CalcKeyType.SPECIAL  -> MaterialTheme.colorScheme.onTertiaryContainer
+        CalcKeyType.DIGIT    -> MaterialTheme.colorScheme.onSurface
+    }
+    val keyElevation = when (keyType) {
+        CalcKeyType.EQUALS -> 2.dp
+        else               -> 0.dp
+    }
+
+    // ExpressiveCard already uses bouncyClick internally from ExpressiveCards.kt
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier,
+        shape = BouncyShape,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        elevation = keyElevation,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (label == "DEL") {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Backspace,
+                    contentDescription = "Backspace",
+                    tint = contentColor,
+                    modifier = Modifier.size(26.dp),
+                )
+            } else {
+                val fontSizeSp = when {
+                    label == "=" || keyType == CalcKeyType.EQUALS -> 30.sp
+                    label.length >= 3                             -> 18.sp
+                    else                                          -> 26.sp
+                }
+                val fontWeight = when (keyType) {
+                    CalcKeyType.EQUALS -> FontWeight.Black
+                    CalcKeyType.DIGIT  -> FontWeight.Bold
+                    else               -> FontWeight.SemiBold
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = fontSizeSp,
+                        fontWeight = fontWeight,
+                    ),
+                    color = contentColor,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCI FUNCTION KEY — compact button for the scientific function strip
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun SciFunctionKey(
+    label: String,
+    modifier: Modifier = Modifier,
+    isAngleModeActive: Boolean = false,
+    isDeg: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val isAngle = label == "DEG" || label == "RAD"
+    val containerColor = when {
+        isAngle -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
+        label == "CONST" -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
+    }
+    val textColor = when {
+        isAngle  -> MaterialTheme.colorScheme.onTertiaryContainer
+        label in listOf("π", "e") -> MaterialTheme.colorScheme.primary
+        label == "CONST" -> MaterialTheme.colorScheme.onSecondaryContainer
+        else     -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f)
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(40.dp),
+        shape = SmallExpressiveShape,
+        color = containerColor,
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isAngle) FontWeight.Black else FontWeight.Bold,
+                color = textColor,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HISTORY PANE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun CalculatorHistoryContent(
+    state: CalculatorState,
+    viewModel: CalculatorViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val vibrationManager = LocalVibrationManager.current
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
+    ) {
+
+        // ── Header ────────────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 18.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "HISTORY",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            AnimatedVisibility(
+                visible = state.history.isNotEmpty(),
+                enter = scaleIn(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
+                exit = scaleOut() + fadeOut(),
+            ) {
+                ToolzExpressiveIconButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        viewModel.clearHistory()
+                    },
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    shape = SmallExpressiveShape,
+                ) {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "Clear history",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        // ── Empty state ────────────────────────────────────────────────────────
+        if (state.history.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Surface(
+                        shape = ExtraLargeExpressiveShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.size(80.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Calculate,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            )
+                        }
+                    }
+                    Text(
+                        "No calculations yet",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        "Results appear here after you press =",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        } else {
+            // ── History list ───────────────────────────────────────────────────
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 40.dp),
+            ) {
+                itemsIndexed(
+                    items = state.history,
+                    key = { idx, item -> "$idx-${item.first}" },
+                ) { index, (expression, result) ->
+                    StaggeredEntrance(index = index) {
+                        ExpressiveCard(
+                            onClick = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.onDigit(result)
+                            },
+                            shape = MediumExpressiveShape,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            elevation = 0.dp,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                                horizontalAlignment = Alignment.End,
+                            ) {
+                                Text(
+                                    text = expression,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.End,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "= $result",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    textAlign = TextAlign.End,
+                                )
+                                // Use as input hint
+                                Text(
+                                    text = "tap to use",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS DIALOG
+// ═══════════════════════════════════════════════════════════════════════════════
+
 @Composable
 fun ConstantsDialog(onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+
     val constants = listOf(
-        "π" to "3.14159265",
-        "e" to "2.71828182",
-        "φ" to "1.61803398",
-        "c" to "299792458",
-        "G" to "6.6743e-11",
-        "h" to "6.62607e-34",
-        "k" to "1.38064e-23",
-        "NA" to "6.02214e23",
-        "R" to "8.31446"
+        Triple("π", "Pi",          "3.14159265"),
+        Triple("e", "Euler's",     "2.71828182"),
+        Triple("φ", "Golden ratio","1.61803398"),
+        Triple("c", "Speed of light", "299792458"),
+        Triple("G", "Gravitation", "6.6743e-11"),
+        Triple("h", "Planck",      "6.62607e-34"),
+        Triple("k", "Boltzmann",   "1.38064e-23"),
+        Triple("Nₐ", "Avogadro",  "6.02214e23"),
+        Triple("R", "Gas const.",  "8.31446"),
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Scientific Constants", fontWeight = FontWeight.Black) },
+        shape = ExtraLargeExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(38.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Science,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "Scientific Constants",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 constants.chunked(3).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        row.forEach { (name, value) ->
-                            Button(
-                                onClick = { onSelect(value) },
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        row.forEach { (symbol, name, value) ->
+                            ExpressiveCard(
+                                onClick = {
+                                    vibrationManager?.vibrateClick()
+                                    onSelect(value)
+                                },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = MediumExpressiveShape,
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                elevation = 0.dp,
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(name, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
                                     Text(
-                                        text = value.take(6) + "...",
-                                        fontSize = 10.sp,
-                                        modifier = Modifier.alpha(0.7f)
+                                        text = symbol,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        text = name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = value.take(7),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                        textAlign = TextAlign.Center,
                                     )
                                 }
                             }
+                        }
+                        // Pad incomplete last row
+                        repeat(3 - row.size) {
+                            Box(modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) {
+                Text("Close", fontWeight = FontWeight.Bold)
+            }
         },
-        shape = RoundedCornerShape(28.dp)
     )
 }
 
-@Composable
-fun CalculatorButton(text: String, onClick: () -> Unit) {
-    val isOperator = text in listOf("=", "+", "-", "×", "÷")
-    val containerColor = when {
-        text == "=" -> MaterialTheme.colorScheme.primary
-        isOperator -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        text == "C" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
-    }
-    val contentColor = when {
-        text == "=" -> MaterialTheme.colorScheme.onPrimary
-        isOperator -> MaterialTheme.colorScheme.primary
-        text == "C" -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+// ═══════════════════════════════════════════════════════════════════════════════
+// DISPATCH HELPER — maps a button label to ViewModel action
+// ═══════════════════════════════════════════════════════════════════════════════
 
-    Surface(
-        modifier = Modifier.aspectRatio(1f).fillMaxWidth().bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = containerColor,
-        border = BorderStroke(1.dp, contentColor.copy(alpha = 0.05f))
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(text, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = contentColor)
-        }
+private fun dispatchCalcAction(label: String, viewModel: CalculatorViewModel) {
+    when (label) {
+        "C", "AC"             -> viewModel.onClear()
+        "DEL"                 -> viewModel.onBackspace()
+        "="                   -> viewModel.onEquals()
+        "+", "-", "×", "÷"   -> viewModel.onOperator(label)
+        "%"                   -> viewModel.onOperator("/100")
+        "!"                   -> viewModel.onFunction("!")
+        else                  -> viewModel.onDigit(label)
     }
 }
 
-@Composable
-fun CalculatorIconButton(icon: ImageVector, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.aspectRatio(1f).fillMaxWidth().bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(28.dp))
-        }
-    }
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// PREVIEWS  (Light + Dark)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// Scientific Specific (No Gap Design)
-
+@Preview(name = "Display Panel — Light", showBackground = true)
 @Composable
-fun ScientificFunctionButton(text: String, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.height(48.dp).fillMaxWidth().bouncyClick(onClick = onClick),
-        color = Color.Transparent,
-        shape = RectangleShape,
-        border = BorderStroke(0.2.dp, MaterialTheme.colorScheme.onSurface.copy(0.05f))
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary.copy(0.8f)
+private fun DisplayLightPreview() {
+    ToolzTheme(darkTheme = false) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+        ) {
+            CalculatorDisplay(
+                state = CalculatorState(
+                    display = "1234567",
+                    formula = "100 × 12345 =",
+                    liveResult = "1234567",
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
+                onCopyResult = {},
             )
         }
     }
 }
 
+@Preview(name = "Display Panel — Dark", showBackground = true)
 @Composable
-fun ScientificMainButton(text: String, onClick: () -> Unit, isClear: Boolean = false, isEquals: Boolean = false) {
-    val containerColor = when {
-        isEquals -> MaterialTheme.colorScheme.primary
-        isClear -> MaterialTheme.colorScheme.errorContainer.copy(0.15f)
-        text in listOf("+", "-", "×", "÷", "%") -> MaterialTheme.colorScheme.surfaceContainerHigh
-        else -> Color.Transparent
-    }
-    val contentColor = when {
-        isEquals -> MaterialTheme.colorScheme.onPrimary
-        isClear -> MaterialTheme.colorScheme.error
-        text in listOf("+", "-", "×", "÷", "%") -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
-    Surface(
-        modifier = Modifier.aspectRatio(1.1f).fillMaxWidth().bouncyClick(onClick = onClick),
-        color = containerColor,
-        shape = RectangleShape,
-        border = BorderStroke(0.3.dp, MaterialTheme.colorScheme.onSurface.copy(0.08f))
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = if (isEquals) FontWeight.Black else FontWeight.Medium,
-                color = contentColor
+private fun DisplayDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+        ) {
+            CalculatorDisplay(
+                state = CalculatorState(
+                    display = "3.14159265",
+                    formula = "sin(30) + π =",
+                    liveResult = "3.64159",
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
+                onCopyResult = {},
             )
         }
     }
 }
 
+@Preview(name = "Display — Error state", showBackground = true)
 @Composable
-fun ScientificMainIconButton(icon: ImageVector, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.aspectRatio(1.1f).fillMaxWidth().bouncyClick(onClick = onClick),
-        color = Color.Transparent,
-        shape = RectangleShape,
-        border = BorderStroke(0.3.dp, MaterialTheme.colorScheme.onSurface.copy(0.08f))
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+private fun DisplayErrorPreview() {
+    ToolzTheme(darkTheme = false) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+        ) {
+            CalculatorDisplay(
+                state = CalculatorState(
+                    display = "Error",
+                    error = "Invalid Expression",
+                ),
+                modifier = Modifier.fillMaxSize(),
+                onCopyResult = {},
+            )
         }
+    }
+}
+
+@Preview(name = "Calc Key Variants — Light", showBackground = true)
+@Composable
+private fun CalcKeyVariantsLightPreview() {
+    ToolzTheme(darkTheme = false) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CalcKey("7",   CalcKeyType.DIGIT,    Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("+",   CalcKeyType.OPERATOR, Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("=",   CalcKeyType.EQUALS,   Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("C",   CalcKeyType.CLEAR,    Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("DEL", CalcKeyType.FUNCTION, Modifier.weight(1f).fillMaxHeight(), onClick = {})
+        }
+    }
+}
+
+@Preview(name = "Calc Key Variants — Dark", showBackground = true)
+@Composable
+private fun CalcKeyVariantsDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CalcKey("7",   CalcKeyType.DIGIT,    Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("+",   CalcKeyType.OPERATOR, Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("=",   CalcKeyType.EQUALS,   Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("C",   CalcKeyType.CLEAR,    Modifier.weight(1f).fillMaxHeight(), onClick = {})
+            CalcKey("DEL", CalcKeyType.FUNCTION, Modifier.weight(1f).fillMaxHeight(), onClick = {})
+        }
+    }
+}
+
+@Preview(name = "History — Empty, Light", showBackground = true, heightDp = 400)
+@Composable
+private fun HistoryEmptyLightPreview() {
+    ToolzTheme(darkTheme = false) {
+        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
+            CalculatorHistoryContent(
+                state = CalculatorState(),
+                viewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+            )
+        }
+    }
+}
+
+@Preview(name = "History — With items, Dark", showBackground = true, heightDp = 500)
+@Composable
+private fun HistoryFilledDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
+            CalculatorHistoryContent(
+                state = CalculatorState(
+                    history = listOf(
+                        "sin(30) + π" to "3.64159265",
+                        "100 × 1234" to "123400",
+                        "√1764" to "42",
+                        "log(1000)" to "3",
+                    ),
+                ),
+                viewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+            )
+        }
+    }
+}
+
+@Preview(name = "Sci Function Keys — Light", showBackground = true)
+@Composable
+private fun SciFunctionKeysPreview() {
+    ToolzTheme(darkTheme = false) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                listOf("sin", "cos", "tan", "log", "ln"),
+                listOf("√", "xⁿ", "π", "e", "("),
+                listOf(")", "DEG", "inv", "abs", "CONST"),
+            ).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { label ->
+                        SciFunctionKey(label = label, modifier = Modifier.weight(1f), onClick = {})
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Constants Dialog — Light", showBackground = true)
+@Composable
+private fun ConstantsDialogLightPreview() {
+    ToolzTheme(darkTheme = false) {
+        ConstantsDialog(onDismiss = {}, onSelect = {})
+    }
+}
+
+@Preview(name = "Constants Dialog — Dark", showBackground = true)
+@Composable
+private fun ConstantsDialogDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        ConstantsDialog(onDismiss = {}, onSelect = {})
     }
 }

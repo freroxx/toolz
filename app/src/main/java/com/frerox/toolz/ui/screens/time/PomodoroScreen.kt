@@ -30,15 +30,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
-import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PomodoroScreen(
     viewModel: PomodoroViewModel,
@@ -49,238 +47,253 @@ fun PomodoroScreen(
     val vibrationManager = LocalVibrationManager.current
 
     val totalTime = state.mode.minutes * 60 * 1000L
+    
+    // Smooth bouncy progress tracking
     val animatedProgress by animateFloatAsState(
         targetValue = if (totalTime > 0) state.remainingTime.toFloat() / totalTime else 0f,
-        animationSpec = if (performanceMode) snap() else tween(durationMillis = 1000, easing = LinearEasing),
-        label = "Pomodoro Progress"
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        label = "PomodoroProgress"
     )
+
+    // Energetic mode transition
+    val activeColor = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "FOCUS SESSIONS",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "FOCUS FLOW",
+                subtitle = "Deep Work Protocol",
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Customize", Icons.Rounded.Edit, { vibrationManager?.vibrateClick() }),
+                            Triple("Stats", Icons.Rounded.BarChart, { vibrationManager?.vibrateClick() }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            if (state.isFinished) viewModel.stopRingtone()
+                            viewModel.toggleStartStop()
+                        },
+                        modifier = Modifier.size(56.dp),
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (state.isRunning) MaterialTheme.colorScheme.error else activeColor
+                        )
+                    ) {
+                        Icon(
+                            if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateLongClick()
+                            viewModel.reset()
+                        },
+                        icon = { Icon(Icons.Rounded.Refresh, null) },
+                        label = "RESET"
+                    )
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.skip()
+                        },
+                        icon = { Icon(Icons.Rounded.SkipNext, null) },
+                        label = "SKIP"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
-            .then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp))
-        ) {
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.Center
             ) {
-                // Header Info
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        color = when (state.mode) {
-                            PomodoroMode.WORK -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
-                        },
-                        shape = RoundedCornerShape(32.dp),
-                        border = BorderStroke(
-                            1.5.dp, 
-                            (if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.2f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                // Mode Indicator with Bouncy Shape
+                StaggeredEntrance(index = 0) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Surface(
+                            color = activeColor.copy(alpha = 0.12f),
+                            shape = BouncyShape,
+                            border = BorderStroke(1.5.dp, activeColor.copy(alpha = 0.25f))
                         ) {
-                            Icon(
-                                if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp),
-                                tint = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-                            )
-                            Spacer(Modifier.width(12.dp))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 28.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = activeColor
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    text = if (state.mode == PomodoroMode.WORK) "FOCUS PHASE" else "RECOVERY PHASE",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = activeColor,
+                                    letterSpacing = 2.sp
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(20.dp))
+                        
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                            shape = SmallExpressiveShape
+                        ) {
                             Text(
-                                text = when (state.mode) {
-                                    PomodoroMode.WORK -> "FOCUS TIME"
-                                    PomodoroMode.SHORT_BREAK -> "SHORT BREAK"
-                                    PomodoroMode.LONG_BREAK -> "LONG BREAK"
-                                },
-                                style = MaterialTheme.typography.labelLarge,
+                                text = "CYCLE SEQUENCE: #${state.sessionsCompleted + 1}",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 fontWeight = FontWeight.Black,
-                                color = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
-                                letterSpacing = 1.5.sp
+                                letterSpacing = 1.sp
                             )
                         }
                     }
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        @Suppress("DEPRECATION")
-                        Text(
-                            text = "SESSION #${state.sessionsCompleted + 1}",
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.5.sp
-                        )
-                    }
                 }
 
-                // Central Timer Circle
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(320.dp)
-                ) {
-                    val activeColor = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-                    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-                    
-                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                    val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.1f) } else infiniteTransition.animateFloat(
-                        initialValue = 0.05f,
-                        targetValue = 0.15f,
-                        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
-                        label = ""
-                    )
+                Spacer(Modifier.height(56.dp))
 
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(activeColor.copy(alpha = glowAlpha), Color.Transparent),
-                                radius = size.width / 1.1f
-                            )
+                // Session Countdown with Wavy Dial in Squircle Container
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(340.dp)) {
+                    // Dynamic background glow
+                    if (!performanceMode) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "PomodoroGlow")
+                        val glowScale by infiniteTransition.animateFloat(
+                            initialValue = 0.95f,
+                            targetValue = 1.05f,
+                            animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                            label = "Scale"
                         )
-                        drawCircle(
-                            color = surfaceVariant.copy(alpha = 0.5f),
-                            style = Stroke(width = 16.dp.toPx())
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .scale(glowScale)
+                                .background(
+                                    Brush.radialGradient(
+                                        listOf(activeColor.copy(alpha = 0.1f), Color.Transparent)
+                                    ),
+                                    CircleShape
+                                )
                         )
                     }
 
-                    CircularProgressIndicator(
+                    Surface(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        shape = SquircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = formatPomodoroTime(state.remainingTime),
+                                    style = MaterialTheme.typography.displayLarge.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 96.sp,
+                                        letterSpacing = (-6).sp
+                                    ),
+                                    color = if (state.isRunning) activeColor else MaterialTheme.colorScheme.onSurface
+                                )
+                                
+                                AnimatedVisibility(
+                                    visible = !state.isRunning && state.remainingTime > 0,
+                                    enter = fadeIn() + scaleIn(),
+                                    exit = fadeOut() + scaleOut()
+                                ) {
+                                    Text(
+                                        "READY TO SYNC",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = activeColor.copy(alpha = 0.6f),
+                                        letterSpacing = 3.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Official Circular Wavy Progress Indicator
+                    ToolzWavyCircularProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 16.dp,
-                        strokeCap = StrokeCap.Round,
                         color = activeColor,
-                        trackColor = Color.Transparent,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f),
                     )
-                    
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = formatPomodoroTime(state.remainingTime),
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 80.sp,
-                                letterSpacing = (-4).sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        
-                        AnimatedVisibility(
-                            visible = state.isFinished && !state.isRunning,
-                            enter = if (performanceMode) fadeIn() else (fadeIn() + scaleIn()),
-                            exit = if (performanceMode) fadeOut() else (fadeOut() + scaleOut())
-                        ) {
-                            IconButton(
-                                onClick = { 
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.stopRingtone() 
-                                },
-                                modifier = Modifier
-                                    .padding(top = 16.dp)
-                                    .size(64.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.error)
-                            ) {
-                                Icon(Icons.Rounded.NotificationsOff, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(32.dp))
+                }
+
+                Spacer(modifier = Modifier.height(64.dp))
+                
+                // Energetic Finish Overlay
+                AnimatedVisibility(
+                    visible = state.isFinished && !state.isRunning,
+                    enter = fadeIn() + scaleIn(animationSpec = spring(Spring.DampingRatioLowBouncy)),
+                    exit = fadeOut() + scaleOut()
+                ) {
+                    ExpressiveCard(
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            viewModel.stopRingtone() 
+                        },
+                        modifier = Modifier.fillMaxWidth().height(80.dp),
+                        shape = BouncyShape,
+                        containerColor = MaterialTheme.colorScheme.error,
+                        elevation = 0.dp
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(28.dp), tint = Color.White)
+                                Spacer(Modifier.width(16.dp))
+                                Text("SESSION COMPLETE • TAP TO SILENCE", fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 1.sp)
                             }
                         }
                     }
                 }
-
-                // Controls
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 48.dp)
-                        .navigationBarsPadding(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateLongClick()
-                            viewModel.reset() 
-                        },
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
-                    }
-
-                    Surface(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            if (state.isFinished) viewModel.stopRingtone()
-                            viewModel.toggleStartStop() 
-                        },
-                        modifier = Modifier.size(100.dp).bouncyClick {},
-                        shape = CircleShape,
-                        color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                        shadowElevation = if (performanceMode) 0.dp else 16.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (state.isRunning) "Pause" else "Start",
-                                modifier = Modifier.size(48.dp),
-                                tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.skip() 
-                        },
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.SkipNext, contentDescription = "Skip", modifier = Modifier.size(32.dp))
-                    }
-                }
+                
+                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }

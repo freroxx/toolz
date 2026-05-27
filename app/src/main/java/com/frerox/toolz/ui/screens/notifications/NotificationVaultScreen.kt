@@ -1,1069 +1,1803 @@
+@file:OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalMaterial3AdaptiveApi::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalLayoutApi::class,
+)
+
 package com.frerox.toolz.ui.screens.notifications
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.RenderEffect
-import android.graphics.Shader
-import android.os.Build
-import android.view.HapticFeedbackConstants
+import android.content.res.Configuration
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.Launch
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
+import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
+import androidx.compose.material3.adaptive.layout.SupportingPaneScaffoldRole
+import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaffoldNavigator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.frerox.toolz.data.notifications.NotificationEntry
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ─── Private Helpers ──────────────────────────────────────────────────────────
+
+private val kAppAccentPalette = listOf(
+    Color(0xFF6750A4), Color(0xFF984061), Color(0xFF006874),
+    Color(0xFF6A6200), Color(0xFF1B6CA8), Color(0xFF006E2C),
+    Color(0xFFAD3000), Color(0xFF7D5260), Color(0xFF00629B),
+)
+
+private fun String.toAppAccentColor(): Color =
+    kAppAccentPalette[abs(hashCode()) % kAppAccentPalette.size]
+
+private fun Long.toRelativeTime(): String {
+    val diff = System.currentTimeMillis() - this
+    return when {
+        diff < 60_000L -> "Just now"
+        diff < 3_600_000L -> "${diff / 60_000}m ago"
+        diff < 86_400_000L -> "${diff / 3_600_000}h ago"
+        diff < 604_800_000L -> "${diff / 86_400_000}d ago"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(this))
+    }
+}
+
+private fun Long.toFullDateTime(): String =
+    SimpleDateFormat("EEEE, MMM d 'at' HH:mm", Locale.getDefault()).format(Date(this))
+
+private fun NotificationEntry.dateGroup(): String {
+    val now = System.currentTimeMillis()
+    val day = 86_400_000L
+    return when {
+        timestamp >= now - day -> "Today"
+        timestamp >= now - 2 * day -> "Yesterday"
+        timestamp >= now - 7 * day -> "This Week"
+        else -> "Older"
+    }
+}
+
+private val kDateGroups = listOf("Today", "Yesterday", "This Week", "Older")
+private val kDateFilterLabels = listOf("All", "Today", "Yest.", "7 Days")
+private val kDateFilterValues = listOf("Anytime", "Today", "Yesterday", "Last 7 Days")
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
 @Composable
 fun NotificationVaultScreen(
     onNavigateBack: () -> Unit,
-    viewModel: NotificationVaultViewModel = hiltViewModel()
+    viewModel: NotificationVaultViewModel = hiltViewModel(),
 ) {
-    val notifications by viewModel.notifications.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val selectedCategory by viewModel.selectedCategory.collectAsState()
-    val categories by viewModel.categories.collectAsState()
-    val performanceMode = LocalPerformanceMode.current
-    var showDeleteDialog by remember { mutableStateOf(false) }
-    var selectedAppDetails by remember { mutableStateOf<AppDetails?>(null) }
-    var showNotificationMenu by remember { mutableStateOf<NotificationEntry?>(null) }
-    var showVaultSettings by remember { mutableStateOf(false) }
-    
-    var isPermissionGranted by remember { mutableStateOf(true) }
-    var showExportMenu by remember { mutableStateOf(false) }
+    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
+    val selectedDateFilter by viewModel.selectedDateFilter.collectAsStateWithLifecycle()
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val hiddenApps by viewModel.hiddenApps.collectAsStateWithLifecycle()
+    val appMappings by viewModel.appMappings.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val vibrationManager = LocalVibrationManager.current
+    val scope = rememberCoroutineScope()
+
+    // Adaptive navigator
+    val navigator = rememberSupportingPaneScaffoldNavigator()
+    val isSupportingPaneVisible =
+        navigator.scaffoldValue[SupportingPaneScaffoldRole.Supporting] == PaneAdaptedValue.Expanded
+
+    // UI state
+    var selectedNotification by remember { mutableStateOf<NotificationEntry?>(null) }
+    var showSearchBar by remember { mutableStateOf(false) }
+    var showClearAllDialog by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    var showHiddenAppsSheet by remember { mutableStateOf(false) }
+    var showContextSheet by remember { mutableStateOf<NotificationEntry?>(null) }
+    var showAppDetails by remember { mutableStateOf<AppDetails?>(null) }
+    var isPermissionGranted by remember { mutableStateOf(true) }
+
+    val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val showDetailSheet = selectedNotification != null && !isSupportingPaneVisible
 
     LaunchedEffect(Unit) {
-        val flat = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-        isPermissionGranted = flat != null && flat.contains(context.packageName)
+        val listeners = Settings.Secure.getString(
+            context.contentResolver, "enabled_notification_listeners"
+        )
+        isPermissionGranted = listeners != null && listeners.contains(context.packageName)
+    }
+
+    // When a notification is selected on an expanded layout, navigate to supporting pane
+    LaunchedEffect(selectedNotification, isSupportingPaneVisible) {
+        if (selectedNotification != null && isSupportingPaneVisible) {
+            navigator.navigateTo(SupportingPaneScaffoldRole.Supporting)
+        }
+    }
+
+    BackHandler(enabled = navigator.canNavigateBack()) {
+        scope.launch { navigator.navigateBack() }
+    }
+
+    SupportingPaneScaffold(
+        directive = navigator.scaffoldDirective,
+        value = navigator.scaffoldValue,
+        mainPane = {
+            AnimatedPane {
+                NotificationFeedPane(
+                    notifications = notifications,
+                    searchQuery = searchQuery,
+                    selectedCategory = selectedCategory,
+                    selectedDateFilter = selectedDateFilter,
+                    categories = categories,
+                    selectedNotification = selectedNotification,
+                    isPermissionGranted = isPermissionGranted,
+                    showSearchBar = showSearchBar,
+                    onToggleSearch = {
+                        vibrationManager?.vibrateTick()
+                        showSearchBar = !showSearchBar
+                        if (!showSearchBar) viewModel.setSearchQuery("")
+                    },
+                    onSearchQueryChange = viewModel::setSearchQuery,
+                    onCategorySelect = {
+                        vibrationManager?.vibrateTick()
+                        viewModel.setCategory(it)
+                    },
+                    onDateFilterSelect = {
+                        vibrationManager?.vibrateTick()
+                        viewModel.setDateFilter(it)
+                    },
+                    onNotificationClick = { n ->
+                        vibrationManager?.vibrateTick()
+                        selectedNotification = n
+                        if (isSupportingPaneVisible) {
+                            scope.launch { navigator.navigateTo(SupportingPaneScaffoldRole.Supporting) }
+                        }
+                    },
+                    onNotificationLongClick = { n ->
+                        vibrationManager?.vibrateLongClick()
+                        showContextSheet = n
+                    },
+                    onDeleteNotification = { id ->
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.deleteNotification(id)
+                        if (selectedNotification?.id == id) selectedNotification = null
+                    },
+                    onNavigateBack = onNavigateBack,
+                    onClearAll = { showClearAllDialog = true },
+                    onExport = { showExportDialog = true },
+                    onManageCategories = { showCategoryManager = true },
+                    onManageHiddenApps = { showHiddenAppsSheet = true },
+                    onPermissionClick = {
+                        context.startActivity(
+                            Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+                        )
+                    },
+                )
+            }
+        },
+        supportingPane = {
+            AnimatedPane {
+                selectedNotification?.let { n ->
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        NotificationDetailContent(
+                            notification = n,
+                            categories = categories,
+                            appMappings = appMappings,
+                            isInPanel = true,
+                            onDismiss = {
+                                selectedNotification = null
+                                scope.launch { navigator.navigateBack() }
+                            },
+                            onDelete = {
+                                vibrationManager?.vibrateLongClick()
+                                viewModel.deleteNotification(n.id)
+                                selectedNotification = null
+                                scope.launch { navigator.navigateBack() }
+                            },
+                            onHideApp = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.hideApp(n.packageName)
+                                selectedNotification = null
+                                scope.launch { navigator.navigateBack() }
+                            },
+                            onMapCategory = { cat ->
+                                vibrationManager?.vibrateTick()
+                                viewModel.mapAppToCategory(n.packageName, cat)
+                            },
+                            onViewAppDetails = {
+                                scope.launch { showAppDetails = viewModel.getAppDetails(n.packageName) }
+                            },
+                            onCopy = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    ClipData.newPlainText("Notification", "${n.title}\n${n.text}")
+                                )
+                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                        )
+                    }
+                } ?: run {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Rounded.TouchApp,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Select a notification",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    // ── Bottom sheet: detail on compact screens ────────────────────────────
+    if (showDetailSheet) {
+        selectedNotification?.let { n ->
+            ModalBottomSheet(
+                onDismissRequest = { selectedNotification = null },
+                sheetState = detailSheetState,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+            ) {
+                NotificationDetailContent(
+                    notification = n,
+                    categories = categories,
+                    appMappings = appMappings,
+                    isInPanel = false,
+                    onDismiss = {
+                        scope.launch {
+                            detailSheetState.hide()
+                            selectedNotification = null
+                        }
+                    },
+                    onDelete = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.deleteNotification(n.id)
+                        scope.launch {
+                            detailSheetState.hide()
+                            selectedNotification = null
+                        }
+                    },
+                    onHideApp = {
+                        vibrationManager?.vibrateClick()
+                        viewModel.hideApp(n.packageName)
+                        scope.launch {
+                            detailSheetState.hide()
+                            selectedNotification = null
+                        }
+                    },
+                    onMapCategory = { cat ->
+                        vibrationManager?.vibrateTick()
+                        viewModel.mapAppToCategory(n.packageName, cat)
+                    },
+                    onViewAppDetails = {
+                        scope.launch { showAppDetails = viewModel.getAppDetails(n.packageName) }
+                    },
+                    onCopy = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("Notification", "${n.title}\n${n.text}")
+                        )
+                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    },
+                )
+            }
+        }
+    }
+
+    // ── Context menu (long-press) ─────────────────────────────────────────
+    showContextSheet?.let { n ->
+        NotificationContextSheet(
+            notification = n,
+            onDismiss = { showContextSheet = null },
+            onCopy = {
+                showContextSheet = null
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Notification", "${n.title}\n${n.text}"))
+                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            },
+            onHideApp = {
+                showContextSheet = null
+                vibrationManager?.vibrateClick()
+                viewModel.hideApp(n.packageName)
+            },
+            onDelete = {
+                showContextSheet = null
+                vibrationManager?.vibrateLongClick()
+                viewModel.deleteNotification(n.id)
+            },
+            onViewAppDetails = {
+                showContextSheet = null
+                scope.launch { showAppDetails = viewModel.getAppDetails(n.packageName) }
+            },
+            onLaunchApp = {
+                showContextSheet = null
+                vibrationManager?.vibrateClick()
+                try {
+                    val launchIntent = context.packageManager.getLaunchIntentForPackage(n.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(launchIntent)
+                    } else {
+                        Toast.makeText(context, "App doesn't have a launcher activity", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to launch app: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
+    }
+
+    // ── App details panel ─────────────────────────────────────────────────
+    showAppDetails?.let { details ->
+        AppDetailsSheet(details = details, onDismiss = { showAppDetails = null })
+    }
+
+    // ── Clear-all dialog ──────────────────────────────────────────────────
+    if (showClearAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllDialog = false },
+            icon = {
+                Icon(
+                    Icons.Rounded.DeleteForever,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            },
+            title = { Text("Clear All Logs", fontWeight = FontWeight.Black) },
+            text = {
+                Text(
+                    "This will permanently delete all ${notifications.size} captured notifications. " +
+                            "This cannot be undone."
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.clearAll()
+                        selectedNotification = null
+                        showClearAllDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) { Text("Clear All", fontWeight = FontWeight.Black) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { showClearAllDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            shape = BouncyShape,
+        )
+    }
+
+    // ── Export dialog ─────────────────────────────────────────────────────
+    if (showExportDialog) {
+        var exportFormat by remember { mutableIntStateOf(0) }
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            icon = { Icon(Icons.Rounded.Download, contentDescription = null) },
+            title = { Text("Export Logs", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Choose a format to export your ${notifications.size} captured notifications.")
+                    ToolzConnectedButtonGroup(
+                        selectedIndex = exportFormat,
+                        options = listOf("JSON", "TXT"),
+                        onOptionSelected = { exportFormat = it },
+                    )
+                }
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        viewModel.exportLogs(context, if (exportFormat == 0) "JSON" else "TXT")
+                        showExportDialog = false
+                    },
+                ) { Text("Export") }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { showExportDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            shape = BouncyShape,
+        )
+    }
+
+    // ── Category manager ──────────────────────────────────────────────────
+    if (showCategoryManager) {
+        CategoryManagerDialog(
+            categories = categories,
+            onDismiss = { showCategoryManager = false },
+            onAddCategory = viewModel::addCategory,
+            onRemoveCategory = viewModel::removeCategory,
+        )
+    }
+
+    // ── Hidden apps sheet ─────────────────────────────────────────────────
+    if (showHiddenAppsSheet) {
+        HiddenAppsSheet(
+            hiddenApps = hiddenApps,
+            onDismiss = { showHiddenAppsSheet = false },
+            onUnhide = { pkg ->
+                vibrationManager?.vibrateTick()
+                viewModel.unhideApp(pkg)
+            },
+        )
+    }
+}
+
+// ─── Feed Pane ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun NotificationFeedPane(
+    notifications: List<NotificationEntry>,
+    searchQuery: String,
+    selectedCategory: String,
+    selectedDateFilter: String,
+    categories: List<String>,
+    selectedNotification: NotificationEntry?,
+    isPermissionGranted: Boolean,
+    showSearchBar: Boolean,
+    onToggleSearch: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onCategorySelect: (String) -> Unit,
+    onDateFilterSelect: (String) -> Unit,
+    onNotificationClick: (NotificationEntry) -> Unit,
+    onNotificationLongClick: (NotificationEntry) -> Unit,
+    onDeleteNotification: (Long) -> Unit,
+    onNavigateBack: () -> Unit,
+    onClearAll: () -> Unit,
+    onExport: () -> Unit,
+    onManageCategories: () -> Unit,
+    onManageHiddenApps: () -> Unit,
+    onPermissionClick: () -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
+    val listState = rememberLazyListState()
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(
+        snapAnimationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+    )
+
+    val selectedDateIndex = kDateFilterValues.indexOf(selectedDateFilter).coerceAtLeast(0)
+    val groupedNotifications = remember(notifications) {
+        notifications.groupBy { it.dateGroup() }
+    }
+    val totalApps = remember(notifications) {
+        notifications.map { it.packageName }.distinct().size
+    }
+    val todayCount = remember(notifications) {
+        notifications.count { it.timestamp >= System.currentTimeMillis() - 86_400_000L }
     }
 
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = Color.Transparent,
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { 
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("NOTIFS VAULT", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                            val alpha by infiniteTransition.animateFloat(
-                                initialValue = 0.4f,
-                                targetValue = 1f,
-                                animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
-                                label = "alpha"
-                            )
-                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
-                            Spacer(Modifier.width(6.dp))
-                            @Suppress("DEPRECATION")
-                            Text("CAPTURING NOTIFICATIONS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            onNavigateBack()
-                        },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { showExportMenu = true },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.FileUpload, contentDescription = "Export Logs")
-                    }
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            showVaultSettings = true 
-                        },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Vault Settings")
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-            )
-        },
-        containerColor = Color.Transparent
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                VaultSearchBar(
-                    query = searchQuery,
-                    onQueryChange = { viewModel.setSearchQuery(it) }
-                )
-
-                CategoryStrip(
-                    categories = categories,
-                    selectedCategory = selectedCategory,
-                    onCategorySelect = { viewModel.setCategory(it) }
-                )
-
-                val dateFilters = listOf("Anytime", "Today", "Yesterday", "Last 7 Days")
-                val selectedDateFilter by viewModel.selectedDateFilter.collectAsState()
-                
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(dateFilters) { filter ->
-                        FilterChip(
-                            selected = selectedDateFilter == filter,
-                            onClick = { 
-                                vibrationManager?.vibrateTick()
-                                viewModel.setDateFilter(filter) 
-                            },
-                            label = { Text(filter) },
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
-                }
-
-                if (!isPermissionGranted) {
-                    Surface(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-                        },
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().bouncyClick { },
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.SecurityUpdateWarning, null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                @Suppress("DEPRECATION")
-                                Text("LISTENER DISABLED", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
-                                Text("Notifications cannot be archived without permission.", style = MaterialTheme.typography.bodySmall)
-                            }
-                            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-
-                AnimatedContent(
-                    targetState = notifications.isEmpty(),
-                    transitionSpec = { 
-                        (fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.95f))
-                            .togetherWith(fadeOut(animationSpec = tween(200))) 
-                    },
-                    label = "listContent",
-                    modifier = Modifier.weight(1f)
-                ) { isEmpty ->
-                    if (isEmpty) {
-                        EmptyVaultState(searchQuery.isNotEmpty())
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize()
-                                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                itemsIndexed(notifications, key = { _, item -> item.id }) { index, notification ->
-                                    var itemVisible by remember { mutableStateOf(false) }
-                                    LaunchedEffect(Unit) {
-                                        delay(index * 20L)
-                                        itemVisible = true
-                                    }
-
-                                    SwipeToDeleteContainer(
-                                        onDelete = { viewModel.deleteNotification(notification.id) },
-                                        modifier = Modifier.graphicsLayer {
-                                            alpha = if (itemVisible) 1f else 0f
-                                            translationY = if (itemVisible) 0f else 20f
-                                        }.animateContentSize()
-                                    ) {
-                                        NotificationVaultCard(
-                                            notification = notification,
-                                            onDelete = { 
-                                                vibrationManager?.vibrateLongClick()
-                                                viewModel.deleteNotification(notification.id) 
-                                            },
-                                            onLongClick = { 
-                                                vibrationManager?.vibrateLongClick()
-                                                showNotificationMenu = notification 
-                                            }
-                                        )
-                                    }
-                                }
-                                item { Spacer(Modifier.height(80.dp)) }
-                            }
-                            
-                            if (notifications.isNotEmpty() && searchQuery.isEmpty() && selectedCategory == "All") {
-                                FloatingActionButton(
-                                    onClick = { 
-                                        vibrationManager?.vibrateClick()
-                                        showDeleteDialog = true 
-                                    },
-                                    modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.error,
-                                    shape = RoundedCornerShape(20.dp)
-                                ) {
-                                    Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (showDeleteDialog) {
-            AlertDialog(
-                onDismissRequest = { showDeleteDialog = false },
-                title = { Text("PURGE HISTORY?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-                text = { Text("This will permanently delete all captured notifications from your device storage.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            vibrationManager?.vibrateLongClick()
-                            viewModel.clearAll()
-                            showDeleteDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text("PURGE ALL", fontWeight = FontWeight.Black)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        vibrationManager?.vibrateClick()
-                        showDeleteDialog = false 
-                    }) {
-                        Text("CANCEL", fontWeight = FontWeight.Bold)
-                    }
-                },
-                shape = RoundedCornerShape(32.dp),
-                containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
-
-        if (showNotificationMenu != null) {
-            val notification = showNotificationMenu!!
-            ModalBottomSheet(
-                onDismissRequest = { showNotificationMenu = null },
-                shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp),
-                containerColor = MaterialTheme.colorScheme.surface
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(56.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ) {
-                            val iconPainter = rememberAsyncImagePainter(
-                                model = ImageRequest.Builder(context)
-                                    .data(try { context.packageManager.getApplicationIcon(notification.packageName) } catch(e: Exception) { null })
-                                    .crossfade(true)
-                                    .build()
-                            )
-                            Image(
-                                painter = iconPainter,
-                                contentDescription = null,
-                                modifier = Modifier.padding(10.dp),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column {
-                            Text(notification.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                            @Suppress("DEPRECATION")
-                            Text(notification.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(32.dp))
-                    @Suppress("DEPRECATION")
-                    Text("VAULT ACTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-                    Spacer(Modifier.height(12.dp))
-                    
-                    val menuItems = listOf(
-                        Triple("Hide notifications from this app", Icons.Rounded.VisibilityOff, {
-                            vibrationManager?.vibrateClick()
-                            viewModel.hideApp(notification.packageName)
-                            showNotificationMenu = null
-                            Toast.makeText(context, "App hidden from vault", Toast.LENGTH_SHORT).show()
-                        }),
-                        Triple("Analyze app footprint", Icons.Rounded.Analytics, {
-                            vibrationManager?.vibrateClick()
-                            scope.launch {
-                                selectedAppDetails = viewModel.getAppDetails(notification.packageName)
-                                showNotificationMenu = null
-                            }
-                        }),
-                        Triple("Launch application", Icons.AutoMirrored.Rounded.Launch, {
-                            vibrationManager?.vibrateClick()
-                            try {
-                                val intent = context.packageManager.getLaunchIntentForPackage(notification.packageName)
-                                if (intent != null) {
-                                    context.startActivity(intent)
-                                } else {
-                                    Toast.makeText(context, "Cannot open app", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Cannot open app", Toast.LENGTH_SHORT).show()
-                            }
-                            showNotificationMenu = null
-                        })
-                    )
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        menuItems.forEach { (label, icon, action) ->
-                            Surface(
-                                onClick = { action() },
-                                modifier = Modifier.fillMaxWidth().height(60.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp)) {
-                                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(16.dp))
-                                    Text(label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        selectedAppDetails?.let { details ->
-            AppDetailsDialog(details = details, onDismiss = { selectedAppDetails = null })
-        }
-
-        if (showVaultSettings) {
-            VaultSettingsDialog(
-                viewModel = viewModel,
-                onDismiss = { showVaultSettings = false }
-            )
-        }
-
-        if (showExportMenu) {
-            AlertDialog(
-                onDismissRequest = { showExportMenu = false },
-                title = { Text("EXPORT LOGS", fontWeight = FontWeight.Black) },
-                text = { Text("Choose a format to export your captured notifications.") },
-                confirmButton = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { 
-                            viewModel.exportLogs(context, "JSON")
-                            showExportMenu = false 
-                        }) { Text("JSON") }
-                        Button(onClick = { 
-                            viewModel.exportLogs(context, "TXT")
-                            showExportMenu = false 
-                        }) { Text("TXT") }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showExportMenu = false }) { Text("CANCEL") }
-                },
-                shape = RoundedCornerShape(28.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun AppDetailsDialog(details: AppDetails, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val vibrationManager = LocalVibrationManager.current
-    val timeString = details.lastNotification?.let { 
-        SimpleDateFormat("HH:mm, MMM dd", Locale.getDefault()).format(Date(it.timestamp))
-    } ?: "N/A"
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(40.dp),
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth(),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-        ) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        modifier = Modifier.size(64.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    ) {
-                        val iconPainter = rememberAsyncImagePainter(
-                            model = ImageRequest.Builder(context)
-                                .data(try { context.packageManager.getApplicationIcon(details.packageName) } catch(e: Exception) { null })
-                                .crossfade(true)
-                                .build()
-                        )
-                        Image(
-                            painter = iconPainter,
-                            contentDescription = null,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(details.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        @Suppress("DEPRECATION")
-                        Text(details.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                }
-                
-                Spacer(Modifier.height(32.dp))
-                @Suppress("DEPRECATION")
-                Text("VAULT STATISTICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-                Spacer(Modifier.height(16.dp))
-                
-                DetailRow("TOTAL ENTRIES", "${details.totalNotifications}")
-                DetailRow("LATEST CAPTURE", timeString)
-                
-                Spacer(Modifier.height(32.dp))
-                Button(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        onDismiss()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text("CLOSE", fontWeight = FontWeight.Black)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        @Suppress("DEPRECATION")
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-        Text(value, fontWeight = FontWeight.Black, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun VaultSettingsDialog(
-    viewModel: NotificationVaultViewModel,
-    onDismiss: () -> Unit
-) {
-    val hiddenApps by viewModel.hiddenApps.collectAsState()
-    val categories by viewModel.categories.collectAsState()
-    val appMappings by viewModel.appMappings.collectAsState()
-    val distinctPackages by viewModel.distinctPackages.collectAsState()
-    val vibrationManager = LocalVibrationManager.current
-    
-    var newCategoryName by remember { mutableStateOf("") }
-    var selectedPackageToMap by remember { mutableStateOf<String?>(null) }
-
-    val context = LocalContext.current
-
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Scaffold(
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text("VAULT CONFIGURATION", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 1.sp) },
+            Column {
+                ExpressiveTopAppBar(
+                    title = "Vault",
+                    subtitle = if (notifications.isEmpty()) "No captures" else "${notifications.size} archived",
                     navigationIcon = {
-                        IconButton(onClick = {
-                            vibrationManager?.vibrateClick()
-                            onDismiss()
-                        }) { Icon(Icons.Rounded.Close, null) }
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
                     },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background)
-                )
-            },
-            containerColor = MaterialTheme.colorScheme.background
-        ) { padding ->
-            Column(modifier = Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "MANAGED SECTIONS", 
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                
-                categories.forEach { category ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(category, fontWeight = FontWeight.Black)
-                            if (category != "All" && category != "General") {
-                                IconButton(onClick = { 
-                                    vibrationManager?.vibrateTick()
-                                    viewModel.removeCategory(category) 
-                                }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.RemoveCircle, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                Spacer(Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newCategoryName,
-                        onValueChange = { newCategoryName = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("New Section Name") },
-                        shape = RoundedCornerShape(20.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedBorderColor = Color.Transparent
-                        )
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    IconButton(
-                        onClick = {
-                            if (newCategoryName.isNotBlank()) {
-                                vibrationManager?.vibrateClick()
-                                viewModel.addCategory(newCategoryName)
-                                newCategoryName = ""
-                            }
-                        },
-                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
-                    ) {
-                        Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onPrimary)
-                    }
-                }
-
-                Spacer(Modifier.height(40.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "APPLICATION MAPPING", 
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                
-                distinctPackages.forEach { pkg ->
-                    val currentCat = appMappings[pkg] ?: "Auto"
-                    Surface(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            selectedPackageToMap = pkg 
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface) {
-                                val iconPainter = rememberAsyncImagePainter(
-                                    model = ImageRequest.Builder(context)
-                                        .data(try { context.packageManager.getApplicationIcon(pkg) } catch(e: Exception) { null })
-                                        .crossfade(true)
-                                        .build()
-                                )
-                                Image(
-                                    painter = iconPainter,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(6.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                @Suppress("DEPRECATION")
-                                Text(pkg, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
-                                @Suppress("DEPRECATION")
-                                Text("SECTION: $currentCat", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Icon(Icons.Rounded.ChevronRight, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(40.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "BLACKLISTED APPS", 
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.error,
-                        letterSpacing = 1.sp
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                
-                if (hiddenApps.isEmpty()) {
-                    Text("No apps hidden from vault tracking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(start = 8.dp))
-                } else {
-                    hiddenApps.forEach { pkg ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                @Suppress("DEPRECATION")
-                                Text(pkg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                IconButton(onClick = { 
-                                    vibrationManager?.vibrateTick()
-                                    viewModel.unhideApp(pkg) 
-                                }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(48.dp))
-            }
-        }
-
-        selectedPackageToMap?.let { pkg ->
-            AlertDialog(
-                onDismissRequest = { selectedPackageToMap = null },
-                title = { Text("SELECT SECTION", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) },
-                text = {
-                    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp).verticalScroll(rememberScrollState())) {
-                        (listOf("Auto") + categories).forEach { cat ->
-                            Surface(
-                                onClick = { 
-                                    vibrationManager?.vibrateTick()
-                                    viewModel.mapAppToCategory(pkg, if (cat == "Auto") "" else cat)
-                                    selectedPackageToMap = null
+                    actions = {
+                        // Animated search toggle
+                        IconButton(onClick = onToggleSearch) {
+                            AnimatedContent(
+                                targetState = showSearchBar,
+                                transitionSpec = {
+                                    (scaleIn(spring(0.5f, Spring.StiffnessMediumLow)) + fadeIn()) togetherWith
+                                            (scaleOut() + fadeOut())
                                 },
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                color = if ((appMappings[pkg] ?: "Auto") == cat || (cat == "Auto" && appMappings[pkg].isNullOrEmpty())) 
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
-                                border = if ((appMappings[pkg] ?: "Auto") == cat) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+                                label = "search_icon",
+                            ) { searching ->
+                                Icon(
+                                    if (searching) Icons.Rounded.SearchOff else Icons.Rounded.Search,
+                                    contentDescription = if (searching) "Close search" else "Search",
+                                )
+                            }
+                        }
+                        // Export
+                        IconButton(onClick = {
+                            vibrationManager?.vibrateTick()
+                            onExport()
+                        }) {
+                            Icon(Icons.Rounded.FileUpload, contentDescription = "Export logs")
+                        }
+                        // Overflow menu
+                        var menuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = {
+                                vibrationManager?.vibrateTick()
+                                menuExpanded = true
+                            }) {
+                                Icon(Icons.Rounded.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                shape = MediumExpressiveShape,
                             ) {
-                                Text(cat, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Black)
+                                DropdownMenuItem(
+                                    text = { Text("Manage Categories") },
+                                    leadingIcon = { Icon(Icons.Rounded.Category, null) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onManageCategories()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Hidden Apps") },
+                                    leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onManageHiddenApps()
+                                    },
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Clear All",
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Rounded.DeleteForever,
+                                            null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onClearAll()
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                )
+
+                // ── Animated search bar ────────────────────────────────
+                AnimatedVisibility(
+                    visible = showSearchBar,
+                    enter = slideInVertically(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) { -it } +
+                            fadeIn(tween(200)),
+                    exit = slideOutVertically { -it } + fadeOut(tween(150)),
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 8.dp),
+                        placeholder = { Text("Search notifications…") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                        trailingIcon = {
+                            AnimatedVisibility(visible = searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(Icons.Rounded.Close, null)
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = SmallExpressiveShape,
+                    )
+                }
+
+                // ── Date filter connected group ────────────────────────
+                ToolzConnectedButtonGroup(
+                    selectedIndex = selectedDateIndex,
+                    options = kDateFilterLabels,
+                    onOptionSelected = { idx ->
+                        vibrationManager?.vibrateTick()
+                        onDateFilterSelect(kDateFilterValues[idx])
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp),
+                )
+
+                // ── Category chips ─────────────────────────────────────
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalFadingEdges(left = 12.dp, right = 12.dp)
+                        .padding(bottom = 4.dp),
+                ) {
+                    items(categories, key = { it }) { category ->
+                        ExpressiveFilterChip(
+                            selected = selectedCategory == category,
+                            onClick = { onCategorySelect(category) },
+                            label = { Text(category) },
+                            leadingIcon = if (selectedCategory == category) {
+                                { Icon(Icons.Rounded.Check, null, Modifier.size(14.dp)) }
+                            } else null,
+                        )
+                    }
+                }
+
+                // ── Permission warning ─────────────────────────────────
+                AnimatedVisibility(visible = !isPermissionGranted) {
+                    Surface(
+                        onClick = onPermissionClick,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        shape = MediumExpressiveShape,
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.SecurityUpdateWarning,
+                                null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Listener Disabled",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                Text(
+                                    "Tap to grant notification access.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                )
+                            }
+                            Icon(
+                                Icons.Rounded.ChevronRight,
+                                null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        bottomBar = {
+            // ── Stats summary bar ──────────────────────────────────────────
+            AnimatedVisibility(
+                visible = notifications.isNotEmpty(),
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f),
+                    tonalElevation = 6.dp,
+                    shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                            .navigationBarsPadding(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                            StatPill(
+                                icon = Icons.Rounded.Notifications,
+                                value = notifications.size.toString(),
+                                label = "Archived",
+                            )
+                            StatPill(
+                                icon = Icons.Rounded.Today,
+                                value = todayCount.toString(),
+                                label = "Today",
+                            )
+                            StatPill(
+                                icon = Icons.Rounded.Apps,
+                                value = totalApps.toString(),
+                                label = "Apps",
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    ) { paddingValues ->
+        AnimatedContent(
+            targetState = notifications.isEmpty(),
+            transitionSpec = {
+                (fadeIn(tween(300)) + scaleIn(tween(300), 0.95f)) togetherWith
+                        (fadeOut(tween(200)) + scaleOut(tween(200), 0.97f))
+            },
+            label = "feed_content",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+        ) { isEmpty ->
+            if (isEmpty) {
+                EmptyVaultState(isFiltering = searchQuery.isNotEmpty() || selectedCategory != "All")
+            } else {
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        top = 8.dp,
+                        end = 16.dp,
+                        bottom = 16.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .run {
+                            if (!performanceMode) fadingEdges(top = 20.dp, bottom = 20.dp) else this
+                        },
+                ) {
+                    kDateGroups.forEach { group ->
+                        val groupItems = groupedNotifications[group] ?: return@forEach
+                        if (groupItems.isEmpty()) return@forEach
+
+                        // Sticky group header
+                        stickyHeader(key = "header_$group") {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                tonalElevation = 2.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Text(
+                                        group,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.Notifications,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                            Text(
+                                                "${groupItems.size}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Black,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            )
+                                        }
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    )
+                                }
+                            }
+                        }
+
+                        itemsIndexed(groupItems, key = { _, item -> item.id }) { index, notification ->
+                            StaggeredEntrance(index = index.coerceAtMost(12)) {
+                                SwipeToDismissNotification(
+                                    notification = notification,
+                                    isSelected = selectedNotification?.id == notification.id,
+                                    onClick = { onNotificationClick(notification) },
+                                    onLongClick = { onNotificationLongClick(notification) },
+                                    onDismiss = { onDeleteNotification(notification.id) },
+                                )
                             }
                         }
                     }
-                },
-                confirmButton = {},
-                shape = RoundedCornerShape(40.dp)
-            )
+                }
+            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ─── Swipe-to-Dismiss ─────────────────────────────────────────────────────────
+
 @Composable
-fun SwipeToDeleteContainer(
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+private fun SwipeToDismissNotification(
+    notification: NotificationEntry,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
     val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = {
-            if (it == SwipeToDismissBoxValue.EndToStart) {
-                vibrationManager?.vibrateLongClick()
-                onDelete()
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDismiss()
                 true
             } else false
-        }
+        },
+        positionalThreshold = { totalDistance -> totalDistance * 0.38f },
     )
 
     SwipeToDismissBox(
         state = dismissState,
-        modifier = modifier,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
         backgroundContent = {
+            val progress = dismissState.progress
             val color by animateColorAsState(
-                when (dismissState.targetValue) {
-                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                }, 
-                animationSpec = tween(300),
-                label = "color"
+                targetValue = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.surfaceContainerLow
+                },
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+                label = "swipe_color",
             )
-            
-            // Text only visible when swipe is deep enough
-            val isSwipingDeep = dismissState.progress > 0.6f && dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
-            val alpha by animateFloatAsState(
-                if (isSwipingDeep) 1f else 0f, 
-                animationSpec = tween(200),
-                label = "alpha"
+            val iconScale by animateFloatAsState(
+                targetValue = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) 1.25f else 0.75f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+                label = "swipe_icon_scale",
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(SquircleShape)
+                    .background(color),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = "Delete",
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .padding(end = 28.dp)
+                        .graphicsLayer {
+                            scaleX = iconScale
+                            scaleY = iconScale
+                        },
+                )
+            }
+        },
+    ) {
+        NotificationCard(
+            notification = notification,
+            isSelected = isSelected,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
+    }
+}
+
+// ─── Notification Card ────────────────────────────────────────────────────────
+
+@Composable
+private fun NotificationCard(
+    notification: NotificationEntry,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val accentColor = notification.packageName.toAppAccentColor()
+
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "card_border",
+    )
+
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = onLongClick,
+        shape = SquircleShape,
+        containerColor = if (isSelected)
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        else
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = if (isSelected) BorderStroke(2.dp, borderColor) else null,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            // Accent left bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(52.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+                    .align(Alignment.CenterVertically),
             )
 
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(color)
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.CenterEnd
+            // App icon with coil
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = accentColor.copy(alpha = 0.12f),
+            ) {
+                val iconPainter = rememberAsyncImagePainter(
+                    model = ImageRequest.Builder(context)
+                        .data(
+                            try {
+                                context.packageManager.getApplicationIcon(notification.packageName)
+                            } catch (e: Exception) {
+                                null
+                            }
+                        )
+                        .crossfade(true)
+                        .build()
+                )
+                Image(
+                    painter = iconPainter,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+
+            // Content
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    @Suppress("DEPRECATION")
                     Text(
-                        "DELETE", 
-                        modifier = Modifier.alpha(alpha),
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black, 
-                        color = Color.White,
-                        letterSpacing = 1.sp
+                        text = notification.appName,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = accentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Icon(
-                        Icons.Rounded.DeleteOutline,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                    Text(
+                        text = notification.timestamp.toRelativeTime(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                     )
                 }
-            }
-        },
-        enableDismissFromStartToEnd = false,
-        content = { content() }
-    )
-}
 
-@Composable
-fun VaultSearchBar(query: String, onQueryChange: (String) -> Unit) {
-    val vibrationManager = LocalVibrationManager.current
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        placeholder = { Text("Search encrypted logs...") },
-        leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { 
-                    vibrationManager?.vibrateClick()
-                    onQueryChange("") 
-                }) {
-                    Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!notification.title.isNullOrBlank()) {
+                    Text(
+                        text = notification.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-            }
-        },
-        shape = RoundedCornerShape(32.dp),
-        singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            unfocusedBorderColor = Color.Transparent,
-            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-        )
-    )
-}
 
-@Composable
-fun CategoryStrip(
-    categories: List<String>,
-    selectedCategory: String,
-    onCategorySelect: (String) -> Unit
-) {
-    val vibrationManager = LocalVibrationManager.current
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        items(categories) { category ->
-            val isSelected = selectedCategory == category
-            val backgroundColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
-                label = "catBg"
-            )
-            val contentColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
-                label = "catText"
-            )
-            val scale by animateFloatAsState(
-                targetValue = if (isSelected) 1.05f else 1f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-                label = "catScale"
-            )
+                if (!notification.text.isNullOrBlank()) {
+                    Text(
+                        text = notification.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
-            Surface(
-                modifier = Modifier
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .bouncyClick { 
-                        if (!isSelected) {
-                            vibrationManager?.vibrateTick()
-                            onCategorySelect(category)
+                // Category badge
+                notification.category
+                    ?.takeIf { it.isNotBlank() && it != "General" }
+                    ?.let { cat ->
+                        Spacer(Modifier.height(2.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = accentColor.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                text = cat,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = accentColor,
+                            )
                         }
-                    },
-                shape = RoundedCornerShape(20.dp),
-                color = backgroundColor,
-                border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-            ) {
-                @Suppress("DEPRECATION")
-                Text(
-                    text = category.uppercase(),
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    color = contentColor,
-                    letterSpacing = 1.2.sp
-                )
+                    }
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+// ─── Notification Detail ──────────────────────────────────────────────────────
+
 @Composable
-fun NotificationVaultCard(
-    notification: NotificationEntry, 
+private fun NotificationDetailContent(
+    notification: NotificationEntry,
+    categories: List<String>,
+    appMappings: Map<String, String>,
+    isInPanel: Boolean,
+    onDismiss: () -> Unit,
     onDelete: () -> Unit,
-    onLongClick: () -> Unit
+    onHideApp: () -> Unit,
+    onMapCategory: (String) -> Unit,
+    onViewAppDetails: () -> Unit,
+    onCopy: () -> Unit,
 ) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    val scale by animateFloatAsState(if (visible) 1f else 0.92f, spring(Spring.DampingRatioMediumBouncy), label = "")
-    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(600), label = "")
-
     val context = LocalContext.current
-    var isExpanded by remember { mutableStateOf(false) }
-    val timeString = remember(notification.timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(notification.timestamp))
-    }
-    val vibrationManager = LocalVibrationManager.current
+    val accentColor = notification.packageName.toAppAccentColor()
+    val currentMapping = appMappings[notification.packageName]
 
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-            .animateContentSize()
-            .combinedClickable(
-                onClick = { 
-                    vibrationManager?.vibrateTick()
-                    isExpanded = !isExpanded 
-                },
-                onLongClick = { onLongClick() }
-            ),
-        shape = RoundedCornerShape(32.dp),
-        color = if (isExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(
-            1.dp, 
-            if (isExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) 
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-        ),
-        shadowElevation = if (isExpanded) 6.dp else 0.dp
+            .verticalScroll(rememberScrollState())
+            .padding(if (isInPanel) 24.dp else 20.dp)
+            .then(if (!isInPanel) Modifier.navigationBarsPadding() else Modifier),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+        if (isInPanel) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Notification Detail",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close")
+                }
+            }
+        }
+
+        // ── App header ─────────────────────────────────────────────────────
+        Surface(
+            shape = LargeExpressiveShape,
+            color = accentColor.copy(alpha = 0.08f),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Surface(
-                    modifier = Modifier.size(52.dp),
+                    modifier = Modifier.size(56.dp),
                     shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
-                    shadowElevation = 2.dp
+                    color = accentColor.copy(alpha = 0.18f),
                 ) {
                     val iconPainter = rememberAsyncImagePainter(
                         model = ImageRequest.Builder(context)
-                            .data(try { context.packageManager.getApplicationIcon(notification.packageName) } catch(e: Exception) { null })
+                            .data(
+                                try {
+                                    context.packageManager.getApplicationIcon(notification.packageName)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            )
                             .crossfade(true)
                             .build()
                     )
                     Image(
                         painter = iconPainter,
                         contentDescription = null,
-                        modifier = Modifier.padding(12.dp),
-                        contentScale = ContentScale.Fit
+                        modifier = Modifier.padding(10.dp),
                     )
                 }
-
-                Spacer(Modifier.width(16.dp))
-
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        @Suppress("DEPRECATION")
-                        Text(
-                            notification.appName.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            letterSpacing = 1.sp
-                        )
-                        @Suppress("DEPRECATION")
-                        Text(
-                            timeString,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                    }
-                    
+                    Text(
+                        notification.appName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        notification.packageName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // App details button
+                FilledTonalIconButton(onClick = onViewAppDetails) {
+                    Icon(Icons.Rounded.Info, contentDescription = "App details")
+                }
+            }
+        }
+
+        // ── Notification body ──────────────────────────────────────────────
+        Surface(
+            shape = LargeExpressiveShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (!notification.title.isNullOrBlank()) {
+                    Text(
+                        notification.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (!notification.text.isNullOrBlank()) {
+                    Text(
+                        notification.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (notification.title.isNullOrBlank() && notification.text.isNullOrBlank()) {
+                    Text(
+                        "No content available",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+
+        // ── Metadata ───────────────────────────────────────────────────────
+        Surface(
+            shape = LargeExpressiveShape,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                MetaRow(
+                    icon = Icons.Rounded.AccessTime,
+                    label = "Received",
+                    value = notification.timestamp.toFullDateTime(),
+                    accent = accentColor,
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                MetaRow(
+                    icon = Icons.Rounded.Category,
+                    label = "Category",
+                    value = notification.category ?: "General",
+                    accent = accentColor,
+                )
+                currentMapping?.let {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    MetaRow(
+                        icon = Icons.Rounded.Label,
+                        label = "App mapped to",
+                        value = it,
+                        accent = accentColor,
+                    )
+                }
+            }
+        }
+
+        // ── Remap to category ──────────────────────────────────────────────
+        Text(
+            "Map App to Category",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 2.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            categories.filter { it != "All" }.forEach { category ->
+                val isMapped = currentMapping == category
+                ExpressiveFilterChip(
+                    selected = isMapped,
+                    onClick = { onMapCategory(category) },
+                    label = { Text(category) },
+                    leadingIcon = if (isMapped) {
+                        { Icon(Icons.Rounded.Check, null, Modifier.size(14.dp)) }
+                    } else null,
+                )
+            }
+        }
+
+        // ── Action row ─────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ToolzOutlinedExpressiveButton(
+                onClick = onCopy,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Copy")
+            }
+            ToolzOutlinedExpressiveButton(
+                onClick = onHideApp,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Hide App")
+            }
+        }
+        ToolzExpressiveButton(
+            onClick = onDelete,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ),
+        ) {
+            Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Delete Notification", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun MetaRow(icon: ImageVector, label: String, value: String, accent: Color) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(18.dp),
+        )
+        Column {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+// ─── Context Bottom Sheet (long press) ────────────────────────────────────────
+
+@Composable
+private fun NotificationContextSheet(
+    notification: NotificationEntry,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    onHideApp: () -> Unit,
+    onDelete: () -> Unit,
+    onViewAppDetails: () -> Unit,
+    onLaunchApp: () -> Unit,
+) {
+    val context = LocalContext.current
+    val accentColor = notification.packageName.toAppAccentColor()
+    val vibrationManager = LocalVibrationManager.current
+    val sheetState = rememberModalBottomSheetState()
+
+    val menuItems = listOf(
+        Triple("Copy content", Icons.Rounded.ContentCopy, onCopy),
+        Triple("View app stats", Icons.Rounded.BarChart, onViewAppDetails),
+        Triple("Launch app", Icons.AutoMirrored.Rounded.Launch, onLaunchApp),
+        Triple("Hide this app", Icons.Rounded.VisibilityOff, onHideApp),
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = accentColor.copy(alpha = 0.12f),
+                ) {
+                    val iconPainter = rememberAsyncImagePainter(
+                        model = ImageRequest.Builder(context)
+                            .data(
+                                try {
+                                    context.packageManager.getApplicationIcon(notification.packageName)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            )
+                            .crossfade(true)
+                            .build()
+                    )
+                    Image(
+                        painter = iconPainter,
+                        contentDescription = null,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+                Column {
+                    Text(
+                        notification.appName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                    )
                     Text(
                         notification.title ?: "Notification",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
-            if (notification.text?.isNotEmpty() == true) {
-                Spacer(Modifier.height(12.dp))
-                
-                Text(
-                    notification.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = if (isExpanded) Int.MAX_VALUE else 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium,
-                    lineHeight = 20.sp
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+
+            // Menu items
+            menuItems.forEachIndexed { idx, (label, icon, action) ->
+                StaggeredEntrance(index = idx) {
+                    Surface(
+                        onClick = {
+                            vibrationManager?.vibrateTick()
+                            action()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = MediumExpressiveShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            Icon(icon, null, tint = accentColor, modifier = Modifier.size(20.dp))
+                            Text(
+                                label,
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Destructive delete
+            Spacer(Modifier.height(4.dp))
+            ToolzExpressiveButton(
+                onClick = {
+                    vibrationManager?.vibrateLongClick()
+                    onDelete()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Delete", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+// ─── App Details Sheet ────────────────────────────────────────────────────────
+
+@Composable
+fun AppDetailsSheet(details: AppDetails, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val vibrationManager = LocalVibrationManager.current
+    val accentColor = details.packageName.toAppAccentColor()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val lastTime = details.lastNotification?.timestamp?.toFullDateTime() ?: "—"
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // App header
+            Surface(
+                shape = LargeExpressiveShape,
+                color = accentColor.copy(alpha = 0.08f),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        modifier = Modifier.size(60.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        color = accentColor.copy(alpha = 0.15f),
+                    ) {
+                        val iconPainter = rememberAsyncImagePainter(
+                            model = ImageRequest.Builder(context)
+                                .data(
+                                    try {
+                                        context.packageManager.getApplicationIcon(details.packageName)
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                )
+                                .crossfade(true)
+                                .build()
+                        )
+                        Image(
+                            painter = iconPainter,
+                            contentDescription = null,
+                            modifier = Modifier.padding(10.dp),
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            details.appName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text(
+                            details.packageName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+
+            // Stats grid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    label = "Total Archived",
+                    value = "${details.totalNotifications}",
+                    icon = Icons.Rounded.Notifications,
+                    accent = accentColor,
+                )
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    label = "Last Received",
+                    value = lastTime.take(12),
+                    icon = Icons.Rounded.AccessTime,
+                    accent = accentColor,
                 )
             }
 
-            if (isExpanded) {
-                Spacer(Modifier.height(16.dp))
+            ToolzExpressiveButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    onDismiss()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Done", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(
+    modifier: Modifier,
+    label: String,
+    value: String,
+    icon: ImageVector,
+    accent: Color,
+) {
+    Surface(
+        modifier = modifier,
+        shape = MediumExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(18.dp))
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// ─── Category Manager Dialog ──────────────────────────────────────────────────
+
+@Composable
+private fun CategoryManagerDialog(
+    categories: List<String>,
+    onDismiss: () -> Unit,
+    onAddCategory: (String) -> Unit,
+    onRemoveCategory: (String) -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    var newCategoryText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Category, contentDescription = null) },
+        title = { Text("Manage Categories", fontWeight = FontWeight.Black) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Add new category
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(
+                    OutlinedTextField(
+                        value = newCategoryText,
+                        onValueChange = { newCategoryText = it },
+                        placeholder = { Text("New category…") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                    )
+                    ToolzExpressiveIconButton(
                         onClick = {
-                            vibrationManager?.vibrateClick()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("Notification Text", notification.text ?: "")
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Content copied to clipboard", Toast.LENGTH_SHORT).show()
+                            val trimmed = newCategoryText.trim()
+                            if (trimmed.isNotBlank()) {
+                                vibrationManager?.vibrateTick()
+                                onAddCategory(trimmed)
+                                newCategoryText = ""
+                            }
                         },
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        modifier = Modifier.weight(1f).height(40.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                            Icon(Icons.Rounded.ContentCopy, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            @Suppress("DEPRECATION")
-                            Text("COPY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.Add, contentDescription = "Add category")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Existing categories
+                categories.forEach { category ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            category,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (category == "All" || category == "General") FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (category != "All" && category != "General") {
+                            IconButton(
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    onRemoveCategory(category)
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Rounded.RemoveCircleOutline,
+                                    contentDescription = "Remove",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
-                    
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateLongClick()
-                            onDelete()
-                        },
-                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
-                    ) {
-                        Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(onClick = onDismiss) { Text("Done") }
+        },
+        shape = BouncyShape,
+    )
+}
+
+// ─── Hidden Apps Sheet ────────────────────────────────────────────────────────
+
+@Composable
+private fun HiddenAppsSheet(
+    hiddenApps: Set<String>,
+    onDismiss: () -> Unit,
+    onUnhide: (String) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Hidden Apps",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+
+            if (hiddenApps.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Rounded.Visibility,
+                            null,
+                            Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "No hidden apps",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+            } else {
+                hiddenApps.forEachIndexed { index, packageName ->
+                    StaggeredEntrance(index = index) {
+                        Surface(
+                            shape = MediumExpressiveShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    packageName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(onClick = { onUnhide(packageName) }) {
+                                    Text("Unhide", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1071,79 +1805,224 @@ fun NotificationVaultCard(
     }
 }
 
-@Composable
-fun EmptyVaultState(isFiltering: Boolean) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp).graphicsLayer { translationY = -20f },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            // Interactive security rings
-            repeat(2) { i ->
-                val infiniteTransition = rememberInfiniteTransition(label = "rings")
-                val rotation by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = if (i == 0) 360f else -360f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(8000 + (i * 2000), easing = LinearEasing),
-                        repeatMode = RepeatMode.Restart
-                    ),
-                    label = "rotation"
-                )
-                
-                val arcColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                Canvas(modifier = Modifier.size(150.dp + (i * 40).dp).graphicsLayer { rotationZ = rotation }) {
-                    drawArc(
-                        color = arcColor,
-                        startAngle = 0f,
-                        sweepAngle = 120f,
-                        useCenter = false,
-                        style = Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    )
-                    drawArc(
-                        color = arcColor,
-                        startAngle = 180f,
-                        sweepAngle = 120f,
-                        useCenter = false,
-                        style = Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    )
-                }
-            }
+// ─── Empty State ──────────────────────────────────────────────────────────────
 
+@Composable
+private fun EmptyVaultState(isFiltering: Boolean) {
+    val performanceMode = LocalPerformanceMode.current
+    val infiniteTransition = rememberInfiniteTransition(label = "empty_state")
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            tween(2200, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "empty_pulse",
+    )
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Surface(
-                modifier = Modifier.size(110.dp),
-                shape = RoundedCornerShape(40.dp),
+                modifier = Modifier
+                    .size(112.dp)
+                    .graphicsLayer {
+                        if (!performanceMode) {
+                            scaleX = pulseScale
+                            scaleY = pulseScale
+                        }
+                    },
+                shape = ExtraLargeExpressiveShape,
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                border = BorderStroke(
+                    1.5.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                ),
             ) {
                 Icon(
                     if (isFiltering) Icons.Rounded.SearchOff else Icons.Rounded.Shield,
-                    null,
+                    contentDescription = null,
                     modifier = Modifier.padding(28.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
+
+            Text(
+                text = if (isFiltering) "No matches found" else "Vault is secure",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (isFiltering)
+                    "Adjust your filters and try again."
+                else
+                    "Incoming notifications will be captured and archived here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
         }
-        
-        Spacer(Modifier.height(48.dp))
-        @Suppress("DEPRECATION")
+    }
+}
+
+// ─── Stats Pill ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun StatPill(icon: ImageVector, value: String, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+        )
         Text(
-            if (isFiltering) "NO SCAN MATCHES" else "VAULT IS SECURE",
-            style = MaterialTheme.typography.labelSmall,
+            value,
+            style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.sp
+            color = MaterialTheme.colorScheme.onSurface
         )
-        Spacer(Modifier.height(12.dp))
         Text(
-            if (isFiltering) "Adjust your parameters and try again." else "All incoming transmissions are currently being monitored and encrypted.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(0.85f),
-            fontWeight = FontWeight.Medium,
-            lineHeight = 24.sp
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+// ─── Previews ─────────────────────────────────────────────────────────────────
+
+private fun fakeSampleNotifications() = listOf(
+    NotificationEntry(
+        1L, "com.whatsapp", "WhatsApp",
+        "Alice", "Are you coming to the meetup tonight?",
+        System.currentTimeMillis() - 120_000L, "Social",
+    ),
+    NotificationEntry(
+        2L, "com.google.android.gm", "Gmail",
+        "Q3 Report Ready", "Your Q3 performance report has been generated and is ready for review.",
+        System.currentTimeMillis() - 3_600_000L, "Work",
+    ),
+    NotificationEntry(
+        3L, "com.spotify.music", "Spotify",
+        "New Release Friday", "Check out new albums from your favourite artists.",
+        System.currentTimeMillis() - 86_400_000L * 2, "General",
+    ),
+    NotificationEntry(
+        4L, "com.bankapp", "My Bank",
+        "Transaction Alert", "You spent \$42.00 at Coffee Co.",
+        System.currentTimeMillis() - 86_400_000L * 4, "Finance",
+    ),
+)
+
+@Preview(name = "Feed · Light", showBackground = true)
+@Composable
+private fun FeedLightPreview() {
+    ToolzTheme {
+        NotificationFeedPane(
+            notifications = fakeSampleNotifications(),
+            searchQuery = "",
+            selectedCategory = "All",
+            selectedDateFilter = "Anytime",
+            categories = listOf("All", "Social", "Finance", "Work", "General"),
+            selectedNotification = null,
+            isPermissionGranted = true,
+            showSearchBar = false,
+            onToggleSearch = {},
+            onSearchQueryChange = {},
+            onCategorySelect = {},
+            onDateFilterSelect = {},
+            onNotificationClick = {},
+            onNotificationLongClick = {},
+            onDeleteNotification = {},
+            onNavigateBack = {},
+            onClearAll = {},
+            onExport = {},
+            onManageCategories = {},
+            onManageHiddenApps = {},
+            onPermissionClick = {},
+        )
+    }
+}
+
+@Preview(name = "Feed · Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun FeedDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        NotificationFeedPane(
+            notifications = fakeSampleNotifications(),
+            searchQuery = "",
+            selectedCategory = "All",
+            selectedDateFilter = "Anytime",
+            categories = listOf("All", "Social", "Finance", "Work", "General"),
+            selectedNotification = null,
+            isPermissionGranted = false,
+            showSearchBar = true,
+            onToggleSearch = {},
+            onSearchQueryChange = {},
+            onCategorySelect = {},
+            onDateFilterSelect = {},
+            onNotificationClick = {},
+            onNotificationLongClick = {},
+            onDeleteNotification = {},
+            onNavigateBack = {},
+            onClearAll = {},
+            onExport = {},
+            onManageCategories = {},
+            onManageHiddenApps = {},
+            onPermissionClick = {},
+        )
+    }
+}
+
+@Preview(name = "Empty State · Light", showBackground = true)
+@Composable
+private fun EmptyLightPreview() {
+    ToolzTheme { EmptyVaultState(isFiltering = false) }
+}
+
+@Preview(name = "Empty State · Searching", showBackground = true)
+@Composable
+private fun EmptyFilteringPreview() {
+    ToolzTheme { EmptyVaultState(isFiltering = true) }
+}
+
+@Preview(name = "Notification Card · Light", showBackground = true)
+@Composable
+private fun CardLightPreview() {
+    ToolzTheme {
+        Box(Modifier.padding(16.dp)) {
+            NotificationCard(
+                notification = fakeSampleNotifications().first(),
+                isSelected = false,
+                onClick = {},
+                onLongClick = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Notification Card · Selected", showBackground = true)
+@Composable
+private fun CardSelectedPreview() {
+    ToolzTheme {
+        Box(Modifier.padding(16.dp)) {
+            NotificationCard(
+                notification = fakeSampleNotifications()[1],
+                isSelected = true,
+                onClick = {},
+                onLongClick = {},
+            )
+        }
     }
 }

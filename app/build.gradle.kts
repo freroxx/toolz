@@ -10,8 +10,7 @@ plugins {
 
 android {
     namespace = "com.frerox.toolz"
-    compileSdk = 36
-    compileSdkExtension = 19
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.frerox.toolz"
@@ -91,6 +90,7 @@ android {
         viewBinding = true
         aidl = true
     }
+    compileSdkMinor = 0
 }
 
 
@@ -103,6 +103,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.foundation)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     
     implementation(libs.androidx.core.ktx)
@@ -120,6 +121,11 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material3.adaptive)
+    implementation(libs.androidx.compose.material3.adaptive.layout)
+    implementation(libs.androidx.compose.material3.adaptive.navigation)
+    implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
+    implementation(libs.androidx.compose.material3.windowSizeClass)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation("androidx.palette:palette-ktx:1.0.0")

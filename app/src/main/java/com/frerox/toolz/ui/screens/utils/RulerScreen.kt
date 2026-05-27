@@ -13,6 +13,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Flip
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,13 +35,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RulerScreen(
     onBack: () -> Unit
@@ -48,6 +51,7 @@ fun RulerScreen(
     val density = LocalDensity.current
     val context = LocalContext.current
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
     val displayMetrics = context.resources.displayMetrics
     
     val ydpi = displayMetrics.ydpi
@@ -64,67 +68,110 @@ fun RulerScreen(
     val strokeWidthMm = with(density) { 1.2.dp.toPx() }
     val strokeWidthInch = with(density) { 2.dp.toPx() }
     val strokeWidthSubInch = with(density) { 1.dp.toPx() }
-    val strokeWidthMeasure = with(density) { 3.dp.toPx() }
+    val strokeWidthMeasure = with(density) { 4.dp.toPx() }
     
-    val majorLen = with(density) { 44.dp.toPx() }
-    val halfLen = with(density) { 28.dp.toPx() }
-    val minorLen = with(density) { 16.dp.toPx() }
+    val majorLen = with(density) { 48.dp.toPx() }
+    val halfLen = with(density) { 32.dp.toPx() }
+    val minorLen = with(density) { 18.dp.toPx() }
     
-    val inchMajorLen = with(density) { 44.dp.toPx() }
-    val inchHalfLen = with(density) { 32.dp.toPx() }
-    val inchQuarterLen = with(density) { 24.dp.toPx() }
-    val inchEighthLen = with(density) { 16.dp.toPx() }
+    val inchMajorLen = with(density) { 48.dp.toPx() }
+    val inchHalfLen = with(density) { 36.dp.toPx() }
+    val inchQuarterLen = with(density) { 28.dp.toPx() }
+    val inchEighthLen = with(density) { 18.dp.toPx() }
     
-    val mmTextSize = with(density) { 12.sp.toPx() }
-    val inchTextSize = with(density) { 14.sp.toPx() }
-    val textOffset = with(density) { 4.dp.toPx() }
-    val mmLabelOffset = with(density) { 10.dp.toPx() }
-    val inchLabelOffset = with(density) { 52.dp.toPx() }
+    val mmTextSize = with(density) { 14.sp.toPx() }
+    val inchTextSize = with(density) { 16.sp.toPx() }
+    val textOffset = with(density) { 5.dp.toPx() }
+    val mmLabelOffset = with(density) { 12.dp.toPx() }
+    val inchLabelOffset = with(density) { 56.dp.toPx() }
+
+    // Fluid bouncy spring for the measurement line
+    val animatedTouchY by animateFloatAsState(
+        targetValue = touchY,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioLowBouncy
+        ),
+        label = "MeasureLine"
+    )
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("PRECISION RULER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "RULER",
+                subtitle = "Precision Metric & Imperial",
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { isFlipped = !isFlipped },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Flip, contentDescription = "Flip Ruler", tint = MaterialTheme.colorScheme.primary)
-                    }
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Recalibrate", Icons.Rounded.Sync, { vibrationManager?.vibrateClick() }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = Color.Transparent
+        containerColor = Color.Transparent,
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            isFlipped = !isFlipped
+                        },
+                        modifier = Modifier.size(48.dp),
+                        shape = SmallExpressiveShape
+                    ) {
+                        Icon(Icons.Rounded.Flip, contentDescription = "Flip Orientation")
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        icon = { Icon(Icons.Rounded.Info, null) },
+                        label = "SPECS"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .toolzBackground()
-                .padding(padding)
-                .then(if (performanceMode) Modifier else Modifier.fadingEdge(
-                    brush = Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.05f to Color.Black,
-                        0.95f to Color.Black,
-                        1f to Color.Transparent
-                    ),
-                    length = 32.dp
-                ))
+                .padding(top = padding.calculateTopPadding())
+                .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 32.dp, bottom = 32.dp))
                 .pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { offset -> touchY = offset.y },
+                        onDragStart = { offset -> 
+                            vibrationManager?.vibrateTick()
+                            touchY = offset.y 
+                        },
                         onDrag = { change, _ -> 
                             change.consume()
+                            if (Math.abs(change.position.y - touchY) > 5) {
+                                vibrationManager?.vibrateTick()
+                            }
                             touchY = change.position.y 
                         }
                     )
@@ -134,7 +181,7 @@ fun RulerScreen(
                 val width = size.width
                 val height = size.height
                 
-                // CM / MM Side
+                // CM / MM Side with expressive markings
                 var currentY = 0f
                 var mmCount = 0
                 while (currentY < height) {
@@ -150,10 +197,10 @@ fun RulerScreen(
                     val endX = if (isFlipped) width - lineLength else lineLength
                     
                     drawLine(
-                        color = if (isMajor) onSurface else onSurface.copy(alpha = 0.3f),
+                        color = if (isMajor) onSurface else onSurface.copy(alpha = 0.25f),
                         start = Offset(startX, currentY),
                         end = Offset(endX, currentY),
-                        strokeWidth = if (isMajor) strokeWidthMm * 1.5f else strokeWidthMm,
+                        strokeWidth = if (isMajor) strokeWidthMm * 1.8f else strokeWidthMm,
                         cap = StrokeCap.Round
                     )
 
@@ -168,7 +215,7 @@ fun RulerScreen(
                                 color = onSurfaceColor
                                 textSize = mmTextSize
                                 textAlign = if (isFlipped) Paint.Align.RIGHT else Paint.Align.LEFT
-                                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.BOLD)
                             }
                         )
                     }
@@ -177,7 +224,7 @@ fun RulerScreen(
                     mmCount++
                 }
                 
-                // Inch Side
+                // Inch Side with energetic primary colors
                 currentY = 0f
                 var inchCount = 0
                 val eighth = inchPx / 8
@@ -185,7 +232,6 @@ fun RulerScreen(
                     val startX = if (isFlipped) 0f else width
                     val endX = if (isFlipped) inchMajorLen else width - inchMajorLen
                     
-                    // Full inch
                     drawLine(
                         color = primaryColor,
                         start = Offset(startX, currentY),
@@ -203,7 +249,7 @@ fun RulerScreen(
                             color = primaryColorArgb
                             textSize = inchTextSize
                             textAlign = if (isFlipped) Paint.Align.LEFT else Paint.Align.RIGHT
-                            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                            typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.BOLD)
                         }
                     )
                     
@@ -217,10 +263,10 @@ fun RulerScreen(
                         }
                         val subEndX = if (isFlipped) subLen else width - subLen
                         drawLine(
-                            color = primaryColor.copy(alpha = if (i % 4 == 0) 0.6f else 0.3f),
+                            color = primaryColor.copy(alpha = if (i % 4 == 0) 0.6f else 0.2f),
                             start = Offset(startX, subY),
                             end = Offset(subEndX, subY),
-                            strokeWidth = if (i % 4 == 0) strokeWidthSubInch * 1.5f else strokeWidthSubInch,
+                            strokeWidth = if (i % 4 == 0) strokeWidthSubInch * 2f else strokeWidthSubInch,
                             cap = StrokeCap.Round
                         )
                     }
@@ -229,28 +275,28 @@ fun RulerScreen(
                     inchCount++
                 }
 
-                // Measurement line
-                if (touchY > 0) {
+                // Measurement line with high visibility
+                if (animatedTouchY > 0) {
                     drawLine(
                         color = errorColor,
-                        start = Offset(0f, touchY),
-                        end = Offset(width, touchY),
+                        start = Offset(0f, animatedTouchY),
+                        end = Offset(width, animatedTouchY),
                         strokeWidth = strokeWidthMeasure,
                         cap = StrokeCap.Round
                     )
                     
                     drawCircle(
                         color = errorColor,
-                        radius = 6.dp.toPx(),
-                        center = Offset(if (isFlipped) width - 4.dp.toPx() else 4.dp.toPx(), touchY)
+                        radius = 8.dp.toPx(),
+                        center = Offset(if (isFlipped) width - 8.dp.toPx() else 8.dp.toPx(), animatedTouchY)
                     )
                 }
             }
             
-            // Real-time measurement display
+            // High-fidelity Floating Measurement Hub in Squircle Container
             AnimatedVisibility(
                 visible = touchY > 0,
-                enter = fadeIn() + scaleIn(),
+                enter = fadeIn() + scaleIn(animationSpec = spring(Spring.DampingRatioMediumBouncy)),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier.align(Alignment.Center)
             ) {
@@ -260,64 +306,81 @@ fun RulerScreen(
                 Surface(
                     modifier = Modifier
                         .padding(24.dp)
-                        .shadow(24.dp, RoundedCornerShape(32.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                        .shadow(elevation = if (performanceMode) 0.dp else 48.dp, shape = SquircleShape, spotColor = primaryColor.copy(alpha = 0.4f)),
+                    shape = SquircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                    border = BorderStroke(2.dp, primaryColor.copy(alpha = 0.3f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(32.dp), 
+                        modifier = Modifier.padding(36.dp), 
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Surface(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(8.dp)
+                            color = primaryColor.copy(alpha = 0.12f),
+                            shape = BouncyShape
                         ) {
                             Text(
-                                "CURRENT MEASUREMENT",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                "PRECISE SCAN",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 1.5.sp
+                                color = primaryColor,
+                                letterSpacing = 2.sp
                             )
                         }
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(28.dp))
                         Text(
-                            text = String.format(Locale.getDefault(), "%.2f cm", cm),
-                            style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Black,
+                            text = String.format(Locale.getDefault(), "%.2f CM", cm),
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontWeight = FontWeight.Black,
+                                fontSize = 64.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                letterSpacing = (-2).sp
+                            ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(Modifier.height(8.dp))
-                        @Suppress("DEPRECATION")
-                        Text(
-                            text = String.format(Locale.getDefault(), "%.2f inches", inches),
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                            shape = SmallExpressiveShape
+                        ) {
+                            Text(
+                                text = String.format(Locale.getDefault(), "%.2f IN", inches),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.secondary,
+                                letterSpacing = 1.sp
+                            )
+                        }
                     }
                 }
             }
             
             if (touchY <= 0) {
                 Box(
-                    modifier = Modifier.fillMaxSize().padding(bottom = 64.dp),
+                    modifier = Modifier.fillMaxSize().padding(bottom = 120.dp),
                     contentAlignment = Alignment.BottomCenter
                 ) {
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+                        shape = BouncyShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     ) {
-                        Text(
-                            "DRAG TO MEASURE",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.outline,
-                            letterSpacing = 2.sp
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Sync, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "DRAG SURFACE TO MEASURE",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                letterSpacing = 1.5.sp
+                            )
+                        }
                     }
                 }
             }

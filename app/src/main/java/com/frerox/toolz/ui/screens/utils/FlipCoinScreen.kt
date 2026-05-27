@@ -1,20 +1,19 @@
 package com.frerox.toolz.ui.screens.utils
 
-import android.os.Build
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,12 +23,10 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -37,7 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun FlipCoinScreen(
     onBack: () -> Unit
@@ -49,29 +46,31 @@ fun FlipCoinScreen(
     val vibrationManager = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
 
+    // Energetic flip animation with many rotations
     val rotation = animateFloatAsState(
-        targetValue = if (isFlipping) 2160f else 0f,
+        targetValue = if (isFlipping) 2880f else 0f,
         animationSpec = if (isFlipping) {
-            tween(durationMillis = 1200, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1f))
+            tween(durationMillis = 1500, easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1f))
         } else {
             snap()
         },
-        label = "CoinFlip"
+        label = "FlipRotation"
     )
 
+    // Organic scale bounce during flip
     val scale = animateFloatAsState(
-        targetValue = if (isFlipping) 1.4f else 1f,
+        targetValue = if (isFlipping) 1.5f else 1f,
         animationSpec = if (isFlipping) {
             keyframes {
-                durationMillis = 1200
+                durationMillis = 1500
                 1.0f at 0 with FastOutSlowInEasing
-                1.8f at 600 with FastOutSlowInEasing
-                1.4f at 1200 with FastOutSlowInEasing
+                2.0f at 750 with FastOutSlowInEasing
+                1.5f at 1500 with FastOutSlowInEasing
             }
         } else {
-            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
         },
-        label = "CoinScale"
+        label = "FlipScale"
     )
 
     fun flipCoin() {
@@ -81,56 +80,81 @@ fun FlipCoinScreen(
             isFlipping = true
             val nextResult = Random.nextBoolean()
 
-            delay(600)
+            // Time result swap to midpoint of flip
+            delay(750)
             isHeads = nextResult
 
-            delay(600)
+            delay(750)
             isFlipping = false
-            history = (listOf(nextResult) + history).take(12)
+            history = (listOf(nextResult) + history).take(15)
 
             vibrationManager?.vibrateSuccess()
         }
     }
 
     Scaffold(
-        containerColor = Color.Transparent,
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "COIN FLIP",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "COIN FLIP",
+                subtitle = "Random Outcome Hub",
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Clear History", Icons.Rounded.Refresh, { 
+                                vibrationManager?.vibrateClick()
+                                history = emptyList() 
+                            }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
+            )
+        },
+        containerColor = Color.Transparent,
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = { flipCoin() },
+                        modifier = Modifier.size(56.dp),
+                        shape = SmallExpressiveShape,
+                        enabled = !isFlipping
+                    ) {
+                        Icon(Icons.Rounded.Casino, contentDescription = "Flip")
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
                         onClick = { 
                             vibrationManager?.vibrateClick()
                             history = emptyList() 
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", tint = MaterialTheme.colorScheme.primary)
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                        icon = { Icon(Icons.Rounded.History, null) },
+                        label = "CLEAR"
+                    )
+                }
             )
-        }
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
@@ -140,105 +164,52 @@ fun FlipCoinScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(48.dp)
+                verticalArrangement = Arrangement.Center
             ) {
-                // History Row
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        "RECENT FLIPS",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.outline,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (history.isEmpty()) {
-                            Text("No history", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                        } else {
-                            history.forEachIndexed { index, heads ->
-                                Box(
-                                    modifier = Modifier
-                                        .padding(horizontal = 4.dp)
-                                        .size(if (index == 0) 32.dp else 24.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (heads) Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFB8860B)))
-                                            else Brush.linearGradient(listOf(Color(0xFFC0C0C0), Color(0xFF708090)))
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        if (heads) "H" else "T",
-                                        fontSize = if (index == 0) 14.sp else 10.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Coin Display
-                Box(
-                    modifier = Modifier
-                        .size(260.dp)
-                        .scale(scale.value)
-                        .graphicsLayer {
-                            rotationY = rotation.value
-                            cameraDistance = 15f * density
-                        }
-                        .bouncyClick(enabled = !isFlipping) { flipCoin() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = CircleShape,
-                        color = Color.Transparent,
-                        shadowElevation = if (isFlipping) 24.dp else 8.dp
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.radialGradient(
-                                        if (isHeads) listOf(Color(0xFFFFE082), Color(0xFFFFA000), Color(0xFFB8860B))
-                                        else listOf(Color(0xFFE0E0E0), Color(0xFF9E9E9E), Color(0xFF616161))
-                                    )
-                                )
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
+                // History Hub in an organic Squircle Container
+                StaggeredEntrance(index = 0) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "RECENT SEQUENCE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        ExpressiveCard(
+                            onClick = {},
+                            shape = SquircleShape,
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                            elevation = 0.dp
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.05f))
-                                    .padding(12.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (isHeads) "H" else "T",
-                                    style = MaterialTheme.typography.displayLarge,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 120.sp,
-                                    color = Color.White.copy(alpha = 0.9f)
-                                )
-
-                                repeat(12) { i ->
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .graphicsLayer { rotationZ = i * 30f },
-                                        contentAlignment = Alignment.TopCenter
-                                    ) {
-                                        Box(Modifier.size(4.dp, 12.dp).background(Color.White.copy(alpha = 0.3f), CircleShape))
+                                if (history.isEmpty()) {
+                                    Text("NO HISTORY RECORDED", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                                } else {
+                                    history.forEachIndexed { index, heads ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(if (index == 0) 36.dp else 28.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (heads) Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFB8860B)))
+                                                    else Brush.linearGradient(listOf(Color(0xFFC0C0C0), Color(0xFF708090)))
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                if (heads) "H" else "T",
+                                                fontSize = if (index == 0) 16.sp else 12.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -246,43 +217,126 @@ fun FlipCoinScreen(
                     }
                 }
 
-                // Result Text and Button
+                Spacer(Modifier.height(64.dp))
+
+                // High-fidelity Coin Display with fluid rotation and 3D depth
+                Box(
+                    modifier = Modifier.size(280.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isFlipping && !performanceMode) {
+                        ExpressiveScanningIndicator(
+                            modifier = Modifier.fillMaxSize().padding((-32).dp),
+                            color = if (isHeads) Color(0xFFFFD700) else Color(0xFFC0C0C0)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .scale(scale.value)
+                            .graphicsLayer {
+                                rotationY = rotation.value
+                                cameraDistance = 20f * density
+                            }
+                            .bouncyClick(enabled = !isFlipping) { flipCoin() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = CircleShape,
+                            color = Color.Transparent,
+                            shadowElevation = if (isFlipping) 48.dp else 12.dp,
+                            tonalElevation = if (isFlipping) 16.dp else 0.dp
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.radialGradient(
+                                            if (isHeads) listOf(Color(0xFFFFE082), Color(0xFFFFA000), Color(0xFFB8860B))
+                                            else listOf(Color(0xFFE0E0E0), Color(0xFF9E9E9E), Color(0xFF616161))
+                                        )
+                                    )
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.08f))
+                                        .padding(14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (isHeads) "H" else "T",
+                                        style = MaterialTheme.typography.displayLarge,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 130.sp,
+                                        color = Color.White.copy(alpha = 0.95f)
+                                    )
+
+                                    // Decorative coin ridges
+                                    repeat(12) { i ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer { rotationZ = i * 30f },
+                                            contentAlignment = Alignment.TopCenter
+                                        ) {
+                                            Box(Modifier.size(5.dp, 16.dp).background(Color.White.copy(alpha = 0.4f), CircleShape))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(64.dp))
+
+                // Energetic Result Presentation
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AnimatedContent(
                         targetState = if (isFlipping) "FLIPPING..." else if (isHeads) "HEADS" else "TAILS",
                         transitionSpec = {
-                            (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut())
+                            (slideInVertically(initialOffsetY = { it }) + fadeIn()) togetherWith 
+                            (slideOutVertically(targetOffsetY = { -it }) + fadeOut())
                         },
                         label = "ResultAnim"
                     ) { text ->
-                        Text(
-                            text = text,
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.Black,
-                            color = if (isFlipping) MaterialTheme.colorScheme.outline
-                                    else if (isHeads) Color(0xFFFFA000) else Color(0xFF757575),
-                            letterSpacing = 2.sp
-                        )
+                        Surface(
+                            color = if (isFlipping) Color.Transparent else (if (isHeads) Color(0xFFFFD700) else Color(0xFF9E9E9E)).copy(alpha = 0.15f),
+                            shape = BouncyShape
+                        ) {
+                            Text(
+                                text = text,
+                                modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.headlineLarge,
+                                fontWeight = FontWeight.Black,
+                                color = if (isFlipping) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                        else if (isHeads) Color(0xFFFFA000) else Color(0xFF757575),
+                                letterSpacing = 4.sp
+                            )
+                        }
                     }
 
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(Modifier.height(56.dp))
 
-                    Button(
+                    ToolzExpressiveButton(
                         onClick = { flipCoin() },
-                        modifier = Modifier.fillMaxWidth().height(80.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        enabled = !isFlipping,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                        modifier = Modifier.fillMaxWidth().height(84.dp),
+                        shape = LargeExpressiveShape,
+                        enabled = !isFlipping
                     ) {
-                        Icon(Icons.Rounded.Casino, null, modifier = Modifier.size(28.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("FLIP COIN", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Icon(Icons.Rounded.Casino, null, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Text("FLIP COIN", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                     }
                 }
+                
+                Spacer(Modifier.height(120.dp))
             }
         }
     }

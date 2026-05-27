@@ -251,7 +251,7 @@ fun RandomGeneratorScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(state.password, style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace), fontWeight = FontWeight.Bold, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(8.dp))
-                                    LinearProgressIndicator(
+                                    com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                                         progress = { state.passwordStrength },
                                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                                         color = when {

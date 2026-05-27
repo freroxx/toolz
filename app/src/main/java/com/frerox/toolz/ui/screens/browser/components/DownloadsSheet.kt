@@ -125,7 +125,7 @@ fun DownloadItemRow(
                 )
                 if (item.progress < 1f) {
                     Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
+                    com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                         progress = { item.progress },
                         modifier = Modifier.fillMaxWidth().height(4.dp),
                         strokeCap = androidx.compose.ui.graphics.StrokeCap.Round

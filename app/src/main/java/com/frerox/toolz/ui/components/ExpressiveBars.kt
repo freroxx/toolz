@@ -75,31 +75,48 @@ fun ExpressiveTopAppBar(
         label = "expressiveTopBarScale",
     )
 
-    CenterAlignedTopAppBar(
-        modifier = modifier,
-        title = {
+    val titleContent = @Composable {
+        Column(
+            horizontalAlignment = titleHorizontalAlignment,
+            modifier = if (titleHorizontalAlignment == Alignment.CenterHorizontally)
+                Modifier.fillMaxWidth() else Modifier,
+        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .graphicsLayer {
                         scaleX = titleScale
                         scaleY = titleScale
+                        transformOrigin = if (titleHorizontalAlignment == Alignment.Start)
+                            androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+                        else
+                            androidx.compose.ui.graphics.TransformOrigin.Center
                     },
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    title()
-                    subtitle?.invoke()
-                }
+                title()
             }
-        },
-        navigationIcon = navigationIcon,
-        actions = actions,
-        colors = colors,
-        scrollBehavior = scrollBehavior,
-    )
+            subtitle?.invoke()
+        }
+    }
+
+    if (titleHorizontalAlignment == Alignment.CenterHorizontally) {
+        CenterAlignedTopAppBar(
+            modifier = modifier,
+            title = titleContent,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = colors,
+            scrollBehavior = scrollBehavior,
+        )
+    } else {
+        TopAppBar(
+            modifier = modifier,
+            title = titleContent,
+            navigationIcon = navigationIcon,
+            actions = actions,
+            colors = colors,
+            scrollBehavior = scrollBehavior,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -1,23 +1,16 @@
 package com.frerox.toolz.ui.screens.time
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Flag
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,15 +28,29 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
-import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AppBarRowScope.clickableItem(
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+    label: String,
+    enabled: Boolean = true
+) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            icon()
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun StopwatchScreen(
     viewModel: StopwatchViewModel,
@@ -52,18 +59,23 @@ fun StopwatchScreen(
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
+    val primaryColor = MaterialTheme.colorScheme.primary
+
+    // Energetic spring for the primary timer value
+    val animatedTime by animateFloatAsState(
+        targetValue = state.elapsedTime.toFloat(),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "StopwatchTime"
+    )
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "CHRONOMETER",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "CHRONOMETER",
+                subtitle = "Precision Lap Timing",
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -72,78 +84,113 @@ fun StopwatchScreen(
                         },
                         modifier = Modifier
                             .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.reset() 
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset")
-                    }
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Share Splits", Icons.Rounded.Share, { vibrationManager?.vibrateClick() }),
+                            Triple("Export CSV", Icons.Rounded.FileDownload, { vibrationManager?.vibrateClick() }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.toggleStartStop()
+                        },
+                        modifier = Modifier.size(56.dp),
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateTick()
+                            if (state.isRunning) viewModel.lap()
+                        },
+                        icon = { Icon(Icons.Rounded.Flag, null) },
+                        label = "LAP",
+                        enabled = state.isRunning
+                    )
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateLongClick()
+                            viewModel.reset()
+                        },
+                        icon = { Icon(Icons.Rounded.Refresh, null) },
+                        label = "RESET"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
-        ) {
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 120.dp))
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Main Chronometer Display in an organic Squircle Container
                 Box(
                     modifier = Modifier
-                        .weight(1.3f)
+                        .weight(1.2f)
                         .fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "StopwatchRing")
-                    val rotation by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(2000, easing = LinearEasing),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "Rotation"
-                    )
-
-                    val primaryColor = MaterialTheme.colorScheme.primary
                     
-                    Canvas(modifier = Modifier.size(300.dp)) {
-                        drawCircle(
-                            color = primaryColor.copy(alpha = 0.08f),
-                            style = Stroke(width = 16.dp.toPx())
+                    // Liquid rotating ring for active timing
+                    if (state.isRunning && !performanceMode) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "StopwatchSpin")
+                        val rotation by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
+                            label = "Spin"
                         )
                         
-                        if (state.isRunning && !performanceMode) {
-                            drawArc(
-                                color = primaryColor,
-                                startAngle = rotation - 90f,
-                                sweepAngle = 90f,
-                                useCenter = false,
-                                style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                        }
+                        ToolzWavyCircularProgressIndicator(
+                            progress = { 0.25f },
+                            modifier = Modifier.size(340.dp).rotate(rotation),
+                            color = primaryColor,
+                            trackColor = Color.Transparent,
+                            strokeCap = StrokeCap.Round
+                        )
+                    } else {
+                        Surface(
+                            modifier = Modifier.size(320.dp),
+                            shape = SquircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                        ) {}
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -151,25 +198,25 @@ fun StopwatchScreen(
                             text = formatTime(state.elapsedTime),
                             style = MaterialTheme.typography.displayLarge.copy(
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 64.sp,
+                                fontSize = 72.sp,
                                 fontWeight = FontWeight.Black,
-                                letterSpacing = (-3).sp
+                                letterSpacing = (-4).sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         
                         val lapTime = if (state.laps.isEmpty()) state.elapsedTime else state.elapsedTime - state.laps.first()
                         Surface(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.padding(top = 20.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                            color = primaryColor.copy(alpha = 0.15f),
+                            shape = BouncyShape,
+                            modifier = Modifier.padding(top = 24.dp),
+                            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.2f))
                         ) {
                             Text(
-                                text = "+ ${formatTime(lapTime)}",
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                                text = "DELTA: +${formatTime(lapTime)}",
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.primary,
+                                color = primaryColor,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 1.sp
                             )
@@ -177,86 +224,21 @@ fun StopwatchScreen(
                     }
                 }
                 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateLongClick()
-                            viewModel.reset() 
-                        },
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset", modifier = Modifier.size(32.dp))
-                    }
-                    
-                    Surface(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.toggleStartStop() 
-                        },
-                        modifier = Modifier
-                            .size(100.dp)
-                            .bouncyClick {},
-                        shape = CircleShape,
-                        color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                        shadowElevation = if (performanceMode) 0.dp else 12.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (state.isRunning) "Pause" else "Start",
-                                modifier = Modifier.size(48.dp),
-                                tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-                    
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateTick()
-                            if (state.isRunning) viewModel.lap() 
-                        },
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(
-                                if (state.isRunning) MaterialTheme.colorScheme.secondaryContainer 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                            ),
-                        enabled = state.isRunning
-                    ) {
-                        Icon(
-                            Icons.Rounded.Flag, 
-                            contentDescription = "Lap", 
-                            modifier = Modifier.size(32.dp),
-                            tint = if (state.isRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                        )
-                    }
-                }
-                
+                // Splits Index with Staggered Entrance
                 Column(modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp)
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            shape = SmallExpressiveShape
                         ) {
-                            @Suppress("DEPRECATION")
                             Text(
-                                "RECORDS INDEX", 
+                                "SPLITS INDEX", 
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelSmall, 
                                 fontWeight = FontWeight.Black, 
@@ -265,7 +247,6 @@ fun StopwatchScreen(
                             )
                         }
                         if (state.laps.isNotEmpty()) {
-                            @Suppress("DEPRECATION")
                             Text(
                                 "${state.laps.size} DATA POINTS",
                                 style = MaterialTheme.typography.labelSmall,
@@ -279,16 +260,16 @@ fun StopwatchScreen(
                     if (state.laps.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Rounded.Flag, null, modifier = Modifier.size(100.dp).alpha(0.1f), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.height(20.dp))
-                                Text("AWAITING INITIALIZATION", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), letterSpacing = 1.sp)
+                                Icon(Icons.Rounded.Flag, null, modifier = Modifier.size(100.dp).alpha(0.1f), tint = primaryColor)
+                                Spacer(Modifier.height(24.dp))
+                                Text("AWAITING INITIALIZATION", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), letterSpacing = 1.5.sp)
                             }
                         }
                     } else {
                         LazyColumn(
-                            modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp)),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                            contentPadding = PaddingValues(bottom = 40.dp)
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 140.dp)
                         ) {
                             itemsIndexed(state.laps) { index, lapTime ->
                                 val duration = if (index == state.laps.size - 1) {
@@ -296,11 +277,13 @@ fun StopwatchScreen(
                                 } else {
                                     lapTime - state.laps[index + 1]
                                 }
-                                LapCard(
-                                    lapNumber = state.laps.size - index, 
-                                    totalTime = lapTime,
-                                    lapDuration = duration
-                                )
+                                StaggeredEntrance(index = index % 5) {
+                                    LapCardExpressive(
+                                        lapNumber = state.laps.size - index, 
+                                        totalTime = lapTime,
+                                        lapDuration = duration
+                                    )
+                                }
                             }
                         }
                     }
@@ -311,34 +294,37 @@ fun StopwatchScreen(
 }
 
 @Composable
-fun LapCard(lapNumber: Int, totalTime: Long, lapDuration: Long) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        shape = RoundedCornerShape(36.dp),
+fun LapCardExpressive(lapNumber: Int, totalTime: Long, lapDuration: Long) {
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = { vibrationManager?.vibrateTick() },
         modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.size(48.dp)
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    shape = SmallExpressiveShape,
+                    modifier = Modifier.size(52.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = String.format("%02d", lapNumber),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
-                Spacer(Modifier.width(20.dp))
+                Spacer(Modifier.width(24.dp))
                 Column {
                     Text(
                         text = "INTERVAL",
@@ -349,13 +335,13 @@ fun LapCard(lapNumber: Int, totalTime: Long, lapDuration: Long) {
                     )
                     Text(
                         text = formatTime(lapDuration),
-                        style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                        style = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
                     )
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "CUMULATIVE",
+                    text = "TOTAL",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     fontWeight = FontWeight.Black,
@@ -363,8 +349,8 @@ fun LapCard(lapNumber: Int, totalTime: Long, lapDuration: Long) {
                 )
                 Text(
                     text = formatTime(totalTime),
-                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
         }

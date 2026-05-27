@@ -581,7 +581,7 @@ fun PasswordStrengthIndicator(strength: Float) {
             Text("Security Strength", style = MaterialTheme.typography.labelSmall)
             Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
         }
-        LinearProgressIndicator(
+        com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
             progress = { strength },
             modifier = Modifier
                 .fillMaxWidth()

@@ -29,9 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.focus.CaffeinateApp
-import com.frerox.toolz.ui.components.AppIcon
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -83,8 +81,9 @@ fun CaffeinateScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("CAFFEINATE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "CAFFEINATE",
+                subtitle = if (isRunning) "KEEP AWAKE ACTIVE" else "System sleep prevention",
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
@@ -111,7 +110,9 @@ fun CaffeinateScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                largeFlexible = true,
+                modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
@@ -482,11 +483,13 @@ fun ReminderSettingsCard(
     onIntervalChange: (Float) -> Unit,
     onInfiniteToggle: (Boolean) -> Unit
 ) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth(),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -509,16 +512,9 @@ fun ReminderSettingsCard(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                Switch(
+                ExpressiveSwitch(
                     checked = !isInfinite,
-                    onCheckedChange = { onInfiniteToggle(!it) },
-                    thumbContent = {
-                        Icon(
-                            if (!isInfinite) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                            null,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                    onCheckedChange = { onInfiniteToggle(!it) }
                 )
             }
 
@@ -528,15 +524,14 @@ fun ReminderSettingsCard(
                         Text("5m", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
                         Text("120m", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
                     }
-                    Slider(
+                    ExpressiveSlider(
                         value = interval.toFloat(),
                         onValueChange = onIntervalChange,
                         valueRange = 5f..120f,
-                        steps = 23,
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(0.1f)
+                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                         )
                     )
                 }
@@ -583,16 +578,17 @@ fun CategoryManagerUI(
         categories.forEach { (category, categoryApps) ->
             var expanded by remember { mutableStateOf(false) }
 
-            Surface(
+            ExpressiveCard(
+                onClick = { expanded = !expanded },
                 shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                elevation = 0.dp
             ) {
                 Column {
                     Row(
                         modifier = Modifier
-                            .clickable { expanded = !expanded }
                             .padding(20.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

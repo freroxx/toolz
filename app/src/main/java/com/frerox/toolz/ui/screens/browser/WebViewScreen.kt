@@ -868,7 +868,7 @@ private fun TopChrome(
 
         // Thin progress bar
         if (progressAlpha > 0.01f) {
-            LinearProgressIndicator(
+            com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                 progress   = { progress },
                 modifier   = Modifier
                     .fillMaxWidth()

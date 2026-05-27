@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.search.SearchResult
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import kotlinx.coroutines.delay
 
 // ══════════════════════════════════════════════════════════
@@ -1316,12 +1317,11 @@ fun SelectableFilterChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FilterChip(
+    ExpressiveFilterChip(
         selected    = selected,
         onClick     = onClick,
         label       = { Text(label, style = MaterialTheme.typography.labelLarge) },
         modifier    = modifier,
-        shape       = CircleShape,
         leadingIcon = if (selected) {
             { Icon(Icons.Rounded.Check, null, modifier = Modifier.size(16.dp)) }
         } else null,

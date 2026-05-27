@@ -89,7 +89,11 @@ fun ToolzConnectedButtonGroup(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selectedIndex == index) FontWeight.Black else FontWeight.Medium
+                    fontWeight = if (selectedIndex == index) FontWeight.Black else FontWeight.Medium,
+                    color = if (selectedIndex == index) 
+                        MaterialTheme.colorScheme.onPrimaryContainer 
+                    else 
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

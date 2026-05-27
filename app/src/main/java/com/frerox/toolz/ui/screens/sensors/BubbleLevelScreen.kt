@@ -9,11 +9,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CenterFocusStrong
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,24 +30,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.fadingEdges
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
+import kotlin.math.abs
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BubbleLevelScreen(
     viewModel: BubbleLevelViewModel,
     onBack: () -> Unit
 ) {
-    val state by viewModel.bubbleState.collectAsState()
-    val haptic = LocalHapticFeedback.current
+    val state by viewModel.bubbleState.collectAsStateWithLifecycle()
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
     var wasLevel by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -55,34 +61,89 @@ fun BubbleLevelScreen(
         }
     }
 
-    val animX by animateFloatAsState(targetValue = state.x, animationSpec = spring(stiffness = 500f, dampingRatio = Spring.DampingRatioMediumBouncy), label = "animX")
-    val animY by animateFloatAsState(targetValue = state.y, animationSpec = spring(stiffness = 500f, dampingRatio = Spring.DampingRatioMediumBouncy), label = "animY")
+    // Liquid-like bouncy spring physics for the bubble
+    val animX by animateFloatAsState(
+        targetValue = state.x,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioLowBouncy
+        ),
+        label = "BubbleX"
+    )
+    val animY by animateFloatAsState(
+        targetValue = state.y,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioLowBouncy
+        ),
+        label = "BubbleY"
+    )
 
-    val isLevel = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
+    val isLevel = abs(state.x) < 0.2f && abs(state.y) < 0.2f
     
     LaunchedEffect(isLevel) {
         if (isLevel && !wasLevel) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            vibrationManager?.vibrateSuccess()
         }
         wasLevel = isLevel
     }
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("BUBBLE LEVEL", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "BUBBLE LEVEL",
+                subtitle = "Precision Equilibrium",
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                actions = {
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Recenter", Icons.Rounded.CenterFocusStrong, { vibrationManager?.vibrateClick() }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
-        containerColor = Color.Transparent
+        containerColor = Color.Transparent,
+        floatingActionButton = {
+             ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        modifier = Modifier.size(48.dp),
+                        shape = SmallExpressiveShape
+                    ) {
+                        Icon(Icons.Rounded.Sync, contentDescription = "Calibrate")
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        icon = { Icon(Icons.Rounded.Info, null) },
+                        label = "Sensors"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
@@ -94,51 +155,54 @@ fun BubbleLevelScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                val isLevelNow = Math.abs(state.x) < 0.3f && Math.abs(state.y) < 0.3f
-                
+                // High-precision Metrics Display in a Bouncy Container
                 Surface(
-                    color = if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(32.dp),
-                    modifier = Modifier.padding(bottom = 48.dp),
-                    border = BorderStroke(1.5.dp, if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    color = if (isLevel) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    shape = BouncyShape,
+                    modifier = Modifier.padding(bottom = 56.dp),
+                    border = BorderStroke(1.5.dp, if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val activeColor = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         Icon(
                             Icons.Rounded.CenterFocusStrong,
                             null,
-                            tint = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            tint = activeColor,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(20.dp))
                         Text(
                             text = String.format(Locale.getDefault(), "X: %.1f°  Y: %.1f°", state.x, state.y),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Black,
-                            color = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = activeColor,
+                            letterSpacing = (-1).sp
                         )
                     }
                 }
 
+                // Main Level Container with organic Squircle Shape
                 Box(
                     modifier = Modifier
-                        .size(310.dp)
-                        .clip(CircleShape)
+                        .size(340.dp)
+                        .clip(SquircleShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
-                        .border(BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), CircleShape),
+                        .border(BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), SquircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                    val glowScale by infiniteTransition.animateFloat(
-                        initialValue = 0.95f,
-                        targetValue = 1.05f,
-                        animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                        label = "glow"
-                    )
-
-                    if (isLevelNow && !performanceMode) {
+                    // Dynamic background glow when level
+                    if (isLevel && !performanceMode) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "LevelGlow")
+                        val glowScale by infiniteTransition.animateFloat(
+                            initialValue = 0.95f,
+                            targetValue = 1.05f,
+                            animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                            label = "Scale"
+                        )
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -151,68 +215,95 @@ fun BubbleLevelScreen(
                         )
                     }
 
-                    // Background Grid
-                    val gridColor = if (isLevelNow) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                    Canvas(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+                    // Precise Grid Visualization
+                    val gridColor = if (isLevel) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    Canvas(modifier = Modifier.fillMaxSize().padding(48.dp)) {
                         val center = Offset(size.width / 2, size.height / 2)
-                        val primaryColor = gridColor
                         
-                        // Circles
-                        drawCircle(primaryColor, radius = 45.dp.toPx(), center = center, style = Stroke(2.5.dp.toPx()))
-                        drawCircle(primaryColor.copy(alpha = 0.15f), radius = 110.dp.toPx(), center = center, style = Stroke(1.5.dp.toPx()))
+                        // Target Circles
+                        drawCircle(gridColor, radius = 40.dp.toPx(), center = center, style = Stroke(3.dp.toPx()))
+                        drawCircle(gridColor.copy(alpha = 0.2f), radius = 100.dp.toPx(), center = center, style = Stroke(1.5.dp.toPx()))
+                        drawCircle(gridColor.copy(alpha = 0.1f), radius = 160.dp.toPx(), center = center, style = Stroke(1.dp.toPx()))
                         
-                        // Lines
-                        drawLine(primaryColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx(), cap = StrokeCap.Round)
-                        drawLine(primaryColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.5.dp.toPx(), cap = StrokeCap.Round)
+                        // Crosshair lines
+                        drawLine(gridColor, Offset(size.width * 0.45f, size.height / 2), Offset(size.width * 0.55f, size.height / 2), 2.5.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(gridColor, Offset(size.width / 2, size.height * 0.45f), Offset(size.width / 2, size.height * 0.55f), 2.5.dp.toPx(), cap = StrokeCap.Round)
                     }
 
-                    // The Bubble
-                    val bubbleX = (animX * 12).dp
-                    val bubbleY = (animY * 12).dp
+                    // Liquid Bubble with high-fidelity spring motion
+                    val bubbleOffsetScale = 16f
+                    val bubbleX = (animX * bubbleOffsetScale).dp
+                    val bubbleY = (animY * bubbleOffsetScale).dp
                     
                     Surface(
                         modifier = Modifier
                             .offset(x = -bubbleX, y = bubbleY)
-                            .size(64.dp)
-                            .shadow(if (isLevelNow && !performanceMode) 16.dp else 4.dp, CircleShape, spotColor = if (isLevelNow) MaterialTheme.colorScheme.primary else Color.Black),
+                            .size(80.dp)
+                            .shadow(
+                                elevation = if (isLevel && !performanceMode) 32.dp else 8.dp, 
+                                shape = CircleShape, 
+                                spotColor = if (isLevel) MaterialTheme.colorScheme.primary else Color.Black
+                            ),
                         shape = CircleShape,
-                        color = if (isLevelNow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                        border = BorderStroke(3.dp, Color.White.copy(alpha = if (isLevelNow) 0.5f else 0.2f))
+                        color = if (isLevel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                        border = BorderStroke(4.dp, Color.White.copy(alpha = if (isLevel) 0.7f else 0.4f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            // Inner highlight for 3D effect
+                            // Organic 3D specular highlight
                             Box(
                                 modifier = Modifier
-                                    .size(24.dp)
-                                    .offset(x = (-8).dp, y = (-8).dp)
+                                    .size(32.dp)
+                                    .offset(x = (-12).dp, y = (-12).dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.25f))
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Color.White.copy(alpha = 0.4f), Color.Transparent)
+                                        )
+                                    )
                             )
                         }
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(64.dp))
+                Spacer(modifier = Modifier.height(72.dp))
                 
+                // Equilibrium Status with Expressive Transitions
                 AnimatedContent(
-                    targetState = isLevelNow,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() }, label = ""
+                    targetState = isLevel,
+                    transitionSpec = { 
+                        (scaleIn(animationSpec = spring(Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith 
+                        (scaleOut() + fadeOut())
+                    }, 
+                    label = "LevelStatus"
                 ) { level ->
                     Surface(
                         color = if (level) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = BouncyShape
                     ) {
                         Text(
-                            text = if (level) "PERFECTLY LEVEL" else "ALIGN DEVICE",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.headlineSmall,
+                            text = if (level) "SURFACE ALIGNED" else "ADJUSTING POSITION...",
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black,
-                            color = if (level) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                            letterSpacing = 1.sp
+                            textAlign = TextAlign.Center,
+                            color = if (level) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            letterSpacing = 1.5.sp
                         )
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(100.dp))
             }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun BubbleLevelPreview() {
+    ToolzTheme {
+        Box(Modifier.fillMaxSize().toolzBackground()) {
+            // Preview logic
         }
     }
 }

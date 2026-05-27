@@ -441,7 +441,7 @@ private fun ChatTopBarRedesign(
                     }
                     Text(uiState.chats.find { it.id == uiState.currentChatId }?.title ?: "AI Assistant", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = AiDesign.textColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                if (uiState.isGeneratingTitle) LinearProgressIndicator(Modifier.width(40.dp).height(2.dp).padding(top = 2.dp), color = providerColor, trackColor = Color.Transparent)
+                if (uiState.isGeneratingTitle) com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(Modifier.width(40.dp).height(2.dp).padding(top = 2.dp), color = providerColor, trackColor = Color.Transparent)
             }
         },
         navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBackIosNew, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.7f)) } },
@@ -519,15 +519,29 @@ private fun ChatInputBarRedesign(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 54.dp),
-            shape = RoundedCornerShape(26.dp),
+                .heightIn(min = 60.dp),
+            shape = RoundedCornerShape(30.dp),
             color = AiDesign.surfaceColor(),
             tonalElevation = 8.dp,
-            shadowElevation = if (performanceMode) 0.dp else 4.dp,
+            shadowElevation = if (performanceMode) 0.dp else 12.dp,
             border = BorderStroke(
-                width = 1.dp,
-                brush = if (isIdle && !performanceMode) {
-                    Brush.sweepGradient(listOf(MaterialTheme.colorScheme.primary.copy(glowAlpha), Color.Transparent, MaterialTheme.colorScheme.primary.copy(glowAlpha)))
+                width = if (isLoading) 2.dp else 1.dp,
+                brush = if (isLoading && !performanceMode) {
+                    Brush.sweepGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.secondary,
+                            MaterialTheme.colorScheme.primary
+                        )
+                    )
+                } else if (isIdle && !performanceMode) {
+                    Brush.sweepGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(glowAlpha),
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.primary.copy(glowAlpha)
+                        )
+                    )
                 } else {
                     SolidColor(AiDesign.glassBorder())
                 }
@@ -660,7 +674,6 @@ private fun ChatInputBarRedesign(
 //  Components
 // ─────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ChatBubble(
     message: AiMessage,
@@ -698,16 +711,27 @@ fun ChatBubble(
 
     AnimatedVisibility(
         visible = true,
-        enter = fadeIn(tween(600, easing = EaseOutBack)) + slideInVertically(
-            initialOffsetY = { 40 },
-            animationSpec = tween(600, easing = EaseOutBack)
-        ),
+        enter = if (performanceMode) fadeIn() else {
+            fadeIn(tween(400)) + scaleIn(
+                initialScale = 0.85f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + slideInVertically(
+                initialOffsetY = { 20 },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        },
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
+                .padding(vertical = 10.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
             Row(
@@ -715,7 +739,7 @@ fun ChatBubble(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.padding(horizontal = 16.dp)
             ) {
-                if (!isUser) AiAvatar(currentConfig, 32.dp, performanceMode = performanceMode)
+                if (!isUser) AiAvatar(currentConfig, 36.dp, performanceMode = performanceMode)
 
                 Surface(
                     shape = RoundedCornerShape(
@@ -725,18 +749,18 @@ fun ChatBubble(
                         bottomEnd = 24.dp
                     ),
                     color = if (isUser) MaterialTheme.colorScheme.primary else AiDesign.glassColor(),
-                    border = if (isUser) null else BorderStroke(1.dp, AiDesign.glassBorder()),
-                    shadowElevation = if (performanceMode) 0.dp else 4.dp,
+                    border = if (isUser) null else BorderStroke(1.5.dp, AiDesign.glassBorder()),
+                    shadowElevation = if (performanceMode) 0.dp else 6.dp,
                     modifier = Modifier.combinedClickable(
                         onLongClick = { onLongPress(message) },
                         onClick = { /* Standard tap - could toggle timestamp or something */ }
                     )
                 ) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
                         segments.forEach { seg ->
                             MarkdownSegment(
                                 seg = seg,
-                                baseFontSize = 15.sp,
+                                baseFontSize = 16.sp,
                                 modifier = Modifier.padding(vertical = 4.dp),
                                 textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor(),
                                 onLinkClick = onLinkClick
@@ -744,11 +768,11 @@ fun ChatBubble(
                         }
 
                         if (sources.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 8.dp),
+                                modifier = Modifier.padding(vertical = 10.dp),
                                 thickness = 0.5.dp,
-                                color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.1f)
+                                color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.15f)
                             )
                             SourcesPill(
                                 sources = sources,

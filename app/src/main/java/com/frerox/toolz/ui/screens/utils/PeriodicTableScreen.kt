@@ -35,6 +35,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -109,89 +112,77 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            Surface(
-                color = Color.Transparent,
-                tonalElevation = 0.dp
-            ) {
-                Column(modifier = Modifier.statusBarsPadding()) {
-                    CenterAlignedTopAppBar(
-                        title = { 
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("PERIODIC TABLE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, letterSpacing = 2.sp)
-                                if (!isLoading) {
-                                    @Suppress("DEPRECATION")
-                                    Text("${allElements.size} ELEMENTS INDEXED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                    )
-                    
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp),
-                        placeholder = { Text("Search by name, symbol or number...") },
-                        leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                        shape = RoundedCornerShape(24.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        )
-                    )
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        item {
-                            Surface(
-                                onClick = { selectedCategory = null },
-                                color = if (selectedCategory == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = if (selectedCategory != null) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
-                            ) {
-                                Text(
-                                    "ALL",
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (selectedCategory == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
+                ExpressiveTopAppBar(
+                    title = "PERIODIC TABLE",
+                    subtitle = if (isLoading) "Synthesizing atomic database..." else "${allElements.size} elements indexed",
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
-                        items(categories) { category ->
-                            val isSelected = selectedCategory == category
-                            val catColor = allElements.find { it.category == category }?.color ?: MaterialTheme.colorScheme.primary
-                            
-                            Surface(
-                                onClick = { selectedCategory = category },
-                                color = if (isSelected) catColor else catColor.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = if (!isSelected) BorderStroke(1.dp, catColor.copy(alpha = 0.3f)) else null
-                            ) {
-                                Text(
-                                    category.uppercase(),
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (isSelected) Color.White else catColor
-                                )
-                            }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                )
+                
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    placeholder = { Text("Search by name, symbol or number...") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                    shape = RoundedCornerShape(24.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    )
+                )
+
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Surface(
+                            onClick = { selectedCategory = null },
+                            color = if (selectedCategory == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = if (selectedCategory != null) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
+                        ) {
+                            Text(
+                                "ALL",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = if (selectedCategory == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    items(categories) { category ->
+                        val isSelected = selectedCategory == category
+                        val catColor = allElements.find { it.category == category }?.color ?: MaterialTheme.colorScheme.primary
+                        
+                        Surface(
+                            onClick = { selectedCategory = category },
+                            color = if (isSelected) catColor else catColor.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = if (!isSelected) BorderStroke(1.dp, catColor.copy(alpha = 0.3f)) else null
+                        ) {
+                            Text(
+                                category.uppercase(),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = if (isSelected) Color.White else catColor
+                            )
                         }
                     }
                 }
@@ -282,13 +273,12 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
 
 @Composable
 fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        modifier = modifier
-            .aspectRatio(1f)
-            .bouncyClick(onClick = onClick),
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier.aspectRatio(1f),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
+        containerColor = MaterialTheme.colorScheme.surface,
+        elevation = 4.dp,
         border = BorderStroke(
             width = 2.dp,
             brush = Brush.linearGradient(
@@ -508,11 +498,13 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
 
 @Composable
 fun DetailCard(modifier: Modifier, label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)

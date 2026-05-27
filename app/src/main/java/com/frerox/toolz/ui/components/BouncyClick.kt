@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
@@ -25,7 +26,7 @@ enum class ButtonState { Pressed, Idle }
 
 fun Modifier.bouncyClick(
     enabled: Boolean = true,
-    scaleDown: Float = 0.94f,
+    scaleDown: Float = 0.92f,
     haptic: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
@@ -39,8 +40,8 @@ fun Modifier.bouncyClick(
     val scale by animateFloatAsState(
         targetValue = if (buttonState == ButtonState.Pressed && enabled && !performanceMode) scaleDown else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+            dampingRatio = 0.6f,
+            stiffness = Spring.StiffnessMediumLow
         ),
         label = "BouncyClickScale"
     )
@@ -53,7 +54,10 @@ fun Modifier.bouncyClick(
         .drawWithContent {
             drawContent()
             if (buttonState == ButtonState.Pressed && enabled && !performanceMode) {
-                drawRect(color = Color.White.copy(alpha = 0.05f))
+                drawRect(
+                    color = Color.White.copy(alpha = 0.08f),
+                    blendMode = BlendMode.Overlay
+                )
             }
         }
         .combinedClickable(

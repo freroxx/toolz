@@ -26,6 +26,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -71,8 +75,9 @@ fun LightMeterScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("LIGHT METER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "LIGHT METER",
+                subtitle = "Ambient illumination analytics",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -89,7 +94,8 @@ fun LightMeterScreen(
                         Icon(Icons.Rounded.Refresh, contentDescription = "Reset Max")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent
@@ -164,14 +170,16 @@ fun LightMeterScreen(
                     Spacer(modifier = Modifier.height(40.dp))
 
                     // Status Card
-                    Surface(
-                        color = animatedColor.copy(alpha = 0.1f),
+                    ExpressiveCard(
+                        onClick = {},
+                        containerColor = animatedColor.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(32.dp),
                         modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.5.dp, animatedColor.copy(alpha = 0.2f))
+                        border = BorderStroke(1.5.dp, animatedColor.copy(alpha = 0.2f)),
+                        elevation = 0.dp
                     ) {
                         Column(
-                            modifier = Modifier.padding(24.dp),
+                            modifier = Modifier.padding(24.dp).fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Surface(
@@ -232,14 +240,16 @@ fun LightMeterScreen(
 
 @Composable
 fun InfoCard(modifier: Modifier, label: String, value: String, unit: String, color: Color) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(20.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
