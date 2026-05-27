@@ -98,6 +98,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -140,9 +141,15 @@ import com.frerox.toolz.data.network.NetworkPowerUiState
 import com.frerox.toolz.data.network.PingSample
 import com.frerox.toolz.data.network.ProcessNetworkUsage
 import com.frerox.toolz.data.network.VpnStatus
-import com.frerox.toolz.ui.screens.network.components.TerminalOverlay
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.ui.screens.network.components.TerminalOverlay
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdges
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.draw.drawBehind
@@ -251,30 +258,14 @@ fun NetworkPowerSuiteScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                CenterAlignedTopAppBar(
-                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "Network Power-Suite",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black
-                            )
-                            Text(
-                                uiState.wifiState.ssid,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
+                ExpressiveTopAppBar(
+                    title = "NETWORK SUITE",
+                    subtitle = if (uiState.wifiState.ssid.isNotEmpty()) uiState.wifiState.ssid else "Scanning connectivity",
                     navigationIcon = {
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
-                        }) {
+                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     },
@@ -282,10 +273,13 @@ fun NetworkPowerSuiteScreen(
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
                             viewModel.refreshSuite()
-                        }) {
+                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                             Icon(Icons.Rounded.Refresh, contentDescription = "Refresh suite")
                         }
-                    }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                    largeFlexible = true,
+                    modifier = Modifier.statusBarsPadding()
                 )
             }
         ) { padding ->
@@ -906,7 +900,7 @@ private fun DiagnosticsTab(
                 MetricRow("Download", "${uiState.speedTestResult.downloadSpeedMbps.format(1)} Mbps")
                 MetricRow("Progress", "${(uiState.speedTestResult.progress * 100).roundToInt()}%")
                 Spacer(Modifier.height(10.dp))
-                LinearProgressIndicator(
+                com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                     progress = { uiState.speedTestResult.progress },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1545,14 +1539,13 @@ private fun GlassCard(
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .animateContentSize(animationSpec = spring(stiffness = 280f)),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 2.dp,
+    ExpressiveCard(
+        onClick = {},
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f))
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)),
+        elevation = 2.dp
     ) {
         Column(
             modifier = Modifier

@@ -177,7 +177,7 @@ fun TabManagementScreen(
                         enter   = expandVertically(),
                         exit    = shrinkVertically(),
                     ) {
-                        LinearProgressIndicator(
+                        com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                             progress = { if (tabs.isEmpty()) 0f else selectedIds.size.toFloat() / tabs.size },
                             modifier  = Modifier.fillMaxWidth(),
                             color     = ElectricViolet,

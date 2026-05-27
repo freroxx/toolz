@@ -197,8 +197,8 @@ class ClipboardViewModel @Inject constructor(
             try {
                 val prompt = """
                     Classify this clipboard content and provide a punchy 1-sentence summary (max 15 words).
-                    You can use standard categories (TEXT, URL, PHONE, EMAIL, MATHS, CODE, ADDRESS, CRYPO, TODO) 
-                    or CREATE A NEW ONE if it fits better (e.g., RECIPE, FLIGHT, PROMPT, QUOTE, etc.).
+                    You can use standard categories (TEXT, URL, SOCIAL, PHONE, OTP, EMAIL, MATHS, PERSONAL, CODE, ADDRESS, CRYPTO, TODO, RECIPE, FLIGHT, EVENT, QUOTE) 
+                    or CREATE A NEW ONE if it fits better.
                     Keep category names uppercase and single-word.
                     
                     Content: ${entry.content.take(1500)}
@@ -206,7 +206,7 @@ class ClipboardViewModel @Inject constructor(
                     Respond in JSON format: {"category": "CATEGORY_NAME", "summary": "Short summary"}
                 """.trimIndent()
 
-                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
+                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.1-8b-instant").collect { result ->
                     result.onSuccess { chunk ->
                         val response = chunk.text
                         val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type
@@ -218,6 +218,20 @@ class ClipboardViewModel @Inject constructor(
                 e.printStackTrace()
             } finally {
                 _isSummarizing.value = null
+            }
+        }
+    }
+
+    fun categorizeAllWithAi() {
+        viewModelScope.launch {
+            val unproccessed = entries.value.filter { !it.isAiProcessed }.take(10)
+            if (unproccessed.isEmpty()) {
+                refreshClipboard()
+                return@launch
+            }
+
+            unproccessed.forEach { entry ->
+                summarizeEntry(entry)
             }
         }
     }

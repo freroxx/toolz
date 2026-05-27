@@ -435,7 +435,7 @@ private fun ScanningView(state: ScanState.Scanning) {
 
         Spacer(Modifier.height(16.dp))
 
-        LinearProgressIndicator(
+        com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
             progress = { state.progress },
             modifier = Modifier
                 .fillMaxWidth(0.85f)

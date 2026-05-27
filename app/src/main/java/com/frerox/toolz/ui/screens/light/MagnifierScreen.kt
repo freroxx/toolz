@@ -43,6 +43,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -129,8 +133,9 @@ fun MagnifierScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("MAGNIFIER ENGINE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "MAGNIFIER ENGINE",
+                subtitle = "Optical zoom precision",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -139,7 +144,8 @@ fun MagnifierScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
@@ -213,13 +219,15 @@ fun MagnifierScreen(
                         }
                     }
                     
-                    Surface(
+                    ExpressiveCard(
+                        onClick = {},
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 16.dp),
                         shape = RoundedCornerShape(40.dp),
-                        color = surfaceVariantColor.copy(alpha = 0.3f),
-                        border = BorderStroke(1.dp, outlineVariantColor.copy(alpha = 0.2f))
+                        containerColor = surfaceVariantColor.copy(alpha = 0.3f),
+                        border = BorderStroke(1.dp, outlineVariantColor.copy(alpha = 0.2f)),
+                        elevation = 0.dp
                     ) {
                         Column(modifier = Modifier.padding(28.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {

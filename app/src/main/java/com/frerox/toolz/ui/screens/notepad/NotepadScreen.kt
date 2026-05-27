@@ -59,9 +59,13 @@ import androidx.compose.ui.text.input.VisualTransformation
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.components.MarkdownSegment
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -159,12 +163,12 @@ private fun NoteCardOptionsSheet(
 
             sizeOptions.forEach { (value, label) ->
                 val selected = note.cardSize == value
-                Surface(
+                ExpressiveCard(
                     onClick = {
                         vibration?.vibrateClick()
                         onSizeSelected(value)
                     },
-                    color = onColor.copy(if (selected) 0.16f else 0.08f),
+                    containerColor = onColor.copy(if (selected) 0.16f else 0.08f),
                     shape = RoundedCornerShape(22.dp),
                     border = BorderStroke(1.dp, onColor.copy(if (selected) 0.28f else 0.12f)),
                 ) {
@@ -199,12 +203,12 @@ private fun NoteCardOptionsSheet(
                 }
             }
 
-            Surface(
+            ExpressiveCard(
                 onClick = {
                     vibration?.vibrateLongClick()
                     onSelect()
                 },
-                color = onColor.copy(0.08f),
+                containerColor = onColor.copy(0.08f),
                 shape = RoundedCornerShape(18.dp),
                 border = BorderStroke(1.dp, onColor.copy(0.12f)),
             ) {
@@ -265,10 +269,10 @@ private fun resolveNoteCardStyle(
 ): NoteCardStyle {
     val requestedSize = note.cardSize.uppercase(Locale.getDefault())
     val baseShape = when {
-        note.attachedAudioUri != null -> RoundedCornerShape(34.dp, 26.dp, 34.dp, 26.dp)
-        note.attachedImageUri != null -> RoundedCornerShape(32.dp, 18.dp, 32.dp, 18.dp)
-        note.attachedPdfUri != null -> RoundedCornerShape(22.dp)
-        else -> RoundedCornerShape(28.dp)
+        note.attachedAudioUri != null -> RoundedCornerShape(36.dp, 28.dp, 36.dp, 28.dp)
+        note.attachedImageUri != null -> RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
+        note.attachedPdfUri != null -> RoundedCornerShape(24.dp)
+        else -> RoundedCornerShape(32.dp)
     }
 
     return when (requestedSize) {
@@ -276,17 +280,17 @@ private fun resolveNoteCardStyle(
         NOTE_CARD_SIZE_MEDIUM -> NoteCardStyle(1, 228.dp, 148.dp, baseShape)
         NOTE_CARD_SIZE_LARGE -> NoteCardStyle(
             span = 2,
-            minHeight = 250.dp,
-            imageHeight = if (imageHint?.isLandscape == true) 220.dp else 188.dp,
+            minHeight = 260.dp,
+            imageHeight = if (imageHint?.isLandscape == true) 230.dp else 200.dp,
             shape = baseShape,
         )
         else -> when {
-            note.attachedAudioUri != null -> NoteCardStyle(2, 230.dp, 160.dp, baseShape)
+            note.attachedAudioUri != null -> NoteCardStyle(2, 240.dp, 160.dp, baseShape)
             note.attachedImageUri != null && (imageHint?.isLandscape == true || imageHint?.isLarge == true) ->
-                NoteCardStyle(2, 236.dp, if (imageHint.isLandscape) 220.dp else 192.dp, baseShape)
-            note.attachedPdfUri != null -> NoteCardStyle(1, 210.dp, 108.dp, baseShape)
-            note.content.length > 240 -> NoteCardStyle(2, 220.dp, 140.dp, baseShape)
-            else -> NoteCardStyle(1, 196.dp, 132.dp, baseShape)
+                NoteCardStyle(2, 246.dp, if (imageHint.isLandscape) 230.dp else 200.dp, baseShape)
+            note.attachedPdfUri != null -> NoteCardStyle(1, 220.dp, 108.dp, baseShape)
+            note.content.length > 240 -> NoteCardStyle(2, 230.dp, 140.dp, baseShape)
+            else -> NoteCardStyle(1, 200.dp, 132.dp, baseShape)
         }
     }
 }
@@ -420,39 +424,22 @@ fun NotepadScreen(
                             )
                         )
                     )
-                    .statusBarsPadding()
             ) {
-                // Header
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        AnimatedContent(
-                            targetState = isSelectionMode,
-                            transitionSpec = { fadeIn() togetherWith fadeOut() },
-                            label = "title"
-                        ) { selecting ->
-                            Text(
-                                if (selecting) "${selectedNoteIds.size} SELECTED" else "MY NOTES",
-                                fontWeight    = FontWeight.Black,
-                                style         = MaterialTheme.typography.headlineMedium,
-                                letterSpacing = (-1).sp,
-                                color         = MaterialTheme.colorScheme.onSurface,
-                            )
+                ExpressiveTopAppBar(
+                    title = if (isSelectionMode) "${selectedNoteIds.size} SELECTED" else "MY NOTES",
+                    subtitle = if (isSelectionMode) "Apply batch actions" else "${notes.size} thoughts captured",
+                    navigationIcon = {
+                        IconButton(
+                            onClick = if (isSelectionMode) { { selectedNoteIds = emptySet() } } else onBack,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Icon(if (isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack, null)
                         }
-                        Text(
-                            "${notes.size} total notes",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(0.4f),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    },
+                    actions = {
                         if (isSelectionMode) {
                             IconButton(
                                 onClick = {
@@ -478,26 +465,14 @@ fun NotepadScreen(
                             ) {
                                 Icon(Icons.Rounded.Delete, "Delete Selected", tint = MaterialTheme.colorScheme.error)
                             }
-                            IconButton(
-                                onClick = { selectedNoteIds = emptySet() },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp)),
-                            ) {
-                                Icon(Icons.Rounded.Close, "Cancel")
-                            }
                         } else {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(16.dp)),
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
-                            }
+                            // Search Toggle or other actions if needed
                         }
-                    }
-                }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                    largeFlexible = true,
+                    modifier = Modifier.statusBarsPadding()
+                )
 
                 // Glassy Search Bar
                 Surface(
@@ -980,7 +955,9 @@ private fun NoteCard(
         }
     }
 
-    Surface(
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = onLongClick,
         modifier       = modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -992,11 +969,11 @@ private fun NoteCard(
                     dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow,
                 )
-            )
-            .bouncyClick(onClick = onClick, onLongClick = onLongClick),
+            ),
         shape          = cardStyle.shape,
-        color          = noteColor,
-        shadowElevation = if (performanceMode) 0.dp else 4.dp,
+        containerColor = noteColor,
+        contentColor = onColor,
+        elevation = if (performanceMode) 0.dp else 4.dp,
         border         = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
                          else BorderStroke(1.dp, onColor.copy(alpha = 0.08f)),
     ) {

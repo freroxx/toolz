@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
@@ -20,34 +19,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.steps.StepEntry
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun StepCounterScreen(
     viewModel: StepCounterViewModel,
     onBack: () -> Unit
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val vibrationManager = LocalVibrationManager.current
     
     val activityPermissionState = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         rememberPermissionState(Manifest.permission.ACTIVITY_RECOGNITION)
@@ -57,46 +59,68 @@ fun StepCounterScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        @Suppress("DEPRECATION")
-                        Text(
-                            text = "FITNESS TRACKER",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 3.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = { /* History action */ },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        ) {
-                            Icon(Icons.Rounded.History, contentDescription = "History")
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-                )
-            }
+            ExpressiveTopAppBar(
+                title = "TRACKER",
+                subtitle = "Active Daily Progress",
+                navigationIcon = {
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Step Goal", Icons.Rounded.EmojiEvents, { vibrationManager?.vibrateClick() }),
+                            Triple("History", Icons.Rounded.History, { vibrationManager?.vibrateClick() }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
+            )
         },
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                        },
+                        modifier = Modifier.size(48.dp),
+                        shape = SmallExpressiveShape
+                    ) {
+                        Icon(Icons.Rounded.DirectionsRun, contentDescription = "Sync")
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        icon = { Icon(Icons.Rounded.BarChart, null) },
+                        label = "STATS"
+                    )
+                    clickableItem(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        icon = { Icon(Icons.Rounded.Favorite, null) },
+                        label = "HEALTH"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
         val hasActivityPermission = activityPermissionState?.status?.isGranted ?: true
         
@@ -107,16 +131,22 @@ fun StepCounterScreen(
         ) {
             when {
                 !state.isEnabledInSettings -> {
-                    DisabledInSettingsState(onEnable = { viewModel.toggleStepCounter(true) })
+                    DisabledInSettingsView { 
+                        vibrationManager?.vibrateClick()
+                        viewModel.toggleStepCounter(true) 
+                    }
                 }
                 !hasActivityPermission -> {
-                    PermissionDeniedState { activityPermissionState?.launchPermissionRequest() }
+                    PermissionDeniedView { 
+                        vibrationManager?.vibrateClick()
+                        activityPermissionState?.launchPermissionRequest() 
+                    }
                 }
                 !state.isSensorPresent -> {
-                    NoSensorState()
+                    NoSensorView()
                 }
                 else -> {
-                    StepContent(state)
+                    StepContentLayout(state)
                 }
             }
         }
@@ -124,101 +154,39 @@ fun StepCounterScreen(
 }
 
 @Composable
-fun DisabledInSettingsState(onEnable: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            modifier = Modifier.size(140.dp),
-            shape = RoundedCornerShape(48.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.DirectionsRun,
-                    contentDescription = null,
-                    modifier = Modifier.size(72.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(40.dp))
-        Text(
-            "TRACKING DISABLED",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center,
-            letterSpacing = (-1).sp
-        )
-        Text(
-            "Step counter is currently disabled. Enable it to start tracking your daily progress and reach your goals.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp, bottom = 40.dp)
-        )
-        Button(
-            onClick = onEnable,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .bouncyClick {},
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Text("ENABLE TRACKER", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-        }
-    }
-}
-
-@Composable
-fun StepContent(state: StepState) {
+private fun StepContentLayout(state: StepState) {
     val performanceMode = LocalPerformanceMode.current
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .fadingEdges(top = 24.dp, bottom = 24.dp),
+            .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { visible = true }
-            AnimatedVisibility(
-                visible = visible, 
-                enter = if (performanceMode) fadeIn() else (fadeIn() + expandVertically())
-            ) {
-                StepProgressCard(state.steps, state.goal)
+            StaggeredEntrance(index = 0) {
+                StepProgressCardExpressive(state.steps, state.goal)
             }
         }
 
         item {
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { delay(100); visible = true }
-            AnimatedVisibility(
-                visible = visible, 
-                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    StatCard(
-                        modifier = Modifier.weight(1f),
+                StaggeredEntrance(index = 1, modifier = Modifier.weight(1f)) {
+                    ActivityStatCard(
                         title = "CALORIES",
-                        value = "${(state.steps * 0.04).toInt()}",
+                        value = "${(state.steps * 0.045).toInt()}",
                         unit = "KCAL",
                         icon = Icons.Rounded.Whatshot,
                         color = Color(0xFFFF5722)
                     )
-                    StatCard(
-                        modifier = Modifier.weight(1f),
+                }
+                StaggeredEntrance(index = 2, modifier = Modifier.weight(1f)) {
+                    ActivityStatCard(
                         title = "DISTANCE",
-                        value = String.format("%.2f", state.steps * 0.000762),
+                        value = String.format("%.2f", state.steps * 0.00078),
                         unit = "KM",
                         icon = Icons.Rounded.Route,
                         color = Color(0xFF2196F3)
@@ -228,69 +196,46 @@ fun StepContent(state: StepState) {
         }
 
         item {
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { delay(200); visible = true }
-            AnimatedVisibility(
-                visible = visible, 
-                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
-            ) {
-                WeeklyHistoryCard(state.weeklyHistory, state.goal)
+            StaggeredEntrance(index = 3) {
+                ActivityHistoryCardExpressive(state.weeklyHistory, state.goal)
             }
         }
         
         item {
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { delay(300); visible = true }
-            AnimatedVisibility(
-                visible = visible, 
-                enter = if (performanceMode) fadeIn() else (fadeIn() + slideInVertically { it / 2 })
-            ) {
-                DailyGoalSection(state.goal)
-            }
-        }
-        
-        item {
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(120.dp))
         }
     }
 }
 
 @Composable
-fun StepProgressCard(steps: Int, goal: Int) {
-    Surface(
+private fun StepProgressCardExpressive(steps: Int, goal: Int) {
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = { vibrationManager?.vibrateTick() },
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(48.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
-        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier
-                .padding(32.dp)
-                .fillMaxWidth(),
+            modifier = Modifier.padding(32.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
                 val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0f, 1f)
                 val animatedProgress by animateFloatAsState(
                     targetValue = progress,
-                    animationSpec = tween(1500, easing = FastOutSlowInEasing),
-                    label = "Step Progress"
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+                    label = "GoalProgress"
                 )
                 
-                CircularProgressIndicator(
-                    progress = { 1f },
-                    modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
-                    strokeCap = StrokeCap.Round,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                )
-                
-                CircularProgressIndicator(
+                // Official Circular Wavy Progress Indicator
+                ToolzWavyCircularProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier.fillMaxSize(),
-                    strokeWidth = 24.dp,
-                    strokeCap = StrokeCap.Round,
                     color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f),
                 )
                 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -298,23 +243,23 @@ fun StepProgressCard(steps: Int, goal: Int) {
                         text = steps.toString(),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontWeight = FontWeight.Black,
-                            fontSize = 60.sp,
-                            letterSpacing = (-2).sp
+                            fontSize = 80.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = (-4).sp
                         ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    @Suppress("DEPRECATION")
                     Text(
                         text = "STEPS TODAY",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
+                        letterSpacing = 2.sp
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(40.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -322,21 +267,19 @@ fun StepProgressCard(steps: Int, goal: Int) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    @Suppress("DEPRECATION")
-                    Text("GOAL PROGRESS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
-                    Text("${(steps.toFloat() / goal.toFloat() * 100).toInt()}% COMPLETED", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                    Text("PROGRESS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline, letterSpacing = 1.sp)
+                    Text("${(steps.toFloat() / goal.toFloat() * 100).toInt()}% OF DAILY GOAL", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }
                 Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(14.dp)
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    shape = BouncyShape
                 ) {
-                    @Suppress("DEPRECATION")
                     Text(
-                        "TARGET: $goal",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelSmall,
+                        "GOAL: $goal",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -345,46 +288,49 @@ fun StepProgressCard(steps: Int, goal: Int) {
 }
 
 @Composable
-fun StatCard(
-    modifier: Modifier = Modifier,
+private fun ActivityStatCard(
     title: String,
     value: String,
     unit: String,
     icon: ImageVector,
     color: Color
 ) {
-    Surface(
-        modifier = modifier.height(130.dp),
-        shape = RoundedCornerShape(32.dp),
-        color = color.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = { vibrationManager?.vibrateTick() },
+        modifier = Modifier.height(140.dp),
+        shape = BouncyShape,
+        containerColor = color.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Surface(
                 modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(12.dp),
+                shape = SmallExpressiveShape,
                 color = color.copy(alpha = 0.15f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
                 }
             }
             Column {
-                Text(text = value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                @Suppress("DEPRECATION")
-                Text(text = "$unit $title", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color.copy(alpha = 0.8f))
+                Text(text = value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                Text(text = "$unit $title", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(alpha = 0.8f), letterSpacing = 0.5.sp)
             }
         }
     }
 }
 
 @Composable
-fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
-    Surface(
+private fun ActivityHistoryCardExpressive(history: List<StepEntry>, goal: Int) {
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(40.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
             Row(
@@ -394,29 +340,26 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
             ) {
                 @Suppress("DEPRECATION")
                 Text(
-                    "WEEKLY ACTIVITY",
+                    "WEEKLY PERFORMANCE",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
                     letterSpacing = 2.sp
                 )
                 Icon(
-                    Icons.Rounded.BarChart,
+                    Icons.Rounded.TrendingUp,
                     null,
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(40.dp))
             
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp),
+                modifier = Modifier.fillMaxWidth().height(180.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                val calendar = Calendar.getInstance()
                 val days = (0..6).map { i ->
                     val cal = Calendar.getInstance()
                     cal.add(Calendar.DAY_OF_YEAR, -i)
@@ -426,42 +369,37 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
                 days.forEachIndexed { index, dateStr ->
                     val entry = history.find { dateStr == it.date }
                     val steps = entry?.steps ?: 0
-                    val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0.05f, 1f)
+                    val progress = (steps.toFloat() / goal.toFloat()).coerceIn(0.05f, 1.2f)
                     
                     val animatedHeight by animateFloatAsState(
                         targetValue = progress,
-                        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                         label = "BarHeight"
                     )
 
                     val dayName = try {
                         val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateStr)
                         SimpleDateFormat("EEE", Locale.getDefault()).format(date!!).uppercase()
-                    } catch (e: Exception) {
-                        dateStr.takeLast(2)
-                    }
+                    } catch (e: Exception) { "D" }
 
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Box(
                             modifier = Modifier
-                                .width(12.dp)
-                                .fillMaxHeight(animatedHeight)
+                                .width(16.dp)
+                                .fillMaxHeight(animatedHeight.coerceAtMost(1f))
                                 .clip(CircleShape)
                                 .background(
                                     if (steps >= goal) MaterialTheme.colorScheme.primary 
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
                                 )
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         @Suppress("DEPRECATION")
                         Text(
-                            text = dayName.first().toString(),
+                            text = dayName.take(1),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = if (index == 6) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            color = if (index == 6) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                         )
                     }
                 }
@@ -471,81 +409,68 @@ fun WeeklyHistoryCard(history: List<StepEntry>, goal: Int) {
 }
 
 @Composable
-fun DailyGoalSection(goal: Int) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick {},
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+private fun DisabledInSettingsView(onEnable: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Row(
-            modifier = Modifier.padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Surface(
+            modifier = Modifier.size(160.dp),
+            shape = LargeExpressiveShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFFC107).copy(alpha = 0.15f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.EmojiEvents, contentDescription = null, tint = Color(0xFFFFC107))
-                    }
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    @Suppress("DEPRECATION")
-                    Text("DAILY GOAL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
-                    Text("$goal STEPS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                }
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.primary)
             }
-            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
-    }
-}
-
-@Composable
-fun PermissionDeniedState(onGrant: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(80.dp).alpha(0.2f), tint = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(32.dp))
-        Text("PERMISSION REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(48.dp))
+        Text("TRACKING PAUSED", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
         Text(
-            "Tracking your activity requires permission to use physical sensors. This data stays private on your device.",
+            "The activity sensor is currently inactive. Re-enable to resume your fitness journey.",
+            style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp, bottom = 40.dp)
+            modifier = Modifier.padding(top = 16.dp, bottom = 48.dp)
         )
-        Button(
-            onClick = onGrant,
-            modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick {},
-            shape = RoundedCornerShape(24.dp)
-        ) {
-            Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+        ToolzExpressiveButton(onClick = onEnable, modifier = Modifier.fillMaxWidth().height(72.dp), shape = BouncyShape) {
+            Text("RESUME TRACKING", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
         }
     }
 }
 
 @Composable
-fun NoSensorState() {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(80.dp).alpha(0.2f), tint = MaterialTheme.colorScheme.error)
-        Spacer(modifier = Modifier.height(32.dp))
-        Text("SENSOR NOT FOUND", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+private fun PermissionDeniedView(onGrant: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Rounded.Lock, null, modifier = Modifier.size(100.dp).alpha(0.15f), tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(40.dp))
+        Text("ACCESS REQUIRED", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         Text(
-            "Unfortunately, your device does not support the required hardware for step counting.",
+            "Motion sensors are required to quantify your daily movement. This data is stored locally and securely.",
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp)
+            modifier = Modifier.padding(top = 16.dp, bottom = 48.dp),
+            style = MaterialTheme.typography.bodyLarge
+        )
+        ToolzExpressiveButton(onClick = onGrant, modifier = Modifier.fillMaxWidth().height(72.dp), shape = BouncyShape) {
+            Text("GRANT ACCESS", fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun NoSensorView() {
+    Column(modifier = Modifier.fillMaxSize().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Rounded.SentimentVeryDissatisfied, null, modifier = Modifier.size(100.dp).alpha(0.15f), tint = MaterialTheme.colorScheme.error)
+        Spacer(modifier = Modifier.height(40.dp))
+        Text("HARDWARE MISSING", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+        Text(
+            "This device does not appear to have the physical step counting hardware required for this feature.",
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 16.dp),
+            style = MaterialTheme.typography.bodyLarge
         )
     }
 }

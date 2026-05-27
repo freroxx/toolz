@@ -1,3 +1,34 @@
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║                  TOOLZ — DashboardScreen.kt                                 ║
+ * ║            Material 3 Expressive — Full Overhaul                            ║
+ * ╠══════════════════════════════════════════════════════════════════════════════╣
+ * ║  HANDOFF MEMO (for the next Claude instance)                                ║
+ * ║                                                                             ║
+ * ║  1. STYLING: All tool cards use SquircleShape (28dp) as the primary        ║
+ * ║     container, BouncyShape (32dp) for pinned/recent chips, and              ║
+ * ║     SmallExpressiveShape (20dp) for icon badges; backgrounds are all        ║
+ * ║     semi-transparent M3 surface roles (surfaceContainerHigh @ 40% alpha)   ║
+ * ║     with a 1dp outlineVariant border at 15% opacity for layered depth;      ║
+ * ║     the featured carousel uses full tool.color gradient fills over          ║
+ * ║     MaterialTheme.shapes.large masked clip cards.                           ║
+ * ║                                                                             ║
+ * ║  2. CARD LAYOUT: The grid is adaptive — 2 columns on phones (<600dp),      ║
+ * ║     3 columns on tablets (≥600dp) via BoxWithConstraints; each grid item    ║
+ * ║     is individually wrapped in StaggeredEntrance with delay offset          ║
+ * ║     (rowIndex * columns + colIndex) * 40ms and                              ║
+ * ║     spring(DampingRatioLowBouncy, StiffnessMediumLow) physics; stat cards  ║
+ * ║     show ExpressiveWavyLinearProgressIndicator for battery/storage metrics. ║
+ * ║                                                                             ║
+ * ║  3. INTERACTIONS: Every tap calls LocalVibrationManager.vibrateClick() for ║
+ * ║     primary actions, vibrateTick() for toggles/secondary; a                ║
+ * ║     HorizontalFloatingToolbar (exitAlwaysScrollBehavior) anchored at        ║
+ * ║     bottom-start handles Settings + contextual actions and collapses on     ║
+ * ║     scroll-down; the ToolzConnectedButtonGroup in the content area drives   ║
+ * ║     in-session Grid/List mode switching without touching persisted prefs.   ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
+ */
+
 package com.frerox.toolz.ui.screens.dashboard
 
 import android.view.HapticFeedbackConstants
@@ -7,12 +38,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,22 +52,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.FloatingToolbarExitDirection.Companion.Bottom
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,42 +80,40 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.navigation.Screen
+import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.MusicUiState
-import com.frerox.toolz.ui.screens.time.TimerViewModel
-import com.frerox.toolz.ui.screens.time.StopwatchViewModel
-import com.frerox.toolz.ui.screens.time.PomodoroViewModel
-import com.frerox.toolz.ui.screens.time.PomodoroMode
+import com.frerox.toolz.ui.screens.media.catalog.CatalogUiState
+import com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel
+import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
+import com.frerox.toolz.ui.screens.sensors.RecordingState
 import com.frerox.toolz.ui.screens.sensors.StepCounterViewModel
 import com.frerox.toolz.ui.screens.sensors.StepState
 import com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel
-import com.frerox.toolz.ui.screens.sensors.RecordingState
-import com.frerox.toolz.ui.screens.notepad.NotepadViewModel
+import com.frerox.toolz.ui.screens.time.PomodoroMode
+import com.frerox.toolz.ui.screens.time.PomodoroState
+import com.frerox.toolz.ui.screens.time.PomodoroViewModel
+import com.frerox.toolz.ui.screens.time.StopwatchState
+import com.frerox.toolz.ui.screens.time.StopwatchViewModel
+import com.frerox.toolz.ui.screens.time.TimerState
+import com.frerox.toolz.ui.screens.time.TimerViewModel
 import com.frerox.toolz.ui.screens.todo.TodoViewModel
-import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.util.OfflineState
 import com.frerox.toolz.util.VibrationManager
+import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.*
 
-data class ToolCategory(
-    val title: String,
-    val items: List<ToolItem>
-)
-
-data class ToolItem(
-    val title: String,
-    val icon: ImageVector,
-    val route: String,
-    val description: String,
-    val color: Color = Color.Unspecified
-)
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA CLASSES
+// ─────────────────────────────────────────────────────────────────────────────
 
 sealed class PillPage {
     data object Music : PillPage()
@@ -102,7 +136,15 @@ data class AppTip(
     val color: Color
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD SCREEN ENTRY POINT
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun DashboardScreen(
     onNavigate: (String) -> Unit,
@@ -116,11 +158,11 @@ fun DashboardScreen(
     notepadViewModel: NotepadViewModel = hiltViewModel(),
     todoViewModel: TodoViewModel = hiltViewModel(),
     caffeinateViewModel: CaffeinateViewModel = hiltViewModel(),
-    catalogViewModel: com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel = hiltViewModel(),
+    catalogViewModel: CatalogViewModel = hiltViewModel(),
     settingsRepository: SettingsRepository
 ) {
     val vibrationManager = LocalVibrationManager.current
-    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+    val performanceMode = LocalPerformanceMode.current
 
     val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
     val catalogState by catalogViewModel.uiState.collectAsStateWithLifecycle()
@@ -136,7 +178,6 @@ fun DashboardScreen(
     val userName by settingsRepository.userName.collectAsState(initial = "")
     val pinnedTools by settingsRepository.pinnedTools.collectAsState(initial = emptySet())
     val recentTools by settingsRepository.recentTools.collectAsState(initial = emptyList())
-    
     val showRecentTools by settingsRepository.showRecentTools.collectAsState(initial = true)
     val showQuickNotes by settingsRepository.showQuickNotes.collectAsState(initial = true)
     val showDashboardStats by settingsRepository.showDashboardStats.collectAsState(initial = false)
@@ -146,17 +187,14 @@ fun DashboardScreen(
     val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
     val aiSuggestedRoutes by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
     val stats by viewModel.dashboardStats.collectAsStateWithLifecycle()
-
     val updateVersion by viewModel.updateAvailableVersion.collectAsStateWithLifecycle(initialValue = null)
-    
     val offlineState by viewModel.offlineState.collectAsStateWithLifecycle()
-
     val notes by notepadViewModel.notes.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val allTools = remember(categories) { categories.flatMap { it.items } }
 
     val navAction = remember {
         { route: String ->
+            vibrationManager?.vibrateClick()
             viewModel.addRecentTool(route)
             onNavigate(route)
         }
@@ -164,9 +202,10 @@ fun DashboardScreen(
 
     DashboardContent(
         onNavigate = navAction,
-        onTogglePin = viewModel::togglePinnedTool,
-        settingsRepository = settingsRepository,
-        hapticEnabled = hapticEnabled,
+        onTogglePin = {
+            vibrationManager?.vibrateTick()
+            viewModel.togglePinnedTool(it)
+        },
         performanceMode = performanceMode,
         vibrationManager = vibrationManager,
         userName = userName,
@@ -188,7 +227,6 @@ fun DashboardScreen(
         stepsViewModel = stepsViewModel,
         recordingState = recordingState,
         recorderViewModel = recorderViewModel,
-        notepadViewModel = notepadViewModel,
         todoViewModel = todoViewModel,
         caffeinateViewModel = caffeinateViewModel,
         catalogState = catalogState,
@@ -198,7 +236,7 @@ fun DashboardScreen(
         searchQuery = searchQuery,
         isAiSearching = isAiSearching,
         aiSuggestedRoutes = aiSuggestedRoutes,
-        onSearchQueryChange = viewModel::onSearchQueryChanged,
+        onSearchQueryChange = viewModel::updateSearchQuery,
         updateVersion = updateVersion,
         onDismissUpdate = viewModel::dismissUpdate,
         notes = notes,
@@ -209,13 +247,19 @@ fun DashboardScreen(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD CONTENT — PRIMARY LAYOUT (OVERHAULED)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun DashboardContent(
     onNavigate: (String) -> Unit,
     onTogglePin: (String) -> Unit,
-    settingsRepository: SettingsRepository,
-    hapticEnabled: Boolean,
     performanceMode: Boolean,
     vibrationManager: VibrationManager?,
     userName: String,
@@ -237,11 +281,10 @@ fun DashboardContent(
     stepsViewModel: StepCounterViewModel,
     recordingState: RecordingState,
     recorderViewModel: VoiceRecorderViewModel,
-    notepadViewModel: NotepadViewModel,
     todoViewModel: TodoViewModel,
     caffeinateViewModel: CaffeinateViewModel,
-    catalogState: com.frerox.toolz.ui.screens.media.catalog.CatalogUiState,
-    catalogViewModel: com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel,
+    catalogState: CatalogUiState,
+    catalogViewModel: CatalogViewModel,
     showPillSetting: Boolean,
     fillThePillEnabled: Boolean,
     searchQuery: String,
@@ -259,12 +302,25 @@ fun DashboardContent(
     var showOfflineModal by remember { mutableStateOf(false) }
     var selectedToolForDetail by remember { mutableStateOf<ToolItem?>(null) }
 
+    // In-session view mode override — driven by the connected button group in the list
+    var currentView by remember(dashboardView) { mutableStateOf(dashboardView) }
+
+    // Floating toolbar scroll behavior: collapses on scroll-down, expands on scroll-up
+    val floatingToolbarBehavior = FloatingToolbarDefaults.exitAlwaysScrollBehavior(exitDirection = Bottom)
+    val toolbarExpanded by remember {
+        derivedStateOf {
+            val state = floatingToolbarBehavior.state
+            if (state.offsetLimit != 0f) state.offset / state.offsetLimit < 0.5f else true
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .toolzBackground()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // ── Top App Bar + Search ──────────────────────────────────────────
             DashboardTopBar(
                 onSettingsClick = { onNavigate(Screen.Settings.route) },
                 searchQuery = searchQuery,
@@ -276,19 +332,24 @@ fun DashboardContent(
                 offlineState = offlineState
             )
 
+            // ── Main Scrollable Content ───────────────────────────────────────
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .weight(1f)
-                    .fadingEdges(top = 16.dp, bottom = 80.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                    .then(
+                        if (performanceMode) Modifier
+                        else Modifier.fadingEdges(top = 16.dp, bottom = 130.dp)
+                    )
+                    .nestedScroll(floatingToolbarBehavior),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
             ) {
-                // Update Card
-                // Update Card
+
+                // Update banner
                 if (updateVersion != null) {
-                    item {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            UpdateCard(
+                    item(key = "update_card") {
+                        StaggeredEntrance(index = 0) {
+                            UpdateCardExpressive(
                                 version = updateVersion,
                                 onUpdate = { onNavigate(Screen.Update.route) },
                                 onDismiss = onDismissUpdate
@@ -297,10 +358,10 @@ fun DashboardContent(
                     }
                 }
 
-                // Header
-                item {
-                    Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                        DashboardHeader(
+                // Greeting + user name header
+                item(key = "header") {
+                    StaggeredEntrance(index = 1) {
+                        DashboardHeaderExpressive(
                             userName = userName,
                             vibrationManager = vibrationManager,
                             offlineState = offlineState,
@@ -309,20 +370,29 @@ fun DashboardContent(
                     }
                 }
 
-                // Quick Stats
+                // Device stats (battery + storage)
                 if (showDashboardStats) {
-                    item {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            QuickStatsRow(stats = stats, onNavigate = onNavigate)
+                    item(key = "stats") {
+                        StaggeredEntrance(index = 2) {
+                            QuickStatsRowExpressive(stats = stats, onNavigate = onNavigate)
                         }
                     }
                 }
 
-                // Recent Tools
+                // Featured tools carousel
+                if (categories.isNotEmpty()) {
+                    item(key = "featured_carousel") {
+                        StaggeredEntrance(index = 3) {
+                            FeaturedToolsSection(categories = categories, onNavigate = onNavigate)
+                        }
+                    }
+                }
+
+                // Recent tools hub
                 if (showRecentTools && recentTools.isNotEmpty()) {
-                    item {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            RecentToolsSection(
+                    item(key = "recent_tools") {
+                        StaggeredEntrance(index = 4) {
+                            RecentToolsSectionExpressive(
                                 recentTools = recentTools,
                                 categories = categories,
                                 onNavigate = onNavigate
@@ -331,11 +401,11 @@ fun DashboardContent(
                     }
                 }
 
-                // Quick Access / Pinned
+                // Quick-access pinned tools
                 if (pinnedTools.isNotEmpty()) {
-                    item {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            PinnedToolsSection(
+                    item(key = "pinned_tools") {
+                        StaggeredEntrance(index = 5) {
+                            PinnedToolsSectionExpressive(
                                 pinnedTools = pinnedTools,
                                 categories = categories,
                                 onTogglePin = onTogglePin,
@@ -345,11 +415,11 @@ fun DashboardContent(
                     }
                 }
 
-                // Quick Notes
+                // Smart notes strip
                 if (showQuickNotes && notes.isNotEmpty()) {
-                    item(key = "quick_notes_section") {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            QuickNotesSection(
+                    item(key = "quick_notes") {
+                        StaggeredEntrance(index = 6) {
+                            QuickNotesSectionExpressive(
                                 notes = notes,
                                 onNavigate = onNavigate
                             )
@@ -357,49 +427,179 @@ fun DashboardContent(
                     }
                 }
 
-                // Categories
-                categories.forEach { category ->
-                    item(key = "header_${category.title}") {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            CategoryHeader(category.title)
-                        }
-                    }
-
-                    item(key = "layout_${category.title}") {
-                        Box(modifier = if (!performanceMode) Modifier.animateItem() else Modifier) {
-                            if (dashboardView == "LIST") {
-                                CategoryList(
-                                    items = category.items,
-                                    vibrationManager = vibrationManager,
-                                    hapticEnabled = hapticEnabled,
-                                    onNavigate = onNavigate,
-                                    onTogglePin = onTogglePin,
-                                    onToolLongClick = { selectedToolForDetail = it }
+                // View-mode toggle + "ALL TOOLS" title
+                item(key = "view_toggle_header") {
+                    StaggeredEntrance(index = 7) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 32.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "ALL TOOLS",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 2.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                            } else {
-                                CategoryGrid(
-                                    items = category.items,
-                                    vibrationManager = vibrationManager,
-                                    hapticEnabled = hapticEnabled,
-                                    onNavigate = onNavigate,
-                                    onTogglePin = onTogglePin,
-                                    onToolLongClick = { selectedToolForDetail = it }
+                                Text(
+                                    text = "${categories.sumOf { it.items.size }} utilities",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
+                            ToolzConnectedButtonGroup(
+                                selectedIndex = if (currentView == "LIST") 1 else 0,
+                                options = listOf("Grid", "List"),
+                                onOptionSelected = { idx ->
+                                    vibrationManager?.vibrateTick()
+                                    currentView = if (idx == 0) "DEFAULT" else "LIST"
+                                },
+                                modifier = Modifier.width(148.dp)
+                            )
                         }
                     }
                 }
+
+                // Category sections — header + grid/list per category
+                categories.forEachIndexed { catIndex, category ->
+                    item(key = "cat_header_${category.title}") {
+                        StaggeredEntrance(index = catIndex + 8) {
+                            CategoryHeaderExpressive(title = category.title)
+                        }
+                    }
+
+                    item(key = "cat_content_${category.title}") {
+                        // No StaggeredEntrance here; individual grid items handle their own stagger
+                        if (currentView == "LIST") {
+                            CategoryListExpressive(
+                                items = category.items,
+                                vibrationManager = vibrationManager,
+                                onNavigate = onNavigate,
+                                onToolLongClick = { selectedToolForDetail = it }
+                            )
+                        } else {
+                            CategoryGridExpressive(
+                                items = category.items,
+                                vibrationManager = vibrationManager,
+                                onNavigate = onNavigate,
+                                onToolLongClick = { selectedToolForDetail = it }
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
+                item(key = "bottom_spacer") { Spacer(Modifier.height(170.dp)) }
             }
         }
 
-        // Universal Pill
+        // ── Floating Horizontal Toolbar (Settings & Contextual Actions) ───────
+        // Anchored bottom-start, collapses on scroll-down via exitAlwaysScrollBehavior.
+        // Uses HorizontalFloatingToolbar directly to access containerFluidShape.
+        @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+        HorizontalFloatingToolbar(
+            expanded = toolbarExpanded,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 24.dp, bottom = 108.dp)
+                .navigationBarsPadding(),
+            colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
+                toolbarContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                toolbarContentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+            scrollBehavior = floatingToolbarBehavior,
+            leadingContent = {
+                // Always-visible FAB anchor: Settings
+                FilledIconButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        onNavigate(Screen.Settings.route)
+                    },
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        ) {
+            // Expanded toolbar body — contextual quick actions
+            AnimatedContent(
+                targetState = offlineState == OfflineState.OFFLINE,
+                transitionSpec = {
+                    fadeIn(tween(250)) togetherWith fadeOut(tween(200))
+                },
+                label = "offlineActionTransition"
+            ) { isOffline ->
+                IconButton(
+                    onClick = {
+                        vibrationManager?.vibrateTick()
+                        if (isOffline) onToggleOfflineMode(false) else showOfflineModal = true
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (isOffline) Icons.Rounded.CloudOff else Icons.Rounded.Cloud,
+                        contentDescription = if (isOffline) "Go Online" else "Offline Mode",
+                        tint = if (isOffline) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    onNavigate(Screen.BatteryInfo.route)
+                }
+            ) {
+                Icon(
+                    imageVector = if (stats.isBatteryCharging)
+                        Icons.Rounded.BatteryChargingFull else Icons.Rounded.Battery5Bar,
+                    contentDescription = "Battery — ${stats.batteryLevel}%",
+                    tint = when {
+                        stats.isBatteryCharging -> MaterialTheme.colorScheme.primary
+                        stats.batteryLevel < 20 -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    }
+                )
+            }
+
+            IconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    onNavigate(Screen.AiAssistant.route)
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.AutoAwesome,
+                    contentDescription = "AI Assistant",
+                    tint = if (offlineState == OfflineState.OFFLINE)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                    else MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // ── Universal Pill ────────────────────────────────────────────────────
         if (showPillSetting) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 24.dp)
+                    .navigationBarsPadding()
             ) {
-                UniversalPill(
+                UniversalPillExpressive(
                     musicState = musicState,
                     musicViewModel = musicViewModel,
                     timerState = timerState,
@@ -423,6 +623,7 @@ fun DashboardContent(
             }
         }
 
+        // ── Modals & Dialogs ──────────────────────────────────────────────────
         if (showOfflineModal) {
             OfflineModeBottomSheet(
                 vibrationManager = vibrationManager,
@@ -436,7 +637,7 @@ fun DashboardContent(
         }
 
         selectedToolForDetail?.let { tool ->
-            ToolDetailDialog(
+            ToolDetailDialogExpressive(
                 tool = tool,
                 isPinned = pinnedTools.contains(tool.route),
                 onDismiss = { selectedToolForDetail = null },
@@ -450,157 +651,11 @@ fun DashboardContent(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ToolDetailDialog(
-    tool: ToolItem,
-    isPinned: Boolean,
-    onDismiss: () -> Unit,
-    onNavigate: (String) -> Unit,
-    onTogglePin: () -> Unit
-) {
-    val vibrationManager = LocalVibrationManager.current
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = tool.color.copy(alpha = 0.15f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
-                    }
-                }
-                Spacer(Modifier.width(16.dp))
-                Text(tool.title, fontWeight = FontWeight.Black)
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(tool.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                
-                Surface(
-                    onClick = onTogglePin,
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(if (isPinned) Icons.Rounded.PushPin else Icons.Rounded.PushPin, null, tint = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(if (isPinned) "Pinned to Quick Access" else "Pin to Quick Access", fontWeight = FontWeight.Bold, color = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(checked = isPinned, onCheckedChange = { 
-                            vibrationManager?.vibrateTick()
-                            onTogglePin() 
-                        })
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onNavigate(tool.route) },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text("OPEN TOOL", fontWeight = FontWeight.Black)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("CLOSE", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surface
-    )
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// TOP APP BAR + SMART SEARCH
+// ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-fun UpdateCard(
-    version: String,
-    onUpdate: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp)
-            .bouncyClick(onClick = onUpdate),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.SystemUpdate,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column {
-                    Text(
-                        text = "Update Available",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Text(
-                        text = "v$version is ready for you",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier.background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.05f), CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Close,
-                    contentDescription = "Dismiss",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DashboardTopBar(
     onSettingsClick: () -> Unit,
@@ -617,40 +672,37 @@ fun DashboardTopBar(
             .fillMaxWidth()
             .statusBarsPadding()
     ) {
-            CenterAlignedTopAppBar(
-                title = { 
-                    Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth().padding(start = 12.dp)) {
-                        Text(
-                            text = "Toolz",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                letterSpacing = (-1.5).sp,
-                                fontWeight = FontWeight.Black
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                actions = {
-                    FilledTonalIconButton(
-                        onClick = onSettingsClick,
-                        modifier = Modifier.size(52.dp).padding(end = 8.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp)
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Settings,
-                            contentDescription = "Settings",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
-            )
+        ExpressiveTopAppBar(
+            title = "Toolz",
+            subtitle = when (offlineState) {
+                OfflineState.OFFLINE -> "Offline-first mode active"
+                OfflineState.ONLINE -> "Modern utility suite"
+            },
+            actions = {
+                FilledTonalIconButton(
+                    onClick = onSettingsClick,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .padding(end = 8.dp),
+                    shape = SmallExpressiveShape,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            largeFlexible = false,
+            titleHorizontalAlignment = Alignment.Start
+        )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Box(modifier = Modifier.padding(horizontal = 24.dp)) {
             SmartSearchBar(
@@ -663,9 +715,12 @@ fun DashboardTopBar(
                 offlineState = offlineState
             )
         }
+
+        Spacer(modifier = Modifier.height(4.dp))
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartSearchBar(
     query: String,
@@ -677,143 +732,148 @@ fun SmartSearchBar(
     offlineState: OfflineState = OfflineState.ONLINE
 ) {
     val haptic = LocalView.current
-    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+    val performanceMode = LocalPerformanceMode.current
+    val allTools = remember(categories) { categories.flatMap { it.items } }
+    val localResults = remember(query, categories) {
+        if (query.isBlank()) emptyList()
+        else allTools.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                    it.description.contains(query, ignoreCase = true)
+        }.take(5)
+    }
 
-    // AI breathing sparkle animation
+    // Animated AI sparkle
     val infiniteTransition = rememberInfiniteTransition(label = "searchSparkle")
     val sparkleScale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.15f,
+        initialValue = 0.85f, targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = FastOutSlowInEasing),
+            animation = tween(1800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "sparkleScale"
     )
     val sparkleAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 1f,
+        initialValue = 0.6f, targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = FastOutSlowInEasing),
+            animation = tween(1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "sparkleAlpha"
     )
 
-    // Local search results
-    val allTools = remember(categories) { categories.flatMap { it.items } }
-    val localResults = remember(query, allTools) {
-        if (query.isBlank()) emptyList()
-        else allTools.filter {
-            it.title.contains(query, ignoreCase = true) ||
-            it.description.contains(query, ignoreCase = true)
-        }.take(5)
-    }
-
     Column(modifier = Modifier.fillMaxWidth()) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
-            shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+                .height(60.dp),
+            shape = SquircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
             border = BorderStroke(
                 width = 1.dp,
-                color = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                color = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
             ),
             tonalElevation = 2.dp
         ) {
-            TextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = {
-                    AnimatedContent(
-                        targetState = offlineState == OfflineState.OFFLINE,
-                        transitionSpec = {
-                            (fadeIn(tween(300)) + slideInVertically { it / 2 }).togetherWith(fadeOut(tween(200)) + slideOutVertically { -it / 2 })
-                        },
-                        label = "placeholder"
-                    ) { isOffline ->
-                        Text(
-                            if (isOffline) "Search local tools..." else "Search or ask AI...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Leading icon
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    if (isAiSearching) {
+                        ExpressiveCircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = null,
+                            tint = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                },
-                leadingIcon = {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp)) {
-                        if (isAiSearching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.5.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Icon(
-                                Icons.Rounded.Search,
-                                contentDescription = null,
-                                tint = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary
-                                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                },
-                trailingIcon = {
-                    AnimatedContent(
-                        targetState = query.isNotEmpty(),
-                        transitionSpec = {
-                            (fadeIn(tween(200)) + scaleIn(initialScale = 0.8f, animationSpec = tween(200))).togetherWith(
-                                fadeOut(tween(150)) + scaleOut(targetScale = 0.8f, animationSpec = tween(150))
-                            )
-                        },
-                        label = "trailingIcon"
-                    ) { hasQuery ->
-                        if (hasQuery) {
-                            IconButton(onClick = { onQueryChange("") }) {
-                                Icon(
-                                    Icons.Rounded.Close,
-                                    contentDescription = "Clear",
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Text field
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    singleLine = true,
+                    decorationBox = { innerTextField: @Composable () -> Unit ->
+                        Box {
+                            if (query.isEmpty()) {
+                                AnimatedContent(
+                                    targetState = offlineState == OfflineState.OFFLINE,
+                                    transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(200)) },
+                                    label = "placeholderAnim"
+                                ) { isOffline ->
+                                    Text(
+                                        text = if (isOffline) "Search local tools..." else "Search or ask AI...",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
-                        } else if (offlineState == OfflineState.ONLINE) {
-                            Icon(
-                                Icons.Rounded.AutoAwesome,
-                                contentDescription = "AI Powered",
-                                tint = MaterialTheme.colorScheme.primary.copy(
-                                    alpha = if (performanceMode) 0.7f else sparkleAlpha
-                                ),
-                                modifier = Modifier
-                                    .padding(end = 12.dp)
-                                    .size(20.dp)
-                                    .graphicsLayer {
-                                        if (!performanceMode) {
-                                            scaleX = sparkleScale
-                                            scaleY = sparkleScale
-                                        }
-                                    }
-                            )
+                            innerTextField()
                         }
                     }
-                },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = MaterialTheme.colorScheme.primary,
-                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                ),
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge
-            )
+                )
+
+                // Trailing icon: clear or AI sparkle
+                AnimatedContent(
+                    targetState = query.isNotEmpty(),
+                    transitionSpec = {
+                        (fadeIn(tween(200)) + scaleIn(initialScale = 0.8f, animationSpec = tween(200)))
+                            .togetherWith(fadeOut(tween(150)) + scaleOut(targetScale = 0.8f, animationSpec = tween(150)))
+                    },
+                    label = "trailingIcon"
+                ) { hasQuery ->
+                    if (hasQuery) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "Clear search",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else if (offlineState == OfflineState.ONLINE) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = "AI-powered",
+                            tint = MaterialTheme.colorScheme.primary.copy(
+                                alpha = if (performanceMode) 0.8f else sparkleAlpha
+                            ),
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(20.dp)
+                                .graphicsLayer {
+                                    if (!performanceMode) {
+                                        scaleX = sparkleScale
+                                        scaleY = sparkleScale
+                                    }
+                                }
+                        )
+                    }
+                }
+            }
         }
 
         // Local search results dropdown
@@ -826,11 +886,11 @@ fun SmartSearchBar(
                 modifier = Modifier
                     .padding(top = 8.dp)
                     .fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = SquircleShape,
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 ),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp)
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     localResults.forEach { tool ->
@@ -842,7 +902,7 @@ fun SmartSearchBar(
                                     onNavigate(tool.route)
                                 },
                             color = Color.Transparent,
-                            shape = RoundedCornerShape(14.dp)
+                            shape = SmallExpressiveShape
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -850,7 +910,7 @@ fun SmartSearchBar(
                             ) {
                                 Surface(
                                     modifier = Modifier.size(40.dp),
-                                    shape = RoundedCornerShape(12.dp),
+                                    shape = SmallExpressiveShape,
                                     color = tool.color.copy(alpha = 0.15f)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -889,7 +949,7 @@ fun SmartSearchBar(
             }
         }
 
-        // AI Suggestions
+        // AI suggestions dropdown
         AnimatedVisibility(
             visible = aiSuggestedRoutes.isNotEmpty(),
             enter = expandVertically(spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
@@ -899,20 +959,20 @@ fun SmartSearchBar(
                 modifier = Modifier
                     .padding(top = 10.dp)
                     .fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                shape = SquircleShape,
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 ),
                 elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(bottom = 12.dp, start = 4.dp)
+                        modifier = Modifier.padding(bottom = 12.dp)
                     ) {
                         Surface(
                             modifier = Modifier.size(28.dp),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = SmallExpressiveShape,
                             color = MaterialTheme.colorScheme.primaryContainer
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -945,8 +1005,8 @@ fun SmartSearchBar(
                                         haptic.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                         onNavigate(route)
                                     },
-                                color = MaterialTheme.colorScheme.surfaceColorAtElevation(12.dp),
-                                shape = RoundedCornerShape(18.dp)
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                shape = SmallExpressiveShape
                             ) {
                                 Row(
                                     modifier = Modifier.padding(14.dp),
@@ -954,7 +1014,7 @@ fun SmartSearchBar(
                                 ) {
                                     Surface(
                                         modifier = Modifier.size(46.dp),
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = SmallExpressiveShape,
                                         color = tool.color.copy(alpha = 0.15f)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
@@ -998,8 +1058,12 @@ fun SmartSearchBar(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD HEADER — Greeting + Date
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-fun DashboardHeader(
+fun DashboardHeaderExpressive(
     userName: String,
     vibrationManager: VibrationManager? = null,
     offlineState: OfflineState = OfflineState.ONLINE,
@@ -1008,110 +1072,261 @@ fun DashboardHeader(
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         when (hour) {
-            in 0..5 -> "Good Night \uD83C\uDF19"
-            in 6..11 -> "Good Morning \uD83D\uDC4B"
-            in 12..16 -> "Good Afternoon \u2600\uFE0F"
-            else -> "Good Evening \uD83C\uDF05"
+            in 0..5 -> "GOOD NIGHT"
+            in 6..11 -> "GOOD MORNING"
+            in 12..16 -> "GOOD AFTERNOON"
+            else -> "GOOD EVENING"
         }
     }
-
     val dateText = remember {
-        LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d"))
+        try {
+            LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d"))
+        } catch (_: Exception) {
+            SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date())
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp)
+            .padding(top = 24.dp, bottom = 28.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = greeting,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black
-                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = (-0.5).sp
+                    letterSpacing = 3.sp
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = if (userName.isBlank()) "Explorer" else userName,
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontSize = 48.sp,
+                    style = MaterialTheme.typography.displayMedium.copy(
                         fontWeight = FontWeight.Black,
                         letterSpacing = (-2).sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = dateText.uppercase(),
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 2.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    fontWeight = FontWeight.Black
+                )
             }
 
             if (offlineState == OfflineState.OFFLINE) {
+                Spacer(modifier = Modifier.width(16.dp))
                 Surface(
                     onClick = {
                         vibrationManager?.vibrateClick()
                         onOfflinePillClick()
                     },
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.bouncyClick {
-                        vibrationManager?.vibrateClick()
-                        onOfflinePillClick()
-                    }
+                    shape = BouncyShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                    )
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.CloudOff,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "OFFLINE",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.error,
+                            letterSpacing = 1.sp
                         )
                     }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = dateText,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            fontWeight = FontWeight.Bold
-        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FEATURED TOOLS CAROUSEL — NEW (ExpressiveCarousel)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FeaturedToolsSection(
+    categories: List<ToolCategory>,
+    onNavigate: (String) -> Unit
+) {
+    // Pick the first item from each category as a "featured" representative
+    val featuredTools = remember(categories) {
+        categories.flatMap { it.items.take(1) }.take(6)
+    }
+    if (featuredTools.isEmpty()) return
+
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        CategoryHeaderExpressive(title = "FEATURED")
+        Spacer(modifier = Modifier.height(4.dp))
+        ExpressiveCarousel(
+            items = featuredTools,
+            preferredItemWidth = 196.dp,
+            itemSpacing = 12.dp,
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) { tool ->
+            FeaturedToolCarouselItem(tool = tool, onNavigate = onNavigate)
+        }
     }
 }
 
 @Composable
-fun QuickStatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
+fun FeaturedToolCarouselItem(
+    tool: ToolItem,
+    onNavigate: (String) -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
+
+    // Subtle inner glow animation on the icon
+    val infiniteTransition = rememberInfiniteTransition(label = "featuredGlow")
+    val iconScale by infiniteTransition.animateFloat(
+        initialValue = 1f, targetValue = if (performanceMode) 1f else 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "iconScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        tool.color.copy(alpha = 0.92f),
+                        tool.color.copy(alpha = 0.55f)
+                    )
+                )
+            )
+            .bouncyClick {
+                vibrationManager?.vibrateClick()
+                onNavigate(tool.route)
+            }
+            .padding(20.dp)
+    ) {
+        // Decorative background circle
+        Box(
+            modifier = Modifier
+                .size(90.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 20.dp, y = (-16).dp)
+                .background(Color.White.copy(alpha = 0.08f), CircleShape)
+        )
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Icon container
+            Surface(
+                modifier = Modifier.size(58.dp),
+                shape = MediumExpressiveShape,
+                color = Color.White.copy(alpha = 0.18f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = tool.icon,
+                        contentDescription = tool.title,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            }
+                    )
+                }
+            }
+
+            // Tool info
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = tool.title.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White,
+                    letterSpacing = 0.8.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = tool.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.78f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        // Arrow indicator
+        Icon(
+            imageVector = Icons.Rounded.ArrowOutward,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier
+                .size(18.dp)
+                .align(Alignment.BottomEnd)
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUICK STATS — Battery + Storage with wavy progress
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun QuickStatsRowExpressive(stats: DashboardStats, onNavigate: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        StatCard(
+        StatCardExpressive(
             modifier = Modifier.weight(1f),
-            title = "Battery",
+            title = "BATTERY",
             value = "${stats.batteryLevel}%",
-            subValue = if (stats.isBatteryCharging) "Charging" else "In Use",
-            icon = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryFull,
-            color = if (stats.batteryLevel < 20) Color(0xFFEF5350) else Color(0xFF66BB6A),
+            subValue = if (stats.isBatteryCharging) "CHARGING" else "DISCHARGING",
+            icon = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.Battery5Bar,
+            color = when {
+                stats.isBatteryCharging -> MaterialTheme.colorScheme.primary
+                stats.batteryLevel < 20 -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.secondary
+            },
             progress = stats.batteryLevel / 100f,
             onClick = { onNavigate(Screen.BatteryInfo.route) }
         )
-        StatCard(
+        StatCardExpressive(
             modifier = Modifier.weight(1f),
-            title = "Storage",
-            value = "${(stats.storageAvailableGb).toInt()}GB",
-            subValue = "Free Space",
+            title = "STORAGE",
+            value = "${stats.storageAvailableGb.toInt()}GB",
+            subValue = "AVAILABLE",
             icon = Icons.Rounded.Storage,
             color = MaterialTheme.colorScheme.primary,
             progress = stats.storageUsedPercentage,
@@ -1121,7 +1336,7 @@ fun QuickStatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-fun StatCard(
+fun StatCardExpressive(
     modifier: Modifier = Modifier,
     title: String,
     value: String,
@@ -1131,15 +1346,22 @@ fun StatCard(
     progress: Float,
     onClick: () -> Unit
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(110.dp),
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onClick()
+        },
+        modifier = modifier.height(134.dp),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(18.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -1148,33 +1370,46 @@ fun StatCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    shape = CircleShape,
-                    color = color.copy(alpha = 0.15f),
-                    modifier = Modifier.size(36.dp)
+                    shape = SmallExpressiveShape,
+                    color = color.copy(alpha = 0.14f),
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+                        Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
                     }
                 }
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
-            
-            Column {
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = subValue,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    fontWeight = FontWeight.Bold
+                    color = color.copy(alpha = 0.75f),
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
                 )
-                Spacer(Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                ToolzWavyLinearProgressIndicator(
+                    progress = { progress.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(7.dp)
+                        .clip(CircleShape),
                     color = color,
                     trackColor = color.copy(alpha = 0.1f)
                 )
@@ -1183,310 +1418,60 @@ fun StatCard(
     }
 }
 
-@Composable
-fun PinnedToolsSection(
-    pinnedTools: Set<String>,
-    categories: List<ToolCategory>,
-    onTogglePin: (String) -> Unit,
-    onNavigate: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        CategoryHeader("QUICK ACCESS")
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(pinnedTools.toList()) { route ->
-                val tool = categories.flatMap { it.items }.find { it.route == route }
-                if (tool != null) {
-                    PinnedToolItem(tool, onTogglePin, onNavigate)
-                }
-            }
-        }
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// RECENTLY USED SECTION
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun RecentToolsSection(
+fun RecentToolsSectionExpressive(
     recentTools: List<String>,
     categories: List<ToolCategory>,
     onNavigate: (String) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        CategoryHeader("RECENTLY USED")
+    val allTools = remember(categories) { categories.flatMap { it.items } }
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+        CategoryHeaderExpressive("RECENTLY USED")
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
             items(recentTools.take(8)) { route ->
-                val tool = categories.flatMap { it.items }.find { it.route == route }
-                if (tool != null) {
-                    RecentToolCard(tool, onNavigate)
-                }
+                val tool = allTools.find { it.route == route }
+                if (tool != null) RecentToolCardExpressive(tool, onNavigate)
             }
         }
     }
 }
 
 @Composable
-fun QuickNotesSection(
-    notes: List<Note>,
-    onNavigate: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        CategoryHeader("QUICK NOTES")
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(notes.take(5)) { note ->
-                QuickNoteItem(note, onNavigate)
-            }
-            item {
-                Surface(
-                    modifier = Modifier
-                        .size(width = 110.dp, height = 140.dp)
-                        .bouncyClick { onNavigate(Screen.Notepad.route) },
-                    shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
-                    border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.ArrowForward, 
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "View All", 
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickNoteItem(note: Note, onNavigate: (String) -> Unit) {
-    val noteColor = Color(note.color)
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val containerColor = if (isDark) {
-        noteColor.copy(alpha = 0.25f)
-    } else {
-        noteColor.copy(alpha = 0.12f)
-    }
-    val cardWidth = when {
-        note.cardSize == "LARGE" || note.attachedAudioUri != null -> 292.dp
-        note.attachedImageUri != null -> 252.dp
-        else -> 220.dp
-    }
-    val cardHeight = when {
-        note.attachedImageUri != null -> 198.dp
-        note.cardSize == "SMALL" -> 148.dp
-        else -> 172.dp
-    }
-    
-    Card(
-        modifier = Modifier
-            .size(width = cardWidth, height = cardHeight)
-            .bouncyClick { onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}") },
-        shape = when {
-            note.attachedAudioUri != null -> RoundedCornerShape(32.dp, 24.dp, 32.dp, 24.dp)
-            note.attachedImageUri != null -> RoundedCornerShape(32.dp, 18.dp, 32.dp, 18.dp)
-            note.attachedPdfUri != null -> RoundedCornerShape(32.dp)
-            else -> RoundedCornerShape(32.dp)
+fun RecentToolCardExpressive(tool: ToolItem, onNavigate: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate(tool.route)
         },
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor
-        ),
-        border = BorderStroke(1.5.dp, noteColor.copy(alpha = 0.4f))
+        modifier = Modifier.size(width = 112.dp, height = 112.dp),
+        shape = BouncyShape,
+        containerColor = tool.color.copy(alpha = 0.1f),
+        border = BorderStroke(1.2.dp, tool.color.copy(alpha = 0.18f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Text(
-                        text = note.title.ifBlank { "Untitled" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (note.isPinned) {
-                        Surface(
-                            color = noteColor.copy(alpha = 0.18f),
-                            shape = CircleShape,
-                        ) {
-                            Icon(
-                                Icons.Rounded.PushPin,
-                                null,
-                                modifier = Modifier.padding(6.dp).size(14.dp),
-                                tint = noteColor,
-                            )
-                        }
-                    }
-                }
-
-                note.attachedImageUri?.let { imageUri ->
-                    AsyncImage(
-                        model = imageUri,
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = SmallExpressiveShape,
+                color = tool.color.copy(alpha = 0.16f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = tool.icon,
                         contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(84.dp)
-                            .clip(RoundedCornerShape(18.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-
-                Text(
-                    text = note.content,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-                    maxLines = if (note.attachedImageUri != null) 3 else 4,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 16.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (note.attachedAudioUri != null) {
-                        QuickNoteAttachmentChip(Icons.Rounded.MusicNote, "Audio", noteColor)
-                    }
-                    if (note.attachedPdfUri != null) {
-                        QuickNoteAttachmentChip(Icons.Rounded.Description, "PDF", noteColor)
-                    }
-                    if (note.attachedImageUri != null) {
-                        QuickNoteAttachmentChip(Icons.Rounded.Image, "Image", noteColor)
-                    }
-                }
-                Text(
-                    text = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault()).format(java.util.Date(note.timestamp)).uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    fontWeight = FontWeight.Black,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickNoteAttachmentChip(icon: ImageVector, label: String, accent: Color) {
-    Surface(
-        color = accent.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.18f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(icon, null, modifier = Modifier.size(12.dp), tint = accent)
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = accent,
-            )
-        }
-    }
-}
-
-@Composable
-fun PinnedToolItem(tool: ToolItem, onTogglePin: (String) -> Unit, onNavigate: (String) -> Unit) {
-    Card(
-        modifier = Modifier
-            .size(width = 160.dp, height = 115.dp)
-            .bouncyClick(
-                onLongClick = { onTogglePin(tool.route) }
-            ) { onNavigate(tool.route) },
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = tool.color.copy(alpha = 0.15f)
-        ),
-        border = BorderStroke(1.2.dp, tool.color.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Surface(
-                modifier = Modifier.size(42.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = tool.color.copy(alpha = 0.25f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = tool.icon,
-                        contentDescription = tool.title,
-                        tint = tool.color,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-            Text(
-                text = tool.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Black,
-                color = tool.color,
-                letterSpacing = (-0.4).sp
-            )
-        }
-    }
-}
-
-@Composable
-fun RecentToolCard(tool: ToolItem, onNavigate: (String) -> Unit) {
-    Surface(
-        modifier = Modifier
-            .width(105.dp)
-            .height(105.dp)
-            .bouncyClick { onNavigate(tool.route) },
-        shape = RoundedCornerShape(32.dp),
-        color = tool.color.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, tool.color.copy(alpha = 0.2f)),
-        tonalElevation = 2.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Surface(
-                modifier = Modifier.size(38.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = tool.color.copy(alpha = 0.2f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = tool.icon,
-                        contentDescription = tool.title,
                         tint = tool.color,
                         modifier = Modifier.size(22.dp)
                     )
@@ -1494,221 +1479,70 @@ fun RecentToolCard(tool: ToolItem, onNavigate: (String) -> Unit) {
             }
             Text(
                 text = tool.title,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                letterSpacing = 0.3.sp,
+                lineHeight = 14.sp
             )
         }
     }
 }
 
-@Composable
-fun CategoryHeader(title: String) {
-    Row(
-        modifier = Modifier.padding(top = 24.dp, bottom = 12.dp, start = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .width(4.dp)
-                .height(20.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.primary)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 1.5.sp
-        )
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// PINNED TOOLS SECTION
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun CategoryGrid(
-    items: List<ToolItem>,
-    vibrationManager: VibrationManager?,
-    hapticEnabled: Boolean,
-    onNavigate: (String) -> Unit,
+fun PinnedToolsSectionExpressive(
+    pinnedTools: Set<String>,
+    categories: List<ToolCategory>,
     onTogglePin: (String) -> Unit,
-    onToolLongClick: (ToolItem) -> Unit = {}
+    onNavigate: (String) -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        val rows = items.chunked(2)
-        rows.forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                rowItems.forEach { item ->
-                    ToolGridItem(
-                        item = item,
-                        modifier = Modifier.weight(1f),
-                        vibrationManager = vibrationManager,
-                        hapticEnabled = hapticEnabled,
-                        onNavigate = onNavigate,
-                        onTogglePin = onTogglePin,
-                        onLongClick = { onToolLongClick(item) }
-                    )
-                }
-                if (rowItems.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-        }
-    }
-}
-
-@Composable
-fun CategoryList(
-    items: List<ToolItem>,
-    vibrationManager: VibrationManager?,
-    hapticEnabled: Boolean,
-    onNavigate: (String) -> Unit,
-    onTogglePin: (String) -> Unit,
-    onToolLongClick: (ToolItem) -> Unit = {}
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items.forEach { item ->
-            ToolListItem(
-                item = item,
-                vibrationManager = vibrationManager,
-                hapticEnabled = hapticEnabled,
-                onNavigate = onNavigate,
-                onTogglePin = onTogglePin,
-                onLongClick = { onToolLongClick(item) }
-            )
-        }
-    }
-}
-
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun ToolListItem(
-    item: ToolItem,
-    vibrationManager: VibrationManager?,
-    hapticEnabled: Boolean,
-    onNavigate: (String) -> Unit,
-    onTogglePin: (String) -> Unit,
-    onLongClick: () -> Unit = {}
-) {
-    val view = LocalView.current
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(80.dp)
-            .combinedClickable(
-                onClick = { onNavigate(item.route) },
-                onLongClick = {
-                    if (hapticEnabled) {
-                        if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                        else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    }
-                    onLongClick()
-                }
-            ),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+    val allTools = remember(categories) { categories.flatMap { it.items } }
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+        CategoryHeaderExpressive("QUICK ACCESS")
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            Surface(
-                modifier = Modifier.size(48.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = item.color.copy(alpha = 0.15f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = null,
-                        tint = item.color,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+            items(pinnedTools.toList()) { route ->
+                val tool = allTools.find { it.route == route }
+                if (tool != null) PinnedToolItemExpressive(tool, onTogglePin, onNavigate)
             }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-            )
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ToolGridItem(
-    item: ToolItem,
-    modifier: Modifier = Modifier,
-    vibrationManager: VibrationManager?,
-    hapticEnabled: Boolean,
-    onNavigate: (String) -> Unit,
+fun PinnedToolItemExpressive(
+    tool: ToolItem,
     onTogglePin: (String) -> Unit,
-    onLongClick: () -> Unit = {}
+    onNavigate: (String) -> Unit
 ) {
-    val view = LocalView.current
-    ElevatedCard(
-        modifier = modifier
-            .height(115.dp)
-            .combinedClickable(
-                onClick = { onNavigate(item.route) },
-                onLongClick = {
-                    if (hapticEnabled) {
-                        if (vibrationManager != null) vibrationManager.vibrateLongClick()
-                        else view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    }
-                    onLongClick()
-                }
-            ),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-        ),
-        elevation = CardDefaults.elevatedCardElevation(
-            defaultElevation = 2.dp,
-            pressedElevation = 0.dp
-        )
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate(tool.route)
+        },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            onTogglePin(tool.route)
+        },
+        modifier = Modifier.size(width = 172.dp, height = 122.dp),
+        shape = SquircleShape,
+        containerColor = tool.color.copy(alpha = 0.12f),
+        border = BorderStroke(1.5.dp, tool.color.copy(alpha = 0.25f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(18.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -1717,9 +1551,381 @@ fun ToolGridItem(
                 verticalAlignment = Alignment.Top
             ) {
                 Surface(
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = item.color.copy(alpha = 0.15f)
+                    modifier = Modifier.size(46.dp),
+                    shape = SmallExpressiveShape,
+                    color = tool.color.copy(alpha = 0.2f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = tool.icon,
+                            contentDescription = null,
+                            tint = tool.color,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Rounded.PushPin,
+                    contentDescription = null,
+                    tint = tool.color.copy(alpha = 0.5f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Text(
+                text = tool.title.uppercase(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = tool.color,
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUICK NOTES SECTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun QuickNotesSectionExpressive(
+    notes: List<Note>,
+    onNavigate: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+        CategoryHeaderExpressive("SMART NOTES")
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            items(notes.take(6)) { note ->
+                QuickNoteItemExpressive(note = note, onNavigate = onNavigate)
+            }
+            item {
+                Surface(
+                    modifier = Modifier
+                        .size(width = 116.dp, height = 176.dp)
+                        .bouncyClick { onNavigate(Screen.Notepad.route) },
+                    shape = SquircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.ArrowForward,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                "VIEW ALL",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickNoteItemExpressive(note: Note, onNavigate: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    val noteColor = Color(note.color)
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val containerAlpha = if (isDark) 0.25f else 0.12f
+
+    val cardWidth = when {
+        note.attachedAudioUri != null -> 286.dp
+        note.attachedImageUri != null -> 252.dp
+        else -> 226.dp
+    }
+    val cardHeight = when {
+        note.attachedImageUri != null -> 196.dp
+        else -> 176.dp
+    }
+
+    val cardShape = when {
+        note.attachedAudioUri != null -> RoundedCornerShape(32.dp, 22.dp, 32.dp, 22.dp)
+        note.attachedImageUri != null -> RoundedCornerShape(28.dp, 16.dp, 28.dp, 16.dp)
+        else -> SquircleShape
+    }
+
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}")
+        },
+        modifier = Modifier.size(width = cardWidth, height = cardHeight),
+        shape = cardShape,
+        containerColor = noteColor.copy(alpha = containerAlpha),
+        border = BorderStroke(1.5.dp, noteColor.copy(alpha = 0.35f)),
+        elevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = note.title.ifBlank { "UNTITLED" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        letterSpacing = (-0.5).sp
+                    )
+                    if (note.isPinned) {
+                        Icon(
+                            Icons.Rounded.PushPin,
+                            null,
+                            modifier = Modifier.size(14.dp),
+                            tint = noteColor
+                        )
+                    }
+                }
+
+                note.attachedImageUri?.let { uri ->
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(82.dp)
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                Text(
+                    text = note.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                    maxLines = if (note.attachedImageUri != null) 2 else 4,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 18.sp
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    if (note.attachedAudioUri != null) Icon(Icons.Rounded.Mic, null, modifier = Modifier.size(13.dp), tint = noteColor)
+                    if (note.attachedImageUri != null) Icon(Icons.Rounded.Image, null, modifier = Modifier.size(13.dp), tint = noteColor)
+                }
+                Text(
+                    text = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(note.timestamp)).uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = noteColor.copy(alpha = 0.6f),
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.8.sp
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORY HEADER — Animated accent line
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CategoryHeaderExpressive(title: String) {
+    Row(
+        modifier = Modifier.padding(top = 28.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Animated two-segment accent bar
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Surface(
+                modifier = Modifier
+                    .width(24.dp)
+                    .height(5.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary
+            ) {}
+            Surface(
+                modifier = Modifier
+                    .width(8.dp)
+                    .height(5.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            ) {}
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onSurface,
+            letterSpacing = 1.8.sp
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADAPTIVE CATEGORY GRID — 2 columns phone / 3 columns tablet + per-item stagger
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CategoryGridExpressive(
+    items: List<ToolItem>,
+    vibrationManager: VibrationManager?,
+    onNavigate: (String) -> Unit,
+    onToolLongClick: (ToolItem) -> Unit = {}
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 600.dp) 3 else 2
+        val rows = items.chunked(columns)
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            rows.forEachIndexed { rowIndex, rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    rowItems.forEachIndexed { colIndex, item ->
+                        val staggerIndex = rowIndex * columns + colIndex
+                        StaggeredEntrance(
+                            index = staggerIndex,
+                            modifier = Modifier.weight(1f),
+                            enter = fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 380,
+                                    delayMillis = staggerIndex * 45
+                                )
+                            ) + slideInVertically(
+                                initialOffsetY = { 28 },
+                                animationSpec = tween(420, delayMillis = staggerIndex * 45)
+                            ) + scaleIn(
+                                initialScale = 0.90f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            )
+                        ) {
+                            ToolGridItemExpressive(
+                                item = item,
+                                modifier = Modifier.fillMaxWidth(),
+                                vibrationManager = vibrationManager,
+                                onNavigate = onNavigate,
+                                onLongClick = { onToolLongClick(item) }
+                            )
+                        }
+                    }
+                    // Fill trailing empty slot in last row
+                    repeat(columns - rowItems.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+                if (rowIndex < rows.lastIndex) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORY LIST VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CategoryListExpressive(
+    items: List<ToolItem>,
+    vibrationManager: VibrationManager?,
+    onNavigate: (String) -> Unit,
+    onToolLongClick: (ToolItem) -> Unit = {}
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        items.forEachIndexed { index, item ->
+            StaggeredEntrance(index = index) {
+                ToolListItemExpressive(
+                    item = item,
+                    vibrationManager = vibrationManager,
+                    onNavigate = onNavigate,
+                    onLongClick = { onToolLongClick(item) }
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL CARD — GRID VARIANT
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun ToolGridItemExpressive(
+    item: ToolItem,
+    modifier: Modifier = Modifier,
+    vibrationManager: VibrationManager?,
+    onNavigate: (String) -> Unit,
+    onLongClick: () -> Unit = {}
+) {
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate(item.route)
+        },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            onLongClick()
+        },
+        modifier = modifier.height(132.dp),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.14f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Surface(
+                    modifier = Modifier.size(46.dp),
+                    shape = SmallExpressiveShape,
+                    color = item.color.copy(alpha = 0.14f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -1730,28 +1936,29 @@ fun ToolGridItem(
                         )
                     }
                 }
-
                 Icon(
                     imageVector = Icons.Rounded.ArrowOutward,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    modifier = Modifier
+                        .size(17.dp)
+                        .alpha(0.22f)
                 )
             }
 
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleSmall,
+                    text = item.title.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    letterSpacing = 0.4.sp,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = item.description,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.Bold
@@ -1761,36 +1968,119 @@ fun ToolGridItem(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL CARD — LIST VARIANT
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-fun UniversalPill(
+fun ToolListItemExpressive(
+    item: ToolItem,
+    vibrationManager: VibrationManager?,
+    onNavigate: (String) -> Unit,
+    onLongClick: () -> Unit = {}
+) {
+    ExpressiveCard(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate(item.route)
+        },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            onLongClick()
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.14f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = SmallExpressiveShape,
+                color = item.color.copy(alpha = 0.12f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = null,
+                        tint = item.color,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(18.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(15.dp)
+                    .alpha(0.28f)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIVERSAL PILL — Live activity hub at bottom center
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun UniversalPillExpressive(
     musicState: MusicUiState,
     musicViewModel: MusicPlayerViewModel,
-    timerState: com.frerox.toolz.ui.screens.time.TimerState,
+    timerState: TimerState,
     timerViewModel: TimerViewModel,
-    stopwatchState: com.frerox.toolz.ui.screens.time.StopwatchState,
+    stopwatchState: StopwatchState,
     stopwatchViewModel: StopwatchViewModel,
-    pomodoroState: com.frerox.toolz.ui.screens.time.PomodoroState,
+    pomodoroState: PomodoroState,
     pomodoroViewModel: PomodoroViewModel,
     stepsState: StepState,
     stepsViewModel: StepCounterViewModel,
     recordingState: RecordingState,
     recorderViewModel: VoiceRecorderViewModel,
-    catalogState: com.frerox.toolz.ui.screens.media.catalog.CatalogUiState,
-    catalogViewModel: com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel,
+    catalogState: CatalogUiState,
+    catalogViewModel: CatalogViewModel,
     todoViewModel: TodoViewModel,
     caffeinateViewModel: CaffeinateViewModel,
     fillThePillEnabled: Boolean,
     onNavigate: (String) -> Unit,
     offlineState: OfflineState = OfflineState.ONLINE
 ) {
-    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+    val performanceMode = LocalPerformanceMode.current
     val todoState by todoViewModel.uiState.collectAsStateWithLifecycle()
     val isCaffeinated by caffeinateViewModel.isServiceRunning.collectAsStateWithLifecycle()
     val caffeinateTime by caffeinateViewModel.elapsedTime.collectAsStateWithLifecycle()
 
     val appTips = remember(offlineState) {
         listOfNotNull(
-            if (offlineState == OfflineState.ONLINE) AppTip("Talk to AI agents", "With AI assistant", Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, Color(0xFF9C27B0)) else null,
+            if (offlineState == OfflineState.ONLINE)
+                AppTip("Talk to AI agents", "With AI assistant", Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, Color(0xFF9C27B0))
+            else null,
             AppTip("Express yourself", "Use the Notepad", Icons.Rounded.EditNote, Screen.Notepad.route, Color(0xFFFF9800)),
             AppTip("Convert any file", "100% Local File converter", Icons.Rounded.Transform, Screen.FileConverter.route, Color(0xFF2196F3)),
             AppTip("Manage your time", "Focus Flow", Icons.Rounded.CenterFocusStrong, Screen.FocusFlow.route, Color(0xFF4CAF50)),
@@ -1804,7 +2094,10 @@ fun UniversalPill(
         )
     }
 
-    val pages = remember(musicState, timerState, stopwatchState, pomodoroState, stepsState, recordingState, todoState.tasks, isCaffeinated, catalogState.downloadingTracks, fillThePillEnabled) {
+    val pages = remember(
+        musicState, timerState, stopwatchState, pomodoroState, stepsState,
+        recordingState, todoState.tasks, isCaffeinated, catalogState.downloadingTracks, fillThePillEnabled
+    ) {
         val list = mutableListOf<PillPage>()
         if (catalogState.downloadingTracks.isNotEmpty()) {
             val avgProgress = catalogState.downloadingTracks.values.average().toFloat()
@@ -1817,59 +2110,44 @@ fun UniversalPill(
         if (recordingState.isRecording || recordingState.isPaused) list.add(PillPage.Recorder)
         if (todoState.tasks.isNotEmpty()) list.add(PillPage.Todo)
         if (isCaffeinated) list.add(PillPage.Caffeinate)
-        
-        // Only show step tracker pill if activated in settings
         if (stepsState.isEnabledInSettings) list.add(PillPage.Steps)
-
         if (list.isEmpty() && fillThePillEnabled) {
-            // Pick 3 random tips as fallback
             appTips.shuffled().take(3).forEach { list.add(PillPage.Tip(it)) }
         }
         list
     }
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
+    val isAnyActive = musicState.isPlaying || timerState.isRunning ||
+            stopwatchState.isRunning || pomodoroState.isRunning ||
+            recordingState.isRecording || isCaffeinated
 
-    val isAnyActive = musicState.isPlaying || timerState.isRunning || stopwatchState.isRunning || pomodoroState.isRunning || recordingState.isRecording || isCaffeinated
+    if (pages.isEmpty()) return
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
-    val surfaceColor = MaterialTheme.colorScheme.surface
-
-    if (pages.isEmpty()) return
 
     Surface(
         modifier = Modifier
             .padding(horizontal = 20.dp)
-            .height(84.dp)
-            .fillMaxWidth()
-            .shadow(
-                elevation = if (isAnyActive) 20.dp else 10.dp,
-                shape = RoundedCornerShape(32.dp),
-                ambientColor = primaryColor.copy(alpha = if (isAnyActive) 0.4f else 0.2f),
-                spotColor = primaryColor.copy(alpha = if (isAnyActive) 0.5f else 0.25f)
-            ),
-        color = surfaceColor.copy(alpha = 0.98f),
-        shape = RoundedCornerShape(32.dp),
+            .height(94.dp)
+            .fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        shape = SquircleShape,
+        tonalElevation = 12.dp,
+        shadowElevation = if (performanceMode) 0.dp else 32.dp,
         border = BorderStroke(
-            width = if (isAnyActive) 1.8.dp else 1.2.dp,
+            width = if (isAnyActive) 2.dp else 1.5.dp,
             brush = if (isAnyActive && !performanceMode) {
                 Brush.sweepGradient(
-                    0f to primaryColor.copy(alpha = 0.8f),
-                    0.25f to secondaryColor.copy(alpha = 0.5f),
-                    0.5f to primaryColor.copy(alpha = 0.2f),
-                    0.75f to secondaryColor.copy(alpha = 0.5f),
-                    1f to primaryColor.copy(alpha = 0.8f)
-                )
-            } else {
-                Brush.linearGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.4f),
-                        secondaryColor.copy(alpha = 0.2f),
-                        primaryColor.copy(alpha = 0.1f)
+                    listOf(
+                        primaryColor.copy(alpha = 0.9f),
+                        secondaryColor.copy(alpha = 0.6f),
+                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f),
+                        primaryColor.copy(alpha = 0.9f)
                     )
                 )
-            }
+            } else SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         )
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -1891,12 +2169,12 @@ fun UniversalPill(
                 }
             }
 
-            // Enhanced page indicators
+            // Spring-animated pill page dots
             if (pages.size > 1) {
                 Row(
-                    Modifier
+                    modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 9.dp),
                     horizontalArrangement = Arrangement.Center
                 ) {
                     repeat(pages.size) { iteration ->
@@ -1910,8 +2188,9 @@ fun UniversalPill(
                             label = "dotWidth"
                         )
                         val dotColor by animateColorAsState(
-                            targetValue = if (active) primaryColor else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
-                            animationSpec = tween(300),
+                            targetValue = if (active) primaryColor
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f),
+                            animationSpec = tween(280),
                             label = "dotColor"
                         )
                         Box(
@@ -1928,6 +2207,10 @@ fun UniversalPill(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PILL PAGE CONTENT COMPOSABLES
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
     Row(
@@ -1941,18 +2224,9 @@ fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = tip.color.copy(alpha = 0.15f)
-        ) {
+        Surface(modifier = Modifier.size(52.dp), shape = SmallExpressiveShape, color = tip.color.copy(alpha = 0.15f)) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = tip.icon,
-                    contentDescription = null,
-                    tint = tip.color,
-                    modifier = Modifier.size(28.dp)
-                )
+                Icon(imageVector = tip.icon, contentDescription = null, tint = tip.color, modifier = Modifier.size(28.dp))
             }
         }
         Spacer(modifier = Modifier.width(16.dp))
@@ -1974,16 +2248,8 @@ fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
                 fontWeight = FontWeight.Bold
             )
         }
-        IconButton(
-            onClick = { onNavigate(tip.route) },
-            modifier = Modifier.size(48.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.ArrowOutward,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.size(24.dp)
-            )
+        IconButton(onClick = { onNavigate(tip.route) }, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -1992,24 +2258,16 @@ fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
 fun MusicPillContent(state: MusicUiState, viewModel: MusicPlayerViewModel, onNavigate: (String) -> Unit) {
     val infiniteTransition = rememberInfiniteTransition(label = "musicPill")
     val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(12000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "pillRotation"
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(animation = tween(12000, easing = LinearEasing), repeatMode = RepeatMode.Restart),
+        label = "albumRotation"
     )
 
     Row(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.MusicPlayer.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.MusicPlayer.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -2027,54 +2285,24 @@ fun MusicPillContent(state: MusicUiState, viewModel: MusicPlayerViewModel, onNav
                 contentScale = ContentScale.Crop
             )
             if (state.isPlaying) {
-                Surface(
-                    color = Color.Black.copy(alpha = 0.4f),
-                    modifier = Modifier.size(54.dp).clip(artShape)
-                ) {
+                Surface(color = Color.Black.copy(alpha = 0.4f), modifier = Modifier.size(54.dp).clip(artShape)) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.MusicNote,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Icon(Icons.Rounded.MusicNote, null, tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 }
             }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = state.currentTrack?.title ?: "Not Playing",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = state.currentTrack?.artist ?: "Unknown Artist",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Bold
-            )
+            Text(state.currentTrack?.title ?: "Not Playing", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(state.currentTrack?.artist ?: "Unknown Artist", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
         }
         FilledTonalIconButton(
             onClick = { viewModel.togglePlayPause() },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+            modifier = Modifier.size(48.dp), shape = CircleShape,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
-            Icon(
-                imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(26.dp)
-            )
+            Icon(if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(26.dp))
         }
     }
 }
@@ -2085,62 +2313,25 @@ fun TimerPillContent(state: com.frerox.toolz.ui.screens.time.TimerState, viewMod
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.Timer.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.Timer.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            }
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            val remainingSeconds = state.remainingTime / 1000
-            Text(
-                text = String.format("%02d:%02d", remainingSeconds / 60, remainingSeconds % 60),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            val progress = if (state.initialTime > 0) state.remainingTime.DivideToFloat() / state.initialTime.toFloat() else 0f
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(CircleShape),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-            )
+            val remainingSec = state.remainingTime / 1000
+            Text(String.format("%02d:%02d", remainingSec / 60, remainingSec % 60), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+            val progress = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime.toFloat() else 0f
+            ExpressiveLinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
         }
         Spacer(modifier = Modifier.width(12.dp))
-        FilledTonalIconButton(
-            onClick = { viewModel.toggleStartStop() },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        ) {
-            Icon(
-                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(26.dp)
-            )
+        FilledTonalIconButton(onClick = { viewModel.toggleStartStop() }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Icon(if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
         }
     }
 }
-
-private fun Long.DivideToFloat(): Float = this.toFloat()
 
 @Composable
 fun StopwatchPillContent(state: com.frerox.toolz.ui.screens.time.StopwatchState, viewModel: StopwatchViewModel, onNavigate: (String) -> Unit) {
@@ -2148,48 +2339,19 @@ fun StopwatchPillContent(state: com.frerox.toolz.ui.screens.time.StopwatchState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.Stopwatch.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.Stopwatch.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(28.dp))
-            }
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Text(
-            text = String.format("%02d:%02d.%01d",
-                (state.elapsedTime / 60000),
-                (state.elapsedTime % 60000) / 1000,
-                (state.elapsedTime % 1000) / 100
-            ),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.onSurface
+            text = String.format("%02d:%02d.%01d", state.elapsedTime / 60000, (state.elapsedTime % 60000) / 1000, (state.elapsedTime % 1000) / 100),
+            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface
         )
-        FilledTonalIconButton(
-            onClick = { viewModel.toggleStartStop() },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.tertiaryContainer
-            )
-        ) {
-            Icon(
-                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.size(26.dp)
-            )
+        FilledTonalIconButton(onClick = { viewModel.toggleStartStop() }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+            Icon(if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(26.dp))
         }
     }
 }
@@ -2200,112 +2362,51 @@ fun PomodoroPillContent(state: com.frerox.toolz.ui.screens.time.PomodoroState, v
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.Pomodoro.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.Pomodoro.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.AvTimer, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp))
-            }
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AvTimer, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = if (state.mode != PomodoroMode.WORK) "Break Time" else "Focusing",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.error
-            )
-            val remainingSeconds = state.remainingTime / 1000
-            Text(
-                text = String.format("%02d:%02d", remainingSeconds / 60, remainingSeconds % 60),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Text(if (state.mode != PomodoroMode.WORK) "Break Time" else "Focusing", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+            val remSec = state.remainingTime / 1000
+            Text(String.format("%02d:%02d", remSec / 60, remSec % 60), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
         }
-        FilledTonalIconButton(
-            onClick = { viewModel.toggleStartStop() },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer
-            )
-        ) {
-            Icon(
-                imageVector = if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(26.dp)
-            )
+        FilledTonalIconButton(onClick = { viewModel.toggleStartStop() }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+            Icon(if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(26.dp))
         }
     }
 }
 
 @Composable
 fun StepsPillContent(state: StepState, viewModel: StepCounterViewModel, onNavigate: (String) -> Unit) {
+    val goalSteps = 10_000
     Row(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.StepCounter.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.StepCounter.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Rounded.DirectionsRun, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            }
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.DirectionsRun, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "${state.steps} Steps",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            val progress = (state.steps.toFloat() / state.goal.toFloat()).coerceIn(0f, 1f)
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(CircleShape),
+            Text("STEPS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+            Text("${state.steps}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+            ExpressiveLinearProgressIndicator(
+                progress = { (state.steps.toFloat() / goalSteps).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             )
         }
         Spacer(modifier = Modifier.width(12.dp))
-        FilledTonalIconButton(
-            onClick = { onNavigate(Screen.StepCounter.route) },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-            )
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.ArrowOutward,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
+        FilledTonalIconButton(onClick = { onNavigate(Screen.StepCounter.route) }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))) {
+            Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -2316,53 +2417,22 @@ fun RecorderPillContent(state: RecordingState, viewModel: VoiceRecorderViewModel
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.VoiceRecorder.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.VoiceRecorder.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(24.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            val infiniteTransition = rememberInfiniteTransition(label = "recording")
-            val alpha by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = 0.3f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "alpha"
+        Box(modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f), RoundedCornerShape(24.dp)), contentAlignment = Alignment.Center) {
+            val infiniteTransition = rememberInfiniteTransition(label = "recBlip")
+            val blipAlpha by infiniteTransition.animateFloat(
+                initialValue = 1f, targetValue = 0.3f,
+                animationSpec = infiniteRepeatable(animation = tween(1000, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+                label = "blipAlpha"
             )
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .graphicsLayer { this.alpha = alpha }
-                    .background(MaterialTheme.colorScheme.error, CircleShape)
-            )
+            Box(modifier = Modifier.size(18.dp).graphicsLayer { alpha = blipAlpha }.background(MaterialTheme.colorScheme.error, CircleShape))
         }
         Spacer(modifier = Modifier.width(16.dp))
-        Text(
-            text = if (state.isRecording) "Recording..." else "Recording Paused",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        FilledTonalIconButton(
-            onClick = { viewModel.stopRecording() },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer
-            )
-        ) {
-            Icon(Icons.Rounded.Stop, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(26.dp))
+        Text(if (state.isRecording) "Recording..." else "Recording Paused", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+        FilledTonalIconButton(onClick = { viewModel.stopRecording() }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+            Icon(Icons.Rounded.Stop, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(26.dp))
         }
     }
 }
@@ -2373,144 +2443,188 @@ fun TodoPillContent(task: com.frerox.toolz.data.todo.TaskEntry?, onNavigate: (St
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.Todo.route) }
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.Todo.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            }
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.TaskAlt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Next Priority",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Black
-            )
-            Text(
-                text = task?.title ?: "Nothing planned",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Text("Next Priority", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+            Text(task?.title ?: "Nothing planned", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
         }
         Spacer(modifier = Modifier.width(12.dp))
-        FilledTonalIconButton(
-            onClick = { onNavigate(Screen.Todo.route) },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-            )
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.ArrowOutward,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
+        FilledTonalIconButton(onClick = { onNavigate(Screen.Todo.route) }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))) {
+            Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         }
     }
 }
 
 @Composable
 fun CatalogDownloadPillContent(progress: Float, count: Int, onNavigate: (String) -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition(label = "downloadPill")
+    val infiniteTransition = rememberInfiniteTransition(label = "downloadPulse")
     val pulse by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
+        initialValue = 1f, targetValue = 1.14f,
+        animationSpec = infiniteRepeatable(animation = tween(900, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
         label = "pulse"
     )
-
     Row(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.MusicPlayer.createRoute(2)) } // Navigate to catalog tab (index 2)
-            ),
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.MusicPlayer.route) }),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp).graphicsLayer {
-                scaleX = pulse
-                scaleY = pulse
-            },
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.FileDownload,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
+        Surface(modifier = Modifier.size(52.dp).graphicsLayer { scaleX = pulse; scaleY = pulse }, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.FileDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) }
         }
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Downloads (MUSIC)",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Black
-            )
+            Text("Downloads (MUSIC)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                )
+                ExpressiveLinearProgressIndicator(progress = { progress }, modifier = Modifier.weight(1f).height(6.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                 Spacer(Modifier.width(12.dp))
-                Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
             }
         }
         Spacer(modifier = Modifier.width(12.dp))
-        Surface(
-            modifier = Modifier.size(32.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary
-        ) {
+        Surface(modifier = Modifier.size(32.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
             Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = count.toString(),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black
-                )
+                Text(count.toString(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
             }
         }
     }
 }
+
+@Composable
+fun CaffeinatePillContent(timeMillis: Long, onNavigate: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onNavigate(Screen.Caffeinate.route) }),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(modifier = Modifier.size(52.dp), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Coffee, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(28.dp)) }
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Awake Mode", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Black)
+            val h = timeMillis / 3600000; val m = (timeMillis % 3600000) / 60000; val s = (timeMillis % 60000) / 1000
+            Text(if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        FilledTonalIconButton(onClick = { onNavigate(Screen.Caffeinate.route) }, modifier = Modifier.size(48.dp), shape = CircleShape, colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))) {
+            Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(24.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATE CARD
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun UpdateCardExpressive(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = { vibrationManager?.vibrateClick(); onUpdate() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 20.dp),
+        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+        shape = SquircleShape,
+        elevation = 0.dp,
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+    ) {
+        Row(modifier = Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Surface(shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(52.dp)) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onPrimary) }
+                }
+                Spacer(modifier = Modifier.width(20.dp))
+                Column {
+                    Text("NEW VERSION READY", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer, letterSpacing = 1.5.sp)
+                    Text("Upgrade to v$version now", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+                }
+            }
+            IconButton(onClick = { vibrationManager?.vibrateClick(); onDismiss() }, modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))) {
+                Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL DETAIL DIALOG
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ToolDetailDialogExpressive(
+    tool: ToolItem,
+    isPinned: Boolean,
+    onDismiss: () -> Unit,
+    onNavigate: (String) -> Unit,
+    onTogglePin: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(modifier = Modifier.size(56.dp), shape = SmallExpressiveShape, color = tool.color.copy(alpha = 0.15f)) {
+                    Box(contentAlignment = Alignment.Center) { Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp)) }
+                }
+                Spacer(Modifier.width(20.dp))
+                Text(tool.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(tool.description, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontWeight = FontWeight.Medium)
+                Surface(
+                    onClick = { vibrationManager?.vibrateTick(); onTogglePin() },
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    shape = BouncyShape,
+                    color = if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Icon(Icons.Rounded.PushPin, null, tint = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (isPinned) "Pinned to Quick Access" else "Pin to Quick Access", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = isPinned, onCheckedChange = { vibrationManager?.vibrateTick(); onTogglePin() })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                shape = BouncyShape
+            ) {
+                Text("OPEN UTILITY", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("DISMISS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            }
+        },
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OFFLINE MODE BOTTOM SHEET
+// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2542,134 +2656,183 @@ fun OfflineModeBottomSheet(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(16.dp))
-
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(80.dp)
-            ) {
+            Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(80.dp)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Rounded.CloudOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    Icon(Icons.Rounded.CloudOff, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
-
             Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Offline Mode Active",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-
+            Text("Offline Mode Active", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "AI Assistant and Web Search are hidden to ensure 100% privacy, save battery, and reduce data usage.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
+            Text("AI Assistant and Web Search are hidden to ensure 100% privacy, save battery, and reduce data usage.", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = onGoOnline,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(imageVector = Icons.Rounded.Cloud, contentDescription = null)
+            ToolzExpressiveButton(onClick = onGoOnline, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Icon(Icons.Rounded.Cloud, null)
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "GO ONLINE",
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
-                )
+                Text("GO ONLINE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
-
             Spacer(modifier = Modifier.height(12.dp))
-
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = "STAY OFFLINE",
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.outline
-                )
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Text("STAY OFFLINE", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
             }
         }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PRIVATE HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun Long.toProgressFloat(): Float = this.toFloat()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVIEWS — Light + Dark
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Preview(
+    name = "Dashboard — Light",
+    showBackground = true,
+    backgroundColor = 0xFFF8F9FA
+)
 @Composable
-fun CaffeinatePillContent(timeMillis: Long, onNavigate: (String) -> Unit) {
-    Row(
+private fun DashboardScreenPreviewLight() {
+    ToolzTheme(darkTheme = false) {
+        _DashboardPreviewScaffold()
+    }
+}
+
+@Preview(
+    name = "Dashboard — Dark",
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES or
+            android.content.res.Configuration.UI_MODE_TYPE_NORMAL
+)
+@Composable
+private fun DashboardScreenPreviewDark() {
+    ToolzTheme(darkTheme = true) {
+        _DashboardPreviewScaffold()
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun _DashboardPreviewScaffold() {
+    val sampleCategories = listOf(
+        ToolCategory(
+            "SMART FLOW & AI",
+            listOf(
+                ToolItem("Ai Assistant", Icons.Rounded.AutoAwesome, "ai", "Gemini Flash AI", Color(0xFF8E24AA)),
+                ToolItem("Focus Flow", Icons.Rounded.Toll, "focus", "Flow insights", Color(0xFF1976D2)),
+                ToolItem("Todo List", Icons.Rounded.TaskAlt, "todo", "Physics tasks", Color(0xFF43A047)),
+                ToolItem("Notepad", Icons.Rounded.Description, "notepad", "Quick notes", Color(0xFFFDD835))
+            )
+        ),
+        ToolCategory(
+            "SENSORS & VISION",
+            listOf(
+                ToolItem("Compass", Icons.Rounded.Explore, "compass", "Navigation", Color(0xFF00897B)),
+                ToolItem("Speedometer", Icons.Rounded.Speed, "speed", "GPS Speed", Color(0xFF1976D2)),
+                ToolItem("Bubble Level", Icons.Rounded.Architecture, "level", "Leveling", Color(0xFF7CB342)),
+                ToolItem("Altimeter", Icons.Rounded.Terrain, "altimeter", "Altitude", Color(0xFF795548))
+            )
+        )
+    )
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onNavigate(Screen.Caffeinate.route) }
-            ),
-        verticalAlignment = Alignment.CenterVertically
+            .background(MaterialTheme.colorScheme.surface)
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Coffee, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(28.dp))
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Preview top bar
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.Transparent
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("TOOLZ", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
+                            Text("Modern utility suite", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
+                        }
+                        FilledTonalIconButton(onClick = {}, shape = SmallExpressiveShape) {
+                            Icon(Icons.Rounded.Settings, null)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = SquircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Search or ask AI...", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+                        }
+                    }
+                }
+            }
+
+            LazyColumn(
+                modifier = Modifier.weight(1f).fadingEdges(top = 8.dp, bottom = 100.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp)
+            ) {
+                item {
+                    DashboardHeaderExpressive(userName = "Explorer", offlineState = OfflineState.ONLINE)
+                }
+                item {
+                    FeaturedToolsSection(categories = sampleCategories, onNavigate = {})
+                }
+                sampleCategories.forEach { category ->
+                    item { CategoryHeaderExpressive(category.title) }
+                    item {
+                        CategoryGridExpressive(
+                            items = category.items,
+                            vibrationManager = null,
+                            onNavigate = {}
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+                item { Spacer(Modifier.height(120.dp)) }
             }
         }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Awake Mode",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.secondary,
-                fontWeight = FontWeight.Black
-            )
-            val h = timeMillis / 3600000
-            val m = (timeMillis % 3600000) / 60000
-            val s = (timeMillis % 60000) / 1000
-            Text(
-                text = if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        FilledTonalIconButton(
-            onClick = { onNavigate(Screen.Caffeinate.route) },
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
-            )
+
+        // Preview: static pill at bottom
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .height(94.dp)
+                .fillMaxWidth(),
+            shape = SquircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+            tonalElevation = 10.dp,
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
         ) {
-            Icon(
-                imageVector = Icons.Rounded.ArrowOutward,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.size(24.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(modifier = Modifier.size(52.dp), shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(26.dp)) }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Talk to AI agents", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    Text("With AI assistant", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+                Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
+            }
         }
     }
 }

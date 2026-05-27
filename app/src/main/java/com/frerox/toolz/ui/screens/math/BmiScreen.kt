@@ -33,6 +33,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -71,16 +74,9 @@ fun BmiScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        "BMI ANALYZER PRO",
-                        style         = MaterialTheme.typography.labelMedium,
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 2.sp,
-                        color         = MaterialTheme.colorScheme.primary,
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "BMI CALCULATOR",
+                subtitle = "Precise stats",
                 navigationIcon = {
                     IconButton(
                         onClick  = onBack,
@@ -237,11 +233,13 @@ fun ResultCard(
 
     val color = bmiColor(animatedBmi.takeIf { it > 0f }, animatedRangeStart to animatedRangeEnd)
 
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(32.dp),
-        color    = color.copy(alpha = 0.05f),
+        containerColor    = color.copy(alpha = 0.05f),
         border   = BorderStroke(1.5.dp, color.copy(alpha = 0.15f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier            = Modifier.padding(24.dp),
@@ -381,11 +379,13 @@ fun GoalCard(difference: Float, unit: String) {
         else      -> BmiOverweight
     }
 
-    Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick { },
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(24.dp),
-        color    = color.copy(alpha = 0.1f),
+        containerColor    = color.copy(alpha = 0.1f),
         border   = BorderStroke(1.5.dp, color.copy(alpha = 0.2f)),
+        elevation = 4.dp
     ) {
         Row(
             modifier = Modifier.padding(20.dp),
@@ -434,11 +434,13 @@ fun GoalCard(difference: Float, unit: String) {
 
 @Composable
 private fun InputPanel(state: BmiState, viewModel: BmiViewModel) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(30.dp),
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor    = MaterialTheme.colorScheme.surfaceContainerLow,
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier            = Modifier.padding(24.dp),
@@ -572,11 +574,13 @@ private fun ActivityPanel(
     selected: ActivityLevel,
     onSelect: (ActivityLevel) -> Unit,
 ) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(30.dp),
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor    = MaterialTheme.colorScheme.surfaceContainerLow,
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
+        elevation = 0.dp
     ) {
         Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp)) {
             Row(
@@ -612,14 +616,15 @@ private fun ActivityPanel(
                         spring(Spring.DampingRatioMediumBouncy),
                         label = "act_scale",
                     )
-                    Surface(
+                    ExpressiveCard(
                         onClick  = { onSelect(level) },
-                        modifier = Modifier.weight(1f).scale(itemScale).bouncyClick { },
+                        modifier = Modifier.weight(1f).scale(itemScale),
                         shape    = RoundedCornerShape(14.dp),
-                        color    = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                        containerColor    = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceContainerHigh,
                         border   = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(0.5f))
                         else null,
+                        elevation = if (isSelected) 4.dp else 0.dp
                     ) {
                         Column(
                             modifier            = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
@@ -754,11 +759,13 @@ fun MetricCard(
     icon: ImageVector,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.bouncyClick { },
+    ExpressiveCard(
+        onClick = {},
+        modifier = modifier,
         shape    = RoundedCornerShape(24.dp),
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor    = MaterialTheme.colorScheme.surfaceContainerLow,
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
+        elevation = 2.dp
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(
@@ -819,11 +826,13 @@ fun NutritionSection(state: BmiState) {
         SectionLabel("NUTRITION & HYDRATION")
         
         // Water Intake
-        Surface(
+        ExpressiveCard(
+            onClick = {},
             modifier = Modifier.fillMaxWidth(),
             shape    = RoundedCornerShape(24.dp),
-            color    = Color(0xFFE3F2FD),
-            border   = BorderStroke(1.dp, Color(0xFF90CAF9))
+            containerColor    = Color(0xFFE3F2FD),
+            border   = BorderStroke(1.dp, Color(0xFF90CAF9)),
+            elevation = 2.dp
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
@@ -855,11 +864,13 @@ fun NutritionSection(state: BmiState) {
         }
 
         // Macros
-        Surface(
+        ExpressiveCard(
+            onClick = {},
             modifier = Modifier.fillMaxWidth(),
             shape    = RoundedCornerShape(24.dp),
-            color    = MaterialTheme.colorScheme.surfaceContainerLow,
-            border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f))
+            containerColor    = MaterialTheme.colorScheme.surfaceContainerLow,
+            border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
+            elevation = 0.dp
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 @Suppress("DEPRECATION")
@@ -922,12 +933,14 @@ fun BmiCategoryItem(
         spring(Spring.DampingRatioMediumBouncy),
         label = "cat_scale",
     )
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth().scale(scale),
         shape    = RoundedCornerShape(20.dp),
-        color    = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor    = if (isSelected) color.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainerLow,
         border   = if (isSelected) BorderStroke(2.dp, color.copy(alpha = 0.4f))
         else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(0.15f)),
+        elevation = if (isSelected) 4.dp else 0.dp
     ) {
         Row(
             modifier              = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),

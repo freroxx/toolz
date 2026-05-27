@@ -1,651 +1,1674 @@
+@file:OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalMaterial3AdaptiveApi::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalLayoutApi::class,
+)
+
 package com.frerox.toolz.ui.screens.clipboard
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
+import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
+import androidx.compose.material3.adaptive.layout.SupportingPaneScaffoldRole
+import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaffoldNavigator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.clipboard.ClipboardEntry
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
-import kotlin.math.sin
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ─── Type Metadata ────────────────────────────────────────────────────────────
+
+private data class TypeMeta(
+    val icon: ImageVector,
+    val color: Color,
+    val label: String,
+)
+
+private val kTypeMeta: Map<String, TypeMeta> @Composable get() = mapOf(
+    "URL"      to TypeMeta(Icons.Rounded.Language,           Color(0xFF1A73E8), "URL"),
+    "SOCIAL"   to TypeMeta(Icons.Rounded.Public,             Color(0xFF0D47A1), "Social"),
+    "PHONE"    to TypeMeta(Icons.Rounded.Call,               Color(0xFF34A853), "Phone"),
+    "OTP"      to TypeMeta(Icons.Rounded.Lock,               Color(0xFFFFA000), "OTP"),
+    "EMAIL"    to TypeMeta(Icons.Rounded.Mail,               Color(0xFFEA4335), "Email"),
+    "MATHS"    to TypeMeta(Icons.Rounded.Functions,          Color(0xFF9C27B0), "Maths"),
+    "PERSONAL" to TypeMeta(Icons.Rounded.AutoAwesome,        Color(0xFFE91E63), "Personal"),
+    "CODE"     to TypeMeta(Icons.Rounded.Terminal,           Color(0xFF00BCD4), "Code"),
+    "ADDRESS"  to TypeMeta(Icons.Rounded.Place,              Color(0xFFFF5722), "Address"),
+    "CRYPTO"   to TypeMeta(Icons.Rounded.CurrencyBitcoin,    Color(0xFFF7931A), "Crypto"),
+    "TODO"     to TypeMeta(Icons.Rounded.AssignmentTurnedIn, Color(0xFF4CAF50), "Todo"),
+    "RECIPE"   to TypeMeta(Icons.Rounded.Restaurant,         Color(0xFFFF9800), "Recipe"),
+    "FLIGHT"   to TypeMeta(Icons.Rounded.Flight,             Color(0xFF2196F3), "Flight"),
+    "EVENT"    to TypeMeta(Icons.Rounded.Event,              Color(0xFF9C27B0), "Event"),
+    "QUOTE"    to TypeMeta(Icons.Rounded.FormatQuote,        Color(0xFF607D8B), "Quote"),
+    "TEXT"     to TypeMeta(Icons.Rounded.Notes,              Color(0xFF78909C), "Text"),
+)
+
+@Composable
+private fun typeMeta(type: String): TypeMeta =
+    kTypeMeta[type] ?: TypeMeta(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary, type)
+
+private fun Long.toRelativeTime(): String {
+    val diff = System.currentTimeMillis() - this
+    return when {
+        diff < 60_000L      -> "Just now"
+        diff < 3_600_000L   -> "${diff / 60_000}m ago"
+        diff < 86_400_000L  -> "${diff / 3_600_000}h ago"
+        diff < 604_800_000L -> "${diff / 86_400_000}d ago"
+        else                -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(this))
+    }
+}
+
+private fun Long.toFullTimestamp(): String =
+    SimpleDateFormat("EEE, MMM d 'at' HH:mm", Locale.getDefault()).format(Date(this))
+
+// ─── Root Screen ─────────────────────────────────────────────────────────────
+
 @Composable
 fun ClipboardScreen(
     viewModel: ClipboardViewModel,
     onBack: () -> Unit,
-    onConvertToTask: (String) -> Unit = {}
+    onConvertToTask: (String) -> Unit = {},
 ) {
     val filteredEntries by viewModel.filteredEntries.collectAsStateWithLifecycle()
-    val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val entries         by viewModel.entries.collectAsStateWithLifecycle()
     val isSummarizingId by viewModel.isSummarizing.collectAsStateWithLifecycle()
-    val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val offlineMode by viewModel.offlineModeEnabled.collectAsStateWithLifecycle()
-    
-    val context = LocalContext.current
-    val performanceMode = LocalPerformanceMode.current
+    val isAiSearching   by viewModel.isAiSearching.collectAsStateWithLifecycle()
+    val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle()
+
+    val context         = LocalContext.current
+    val vibrationManager = LocalVibrationManager.current
+    val scope           = rememberCoroutineScope()
 
     val groups = remember(filteredEntries) { viewModel.groupedEntries(filteredEntries) }
-    val listState = rememberLazyListState()
-    var showClearAllConfirmation by remember { mutableStateOf(false) }
-    var isSearchActive by remember { mutableStateOf(false) }
+
+    // Adaptive pane navigator
+    val navigator = rememberSupportingPaneScaffoldNavigator()
+    val isSupportingPaneVisible =
+        navigator.scaffoldValue[SupportingPaneScaffoldRole.Supporting] == PaneAdaptedValue.Expanded
+
+    // UI state
+    var selectedEntry by remember { mutableStateOf<ClipboardEntry?>(null) }
+    var activeTypeFilter by remember { mutableStateOf<String?>(null) }
+    var showSearchBar by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    var showContextSheet by remember { mutableStateOf<ClipboardEntry?>(null) }
+
+    val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val showDetailSheet = selectedEntry != null && !isSupportingPaneVisible
+
+    // Refresh on resume
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshClipboard()
+    }
+
+    // Navigate to supporting pane when entry selected on wide layout
+    LaunchedEffect(selectedEntry, isSupportingPaneVisible) {
+        if (selectedEntry != null && isSupportingPaneVisible) {
+            navigator.navigateTo(SupportingPaneScaffoldRole.Supporting)
+        }
+    }
+
+    BackHandler(enabled = navigator.canNavigateBack()) {
+        scope.launch { navigator.navigateBack() }
+    }
+
+    // Filtered list accounting for type filter
+    val displayGroups = remember(groups, activeTypeFilter) {
+        if (activeTypeFilter == null) groups
+        else groups.map { g ->
+            g.copy(entries = g.entries.filter { it.type == activeTypeFilter })
+        }.filter { it.entries.isNotEmpty() }
+    }
+
+    val distinctTypes = remember(entries) {
+        entries.map { it.type }.distinct().sorted()
+    }
+
+    // Helpers: copy action
+    fun copyToClipboard(entry: ClipboardEntry) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Toolz Clip", entry.content))
+        vibrationManager?.vibrateClick()
+        Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
+    }
+
+    SupportingPaneScaffold(
+        directive  = navigator.scaffoldDirective,
+        value      = navigator.scaffoldValue,
+        mainPane   = {
+            AnimatedPane {
+                ClipboardFeedPane(
+                    groups               = displayGroups,
+                    allEntries           = entries,
+                    distinctTypes        = distinctTypes,
+                    activeTypeFilter     = activeTypeFilter,
+                    isSummarizingId      = isSummarizingId,
+                    isAiSearching        = isAiSearching,
+                    searchQuery          = searchQuery,
+                    offlineMode          = offlineMode,
+                    selectedEntry        = selectedEntry,
+                    showSearchBar        = showSearchBar,
+                    onBack               = onBack,
+                    onToggleSearch       = {
+                        vibrationManager?.vibrateTick()
+                        showSearchBar = !showSearchBar
+                        if (!showSearchBar) viewModel.onSearchQueryChanged("")
+                    },
+                    onSearchQueryChange  = viewModel::onSearchQueryChanged,
+                    onTypeFilterChange   = { type ->
+                        vibrationManager?.vibrateTick()
+                        activeTypeFilter = if (type == "ALL" || activeTypeFilter == type) null else type
+                    },
+                    onEntryClick         = { entry ->
+                        vibrationManager?.vibrateTick()
+                        selectedEntry = entry
+                        if (isSupportingPaneVisible) {
+                            scope.launch { navigator.navigateTo(SupportingPaneScaffoldRole.Supporting) }
+                        }
+                    },
+                    onEntryLongClick     = { entry ->
+                        vibrationManager?.vibrateLongClick()
+                        showContextSheet = entry
+                    },
+                    onCopy               = ::copyToClipboard,
+                    onDelete             = { viewModel.deleteEntry(it) },
+                    onPin                = { viewModel.togglePin(it.id) },
+                    onSummarize          = { viewModel.summarizeEntry(it) },
+                    onConvertToTask      = onConvertToTask,
+                    onContextualAction   = { action, entry ->
+                        if (action == "convert_to_task") onConvertToTask(entry.content)
+                        else handleContextualAction(context, action, entry)
+                    },
+                    onClearAll           = { showClearDialog = true },
+                    onRefresh            = { viewModel.categorizeAllWithAi() },
+                )
+            }
+        },
+        supportingPane = {
+            AnimatedPane {
+                selectedEntry?.let { entry ->
+                    Surface(
+                        modifier  = Modifier.fillMaxSize(),
+                        color     = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        ClipboardDetailContent(
+                            entry         = entry,
+                            isSummarizing = isSummarizingId == entry.id,
+                            offlineMode   = offlineMode,
+                            isInPanel     = true,
+                            onDismiss     = {
+                                selectedEntry = null
+                                scope.launch { navigator.navigateBack() }
+                            },
+                            onCopy        = { copyToClipboard(entry) },
+                            onDelete      = {
+                                viewModel.deleteEntry(entry)
+                                selectedEntry = null
+                                scope.launch { navigator.navigateBack() }
+                            },
+                            onPin         = { viewModel.togglePin(entry.id) },
+                            onSummarize   = { viewModel.summarizeEntry(entry) },
+                            onAction      = { action ->
+                                if (action == "convert_to_task") onConvertToTask(entry.content)
+                                else handleContextualAction(context, action, entry)
+                            },
+                        )
+                    }
+                } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Rounded.ContentPaste, null,
+                            Modifier.size(44.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Select an entry",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        )
+                    }
+                }
+            }
+        },
+    )
+
+    // ── Detail sheet (compact) ─────────────────────────────────────────────
+    if (showDetailSheet) {
+        selectedEntry?.let { entry ->
+            ModalBottomSheet(
+                onDismissRequest = { selectedEntry = null },
+                sheetState       = detailSheetState,
+                containerColor   = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape            = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+            ) {
+                ClipboardDetailContent(
+                    entry         = entry,
+                    isSummarizing = isSummarizingId == entry.id,
+                    offlineMode   = offlineMode,
+                    isInPanel     = false,
+                    onDismiss     = {
+                        scope.launch {
+                            detailSheetState.hide()
+                            selectedEntry = null
+                        }
+                    },
+                    onCopy    = { copyToClipboard(entry) },
+                    onDelete  = {
+                        viewModel.deleteEntry(entry)
+                        scope.launch {
+                            detailSheetState.hide()
+                            selectedEntry = null
+                        }
+                    },
+                    onPin       = { viewModel.togglePin(entry.id) },
+                    onSummarize = { viewModel.summarizeEntry(entry) },
+                    onAction    = { action ->
+                        if (action == "convert_to_task") onConvertToTask(entry.content)
+                        else handleContextualAction(context, action, entry)
+                    },
+                )
+            }
+        }
+    }
+
+    // ── Context menu (long-press) ─────────────────────────────────────────
+    showContextSheet?.let { entry ->
+        ClipboardContextSheet(
+            entry       = entry,
+            isSummarizing = isSummarizingId == entry.id,
+            offlineMode = offlineMode,
+            onDismiss   = { showContextSheet = null },
+            onCopy      = { showContextSheet = null; copyToClipboard(entry) },
+            onPin       = { showContextSheet = null; viewModel.togglePin(entry.id) },
+            onDelete    = { showContextSheet = null; viewModel.deleteEntry(entry) },
+            onSummarize = { showContextSheet = null; viewModel.summarizeEntry(entry) },
+            onAction    = { action ->
+                showContextSheet = null
+                if (action == "convert_to_task") onConvertToTask(entry.content)
+                else handleContextualAction(context, action, entry)
+            },
+        )
+    }
+
+    // ── Clear all dialog ──────────────────────────────────────────────────
+    if (showClearDialog) {
+        val pinnedCount = entries.count { it.isPinned }
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            icon  = { Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Clear History?", fontWeight = FontWeight.Black) },
+            text  = {
+                Text(
+                    "This removes all ${entries.size - pinnedCount} unpinned items. " +
+                            "$pinnedCount pinned item${if (pinnedCount != 1) "s" else ""} will be kept."
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateLongClick()
+                        viewModel.clearAll()
+                        showClearDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor   = MaterialTheme.colorScheme.onError,
+                    ),
+                ) { Text("Clear All", fontWeight = FontWeight.Black) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { showClearDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            shape = BouncyShape,
+        )
+    }
+}
+
+// ─── Feed Pane ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ClipboardFeedPane(
+    groups            : List<ClipboardGroup>,
+    allEntries        : List<ClipboardEntry>,
+    distinctTypes     : List<String>,
+    activeTypeFilter  : String?,
+    isSummarizingId   : Int?,
+    isAiSearching     : Boolean,
+    searchQuery       : String,
+    offlineMode       : Boolean,
+    selectedEntry     : ClipboardEntry?,
+    showSearchBar     : Boolean,
+    onBack            : () -> Unit,
+    onToggleSearch    : () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onTypeFilterChange: (String) -> Unit,
+    onEntryClick      : (ClipboardEntry) -> Unit,
+    onEntryLongClick  : (ClipboardEntry) -> Unit,
+    onCopy            : (ClipboardEntry) -> Unit,
+    onDelete          : (ClipboardEntry) -> Unit,
+    onPin             : (ClipboardEntry) -> Unit,
+    onSummarize       : (ClipboardEntry) -> Unit,
+    onConvertToTask   : (String) -> Unit,
+    onContextualAction: (String, ClipboardEntry) -> Unit,
+    onClearAll        : () -> Unit,
+    onRefresh         : () -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val performanceMode  = LocalPerformanceMode.current
+    val listState        = rememberLazyListState()
+    val scrollBehavior   = TopAppBarDefaults.enterAlwaysScrollBehavior(
+        snapAnimationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+    )
 
     Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = Color.Transparent,
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
-                tonalElevation = 0.dp
-            ) {
-                Column(modifier = Modifier.statusBarsPadding()) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                "CLIPBOARD",
-                                fontWeight = FontWeight.Black,
-                                style = MaterialTheme.typography.titleMedium,
-                                letterSpacing = 2.sp
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier
-                                    .padding(8.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        actions = {
-                            IconButton(
-                                onClick = { 
-                                    isSearchActive = !isSearchActive 
-                                    if (!isSearchActive) viewModel.onSearchQueryChanged("")
+            Column {
+                ExpressiveTopAppBar(
+                    title    = "Clipboard",
+                    subtitle = when {
+                        isAiSearching -> "AI searching…"
+                        allEntries.isEmpty() -> "Empty"
+                        else -> "${allEntries.size} item${if (allEntries.size != 1) "s" else ""}"
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        // Refresh
+                        IconButton(onClick = {
+                            vibrationManager?.vibrateTick()
+                            onRefresh()
+                        }) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                        }
+                        // Search toggle
+                        IconButton(onClick = onToggleSearch) {
+                            AnimatedContent(
+                                targetState = showSearchBar,
+                                transitionSpec = {
+                                    (scaleIn(spring(0.5f, Spring.StiffnessMediumLow)) + fadeIn()) togetherWith
+                                            (scaleOut() + fadeOut())
                                 },
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(if (isSearchActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            ) {
+                                label = "search_toggle",
+                            ) { active ->
                                 Icon(
-                                    if (isSearchActive) Icons.Rounded.SearchOff else Icons.Rounded.Search,
-                                    contentDescription = "Search",
-                                    tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (active) Icons.Rounded.SearchOff else Icons.Rounded.Search,
+                                    contentDescription = if (active) "Close search" else "Open search",
+                                    tint = if (active) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                        }
+                        // Clear all
+                        AnimatedVisibility(visible = allEntries.isNotEmpty()) {
+                            IconButton(onClick = {
+                                vibrationManager?.vibrateTick()
+                                onClearAll()
+                            }) {
+                                Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear all")
+                            }
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                )
 
-                            if (entries.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { showClearAllConfirmation = true },
-                                    modifier = Modifier
-                                        .padding(4.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                ) {
-                                    Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear All")
+                // ── AI search progress ─────────────────────────────────────
+                AnimatedVisibility(
+                    visible = isAiSearching,
+                    enter = fadeIn(tween(200)) + expandVertically(),
+                    exit  = fadeOut(tween(200)) + shrinkVertically(),
+                ) {
+                    ExpressiveWavyLinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .height(3.dp),
+                        color      = MaterialTheme.colorScheme.tertiary,
+                        trackColor = Color.Transparent,
+                    )
+                }
+
+                // ── Search bar ─────────────────────────────────────────────
+                AnimatedVisibility(
+                    visible = showSearchBar,
+                    enter = slideInVertically(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) { -it } +
+                            fadeIn(tween(200)),
+                    exit  = slideOutVertically { -it } + fadeOut(tween(150)),
+                ) {
+                    OutlinedTextField(
+                        value          = searchQuery,
+                        onValueChange  = onSearchQueryChange,
+                        modifier       = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        placeholder    = {
+                            Text(if (offlineMode) "Search clips…" else "Search or ask AI…")
+                        },
+                        leadingIcon    = {
+                            Icon(
+                                if (isAiSearching) Icons.Rounded.AutoAwesome else Icons.Rounded.Search,
+                                contentDescription = null,
+                                tint = if (isAiSearching) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingIcon   = {
+                            AnimatedVisibility(visible = searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(Icons.Rounded.Close, null)
                                 }
                             }
                         },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                        singleLine     = true,
+                        shape          = SmallExpressiveShape,
+                        colors         = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor   = if (isAiSearching) MaterialTheme.colorScheme.tertiary
+                            else MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
                     )
+                }
 
-                    if (isSearchActive) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(24.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                        ) {
-                            TextField(
-                                value = searchQuery,
-                                onValueChange = { viewModel.onSearchQueryChanged(it) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search by subject or keyword...", style = MaterialTheme.typography.bodyMedium) },
+                // ── Type filter chips ──────────────────────────────────────
+                AnimatedVisibility(visible = distinctTypes.size > 1) {
+                    val metaAll = typeMeta("ALL")
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalFadingEdges(left = 12.dp, right = 12.dp),
+                    ) {
+                        item {
+                            ExpressiveFilterChip(
+                                selected = activeTypeFilter == null,
+                                onClick = { onTypeFilterChange("ALL") },
+                                label = { Text("All", fontWeight = FontWeight.Bold) },
                                 leadingIcon = {
-                                    if (isAiSearching) {
-                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                    } else {
-                                        Icon(
-                                            if (offlineMode) Icons.Rounded.Search else Icons.Rounded.AutoAwesome,
-                                            null,
-                                            modifier = Modifier.size(20.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Rounded.AllInclusive, null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                 },
-                                trailingIcon = {
-                                    if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
-                                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(20.dp))
-                                        }
-                                    }
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            )
+                        }
+                        items(distinctTypes, key = { it }) { type ->
+                            val meta = typeMeta(type)
+                            ExpressiveFilterChip(
+                                selected   = activeTypeFilter == type,
+                                onClick    = { onTypeFilterChange(type) },
+                                label      = {
+                                    Text(
+                                        meta.label,
+                                        fontWeight = if (activeTypeFilter == type) FontWeight.Black else FontWeight.Medium,
+                                    )
                                 },
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    disabledContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent
+                                leadingIcon = {
+                                    Icon(
+                                        meta.icon, null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (activeTypeFilter == type) meta.color
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = meta.color.copy(alpha = 0.2f),
+                                    selectedLabelColor     = meta.color,
+                                    selectedLeadingIconColor = meta.color
                                 ),
-                                textStyle = MaterialTheme.typography.bodyMedium,
-                                singleLine = true
                             )
                         }
                     }
                 }
             }
-        }
-    ) { padding ->
-        if (showClearAllConfirmation) {
-            AlertDialog(
-                onDismissRequest = { showClearAllConfirmation = false },
-                title = { Text("Clear All History?", color = MaterialTheme.colorScheme.onSurface) },
-                text = { Text("This will permanently remove all unpinned items from your clipboard history.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.clearAll()
-                            showClearAllConfirmation = false
-                        }
+        },
+        bottomBar = {
+            // Stats summary bar
+            AnimatedVisibility(
+                visible = allEntries.isNotEmpty(),
+                enter   = slideInVertically { it } + fadeIn(),
+                exit    = slideOutVertically { it } + fadeOut(),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .navigationBarsPadding(),
+                    shape = ExtraLargeExpressiveShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                    tonalElevation = 6.dp,
+                    shadowElevation = 8.dp,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically,
                     ) {
-                        Text("CLEAR ALL", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showClearAllConfirmation = false }) {
-                        Text("CANCEL")
-                    }
-                },
-                shape = RoundedCornerShape(32.dp),
-                containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
+                        val pinnedCount = allEntries.count { it.isPinned }
+                        val aiCount     = allEntries.count { it.isAiProcessed }
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            StatPill(Icons.Rounded.ContentPaste, "${allEntries.size}", "items")
+                            if (pinnedCount > 0)
+                                StatPill(Icons.Rounded.PushPin, "$pinnedCount", "pinned")
+                            if (aiCount > 0)
+                                StatPill(Icons.Rounded.AutoAwesome, "$aiCount", "AI")
+                        }
 
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
-        ) {
-            if (entries.isEmpty()) {
+                        // Small refresh indicator or action could go here
+                        Icon(
+                            Icons.Rounded.AutoAwesome,
+                            null,
+                            Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+        },
+    ) { paddingValues ->
+        AnimatedContent(
+            targetState = allEntries.isEmpty(),
+            transitionSpec = {
+                (fadeIn(tween(280)) + scaleIn(tween(280), 0.95f)) togetherWith
+                        (fadeOut(tween(180)) + scaleOut(tween(180), 0.97f))
+            },
+            label = "feed_content",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+        ) { isEmpty ->
+            if (isEmpty) {
                 EmptyClipboardState()
             } else {
                 LazyColumn(
-                    state = listState,
-                    modifier = Modifier
+                    state           = listState,
+                    contentPadding  = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier        = Modifier
                         .fillMaxSize()
-                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .run {
+                            if (!performanceMode) fadingEdges(top = 20.dp, bottom = 20.dp) else this
+                        },
                 ) {
-                    groups.forEach { group ->
-                        item(key = "header_${group.label}") {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                group.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 2.sp,
-                                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                            )
-                        }
-
-                        items(group.entries, key = { it.id }) { entry ->
-                            val index = listState.firstVisibleItemIndex
-                            LiquidStackCard(
-                                entry = entry,
-                                isSummarizing = isSummarizingId == entry.id,
-                                offlineMode = offlineMode,
-                                scrollOffset = index,
-                                onCopy = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Toolz Clip", entry.content))
-                                    Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
-                                },
-                                onDelete = { viewModel.deleteEntry(entry) },
-                                onPin = { viewModel.togglePin(entry.id) },
-                                onSummarize = { viewModel.summarizeEntry(entry) },
-                                onAction = { action -> 
-                                    if (action == "convert_to_task") {
-                                        onConvertToTask(entry.content)
-                                    } else {
-                                        handleContextualAction(context, action, entry)
-                                    }
+                    if (groups.isEmpty() && searchQuery.isNotEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 48.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Rounded.SearchOff, null,
+                                        Modifier.size(40.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "No results for \"$searchQuery\"",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    )
                                 }
-                            )
-                        }
-
-                        item(key = "divider_${group.label}") {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
-                                thickness = 0.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                            )
+                            }
                         }
                     }
 
-                    item { Spacer(Modifier.height(80.dp)) }
+                    groups.forEach { group ->
+                        // Group header
+                        stickyHeader(key = "header_${group.label}") {
+                            Surface(
+                                color    = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        group.label,
+                                        style      = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Black,
+                                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp, 18.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.secondaryContainer),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            "${group.entries.size}",
+                                            style      = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            color      = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        items(group.entries, key = { it.id }) { entry ->
+                            val entryIndex = group.entries.indexOf(entry)
+                            StaggeredEntrance(index = entryIndex.coerceAtMost(10)) {
+                                SwipeToDismissClipEntry(
+                                    entry       = entry,
+                                    isSelected  = selectedEntry?.id == entry.id,
+                                    isSummarizing = isSummarizingId == entry.id,
+                                    offlineMode = offlineMode,
+                                    onClick     = { onEntryClick(entry) },
+                                    onLongClick = { onEntryLongClick(entry) },
+                                    onCopy      = { onCopy(entry) },
+                                    onPin       = { onPin(entry) },
+                                    onDelete    = { onDelete(entry) },
+                                    onSummarize = { onSummarize(entry) },
+                                    onAction    = { action ->
+                                        if (action == "convert_to_task") onConvertToTask(entry.content)
+                                        else onContextualAction(action, entry)
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    item { Spacer(Modifier.height(8.dp)) }
                 }
             }
         }
     }
 }
 
+// ─── Swipe-to-Dismiss ────────────────────────────────────────────────────────
+
 @Composable
-private fun EmptyClipboardState() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-            Surface(
-                modifier = Modifier.size(120.dp),
-                shape = RoundedCornerShape(48.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+private fun SwipeToDismissClipEntry(
+    entry        : ClipboardEntry,
+    isSelected   : Boolean,
+    isSummarizing: Boolean,
+    offlineMode  : Boolean,
+    onClick      : () -> Unit,
+    onLongClick  : () -> Unit,
+    onCopy       : () -> Unit,
+    onPin        : () -> Unit,
+    onDelete     : () -> Unit,
+    onSummarize  : () -> Unit,
+    onAction     : (String) -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else false
+        },
+        positionalThreshold = { it * 0.38f },
+    )
+
+    SwipeToDismissBox(
+        state                      = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            val color by animateColorAsState(
+                targetValue = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+                    else                             -> MaterialTheme.colorScheme.surfaceContainerLow
+                },
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+                label = "swipe_bg",
+            )
+            val scale by animateFloatAsState(
+                targetValue = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) 1.2f else 0.7f,
+                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
+                label = "swipe_icon_scale",
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(SquircleShape)
+                    .background(color),
+                contentAlignment = Alignment.CenterEnd,
             ) {
                 Icon(
-                    Icons.Rounded.ContentPaste,
-                    contentDescription = null,
-                    modifier = Modifier.padding(32.dp),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    Icons.Rounded.Delete,
+                    contentDescription = "Delete",
+                    tint     = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(end = 28.dp).graphicsLayer { scaleX = scale; scaleY = scale },
                 )
             }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "Your clipboard is empty",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.outline,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Copy anything and it shows here",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center
-            )
-        }
+        },
+    ) {
+        ClipboardCard(
+            entry         = entry,
+            isSelected    = isSelected,
+            isSummarizing = isSummarizing,
+            offlineMode   = offlineMode,
+            onClick       = onClick,
+            onLongClick   = onLongClick,
+            onCopy        = onCopy,
+            onPin         = onPin,
+            onSummarize   = onSummarize,
+            onAction      = onAction,
+        )
     }
 }
 
-@Composable
-private fun LiquidStackCard(
-    entry: ClipboardEntry,
-    isSummarizing: Boolean,
-    offlineMode: Boolean,
-    scrollOffset: Int,
-    onCopy: () -> Unit,
-    onDelete: () -> Unit,
-    onPin: () -> Unit,
-    onSummarize: () -> Unit,
-    onAction: (String) -> Unit
-) {
-    val tiltDeg = remember(scrollOffset) { (scrollOffset % 5) * 0.3f }
+// ─── Clipboard Card ───────────────────────────────────────────────────────────
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                rotationZ = tiltDeg
-                shadowElevation = 12f
-            }
-            .bouncyClick(onClick = onCopy),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
-        ),
-        tonalElevation = 2.dp
+@Composable
+private fun ClipboardCard(
+    entry        : ClipboardEntry,
+    isSelected   : Boolean,
+    isSummarizing: Boolean,
+    offlineMode  : Boolean,
+    onClick      : () -> Unit,
+    onLongClick  : () -> Unit,
+    onCopy       : () -> Unit,
+    onPin        : () -> Unit,
+    onSummarize  : () -> Unit,
+    onAction     : (String) -> Unit,
+) {
+    val meta = typeMeta(entry.type)
+    val borderColor by animateColorAsState(
+        targetValue   = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label         = "card_border",
+    )
+
+    ExpressiveCard(
+        onClick     = onClick,
+        onLongClick = onLongClick,
+        shape       = SquircleShape,
+        containerColor = if (isSelected)
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        else
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = if (isSelected) BorderStroke(2.dp, borderColor) else null,
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // ── Header row: type icon + label + pin + timestamp ────────────
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier          = Modifier.fillMaxWidth(),
             ) {
-                TypeIcon(entry.type, entry.content)
-                Spacer(Modifier.width(12.dp))
+                // Type icon
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape    = RoundedCornerShape(14.dp),
+                    color    = meta.color.copy(alpha = 0.13f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (entry.type == "COLOR") {
+                            val swatch = try {
+                                Color(android.graphics.Color.parseColor(entry.content.trim()))
+                            } catch (_: Exception) { meta.color }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(swatch),
+                            )
+                        } else {
+                            Icon(meta.icon, null, Modifier.size(20.dp), tint = meta.color)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(10.dp))
+
+                // Type label + AI badge
                 Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            meta.label,
+                            style      = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color      = meta.color,
+                        )
+                        if (entry.isAiProcessed) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                            ) {
+                                Text(
+                                    "AI",
+                                    modifier   = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color      = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        entry.type,
+                        entry.timestamp.toRelativeTime(),
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
                 }
-                IconButton(onClick = onPin, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        if (entry.isPinned) Icons.Rounded.PushPin else Icons.Rounded.PushPin,
-                        contentDescription = "Pin",
-                        tint = if (entry.isPinned) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                        modifier = Modifier.size(14.dp)
+
+                // Pin toggle
+                IconButton(
+                    onClick  = onPin,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    val pinScale by animateFloatAsState(
+                        targetValue   = if (entry.isPinned) 1.15f else 1f,
+                        animationSpec = spring(Spring.DampingRatioMediumBouncy),
+                        label         = "pin_scale",
                     )
-                }
-                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        Icons.Rounded.DeleteOutline,
-                        contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                        modifier = Modifier.size(14.dp)
+                        Icons.Rounded.PushPin,
+                        contentDescription = if (entry.isPinned) "Unpin" else "Pin",
+                        tint     = if (entry.isPinned) meta.color
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        modifier = Modifier.size(16.dp).graphicsLayer {
+                            scaleX = pinScale; scaleY = pinScale
+                            rotationZ = if (entry.isPinned) 0f else 30f
+                        },
                     )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
 
+            // ── Content ────────────────────────────────────────────────────
             Text(
-                text = entry.content,
-                style = MaterialTheme.typography.bodyMedium.copy(
+                text     = entry.content,
+                style    = MaterialTheme.typography.bodyMedium.copy(
                     fontFamily = if (entry.type == "CODE") FontFamily.Monospace else FontFamily.Default,
-                    lineHeight = 20.sp
+                    lineHeight = androidx.compose.ui.unit.TextUnit(20f, androidx.compose.ui.unit.TextUnitType.Sp),
                 ),
-                maxLines = if (entry.summary != null) 3 else 6,
+                maxLines = if (entry.summary != null) 2 else 4,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
+                color    = MaterialTheme.colorScheme.onSurface,
             )
 
-            if (entry.summary != null) {
-                Spacer(Modifier.height(8.dp))
+            // ── AI summary bubble ──────────────────────────────────────────
+            AnimatedVisibility(
+                visible = entry.summary != null || isSummarizing,
+                enter   = expandVertically(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
+                exit    = shrinkVertically() + fadeOut(),
+            ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier  = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        if (isSummarizing) {
+                            ExpressiveContainedLoadingIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color    = MaterialTheme.colorScheme.tertiary,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.AutoAwesome, null,
+                                Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
                         Text(
-                            text = entry.summary,
+                            text  = if (isSummarizing) "Summarizing…" else entry.summary ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Medium
+                            color = if (isSummarizing) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onTertiaryContainer,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+            // ── Quick action chips ─────────────────────────────────────────
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement   = Arrangement.spacedBy(6.dp),
             ) {
-                ActionChip("Copy", Icons.Rounded.ContentCopy) { onCopy() }
-                
+                QuickChip(
+                    label = "Copy",
+                    icon  = Icons.Rounded.ContentCopy,
+                    onClick = onCopy,
+                )
                 if (entry.summary == null && !offlineMode) {
-                    ActionChip(
-                        label = if (isSummarizing) "Summarizing..." else "AI Summarize",
-                        icon = Icons.Rounded.AutoAwesome,
-                        isLoading = isSummarizing
-                    ) { onSummarize() }
+                    QuickChip(
+                        label     = if (isSummarizing) "Thinking…" else "Summarize",
+                        icon      = Icons.Rounded.AutoAwesome,
+                        isAi      = true,
+                        isLoading = isSummarizing,
+                        onClick   = onSummarize,
+                    )
                 }
-
-                ActionChip("Task", Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") }
-                ActionChip("Share", Icons.Rounded.Share) { onAction("share") }
-
-                Spacer(Modifier.weight(1f))
-
+                QuickChip(
+                    label   = "Task",
+                    icon    = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                    onClick = { onAction("convert_to_task") },
+                )
+                QuickChip(
+                    label   = "Share",
+                    icon    = Icons.Rounded.Share,
+                    onClick = { onAction("share") },
+                )
+                // Contextual
                 when (entry.type) {
-                    "PHONE" -> {
-                        ActionChip("Call", Icons.Rounded.Call) { onAction("call") }
+                    "PHONE"         -> {
+                        QuickChip("Call",  Icons.Rounded.Call)               { onAction("call") }
+                        QuickChip("WhatsApp", Icons.Rounded.Textsms)         { onAction("whatsapp") }
                     }
-                    "URL", "SOCIAL" -> {
-                        ActionChip("Open", Icons.Rounded.OpenInBrowser) { onAction("open_url") }
-                    }
-                    "EMAIL" -> {
-                        ActionChip("Email", Icons.Rounded.Email) { onAction("email") }
-                    }
+                    "URL", "SOCIAL" -> QuickChip("Open", Icons.Rounded.OpenInBrowser) { onAction("open_url") }
+                    "EMAIL"         -> QuickChip("Email", Icons.Rounded.Email)          { onAction("email") }
+                    "CRYPTO"        -> QuickChip("Explore", Icons.Rounded.TravelExplore) { onAction("open_url") }
                 }
             }
-
-            Spacer(Modifier.height(8.dp))
-            val timeString = remember(entry.timestamp) { formatTimestamp(entry.timestamp) }
-            Text(
-                text = timeString,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-            )
         }
     }
 }
 
-@Composable
-private fun TypeIcon(type: String, content: String) {
-    when (type) {
-        "COLOR" -> {
-            val color = try {
-                Color(android.graphics.Color.parseColor(content.trim()))
-            } catch (_: Exception) {
-                MaterialTheme.colorScheme.primary
-            }
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = color,
-                border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-            ) {}
-        }
-        "URL" -> TypeIconBox(Icons.Rounded.Language, Color(0xFF1A73E8))
-        "SOCIAL" -> TypeIconBox(Icons.Rounded.Public, Color(0xFF0D47A1))
-        "PHONE" -> TypeIconBox(Icons.Rounded.Call, Color(0xFF34A853))
-        "OTP" -> TypeIconBox(Icons.Rounded.Lock, Color(0xFFFFA000))
-        "EMAIL" -> TypeIconBox(Icons.Rounded.Mail, Color(0xFFEA4335))
-        "MATHS" -> TypeIconBox(Icons.Rounded.Functions, Color(0xFF9C27B0))
-        "PERSONAL" -> TypeIconBox(Icons.Rounded.AutoAwesome, Color(0xFFE91E63))
-        "CODE" -> TypeIconBox(Icons.Rounded.Terminal, Color(0xFF00BCD4))
-        "ADDRESS" -> TypeIconBox(Icons.Rounded.Place, Color(0xFFFF5722))
-        "CRYPTO" -> TypeIconBox(Icons.Rounded.CurrencyBitcoin, Color(0xFFF7931A))
-        "TODO" -> TypeIconBox(Icons.Rounded.AssignmentTurnedIn, Color(0xFF4CAF50))
-        "RECIPE" -> TypeIconBox(Icons.Rounded.Restaurant, Color(0xFFFF9800))
-        "FLIGHT" -> TypeIconBox(Icons.Rounded.Flight, Color(0xFF2196F3))
-        "EVENT" -> TypeIconBox(Icons.Rounded.Event, Color(0xFF9C27B0))
-        "QUOTE" -> TypeIconBox(Icons.Rounded.FormatQuote, Color(0xFF607D8B))
-        else -> TypeIconBox(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary)
-    }
-}
+// ─── Quick action chip ────────────────────────────────────────────────────────
 
 @Composable
-private fun TypeIconBox(icon: ImageVector, color: Color) {
-    Surface(
-        modifier = Modifier.size(40.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = color.copy(alpha = 0.15f)
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(22.dp))
-        }
-    }
-}
-
-@Composable
-private fun ActionChip(
-    label: String,
-    icon: ImageVector,
+private fun QuickChip(
+    label    : String,
+    icon     : ImageVector,
+    isAi     : Boolean = false,
     isLoading: Boolean = false,
-    onClick: () -> Unit
+    onClick  : () -> Unit,
 ) {
+    val accentColor = if (isAi) MaterialTheme.colorScheme.tertiary
+    else MaterialTheme.colorScheme.primary
+    val bgColor     = if (isAi) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.28f)
+    else MaterialTheme.colorScheme.surfaceContainerHighest
+
     Surface(
         onClick = if (isLoading) ({}) else onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = if (label.contains("AI")) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f) 
-                else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, if (label.contains("AI")) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f) 
-                                   else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-        modifier = Modifier.height(32.dp)
+        shape   = RoundedCornerShape(10.dp),
+        color   = bgColor,
+        modifier = Modifier.height(28.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier.padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.tertiary
+                    modifier    = Modifier.size(10.dp),
+                    strokeWidth = 1.5.dp,
+                    color       = accentColor,
                 )
             } else {
-                Icon(
-                    icon, 
-                    null, 
-                    modifier = Modifier.size(14.dp), 
-                    tint = if (label.contains("AI")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
-                )
+                Icon(icon, null, Modifier.size(12.dp), tint = accentColor)
             }
             Text(
                 label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = if (label.contains("AI")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                style      = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color      = accentColor,
             )
         }
     }
 }
 
-@Composable
-private fun SquigglyDivider() {
-    val primaryColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-    val infiniteTransition = rememberInfiniteTransition(label = "squiggle")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "squigglePhase"
-    )
+// ─── Clipboard Detail ─────────────────────────────────────────────────────────
 
-    Canvas(
+@Composable
+private fun ClipboardDetailContent(
+    entry        : ClipboardEntry,
+    isSummarizing: Boolean,
+    offlineMode  : Boolean,
+    isInPanel    : Boolean,
+    onDismiss    : () -> Unit,
+    onCopy       : () -> Unit,
+    onDelete     : () -> Unit,
+    onPin        : () -> Unit,
+    onSummarize  : () -> Unit,
+    onAction     : (String) -> Unit,
+) {
+    val meta = typeMeta(entry.type)
+    val vibrationManager = LocalVibrationManager.current
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(20.dp)
-            .padding(vertical = 4.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState())
+            .padding(if (isInPanel) 24.dp else 20.dp)
+            .then(if (!isInPanel) Modifier.navigationBarsPadding() else Modifier),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        val width = size.width
-        val height = size.height
-        val midY = height / 2f
-        val amplitude = 4f
-        val wavelength = 40f
-        val path = Path()
-
-        path.moveTo(0f, midY)
-        var x = 0f
-        while (x <= width) {
-            val y = midY + amplitude * sin((x / wavelength * 2 * Math.PI + phase).toDouble()).toFloat()
-            path.lineTo(x, y)
-            x += 2f
+        // Panel header
+        if (isInPanel) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text("Detail", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close")
+                }
+            }
         }
 
-        drawPath(
-            path = path,
-            color = primaryColor,
-            style = Stroke(width = 2f, cap = StrokeCap.Round)
+        // Type header
+        Surface(
+            shape = LargeExpressiveShape,
+            color = meta.color.copy(alpha = 0.08f),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape    = RoundedCornerShape(18.dp),
+                    color    = meta.color.copy(alpha = 0.18f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(meta.icon, null, Modifier.size(24.dp), tint = meta.color)
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(meta.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(
+                        entry.timestamp.toFullTimestamp(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // Pin
+                FilledTonalIconButton(onClick = onPin) {
+                    Icon(
+                        Icons.Rounded.PushPin, null,
+                        tint = if (entry.isPinned) meta.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // Selectable content
+        Surface(
+            shape = LargeExpressiveShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            SelectionContainer {
+                Text(
+                    text     = entry.content,
+                    style    = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = if (entry.type == "CODE") FontFamily.Monospace else FontFamily.Default,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                )
+            }
+        }
+
+        // AI summary
+        AnimatedVisibility(
+            visible = entry.summary != null || isSummarizing,
+            enter   = expandVertically(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
+        ) {
+            Surface(
+                shape  = LargeExpressiveShape,
+                color  = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment     = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (isSummarizing) {
+                        ExpressiveLoadingIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color    = MaterialTheme.colorScheme.tertiary,
+                        )
+                    } else {
+                        Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                    }
+                    Text(
+                        text  = if (isSummarizing) "Generating summary…" else entry.summary ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isSummarizing) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
+            }
+        }
+
+        // Actions
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ToolzExpressiveButton(onClick = onCopy, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Copy")
+            }
+            if (entry.summary == null && !offlineMode) {
+                ToolzOutlinedExpressiveButton(
+                    onClick  = onSummarize,
+                    modifier = Modifier.weight(1f),
+                    enabled  = !isSummarizing,
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isSummarizing) "…" else "AI")
+                }
+            }
+        }
+
+        // Contextual action buttons
+        val contextActions = buildList<Triple<String, ImageVector, String>> {
+            add(Triple("Share",          Icons.Rounded.Share,           "share"))
+            add(Triple("To Task",        Icons.AutoMirrored.Rounded.PlaylistAdd, "convert_to_task"))
+            when (entry.type) {
+                "PHONE"         -> { add(Triple("Call", Icons.Rounded.Call, "call")); add(Triple("WhatsApp", Icons.Rounded.Textsms, "whatsapp")) }
+                "URL", "SOCIAL" -> add(Triple("Open URL", Icons.Rounded.OpenInBrowser, "open_url"))
+                "EMAIL"         -> add(Triple("Send Email", Icons.Rounded.Email, "email"))
+                "CRYPTO"        -> add(Triple("Explore", Icons.Rounded.TravelExplore, "open_url"))
+            }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement   = Arrangement.spacedBy(8.dp),
+        ) {
+            contextActions.forEach { (label, icon, action) ->
+                ToolzOutlinedExpressiveButton(
+                    onClick = { vibrationManager?.vibrateTick(); onAction(action) },
+                ) {
+                    Icon(icon, null, Modifier.size(15.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(label)
+                }
+            }
+        }
+
+        ToolzExpressiveButton(
+            onClick = onDelete,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor   = MaterialTheme.colorScheme.onErrorContainer,
+            ),
+        ) {
+            Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Delete", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ─── Context Bottom Sheet ─────────────────────────────────────────────────────
+
+@Composable
+private fun ClipboardContextSheet(
+    entry        : ClipboardEntry,
+    isSummarizing: Boolean,
+    offlineMode  : Boolean,
+    onDismiss    : () -> Unit,
+    onCopy       : () -> Unit,
+    onPin        : () -> Unit,
+    onDelete     : () -> Unit,
+    onSummarize  : () -> Unit,
+    onAction     : (String) -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val meta   = typeMeta(entry.type)
+    val sheetState = rememberModalBottomSheetState()
+
+    val menuItems = buildList<Triple<String, ImageVector, () -> Unit>> {
+        add(Triple("Copy",              Icons.Rounded.ContentCopy)           { onCopy() })
+        add(Triple(if (entry.isPinned) "Unpin" else "Pin", Icons.Rounded.PushPin) { onPin() })
+        add(Triple("Share",             Icons.Rounded.Share)                 { onAction("share") })
+        add(Triple("Convert to Task",   Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") })
+        if (entry.summary == null && !offlineMode)
+            add(Triple("AI Summarize",  Icons.Rounded.AutoAwesome)           { onSummarize() })
+        when (entry.type) {
+            "PHONE"         -> { add(Triple("Call", Icons.Rounded.Call) { onAction("call") }); add(Triple("WhatsApp", Icons.Rounded.Textsms) { onAction("whatsapp") }) }
+            "URL", "SOCIAL" -> add(Triple("Open URL", Icons.Rounded.OpenInBrowser) { onAction("open_url") })
+            "EMAIL"         -> add(Triple("Send Email", Icons.Rounded.Email)        { onAction("email") })
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        shape            = RoundedCornerShape(topStart = 36.dp, topEnd = 36.dp),
+        containerColor   = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Preview
+            Surface(
+                shape    = MediumExpressiveShape,
+                color    = meta.color.copy(alpha = 0.08f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(meta.icon, null, Modifier.size(20.dp), tint = meta.color)
+                    Text(
+                        entry.content,
+                        style    = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                color    = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+
+            menuItems.forEachIndexed { idx, (label, icon, action) ->
+                StaggeredEntrance(index = idx) {
+                    Surface(
+                        onClick  = {
+                            vibrationManager?.vibrateTick()
+                            action()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape    = MediumExpressiveShape,
+                        color    = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier          = Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            Icon(icon, null, Modifier.size(18.dp), tint = meta.color)
+                            Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            ToolzExpressiveButton(
+                onClick  = {
+                    vibrationManager?.vibrateLongClick()
+                    onDelete()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor   = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Delete", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+// ─── Empty State ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun EmptyClipboardState() {
+    val performanceMode = LocalPerformanceMode.current
+    val infiniteTransition = rememberInfiniteTransition(label = "empty")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.92f,
+        targetValue  = 1.08f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse",
+    )
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(32.dp),
+        ) {
+            Surface(
+                modifier = Modifier
+                    .size(108.dp)
+                    .graphicsLayer {
+                        if (!performanceMode) { scaleX = pulse; scaleY = pulse }
+                    },
+                shape  = ExtraLargeExpressiveShape,
+                color  = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+            ) {
+                Icon(
+                    Icons.Rounded.ContentPaste, null,
+                    Modifier.padding(28.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(
+                "Clipboard is empty",
+                style      = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black,
+            )
+            Text(
+                "Copy anything — text, links, OTPs, code — and it will appear here automatically.",
+                style      = MaterialTheme.typography.bodySmall,
+                color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                textAlign  = TextAlign.Center,
+            )
+        }
+    }
+}
+
+// ─── Stats Pill ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun StatPill(icon: ImageVector, value: String, label: String) {
+    Row(
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            icon, null,
+            Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
+        Text(
+            label, 
+            style = MaterialTheme.typography.labelSmall, 
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            fontWeight = FontWeight.Bold
         )
     }
 }
 
+// ─── Contextual Action Handler ────────────────────────────────────────────────
+
 private fun handleContextualAction(context: Context, action: String, entry: ClipboardEntry) {
     when (action) {
-        "call" -> {
-            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${entry.content.trim()}"))
-            context.startActivity(intent)
-        }
+        "call" -> context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:${entry.content.trim()}")))
         "whatsapp" -> {
-            try {
+            runCatching {
                 val phone = entry.content.trim().replace("[^\\d+]".toRegex(), "")
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$phone"))
-                context.startActivity(intent)
-            } catch (e: Exception) {
-                Toast.makeText(context, "WhatsApp not found", Toast.LENGTH_SHORT).show()
-            }
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$phone")))
+            }.onFailure { Toast.makeText(context, "WhatsApp not installed", Toast.LENGTH_SHORT).show() }
         }
         "open_url" -> {
-            try {
-                val content = entry.content.trim()
-                val url = if (content.startsWith("http")) content
-                          else if (content.startsWith("www.")) "https://$content"
-                          else if (entry.type == "SOCIAL") "https://$content"
-                          else if (entry.type == "CRYPTO") {
-                              if (content.startsWith("0x")) "https://etherscan.io/address/$content"
-                              else "https://www.blockchain.com/explorer/addresses/btc/$content"
-                          }
-                          else "https://www.google.com/search?q=$content"
+            runCatching {
+                val raw = entry.content.trim()
+                val url = when {
+                    raw.startsWith("http")    -> raw
+                    raw.startsWith("www.")    -> "https://$raw"
+                    entry.type == "SOCIAL"    -> "https://$raw"
+                    entry.type == "CRYPTO" && raw.startsWith("0x") ->
+                        "https://etherscan.io/address/$raw"
+                    entry.type == "CRYPTO"    ->
+                        "https://www.blockchain.com/explorer/addresses/btc/$raw"
+                    else                      -> "https://www.google.com/search?q=${Uri.encode(raw)}"
+                }
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }.onFailure { Toast.makeText(context, "Cannot open URL", Toast.LENGTH_SHORT).show() }
+        }
+        "email" -> context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${entry.content.trim()}")))
+        "share" -> context.startActivity(Intent.createChooser(
+            Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, entry.content) },
+            "Share via",
+        ))
+    }
+}
 
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                context.startActivity(intent)
-            } catch (e: Exception) {
-                Toast.makeText(context, "Cannot open URL", Toast.LENGTH_SHORT).show()
-            }
-        }
-        "email" -> {
-            val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${entry.content.trim()}"))
-            context.startActivity(intent)
-        }
-        "share" -> {
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, entry.content)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share via"))
+// ─── Previews ─────────────────────────────────────────────────────────────────
+
+private fun fakeSampleEntries() = listOf(
+    ClipboardEntry(
+        id = 1,
+        content = "https://developer.android.com/jetpack/compose",
+        timestamp = System.currentTimeMillis() - 60_000L,
+        type = "URL",
+        summary = "Android Compose docs",
+        isPinned = true
+    ),
+    ClipboardEntry(
+        id = 2,
+        content = "+1 650 253 0000",
+        timestamp = System.currentTimeMillis() - 600_000L,
+        type = "PHONE",
+        isPinned = false
+    ),
+    ClipboardEntry(
+        id = 3,
+        content = "fun greet(name: String) = println(\"Hello, \$name\")",
+        timestamp = System.currentTimeMillis() - 3_600_000L,
+        type = "CODE",
+        summary = "Kotlin greeting function",
+        isAiProcessed = true
+    ),
+    ClipboardEntry(
+        id = 4,
+        content = "Your OTP is 847 293. Valid for 5 minutes.",
+        timestamp = System.currentTimeMillis() - 86_400_000L,
+        type = "OTP",
+        summary = "One-time password"
+    ),
+    ClipboardEntry(
+        id = 5,
+        content = "1 cup flour, 2 eggs, 200ml milk — whisk together.",
+        timestamp = System.currentTimeMillis() - 172_800_000L,
+        type = "RECIPE"
+    ),
+)
+
+@Preview(name = "Feed · Light", showBackground = true)
+@Composable
+private fun FeedLightPreview() {
+    ToolzTheme {
+        val fakeGroups = listOf(
+            ClipboardGroup("Pinned",  fakeSampleEntries().filter { it.isPinned }),
+            ClipboardGroup("Today",     fakeSampleEntries().filter { !it.isPinned }.take(2)),
+            ClipboardGroup("Yesterday", fakeSampleEntries().filter { !it.isPinned }.drop(2)),
+        )
+        ClipboardFeedPane(
+            groups             = fakeGroups,
+            allEntries         = fakeSampleEntries(),
+            distinctTypes      = listOf("URL","PHONE","CODE","OTP","RECIPE"),
+            activeTypeFilter   = null,
+            isSummarizingId    = null,
+            isAiSearching      = false,
+            searchQuery        = "",
+            offlineMode        = false,
+            selectedEntry      = null,
+            showSearchBar      = false,
+            onBack             = {},
+            onToggleSearch     = {},
+            onSearchQueryChange= {},
+            onTypeFilterChange = {},
+            onEntryClick       = {},
+            onEntryLongClick   = {},
+            onCopy             = {},
+            onDelete           = {},
+            onPin              = {},
+            onSummarize        = {},
+            onConvertToTask    = {},
+            onContextualAction = { _, _ -> },
+            onClearAll         = {},
+            onRefresh          = {},
+        )
+    }
+}
+
+@Preview(name = "Feed · Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun FeedDarkPreview() {
+    ToolzTheme(darkTheme = true) {
+        val groups = listOf(ClipboardGroup("Today", fakeSampleEntries()))
+        ClipboardFeedPane(
+            groups             = groups,
+            allEntries         = fakeSampleEntries(),
+            distinctTypes      = listOf("URL","PHONE","CODE","OTP","RECIPE"),
+            activeTypeFilter   = "CODE",
+            isSummarizingId    = 3,
+            isAiSearching      = true,
+            searchQuery        = "kotlin",
+            offlineMode        = false,
+            selectedEntry      = null,
+            showSearchBar      = true,
+            onBack             = {},
+            onToggleSearch     = {},
+            onSearchQueryChange= {},
+            onTypeFilterChange = {},
+            onEntryClick       = {},
+            onEntryLongClick   = {},
+            onCopy             = {},
+            onDelete           = {},
+            onPin              = {},
+            onSummarize        = {},
+            onConvertToTask    = {},
+            onContextualAction = { _, _ -> },
+            onClearAll         = {},
+            onRefresh          = {},
+        )
+    }
+}
+
+@Preview(name = "Card · Light", showBackground = true)
+@Composable
+private fun CardLightPreview() {
+    ToolzTheme {
+        Box(Modifier.padding(16.dp)) {
+            ClipboardCard(
+                entry         = fakeSampleEntries()[2],
+                isSelected    = false,
+                isSummarizing = false,
+                offlineMode   = false,
+                onClick       = {},
+                onLongClick   = {},
+                onCopy        = {},
+                onPin         = {},
+                onSummarize   = {},
+                onAction      = {},
+            )
         }
     }
 }
 
-private fun formatTimestamp(timestamp: Long): String {
-    val sdf = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
-    return sdf.format(java.util.Date(timestamp))
+@Preview(name = "Card · Selected", showBackground = true)
+@Composable
+private fun CardSelectedPreview() {
+    ToolzTheme {
+        Box(Modifier.padding(16.dp)) {
+            ClipboardCard(
+                entry         = fakeSampleEntries()[0],
+                isSelected    = true,
+                isSummarizing = false,
+                offlineMode   = false,
+                onClick       = {},
+                onLongClick   = {},
+                onCopy        = {},
+                onPin         = {},
+                onSummarize   = {},
+                onAction      = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Empty State", showBackground = true)
+@Composable
+private fun EmptyPreview() {
+    ToolzTheme { EmptyClipboardState() }
 }

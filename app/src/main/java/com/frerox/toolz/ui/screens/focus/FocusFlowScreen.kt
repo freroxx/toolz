@@ -55,14 +55,20 @@ import androidx.lifecycle.Lifecycle
 import coil3.compose.rememberAsyncImagePainter
 import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppUsageInfo
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveLoadingWheel
+import com.frerox.toolz.ui.components.ExpressiveWavyLinearProgressIndicator
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.SquigglySlider
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.rememberLifecycleEvent
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.components.parseMarkdownToSegments
 import com.frerox.toolz.ui.components.MarkdownSegment
+    import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -107,126 +113,108 @@ fun FocusFlowScreen(
 
     Scaffold(
         topBar = {
-            Column(Modifier.background(Color.Transparent)) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "FOCUS FLOW",
-                                fontWeight = FontWeight.Black,
-                                style      = MaterialTheme.typography.labelMedium,
-                                letterSpacing = 2.sp,
-                            )
-                            Text(
-                                if (isWeekly) "WEEKLY PERFORMANCE" else "TODAY'S USAGE",
-                                style     = MaterialTheme.typography.labelSmall,
-                                color     = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick  = { vibrationManager?.vibrateClick(); onNavigateBack() },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            ExpressiveTopAppBar(
+                title = "FOCUS FLOW",
+                subtitle = if (isWeekly) "Detailed app usage" else "Daily attention analytics",
+                navigationIcon = {
+                    IconButton(
+                        onClick  = { vibrationManager?.vibrateClick(); onNavigateBack() },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    val offlineMode by viewModel.offlineModeEnabled.collectAsState(initial = false)
+                    if (!offlineMode) {
+                        // Pulsing "AI" pill while Groq is classifying
+                        AnimatedVisibility(
+                            visible = isAiClassifying,
+                            enter = fadeIn() + scaleIn(),
+                            exit = fadeOut() + scaleOut(),
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
-                        }
-                    },
-                    actions = {
-                        val offlineMode by viewModel.offlineModeEnabled.collectAsState(initial = false)
-                        if (!offlineMode) {
-                            // Pulsing "AI" pill while Groq is classifying
-                            AnimatedVisibility(
-                                visible = isAiClassifying,
-                                enter = fadeIn() + scaleIn(),
-                                exit = fadeOut() + scaleOut(),
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.tertiaryContainer)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.tertiaryContainer)
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    contentAlignment = Alignment.Center,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                    ) {
-                                        val inf = rememberInfiniteTransition(label = "ai_dot")
-                                        val dotAlpha by inf.animateFloat(
-                                            0.3f, 1f,
-                                            infiniteRepeatable(tween(600), RepeatMode.Reverse),
-                                            label = "ai_dot_alpha",
-                                        )
-                                        Box(
-                                            Modifier
-                                                .size(6.dp)
-                                                .alpha(dotAlpha)
-                                                .background(MaterialTheme.colorScheme.tertiary, CircleShape)
-                                        )
-                                        Text(
-                                            "AI",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        )
-                                    }
-                                }
-                            }
-
-                            // AI refresh — clears cache and re-classifies all apps
-                            AnimatedVisibility(
-                                visible = !isAiClassifying,
-                                enter = fadeIn() + scaleIn(spring(Spring.DampingRatioMediumBouncy)),
-                                exit = fadeOut() + scaleOut(),
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        vibrationManager?.vibrateTick(); viewModel.refreshAiCategories()
-                                    },
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(MaterialTheme.colorScheme.tertiaryContainer.copy(0.55f)),
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.AutoAwesome, "Refresh AI",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    val inf = rememberInfiniteTransition(label = "ai_dot")
+                                    val dotAlpha by inf.animateFloat(
+                                        0.3f, 1f,
+                                        infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                                        label = "ai_dot_alpha",
+                                    )
+                                    Box(
+                                        Modifier
+                                            .size(6.dp)
+                                            .alpha(dotAlpha)
+                                            .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                                    )
+                                    Text(
+                                        "AI",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
                                     )
                                 }
                             }
                         }
 
-                        // Usage stats refresh
-                        IconButton(
-                            onClick  = { 
-                                vibrationManager?.vibrateClick()
-                                scope.launch {
-                                    viewModel.refreshStats()
-                                    delay(500)
-                                    vibrationManager?.vibrateSuccess()
-                                }
-                            },
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        // AI refresh — clears cache and re-classifies all apps
+                        AnimatedVisibility(
+                            visible = !isAiClassifying,
+                            enter = fadeIn() + scaleIn(spring(Spring.DampingRatioMediumBouncy)),
+                            exit = fadeOut() + scaleOut(),
                         ) {
-                            Icon(Icons.Rounded.Refresh, "Refresh")
+                            IconButton(
+                                onClick = {
+                                    vibrationManager?.vibrateTick(); viewModel.refreshAiCategories()
+                                },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MaterialTheme.colorScheme.tertiaryContainer.copy(0.55f)),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome, "Refresh AI",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            }
                         }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                )
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color     = MaterialTheme.colorScheme.outlineVariant.copy(0.4f),
-                )
-            }
+                    }
+
+                    // Usage stats refresh
+                    IconButton(
+                        onClick  = { 
+                            vibrationManager?.vibrateClick()
+                            scope.launch {
+                                viewModel.refreshStats()
+                                delay(500)
+                                vibrationManager?.vibrateSuccess()
+                            }
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ) {
+                        Icon(Icons.Rounded.Refresh, "Refresh")
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                largeFlexible = true,
+                modifier = Modifier.statusBarsPadding()
+            )
         },
         containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onBackground,
@@ -587,14 +575,16 @@ fun MetricCard(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.bouncyClick { },
+    ExpressiveCard(
+        onClick = {},
+        modifier = modifier,
         shape    = RoundedCornerShape(24.dp),
-        color    = color.copy(alpha = 0.08f),
+        containerColor    = color.copy(alpha = 0.08f),
         border   = BorderStroke(1.dp, color.copy(alpha = 0.12f)),
+        elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(20.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
@@ -808,11 +798,12 @@ fun EnhancedProductivityHeader(
             }
             
             if (!performanceMode && !offlineModeEnabled) {
-                Surface(
+                ExpressiveCard(
                     onClick = onLongClick,
                     shape = RoundedCornerShape(16.dp),
-                    color = accentColor.copy(alpha = 0.1f),
-                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                    containerColor = accentColor.copy(alpha = 0.1f),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    elevation = 0.dp
                 ) {
                     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = accentColor)
@@ -881,13 +872,14 @@ fun EnhancedUsageItem(
     )
     val showPulse = (limitProgress ?: 0f) >= 0.8f
 
-    Surface(
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier
             .fillMaxWidth()
-            .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha },
         shape = RoundedCornerShape(24.dp),
-        color = if (isOverLimit) {
+        containerColor = if (isOverLimit) {
             MaterialTheme.colorScheme.error.copy(alpha = 0.04f)
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
@@ -900,6 +892,7 @@ fun EnhancedUsageItem(
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
             },
         ),
+        elevation = if (isOverLimit) 6.dp else 0.dp
     ) {
         Column {
             Row(
@@ -1101,11 +1094,13 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
     val distractionTime = stats.filter { it.category == AppCategory.DISTRACTION }.sumOf { it.usageTimeMillis }
     val otherTime      = (totalTime - toolzTime - distractionTime).coerceAtLeast(0)
 
-    Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick { onClick() },
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(24.dp),
-        color    = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.08f),
+        containerColor    = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.08f),
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -1729,11 +1724,11 @@ private fun Top5AppsSection(topApps: List<AppUsageInfo>, totalTime: Long) {
                                 )
                             }
                             Spacer(Modifier.height(4.dp))
-                            LinearProgressIndicator(
+                            ExpressiveWavyLinearProgressIndicator(
                                 progress = { progress },
-                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                                modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
                                 color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.primary.copy(0.1f),
+                                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                                 strokeCap = StrokeCap.Round
                             )
                         }
@@ -1831,13 +1826,12 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
             
             if (isLoading && tips == null) {
                 Column(Modifier.fillMaxWidth().height(200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    CircularProgressIndicator(
+                    ExpressiveLoadingWheel(
                         color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(80.dp)
                     )
-                    Spacer(Modifier.height(16.dp))
-                    Text("Generating custom tips...", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(24.dp))
+                    Text("Generating custom tips...", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             } else {
                 Box(modifier = Modifier.weight(1f, fill = false)) {

@@ -29,13 +29,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WorldClockScreen(
     viewModel: WorldClockViewModel,
@@ -44,71 +44,105 @@ fun WorldClockScreen(
     val clocks by viewModel.clocks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("WORLD CLOCK", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "WORLD CLOCK",
+                subtitle = "Global Temporal Distribution",
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onBack()
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { showAddDialog = true },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-                    ) {
-                        Icon(Icons.Rounded.Language, contentDescription = "Add Clock", tint = MaterialTheme.colorScheme.primary)
-                    }
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Add City", Icons.Rounded.Language, { showAddDialog = true }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(20.dp),
-                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                text = { Text("ADD CITY", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            showAddDialog = true 
+                        },
+                        modifier = Modifier.size(48.dp),
+                        shape = SmallExpressiveShape
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Add City")
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = { vibrationManager?.vibrateClick() },
+                        icon = { Icon(Icons.Rounded.Sort, null) },
+                        label = "SORT"
+                    )
+                }
             )
-        }
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
         Box(modifier = Modifier
             .fillMaxSize()
             .toolzBackground()
-            .padding(padding)
+            .padding(top = padding.calculateTopPadding())
         ) {
             if (clocks.isEmpty()) {
-                EmptyClocksState()
+                EmptyClocksStateExpressive { showAddDialog = true }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize()
-                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
-                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 100.dp, top = 12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 120.dp)),
+                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 140.dp, top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(clocks, key = { it.zoneId }) { clock ->
-                        WorldClockItemRow(
-                            clock = clock,
-                            onDelete = { viewModel.removeZone(clock.zoneId) }
-                        )
+                    items(clocks.size, key = { i -> clocks[i].zoneId }) { index ->
+                        val clock = clocks[index]
+                        StaggeredEntrance(index = index) {
+                            WorldClockCardExpressive(
+                                clock = clock,
+                                onDelete = { 
+                                    vibrationManager?.vibrateClick()
+                                    viewModel.removeZone(clock.zoneId) 
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
 
         if (showAddDialog) {
-            TimeZonePickerDialog(
+            TimeZonePickerDialogExpressive(
                 availableZones = viewModel.availableZones,
                 onDismiss = { showAddDialog = false },
                 onZoneSelected = { zoneId ->
+                    vibrationManager?.vibrateSuccess()
                     viewModel.addZone(zoneId)
                     showAddDialog = false
                 }
@@ -118,51 +152,56 @@ fun WorldClockScreen(
 }
 
 @Composable
-fun EmptyClocksState() {
+fun EmptyClocksStateExpressive(onAdd: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier.fillMaxSize().padding(40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            modifier = Modifier.size(140.dp),
-            shape = RoundedCornerShape(40.dp),
+            modifier = Modifier.size(160.dp),
+            shape = SquircleShape,
             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Rounded.Language,
                     contentDescription = null,
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier.size(80.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
         }
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(48.dp))
         Text(
-            "GLOBAL TIME TRACKER", 
-            style = MaterialTheme.typography.headlineSmall,
+            "TEMPORAL HUB EMPTY", 
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
-            letterSpacing = (-1).sp
+            letterSpacing = 1.sp
         )
         Text(
-            "Add cities from around the globe to track their current time and local date relative to you.", 
+            "Add cities from around the globe to synchronize your workflow across multiple time zones.", 
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp),
-            textAlign = TextAlign.Center
+            modifier = Modifier.padding(top = 16.dp, bottom = 48.dp),
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Bold
         )
+        ToolzExpressiveButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(72.dp), shape = BouncyShape) {
+            Text("INITIALIZE TRACKER", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
     }
 }
 
 @Composable
-fun WorldClockItemRow(
+fun WorldClockCardExpressive(
     clock: WorldClockItem,
     onDelete: () -> Unit
 ) {
+    val vibrationManager = LocalVibrationManager.current
     val backgroundColor = if (clock.isNight) {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f)
     } else {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
     }
@@ -170,78 +209,87 @@ fun WorldClockItemRow(
     val icon = if (clock.isNight) Icons.Rounded.NightlightRound else Icons.Rounded.WbSunny
     val iconColor = if (clock.isNight) Color(0xFF9FA8DA) else Color(0xFFFFA000)
 
-    Surface(
-        modifier = Modifier.fillMaxWidth().bouncyClick { },
-        shape = RoundedCornerShape(28.dp),
-        color = backgroundColor,
+    ExpressiveCard(
+        onClick = { vibrationManager?.vibrateTick() },
+        modifier = Modifier.fillMaxWidth(),
+        shape = SquircleShape,
+        containerColor = backgroundColor,
         border = BorderStroke(
-            1.dp, 
+            1.5.dp, 
             if (clock.isLocal) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) 
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-        )
+        ),
+        elevation = 0.dp
     ) {
         Row(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(24.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        icon, 
-                        contentDescription = null, 
-                        tint = iconColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        modifier = Modifier.size(32.dp),
+                        shape = CircleShape,
+                        color = iconColor.copy(alpha = 0.15f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Text(
-                        text = clock.cityName,
+                        text = clock.cityName.uppercase(),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        letterSpacing = (-0.5).sp
                     )
                 }
                 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(12.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(6.dp)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = BouncyShape
                     ) {
                         Text(
                             text = clock.offset,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.sp
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(12.dp))
                     Text(
-                        text = clock.date,
+                        text = clock.date.uppercase(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
                     )
                 }
                 
                 if (clock.isLocal) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
                     Surface(
                         color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(8.dp)
+                        shape = SmallExpressiveShape
                     ) {
                         Text(
-                            "YOUR LOCATION",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            "CURRENT LOCATION",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            letterSpacing = 1.sp
                         )
                     }
                 }
@@ -250,22 +298,25 @@ fun WorldClockItemRow(
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = clock.currentTime,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.displaySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 44.sp,
+                        letterSpacing = (-2).sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 if (!clock.isLocal) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                        modifier = Modifier.size(40.dp).clip(BouncyShape).background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
                     ) {
                         Icon(
                             Icons.Rounded.Close,
                             contentDescription = "Remove",
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
@@ -277,7 +328,7 @@ fun WorldClockItemRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TimeZonePickerDialog(
+fun TimeZonePickerDialogExpressive(
     availableZones: List<String>,
     onDismiss: () -> Unit,
     onZoneSelected: (String) -> Unit
@@ -290,16 +341,15 @@ fun TimeZonePickerDialog(
         onDismissRequest = onDismiss,
         dragHandle = { BottomSheetDefaults.DragHandle() },
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+        shape = SquircleShape
     ) {
         Column(
             modifier = Modifier
                 .fillMaxHeight(0.85f)
                 .padding(horizontal = 24.dp)
         ) {
-            @Suppress("DEPRECATION")
             Text(
-                "SELECT TIMEZONE", 
+                "GLOBAL DIRECTORY", 
                 style = MaterialTheme.typography.labelSmall, 
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,
@@ -310,13 +360,13 @@ fun TimeZonePickerDialog(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search city or region...") },
+                placeholder = { Text("Search location ID...") },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(20.dp),
+                shape = SquircleShape,
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedBorderColor = Color.Transparent,
                     focusedBorderColor = MaterialTheme.colorScheme.primary
@@ -325,8 +375,8 @@ fun TimeZonePickerDialog(
 
             LazyColumn(
                 modifier = Modifier.weight(1f).then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                contentPadding = PaddingValues(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(bottom = 48.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(filteredZones) { zoneId ->
                     val cityName = zoneId.substringAfter("/").replace("_", " ")
@@ -334,9 +384,9 @@ fun TimeZonePickerDialog(
                     
                     Surface(
                         onClick = { onZoneSelected(zoneId) },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = BouncyShape,
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
                     ) {
                         ListItem(
                             headlineContent = { 
@@ -348,8 +398,7 @@ fun TimeZonePickerDialog(
                             },
                             supportingContent = { 
                                 if (region.isNotEmpty()) {
-                                    @Suppress("DEPRECATION")
-                                    Text(region.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) 
+                                    Text(region.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp) 
                                 }
                             },
                             trailingContent = {

@@ -4,14 +4,12 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -21,23 +19,27 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.math.MathHistory
+import com.frerox.toolz.ui.components.BouncyShape
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -67,11 +69,9 @@ fun EquationSolverScreen(
 
         Scaffold(
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = { 
-                        @Suppress("DEPRECATION")
-                        Text("EQUATION SOLVER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) 
-                    },
+                ExpressiveTopAppBar(
+                    title = "EQUATION SOLVER",
+                    subtitle = "Complex algebraic resolution",
                     navigationIcon = {
                         IconButton(
                             onClick = onBack,
@@ -88,7 +88,8 @@ fun EquationSolverScreen(
                             Icon(Icons.Rounded.History, contentDescription = "History")
                         }
                     },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                    modifier = Modifier.statusBarsPadding()
                 )
             },
             containerColor = Color.Transparent
@@ -114,57 +115,64 @@ fun EquationSolverScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
                 ) {
-                    items(EquationType.entries) { type ->
+                    items(EquationType.entries.size) { index ->
+                        val type = EquationType.entries[index]
                         val isSelected = state.selectedType == type
-                        Surface(
-                            onClick = { viewModel.onTypeChange(type) },
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
-                            modifier = Modifier.bouncyClick { viewModel.onTypeChange(type) }
-                        ) {
-                            @Suppress("DEPRECATION")
-                            Text(
-                                text = type.name,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                            )
+                        StaggeredEntrance(index = index) {
+                            ExpressiveCard(
+                                onClick = { viewModel.onTypeChange(type) },
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                                elevation = if (isSelected) 4.dp else 0.dp
+                            ) {
+                                @Suppress("DEPRECATION")
+                                Text(
+                                    text = type.name,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
 
                 // Coefficient Inputs
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(40.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
-                ) {
-                    Column(modifier = Modifier.padding(28.dp)) {
-                        EquationPreview(state)
-                        
-                        // Dynamic inputs based on type
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            val keys = when (state.selectedType) {
-                                EquationType.LINEAR -> listOf("a", "b")
-                                EquationType.QUADRATIC -> listOf("a", "b", "c")
-                                EquationType.CUBIC -> listOf("a", "b", "c", "d")
-                                EquationType.QUARTIC -> listOf("a", "b", "c", "d", "e")
-                                EquationType.SYSTEM2 -> listOf("a", "b", "c", "d", "e", "f")
-                            }
+                StaggeredEntrance(index = 2) {
+                    ExpressiveCard(
+                        onClick = {},
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                        shape = BouncyShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                        elevation = 0.dp
+                    ) {
+                        Column(modifier = Modifier.padding(28.dp)) {
+                            EquationPreview(state)
                             
-                            keys.forEach { key ->
-                                CoeffInput(
-                                    label = key,
-                                    value = state.coefficients[key] ?: "",
-                                    onValueChange = { viewModel.onCoefficientChange(key, it) }
-                                )
+                            // Dynamic inputs based on type
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                val keys = when (state.selectedType) {
+                                    EquationType.LINEAR -> listOf("a", "b")
+                                    EquationType.QUADRATIC -> listOf("a", "b", "c")
+                                    EquationType.CUBIC -> listOf("a", "b", "c", "d")
+                                    EquationType.QUARTIC -> listOf("a", "b", "c", "d", "e")
+                                    EquationType.SYSTEM2 -> listOf("a", "b", "c", "d", "e", "f")
+                                }
+                                
+                                keys.forEach { key ->
+                                    CoeffInput(
+                                        label = key,
+                                        value = state.coefficients[key] ?: "",
+                                        onValueChange = { viewModel.onCoefficientChange(key, it) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -173,27 +181,31 @@ fun EquationSolverScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Action Buttons
-                Button(
-                    onClick = { 
-                        viewModel.solve()
-                        focusManager.clearFocus()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(64.dp).bouncyClick { viewModel.solve() },
-                    shape = RoundedCornerShape(24.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("SOLVE EQUATION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                StaggeredEntrance(index = 3) {
+                    ToolzExpressiveButton(
+                        onClick = { 
+                            viewModel.solve()
+                            focusManager.clearFocus()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(64.dp),
+                        shape = MediumExpressiveShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("SOLVE EQUATION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 AnimatedVisibility(visible = state.result.isNotEmpty()) {
                     Column {
-                        Surface(
+                        ExpressiveCard(
+                            onClick = {},
                             modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(24.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                            shape = MediumExpressiveShape,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            elevation = 0.dp
                         ) {
                             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 @Suppress("DEPRECATION")
@@ -204,11 +216,11 @@ fun EquationSolverScreen(
                         
                         Spacer(modifier = Modifier.height(16.dp))
                         
-                        OutlinedButton(
+                        ToolzExpressiveButton(
                             onClick = { showSteps = true },
-                            modifier = Modifier.fillMaxWidth().height(56.dp).bouncyClick { showSteps = true },
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            shape = SmallExpressiveShape,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                         ) {
                             Text("HOW TO SOLVE?", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
@@ -233,8 +245,6 @@ fun EquationSolverScreen(
             history = history,
             onDismiss = { showHistory = false },
             onSelect = { 
-                // Restore state? This is tricky with coefficient map. 
-                // For now just show history.
                 showHistory = false
             }
         )
@@ -431,6 +441,74 @@ fun HistoryBottomSheet(
                                 fontWeight = FontWeight.Black
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun EquationSolverPreview() {
+    val state = SolverState(
+        selectedType = EquationType.QUADRATIC,
+        coefficients = mapOf("a" to "1", "b" to "-5", "c" to "6"),
+        result = "x₁ = 3, x₂ = 2"
+    )
+    ToolzTheme {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            // Simplified view for preview
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+            ) {
+                 EquationPreview(state)
+                 Spacer(Modifier.height(16.dp))
+                 ExpressiveCard(
+                    onClick = {},
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+                    shape = BouncyShape,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                    elevation = 0.dp
+                ) {
+                    Column(modifier = Modifier.padding(28.dp)) {
+                        EquationPreview(state)
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                             CoeffInput(label = "a", value = "1", onValueChange = {})
+                             CoeffInput(label = "b", value = "-5", onValueChange = {})
+                             CoeffInput(label = "c", value = "6", onValueChange = {})
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+                ToolzExpressiveButton(
+                    onClick = {},
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    shape = MediumExpressiveShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("SOLVE EQUATION", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                ExpressiveCard(
+                    onClick = {},
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    shape = MediumExpressiveShape,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    elevation = 0.dp
+                ) {
+                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("SOLUTION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        Text(state.result, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }

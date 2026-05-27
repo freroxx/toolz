@@ -1,206 +1,311 @@
 package com.frerox.toolz.ui.screens.pdf
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.pdf.PdfFile
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.components.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF File List — M3 Expressive
+// StaggeredEntrance on every card, SquircleShape containers, surface depth.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PdfFileList(
     files: List<PdfFile>,
     onFileClick: (PdfFile) -> Unit,
-    onMenuClick: (PdfFile) -> Unit
+    onMenuClick: (PdfFile) -> Unit,
 ) {
+    if (files.isEmpty()) {
+        PdfEmptyState()
+        return
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .fadingEdge(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.02f to Color.Black,
-                    0.98f to Color.Black,
-                    1f to Color.Transparent
-                ),
-                length = 24.dp
-            ),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .fadingEdges(top = 0.dp, bottom = 48.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = "RECENT DOCUMENTS",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 2.sp
-                )
-            }
-        }
-        
-        if (files.isEmpty()) {
-            item {
-                Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Rounded.Description, null, modifier = Modifier.size(80.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(24.dp)).padding(20.dp), tint = MaterialTheme.colorScheme.outline)
-                        Spacer(Modifier.height(16.dp))
-                        Text("No PDF files found", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
-                    }
+            StaggeredEntrance(index = 0) {
+                Surface(
+                    shape = SmallExpressiveShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        text = "RECENT DOCUMENTS",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 2.sp,
+                    )
                 }
             }
-        } else {
-            items(files) { file ->
+        }
+
+        itemsIndexed(files, key = { _, f -> f.uri.toString() }) { index, file ->
+            StaggeredEntrance(index = index + 1) {
                 PdfFileItem(
                     file = file,
                     onClick = { onFileClick(file) },
-                    onMenuClick = { onMenuClick(file) }
+                    onMenuClick = { onMenuClick(file) },
                 )
             }
         }
+
+        item { Spacer(Modifier.height(80.dp)) }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF File Item Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PdfFileItem(
     file: PdfFile,
     onClick: () -> Unit,
-    onMenuClick: () -> Unit
+    onMenuClick: () -> Unit,
 ) {
-    Surface(
+    ExpressiveCard(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp)
-            .bouncyClick(onClick = onClick),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            .height(112.dp),
+        shape = SquircleShape,
+        containerColor = if (file.isPinned)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+        else
+            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f),
+        elevation = 0.dp,
+        border = BorderStroke(
+            width = if (file.isPinned) 1.5.dp else 1.dp,
+            color = if (file.isPinned)
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            else
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
     ) {
         Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(14.dp).fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Thumbnail / icon container
             Surface(
-                modifier = Modifier
-                    .width(72.dp)
-                    .fillMaxHeight(),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp
+                modifier = Modifier.width(68.dp).fillMaxHeight(),
+                shape = MediumExpressiveShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                shadowElevation = 4.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     if (file.thumbnail != null) {
                         Image(
                             bitmap = file.thumbnail.asImageBitmap(),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                            modifier = Modifier.fillMaxSize().clip(MediumExpressiveShape),
+                            contentScale = ContentScale.Crop,
                         )
+                        // PDF type badge overlay
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(4.dp)
+                                .size(20.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("P", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimary, fontSize = 9.sp)
+                            }
+                        }
                     } else {
-                        Icon(
-                            imageVector = Icons.Rounded.PictureAsPdf,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Rounded.PictureAsPdf, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(30.dp))
+                        }
                     }
                 }
             }
-            
-            Spacer(modifier = Modifier.width(16.dp))
-            
+
+            Spacer(Modifier.width(16.dp))
+
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (file.isPinned) {
+                        Icon(Icons.Rounded.PushPin, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Text(
+                        text = file.name.removeSuffix(".pdf"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Page count badge
                     Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(6.dp)
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                        shape = SmallExpressiveShape,
                     ) {
                         Text(
                             text = "${file.pageCount} PGS",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black
+                            fontWeight = FontWeight.Black,
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
                     Text(
-                        text = formatSize(file.size),
+                        text = formatPdfSize(file.size),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Bold
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                        fontWeight = FontWeight.Bold,
                     )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = formatDate(file.lastModified).uppercase(),
+                    text = formatPdfDate(file.lastModified).uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.5.sp
+                    letterSpacing = 0.5.sp,
                 )
             }
-            
-            IconButton(
+
+            ToolzExpressiveIconButton(
                 onClick = onMenuClick,
-                modifier = Modifier.size(44.dp)
+                modifier = Modifier.size(40.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                ),
+                shape = MediumExpressiveShape,
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.MoreVert, 
-                    contentDescription = "More",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    Icons.Rounded.MoreVert,
+                    contentDescription = "More options",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
 }
 
-private fun formatSize(size: Long): String {
-    val kb = size / 1024.0
-    val mb = kb / 1024.0
-    return if (mb >= 1) "%.2f MB".format(mb) else "%.2f KB".format(kb)
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty state — animated pulse ring + icon
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PdfEmptyState(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(40.dp).offset(y = (-32).dp),
+        ) {
+            val infiniteTransition = rememberInfiniteTransition(label = "emptyPdf")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.08f, targetValue = 0.22f,
+                animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "pulseAlpha",
+            )
+            val pulseScale by infiniteTransition.animateFloat(
+                initialValue = 0.88f, targetValue = 1.12f,
+                animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "pulseScale",
+            )
+
+            Box(contentAlignment = Alignment.Center) {
+                // Outer animated ring
+                Surface(
+                    modifier = Modifier.size(180.dp).graphicsLayer { scaleX = pulseScale; scaleY = pulseScale; alpha = pulseAlpha },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                ) {}
+                // Icon container
+                Surface(
+                    modifier = Modifier.size(96.dp),
+                    shape = SquircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.FindInPage,
+                            null,
+                            modifier = Modifier.size(44.dp).alpha(0.7f),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+            Text(
+                "NO PDFS FOUND",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "We searched your device but couldn't find any PDF documents. Try downloading one or checking your downloads folder.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp),
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
 }
 
-private fun formatDate(timestamp: Long): String {
-    val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-    return sdf.format(Date(timestamp * 1000))
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+internal fun formatPdfSize(bytes: Long): String {
+    val mb = bytes / 1_048_576.0
+    return if (mb >= 1.0) "%.1f MB".format(mb) else "%.0f KB".format(bytes / 1024.0)
 }
+
+internal fun formatPdfDate(timestamp: Long): String =
+    SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(timestamp * 1000))

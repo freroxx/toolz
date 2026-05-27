@@ -1,23 +1,23 @@
 {
-  "versionName": "1.0.8",
-  "versionCode": 9,
+  "versionName": "1.0.9",
+  "versionCode": 10,
   "changelog": "Dashboard stats toggle, Material 3 Expressive update interface, In-app downloads, and more improvements!",
   "releases": [
     {
       "abi": "arm64-v8a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.8/toolz-arm64-v8a.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.9/toolz-arm64-v8a.apk"
     },
     {
       "abi": "armeabi-v7a",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.8/toolz-armeabi-v7a.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.9/toolz-armeabi-v7a.apk"
     },
     {
       "abi": "x86_64",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.8/toolz-x86_64.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.9/toolz-x86_64.apk"
     },
     {
       "abi": "x86",
-      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.8/toolz-x86.apk"
+      "downloadUrl": "https://github.com/freroxx/toolz/releases/download/v1.0.9/toolz-x86.apk"
     }
   ]
 }

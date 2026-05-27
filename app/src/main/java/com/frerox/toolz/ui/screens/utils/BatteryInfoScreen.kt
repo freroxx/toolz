@@ -34,6 +34,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -60,8 +64,9 @@ fun BatteryInfoScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { @Suppress("DEPRECATION") Text("ENERGY ANALYTICS", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelSmall) },
+            ExpressiveTopAppBar(
+                title = "ENERGY ANALYTICS",
+                subtitle = "Hardware power distribution",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -94,10 +99,12 @@ fun BatteryInfoScreen(
                 )
 
                 // Status Strip
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                ExpressiveCard(
+                    onClick = {},
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     shape = RoundedCornerShape(24.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                    elevation = 0.dp
                 ) {
                     Row(
                         modifier = Modifier.padding(20.dp).fillMaxWidth(),
@@ -125,11 +132,13 @@ fun BatteryInfoScreen(
                 }
 
                 // Advanced Info Card
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                ExpressiveCard(
+                    onClick = {},
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
                     shape = RoundedCornerShape(32.dp),
                     border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = 0.dp
                 ) {
                     Column(modifier = Modifier.padding(24.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -250,11 +259,13 @@ fun BatteryMetricShort(label: String, value: String, icon: ImageVector) {
 
 @Composable
 fun BatteryDetailCard(modifier: Modifier, label: String, value: String, icon: ImageVector) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = modifier,
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
+        elevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Surface(

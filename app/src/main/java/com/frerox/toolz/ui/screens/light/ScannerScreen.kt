@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveScanningIndicator
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -125,8 +128,9 @@ fun ScannerScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("SCANNER", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "SCANNER",
+                subtitle = "Scan QR codes and barcodes",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -311,6 +315,19 @@ fun ScannerOverlay(performanceMode: Boolean) {
             )
         }
     }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        ExpressiveScanningIndicator(
+            modifier = Modifier
+                .fillMaxWidth(0.72f)
+                .aspectRatio(1f),
+            color = Color.White,
+            frameColor = Color.White.copy(alpha = 0.4f),
+        )
+    }
 }
 
 @Composable
@@ -321,14 +338,14 @@ fun ResultCard(
 ) {
     val context = LocalContext.current
     
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier
             .fillMaxWidth()
             .padding(24.dp),
         shape = RoundedCornerShape(40.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 12.dp,
-        shadowElevation = 16.dp,
+        containerColor = MaterialTheme.colorScheme.surface,
+        elevation = 12.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
         Column(

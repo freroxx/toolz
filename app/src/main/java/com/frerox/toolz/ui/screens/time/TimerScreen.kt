@@ -1,15 +1,11 @@
 package com.frerox.toolz.ui.screens.time
 
-import android.view.HapticFeedbackConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -17,29 +13,42 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdge
-import com.frerox.toolz.ui.theme.LocalHapticEnabled
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
+import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdge
+import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AppBarRowScope.clickableItem(
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+    label: String,
+    enabled: Boolean = true
+) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            icon()
+            Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TimerScreen(
     viewModel: TimerViewModel,
@@ -47,26 +56,23 @@ fun TimerScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
-    val hapticEnabled = LocalHapticEnabled.current
     val vibrationManager = LocalVibrationManager.current
 
+    // Bouncy spring for the countdown progress
     val animatedProgress by animateFloatAsState(
         targetValue = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f,
-        animationSpec = if (performanceMode) snap() else tween(durationMillis = 500, easing = LinearOutSlowInEasing),
-        label = "Timer Progress"
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "TimerProgress"
     )
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "PRECISION TIMER",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "TIMER",
+                subtitle = "Precision Countdown",
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -75,144 +81,146 @@ fun TimerScreen(
                         },
                         modifier = Modifier
                             .padding(8.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.toggleHaptic() 
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (hapticEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            )
-                    ) {
-                        Icon(
-                            if (hapticEnabled) Icons.Rounded.Vibration else Icons.Rounded.CommentsDisabled,
-                            contentDescription = "Haptic Toggle",
-                            tint = if (hapticEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    ExpressiveFabMenu(
+                        items = listOf(
+                            Triple("Add 1 min", Icons.Rounded.Add, { 
+                                vibrationManager?.vibrateClick()
+                                viewModel.addTime(60000L) 
+                            }),
+                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        floatingActionButton = {
+            ToolzHorizontalFloatingToolbar(
+                expanded = true,
+                modifier = Modifier.padding(bottom = 16.dp),
+                content = {
+                    FilledIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            if (state.isFinished) viewModel.stopRingtone()
+                            viewModel.toggleStartStop()
+                        },
+                        modifier = Modifier.size(56.dp),
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                },
+                trailingContent = {
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateLongClick()
+                            viewModel.reset()
+                        },
+                        icon = { Icon(Icons.Rounded.Refresh, null) },
+                        label = "RESET"
+                    )
+                }
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
-            .then(if (performanceMode) Modifier else Modifier.fadingEdge(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)), 24.dp))
-        ) {
+        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (state.initialTime == 0L || (state.isFinished && !state.isRunning)) {
-                    // SELECTION UI
+                    // SELECTION UI with Expressive Time Pickers
                     Spacer(Modifier.height(16.dp))
                     
                     Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(16.dp)
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        shape = BouncyShape
                     ) {
                         Text(
-                            "SET DURATION",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelSmall,
+                            "CONFIGURE SESSION",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
                             letterSpacing = 2.sp
                         )
                     }
 
-                    Spacer(Modifier.weight(0.5f))
+                    Spacer(Modifier.weight(0.6f))
 
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp),
+                        modifier = Modifier.fillMaxWidth().height(240.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ModernTimePicker(
+                        ModernTimePickerExpressive(
                             value = state.selectedMinutes,
-                            onValueChange = { 
-                                viewModel.onTimeSelectedChange(it, state.selectedSeconds)
-                                if (hapticEnabled) vibrationManager?.vibrateTick()
-                            },
+                            onValueChange = { viewModel.onTimeSelectedChange(it, state.selectedSeconds) },
                             label = "MINUTES"
                         )
                         
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 32.dp)
-                                .height(160.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)))
-                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)))
+                        Box(modifier = Modifier.padding(horizontal = 40.dp), contentAlignment = Alignment.Center) {
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                                Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
                             }
                         }
 
-                        ModernTimePicker(
+                        ModernTimePickerExpressive(
                             value = state.selectedSeconds,
-                            onValueChange = { 
-                                viewModel.onTimeSelectedChange(state.selectedMinutes, it)
-                                if (hapticEnabled) vibrationManager?.vibrateTick()
-                            },
+                            onValueChange = { viewModel.onTimeSelectedChange(state.selectedMinutes, it) },
                             label = "SECONDS"
                         )
                     }
 
-                    Spacer(Modifier.weight(0.5f))
+                    Spacer(Modifier.weight(0.4f))
 
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    // Presets Hub with Bouncy Cards
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                         Text(
                             "QUICK PRESETS", 
                             style = MaterialTheme.typography.labelSmall, 
                             fontWeight = FontWeight.Black, 
                             color = MaterialTheme.colorScheme.outline, 
-                            letterSpacing = 1.5.sp,
-                            modifier = Modifier.padding(start = 4.dp)
+                            letterSpacing = 2.sp
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            listOf(1, 5, 10, 15).forEach { min ->
-                                Surface(
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            listOf(5, 10, 25, 45).forEach { min ->
+                                ExpressiveCard(
                                     onClick = { 
                                         vibrationManager?.vibrateClick()
                                         viewModel.onTimeSelectedChange(min, 0)
                                     },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(64.dp)
-                                        .bouncyClick {},
-                                    shape = RoundedCornerShape(24.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+                                    modifier = Modifier.weight(1f).height(64.dp),
+                                    shape = BouncyShape,
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                                    elevation = 0.dp
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text("${min}m", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("${min}m", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                                     }
                                 }
                             }
@@ -220,101 +228,73 @@ fun TimerScreen(
                     }
 
                     Spacer(Modifier.weight(1f))
-
-                    Button(
-                        onClick = {
-                            if (state.selectedMinutes > 0 || state.selectedSeconds > 0) {
-                                vibrationManager?.vibrateLongClick()
-                                viewModel.setTimer(state.selectedMinutes, state.selectedSeconds)
-                                viewModel.toggleStartStop()
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(72.dp)
-                            .padding(bottom = 24.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
-                    ) {
-                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(28.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("START ENGINE", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                    }
+                    
+                    Spacer(Modifier.height(100.dp))
                 } else {
-                    // ACTIVE UI
-                    Spacer(Modifier.weight(0.5f))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                    ) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.06f) } else infiniteTransition.animateFloat(
-                            initialValue = 0.04f,
-                            targetValue = 0.1f,
-                            animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
-                            label = ""
-                        )
-                        
+                    // ACTIVE TIMER UI with Wavy Dial
+                    Spacer(Modifier.weight(0.6f))
+                    
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(340.dp)) {
                         val primaryColor = MaterialTheme.colorScheme.primary
-
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent),
-                                    radius = size.width / 1.2f
-                                )
+                        
+                        // Dynamic background glow
+                        if (!performanceMode) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "TimerGlow")
+                            val glowAlpha by infiniteTransition.animateFloat(
+                                initialValue = 0.05f,
+                                targetValue = 0.15f,
+                                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                                label = "Glow"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(primaryColor.copy(alpha = glowAlpha), Color.Transparent)
+                                        ),
+                                        CircleShape
+                                    )
                             )
                         }
                         
-                        CircularProgressIndicator(
-                            progress = { 1f },
-                            modifier = Modifier.fillMaxSize(0.85f),
-                            strokeWidth = 16.dp,
-                            strokeCap = StrokeCap.Round,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        )
-                        
-                        CircularProgressIndicator(
+                        // Official Circular Wavy Progress Indicator
+                        ToolzWavyCircularProgressIndicator(
                             progress = { animatedProgress },
-                            modifier = Modifier.fillMaxSize(0.85f),
-                            strokeWidth = 16.dp,
-                            strokeCap = StrokeCap.Round,
+                            modifier = Modifier.fillMaxSize(0.9f),
                             color = if (state.isFinished) MaterialTheme.colorScheme.error else primaryColor,
-                            trackColor = Color.Transparent,
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f),
                         )
-                        
+
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = formatTimerTime(state.remainingTime),
                                 style = MaterialTheme.typography.displayLarge.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 80.sp,
-                                    letterSpacing = (-4).sp
+                                    fontSize = 88.sp,
+                                    letterSpacing = (-6).sp
                                 ),
                                 color = if (state.isFinished) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                             )
                             
-                            Spacer(Modifier.height(8.dp))
-                            
                             AnimatedVisibility(
                                 visible = state.isPaused,
-                                enter = if (performanceMode) fadeIn() else (fadeIn() + expandVertically()),
-                                exit = if (performanceMode) fadeOut() else (fadeOut() + shrinkVertically())
+                                enter = fadeIn() + scaleIn(animationSpec = spring(Spring.DampingRatioMediumBouncy)),
+                                exit = fadeOut() + scaleOut()
                             ) {
                                 Surface(
                                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(12.dp)
+                                    shape = BouncyShape,
+                                    modifier = Modifier.padding(top = 16.dp)
                                 ) {
                                     Text(
                                         "PAUSED", 
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                                         style = MaterialTheme.typography.labelSmall, 
                                         fontWeight = FontWeight.Black, 
                                         color = MaterialTheme.colorScheme.secondary,
-                                        letterSpacing = 1.5.sp
+                                        letterSpacing = 2.sp
                                     )
                                 }
                             }
@@ -323,32 +303,29 @@ fun TimerScreen(
 
                     Spacer(Modifier.weight(0.2f))
 
+                    // Action Hub: Quick Add Time
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        listOf(30, 60).forEach { sec ->
-                            Surface(
+                        listOf(60, 300).forEach { sec ->
+                            ExpressiveCard(
                                 onClick = { 
                                     vibrationManager?.vibrateTick()
                                     viewModel.addTime(sec * 1000L)
                                 },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(64.dp)
-                                    .bouncyClick {},
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                modifier = Modifier.weight(1f).height(72.dp),
+                                shape = BouncyShape,
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                elevation = 0.dp
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("+${sec}s", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.Add, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (sec < 60) "${sec}S" else "${sec/60}M", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         }
@@ -356,73 +333,17 @@ fun TimerScreen(
 
                     Spacer(Modifier.weight(1f))
                     
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 48.dp)
-                            .navigationBarsPadding(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { 
-                                vibrationManager?.vibrateLongClick()
-                                viewModel.reset() 
-                            },
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        ) {
-                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                        
-                        Surface(
-                            onClick = { 
-                                vibrationManager?.vibrateClick()
-                                if (state.isFinished) viewModel.stopRingtone()
-                                viewModel.toggleStartStop() 
-                            },
-                            modifier = Modifier
-                                .size(100.dp)
-                                .bouncyClick {},
-                            shape = CircleShape,
-                            color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
-                            shadowElevation = if (performanceMode) 0.dp else 16.dp
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
-                                    null, 
-                                    modifier = Modifier.size(48.dp),
-                                    tint = if (state.isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                        }
-
-                        IconButton(
-                            onClick = { 
-                                vibrationManager?.vibrateLongClick()
-                                viewModel.reset() 
-                            },
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        ) {
-                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
+                    Spacer(Modifier.height(120.dp))
                 }
             }
 
-            // Finished Overlay
+            // Finished Overlay with Energetic Pulsing
             AnimatedVisibility(
                 visible = state.isFinished,
-                enter = if (performanceMode) fadeIn() else (fadeIn() + scaleIn()),
-                exit = if (performanceMode) fadeOut() else (fadeOut() + scaleOut())
+                enter = fadeIn() + scaleIn(animationSpec = spring(Spring.DampingRatioLowBouncy)),
+                exit = fadeOut() + scaleOut()
             ) {
-                TimerFinishedOverlay(
+                TimerFinishedOverlayExpressive(
                     onDismiss = {
                         vibrationManager?.vibrateClick()
                         viewModel.stopRingtone()
@@ -435,33 +356,27 @@ fun TimerScreen(
 }
 
 @Composable
-fun ModernTimePicker(
+fun ModernTimePickerExpressive(
     value: Int,
     onValueChange: (Int) -> Unit,
     label: String
 ) {
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
+    val primaryColor = MaterialTheme.colorScheme.primary
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
-            modifier = Modifier
-                .width(130.dp)
-                .height(190.dp)
-                .then(if (performanceMode) Modifier else Modifier.shadow(24.dp, RoundedCornerShape(40.dp), spotColor = primaryColor.copy(alpha = 0.25f))),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            shape = RoundedCornerShape(40.dp),
-            border = BorderStroke(1.dp, primaryColor.copy(alpha = 0.1f))
+            modifier = Modifier.width(130.dp).height(210.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+            shape = SquircleShape,
+            border = BorderStroke(1.5.dp, primaryColor.copy(alpha = 0.15f))
         ) {
             Box(contentAlignment = Alignment.Center) {
-                // Background Highlight
+                // Selector Highlight
                 Surface(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .height(80.dp),
-                    color = primaryColor.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(20.dp)
+                    modifier = Modifier.fillMaxWidth(0.8f).height(80.dp),
+                    color = primaryColor.copy(alpha = 0.12f),
+                    shape = BouncyShape
                 ) {}
 
                 Column(
@@ -474,18 +389,16 @@ fun ModernTimePicker(
                             vibrationManager?.vibrateTick()
                             onValueChange((value + 1) % 60) 
                         }, 
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
+                        modifier = Modifier.fillMaxWidth().height(64.dp)
                     ) {
-                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Up", tint = primaryColor.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+                        Icon(Icons.Rounded.KeyboardArrowUp, null, tint = primaryColor, modifier = Modifier.size(32.dp))
                     }
                     
                     Text(
                         text = String.format(Locale.getDefault(), "%02d", value),
                         style = MaterialTheme.typography.displayLarge.copy(
                             fontWeight = FontWeight.Black,
-                            fontSize = 68.sp,
+                            fontSize = 72.sp,
                             fontFamily = FontFamily.Monospace,
                             letterSpacing = (-2).sp
                         ),
@@ -497,74 +410,60 @@ fun ModernTimePicker(
                             vibrationManager?.vibrateTick()
                             onValueChange((value - 1 + 60) % 60) 
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
+                        modifier = Modifier.fillMaxWidth().height(64.dp)
                     ) {
-                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Down", tint = primaryColor.copy(alpha = 0.7f), modifier = Modifier.size(32.dp))
+                        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = primaryColor, modifier = Modifier.size(32.dp))
                     }
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
         Text(
             text = label, 
             style = MaterialTheme.typography.labelSmall, 
             fontWeight = FontWeight.Black, 
-            color = primaryColor, 
-            letterSpacing = 1.5.sp
+            color = primaryColor.copy(alpha = 0.7f), 
+            letterSpacing = 2.sp
         )
     }
 }
 
 @Composable
-fun TimerFinishedOverlay(onDismiss: () -> Unit) {
-    val performanceMode = LocalPerformanceMode.current
+fun TimerFinishedOverlayExpressive(onDismiss: () -> Unit) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.94f))
-            .padding(32.dp),
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.95f)).padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val pulseScale by if (performanceMode) remember { mutableFloatStateOf(1f) } else infiniteTransition.animateFloat(
+            val infiniteTransition = rememberInfiniteTransition(label = "AlarmPulse")
+            val pulseScale by infiniteTransition.animateFloat(
                 initialValue = 1f,
-                targetValue = 1.15f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(600, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "iconScale"
+                targetValue = 1.2f,
+                animationSpec = infiniteRepeatable(tween(500, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "Scale"
             )
 
             Surface(
-                modifier = Modifier
-                    .size(180.dp)
-                    .scale(pulseScale),
+                modifier = Modifier.size(200.dp).scale(pulseScale),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.error,
-                shadowElevation = if (performanceMode) 0.dp else 32.dp,
-                border = BorderStroke(4.dp, Color.White.copy(alpha = 0.2f))
+                border = BorderStroke(6.dp, Color.White.copy(alpha = 0.2f))
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(96.dp), tint = Color.White)
+                    Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(100.dp), tint = Color.White)
                 }
             }
-            Spacer(Modifier.height(48.dp))
-            Text("TIME'S UP", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp, textAlign = TextAlign.Center)
-            Text("Your precision countdown finished", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.6f), textAlign = TextAlign.Center)
+            
+            Spacer(Modifier.height(64.dp))
+            Text("SESSION EXPIRED", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)
             
             Spacer(Modifier.height(64.dp))
             
-            Button(
+            ToolzExpressiveButton(
                 onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                shape = RoundedCornerShape(32.dp)
+                modifier = Modifier.fillMaxWidth().height(80.dp),
+                shape = BouncyShape,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
             ) {
                 Text("DISMISS ALARM", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             }

@@ -37,7 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.update.UpdateHelper
-import com.frerox.toolz.ui.components.fadingEdges
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.File
@@ -57,29 +58,35 @@ fun UpdateScreen(
     var showHelpSheet by remember { mutableStateOf(false) }
     val performanceMode = LocalPerformanceMode.current
 
+    val pullToRefreshState = rememberPullToRefreshState()
+    val isRefreshing = uiState is UpdateUiState.Checking
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { @Suppress("DEPRECATION") Text("APP GITHUB UPDATER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
                 navigationIcon = {
-                    IconButton(
+                    ToolzExpressiveIconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
+                    ToolzExpressiveButton(
                         onClick = { showHelpSheet = true },
-                        modifier = Modifier.padding(end = 4.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        modifier = Modifier.padding(end = 4.dp).height(40.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                     ) {
                         @Suppress("DEPRECATION")
                         Text("Help", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    IconButton(
+                    ToolzExpressiveIconButton(
                         onClick = { showAbiSettings = true },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = "ABI Settings")
                     }
@@ -90,7 +97,18 @@ fun UpdateScreen(
         },
         containerColor = Color.Transparent
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = padding.calculateTopPadding())
+        ) {
+            ExpressiveRefreshIndicator(
+                state = pullToRefreshState,
+                isRefreshing = isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -173,36 +191,12 @@ fun UpdateScreen(
                                     label = "progress"
                                 )
 
-                                Box(
+                                ToolzWavyLinearProgressIndicator(
+                                    progress = { animatedProgress },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(24.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(animatedProgress)
-                                            .fillMaxHeight()
-                                            .clip(CircleShape)
-                                            .background(
-                                                Brush.horizontalGradient(
-                                                    listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
-                                                )
-                                            )
-                                    )
-                                    
-                                    if (state.progress > 5f) {
-                                        Text(
-                                            "${state.progress.toInt()}%",
-                                            modifier = Modifier.padding(start = 12.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
+                                        .height(12.dp)
+                                )
                                 
                                 Spacer(Modifier.height(16.dp))
                                 
@@ -216,7 +210,7 @@ fun UpdateScreen(
                         }
                         is UpdateUiState.Checking -> {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(modifier = Modifier.size(48.dp), strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                ToolzLoadingIndicator(modifier = Modifier.size(56.dp))
                                 Spacer(Modifier.height(20.dp))
                                 @Suppress("DEPRECATION")
                                 Text(
@@ -239,22 +233,20 @@ fun UpdateScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(Modifier.height(24.dp))
-                                Button(
-                                    onClick = { viewModel.checkForUpdates() },
-                                    shape = RoundedCornerShape(20.dp)
+                                ToolzExpressiveButton(
+                                    onClick = { viewModel.checkForUpdates() }
                                 ) {
                                     Text("RETRY CONNECTION", fontWeight = FontWeight.Black)
                                 }
                             }
                         }
                         else -> {
-                            Button(
+                            ToolzLargeExtendedFloatingActionButton(
                                 onClick = { viewModel.checkForUpdates() },
-                                modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 40.dp),
-                                shape = RoundedCornerShape(24.dp)
-                            ) {
-                                Text("CHECK FOR ENGINE UPDATES", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                            }
+                                modifier = Modifier.padding(horizontal = 40.dp),
+                                icon = { Icon(Icons.Rounded.SystemUpdate, null) },
+                                text = { Text("CHECK FOR ENGINE UPDATES", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+                            )
                         }
                     }
                 }
@@ -397,14 +389,13 @@ fun UpdateScreen(
                         }
                     }
 
-                    Button(
+                    ToolzExpressiveButton(
                         onClick = {
                             if (apkUrl.isNotEmpty()) {
                                 viewModel.startDownload(apkUrl)
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(64.dp),
-                        shape = RoundedCornerShape(24.dp),
                         enabled = apkUrl.isNotEmpty()
                     ) {
                         Icon(Icons.Rounded.Download, contentDescription = null)
@@ -427,10 +418,9 @@ fun UpdateScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                     Spacer(Modifier.height(32.dp))
-                    Button(
+                    ToolzExpressiveButton(
                         onClick = { viewModel.resetState() },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(24.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
                     ) {
                         Text("DISMISS", fontWeight = FontWeight.Black)
                     }
@@ -493,10 +483,9 @@ fun UpdateHelpBottomSheet(
                 icon = Icons.Rounded.Download
             )
 
-            Button(
+            ToolzExpressiveButton(
                 onClick = { onNavigateToUrl("https://github.com/freroxx/toolz/releases") },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp)
+                modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Icon(Icons.Rounded.Download, null)
                 Spacer(Modifier.width(12.dp))

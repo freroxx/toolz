@@ -26,6 +26,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -44,15 +48,16 @@ fun DeviceInfoScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { @Suppress("DEPRECATION") Text("DEVICE INTELLIGENCE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "DEVICE INTELLIGENCE",
+                subtitle = "Hardware & system analytics",
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -168,11 +173,13 @@ fun DeviceInfoScreen(
 
 @Composable
 fun DeviceHeroSection(data: DetailedDeviceData) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(48.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier = Modifier.padding(32.dp),
@@ -251,11 +258,13 @@ fun InfoSection(title: String, icon: ImageVector, items: List<Pair<String, Strin
             )
         }
 
-        Surface(
+        ExpressiveCard(
+            onClick = {},
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+            elevation = 0.dp
         ) {
             Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items.forEach { (label, value) ->

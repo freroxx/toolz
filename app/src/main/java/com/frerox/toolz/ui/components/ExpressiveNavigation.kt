@@ -250,7 +250,12 @@ fun ExpressiveFabMenu(
                     item.third()
                 },
                 icon = { Icon(item.second, contentDescription = null) },
-                text = { Text(text = item.first) },
+                text = { 
+                    Text(
+                        text = item.first,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ) 
+                },
             )
         }
     }

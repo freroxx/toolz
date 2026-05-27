@@ -1,1290 +1,2364 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+
 package com.frerox.toolz.ui.screens.todo
 
-import android.text.format.DateUtils
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
-import androidx.compose.foundation.lazy.staggeredgrid.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Notes
-import androidx.compose.material.icons.automirrored.rounded.PlaylistAddCheck
 import androidx.compose.material.icons.automirrored.rounded.Sort
-import androidx.compose.material.icons.automirrored.rounded.Undo
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
+import com.frerox.toolz.ui.components.BouncyShape
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.SquircleShape
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
+import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
+import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
 import com.frerox.toolz.ui.components.fadingEdges
-import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
-import com.frerox.toolz.ui.theme.toolzBackground
+import com.frerox.toolz.ui.theme.ToolzTheme
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1 ─ Constants & Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+private enum class TaskFilter(val label: String) { ALL("All"), TODAY("Today"), UPCOMING("Upcoming") }
+
+private val PriorityColors = listOf(
+    Color(0xFF9E9E9E), // 1 · None
+    Color(0xFF4CAF50), // 2 · Low
+    Color(0xFF2196F3), // 3 · Medium
+    Color(0xFFFF9800), // 4 · High
+    Color(0xFFF44336), // 5 · Critical
+)
+
+private val PriorityLabels = listOf("None", "Low", "Medium", "High", "Critical")
+
+private fun formatDueDate(ts: Long): String {
+    val diff = ts - System.currentTimeMillis()
+    val days = TimeUnit.MILLISECONDS.toDays(diff)
+    return when {
+        diff < 0 && days < -1 -> "${abs(days)}d overdue"
+        diff < 0 -> "Overdue"
+        days == 0L -> "Today"
+        days == 1L -> "Tomorrow"
+        days < 7 -> "In ${days}d"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(ts))
+    }
+}
+
+private fun dueDateUrgencyColor(ts: Long): Color? {
+    val hours = TimeUnit.MILLISECONDS.toHours(ts - System.currentTimeMillis())
+    return when {
+        hours < 0 -> Color(0xFFF44336)
+        hours < 24 -> Color(0xFFFF9800)
+        hours < 72 -> Color(0xFFFFC107)
+        else -> null
+    }
+}
+
+private fun formatSessionTime(millis: Long): String {
+    val h = TimeUnit.MILLISECONDS.toHours(millis)
+    val m = TimeUnit.MILLISECONDS.toMinutes(millis) % 60
+    val s = TimeUnit.MILLISECONDS.toSeconds(millis) % 60
+    return if (h > 0) "%02d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+}
+
+private fun isToday(ts: Long): Boolean {
+    val t = Calendar.getInstance().apply { timeInMillis = ts }
+    val n = Calendar.getInstance()
+    return t.get(Calendar.YEAR) == n.get(Calendar.YEAR) &&
+            t.get(Calendar.DAY_OF_YEAR) == n.get(Calendar.DAY_OF_YEAR)
+}
+
+private fun isUpcoming(ts: Long): Boolean {
+    val days = TimeUnit.MILLISECONDS.toDays(ts - System.currentTimeMillis())
+    return days in 1..13
+}
+
+private val bouncySpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioLowBouncy,
+    stiffness = Spring.StiffnessMediumLow
+)
+
+private val mediumSpring = spring<Float>(
+    dampingRatio = 0.6f,
+    stiffness = Spring.StiffnessMedium
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2 ─ Main Screen
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 fun TodoScreen(
-    viewModel: TodoViewModel,
-    onBack: () -> Unit
+    onNavigateBack: (() -> Unit)? = null,
+    viewModel: TodoViewModel = hiltViewModel()
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val performanceMode = LocalPerformanceMode.current
-    val hapticEnabled = LocalHapticEnabled.current
+    val uiState by viewModel.uiState.collectAsState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val vibrationManager = LocalVibrationManager.current
-    
-    var showEditor by remember { mutableStateOf(false) }
-    var editingTask by remember { mutableStateOf<TaskEntry?>(null) }
-    var viewingTaskId by remember { mutableStateOf<Int?>(null) }
-    val viewingTask = remember(viewingTaskId, state.tasks, state.completedToday) {
-        (state.tasks + state.completedToday).find { it.id == viewingTaskId }
-    }
-    var expandedTaskIds by remember { mutableStateOf(setOf<Int>()) }
-    var showBrainDump by remember { mutableStateOf(false) }
+
+    var selectedFilter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
+    var selectedTaskForEdit by remember { mutableStateOf<TaskEntry?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
-    
-    val infiniteTransition = rememberInfiniteTransition(label = "SessionBreathing")
-    val sessionPulse by if (performanceMode) remember { mutableFloatStateOf(0.1f) } else infiniteTransition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.15f,
-        animationSpec = infiniteRepeatable(tween(3000, easing = LinearOutSlowInEasing), RepeatMode.Reverse),
-        label = "Pulse"
+    var showCompletedSection by rememberSaveable { mutableStateOf(true) }
+
+    val filteredTasks by remember(uiState.tasks, selectedFilter) {
+        derivedStateOf {
+            when (selectedFilter) {
+                TaskFilter.ALL -> uiState.tasks
+                TaskFilter.TODAY -> uiState.tasks.filter { it.dueDate?.let(::isToday) == true }
+                TaskFilter.UPCOMING -> uiState.tasks.filter { it.dueDate?.let(::isUpcoming) == true }
+            }
+        }
+    }
+
+    val totalCount = uiState.tasks.size + uiState.completedToday.size
+    val completionFraction by animateFloatAsState(
+        targetValue = if (totalCount == 0) 0f else uiState.completedToday.size.toFloat() / totalCount,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        label = "completionFraction"
     )
 
-    val sessionBgColor by animateColorAsState(
-        targetValue = if (state.isSessionActive) MaterialTheme.colorScheme.primary.copy(alpha = sessionPulse) 
-                      else Color.Transparent,
-        animationSpec = if (performanceMode) snap() else tween(2000),
-        label = "SessionBg"
-    )
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+    val listState = rememberLazyListState()
 
-    Box(modifier = Modifier.fillMaxSize().background(sessionBgColor)) {
-        Scaffold(
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            @Suppress("DEPRECATION")
-                            Text("TASK FLOW", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium)
-                            if (state.isSessionActive) {
-                                AnimatedVisibility(
-                                    visible = state.isSessionActive,
-                                    enter = if (performanceMode) fadeIn() else fadeIn() + expandVertically(),
-                                    exit = if (performanceMode) fadeOut() else fadeOut() + shrinkVertically()
-                                ) {
-                                    Text(
-                                        "ACTIVE • ${formatSessionTime(state.sessionTimeMillis)}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                onBack()
-                            },
-                            modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        Box {
-                            IconButton(onClick = { 
-                                vibrationManager?.vibrateClick()
-                                showSortMenu = true 
-                            }) {
-                                Icon(Icons.AutoMirrored.Rounded.Sort, "Sort")
-                            }
-                            DropdownMenu(
-                                expanded = showSortMenu,
-                                onDismissRequest = { showSortMenu = false },
-                                shape = RoundedCornerShape(24.dp)
-                            ) {
-                                TaskSortOrder.entries.forEach { order ->
-                                    DropdownMenuItem(
-                                        text = { Text(order.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold) },
-                                        onClick = {
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.setSortOrder(order)
-                                            showSortMenu = false
-                                        },
-                                        leadingIcon = { if (state.sortOrder == order) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary) }
-                                    )
-                                }
-                            }
-                        }
-                        if (state.isSessionActive) {
-                            IconButton(onClick = { 
-                                vibrationManager?.vibrateClick()
-                                viewModel.stopSession() 
-                            }) {
-                                Icon(Icons.Rounded.StopCircle, "Stop session", tint = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                    modifier = Modifier.statusBarsPadding()
-                )
-            },
-            floatingActionButton = {
-                ExtendedFloatingActionButton(
-                    onClick = { 
-                        vibrationManager?.vibrateClick()
-                        editingTask = null
-                        showEditor = true 
-                    },
-                    modifier = Modifier
-                        .padding(bottom = 16.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onLongPress = { 
-                                    vibrationManager?.vibrateLongClick()
-                                    showBrainDump = true 
-                                }
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = {
+            ExpressiveTopAppBar(
+                title = "My Tasks",
+                subtitle = "${uiState.completedToday.size} of $totalCount done today",
+                navigationIcon = {
+                    if (onNavigateBack != null) {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = "Navigate back"
                             )
-                        },
-                    shape = RoundedCornerShape(28.dp),
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                    text = { Text("NEW TASK", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
+                        }
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort tasks")
+                        }
+                        SortDropdownMenu(
+                            expanded = showSortMenu,
+                            currentOrder = uiState.sortOrder,
+                            onDismiss = { showSortMenu = false },
+                            onOrderSelected = {
+                                viewModel.setSortOrder(it)
+                                showSortMenu = false
+                            }
+                        )
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.97f)
                 )
-            },
-            containerColor = Color.Transparent
-        ) { padding ->
-            Column(modifier = Modifier.fillMaxSize().toolzBackground().padding(padding)) {
-                TaskSummaryHeader(activeCount = state.tasks.size, completedToday = state.completedToday.size)
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        bottomBar = {
+            QuickAddBar(
+                categories = uiState.categories,
+                onAddTask = { title, category, priority, dueDate ->
+                    viewModel.addTask(title, null, category, priority, dueDate)
+                    scope.launch { listState.animateScrollToItem(0) }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            // ── Progress header ───────────────────────────────────────────────
+            TaskProgressHeader(
+                completionFraction = completionFraction,
+                completedCount = uiState.completedToday.size,
+                totalCount = totalCount,
+                isSessionActive = uiState.isSessionActive,
+                sessionTimeMillis = uiState.sessionTimeMillis,
+                sessionTaskId = uiState.sessionTaskId,
+                allTasks = uiState.tasks + uiState.completedToday,
+                onStopSession = { viewModel.stopSession() },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
 
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(1),
-                    modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalItemSpacing = 16.dp
+            // ── Filter bar ────────────────────────────────────────────────────
+            ToolzConnectedButtonGroup(
+                selectedIndex = selectedFilter.ordinal,
+                options = TaskFilter.entries.map { it.label },
+                onOptionSelected = { selectedFilter = TaskFilter.entries[it] },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            // ── Main task list ────────────────────────────────────────────────
+            Box(modifier = Modifier.weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .fadingEdges(top = 24.dp, bottom = 64.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 8.dp, bottom = 140.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (state.tasks.isEmpty() && state.completedToday.isEmpty()) {
-                        item(span = StaggeredGridItemSpan.FullLine) {
-                            EmptyTasksState()
+                    // ── Active tasks ──
+                    if (filteredTasks.isEmpty()) {
+                        item(key = "empty_placeholder") {
+                            EmptyTasksPlaceholder(filter = selectedFilter)
                         }
                     } else {
-                        items(state.tasks, key = { it.id }) { task ->
-                            TaskCard(
-                                task = task,
-                                isSessionTarget = state.sessionTaskId == task.id,
-                                performanceMode = performanceMode,
-                                isExpanded = expandedTaskIds.contains(task.id),
-                                onToggle = { 
-                                    if (hapticEnabled) vibrationManager?.vibrateSuccess()
-                                    viewModel.toggleTaskCompletion(task) 
-                                },
-                                onClick = { 
-                                    vibrationManager?.vibrateClick()
-                                    viewingTaskId = task.id 
-                                },
-                                onLongClick = { 
-                                    vibrationManager?.vibrateLongClick()
-                                    editingTask = task
-                                    showEditor = true 
-                                },
-                                onStartSession = { 
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.startSession(task.id) 
-                                },
-                                onExpandToggle = {
-                                    vibrationManager?.vibrateTick()
-                                    expandedTaskIds = if (expandedTaskIds.contains(task.id)) {
-                                        expandedTaskIds - task.id
-                                    } else {
-                                        expandedTaskIds + task.id
-                                    }
-                                },
-                                onToggleSubtask = { subId ->
-                                    vibrationManager?.vibrateTick()
-                                    viewModel.toggleSubTask(task, subId)
-                                },
+                        items(filteredTasks, key = { it.id }) { task ->
+                            StaggeredEntrance(
+                                index = filteredTasks.indexOf(task),
                                 modifier = Modifier.animateItem(
-                                    fadeInSpec = if (performanceMode) snap() else spring(),
-                                    fadeOutSpec = if (performanceMode) snap() else spring(),
-                                    placementSpec = if (performanceMode) snap() else spring()
+                                    placementSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
                                 )
-                            )
-                        }
-                        
-                        if (state.completedToday.isNotEmpty()) {
-                            item(span = StaggeredGridItemSpan.FullLine) {
-                                @Suppress("DEPRECATION")
-                                Text(
-                                    "COMPLETED TODAY",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                                    letterSpacing = 2.sp
-                                )
-                            }
-                            items(state.completedToday, key = { it.id }) { task ->
-                                TaskCard(
+                            ) {
+                                ActiveTaskCard(
                                     task = task,
-                                    isSessionTarget = false,
-                                    performanceMode = performanceMode,
-                                    isExpanded = expandedTaskIds.contains(task.id),
-                                    onToggle = { 
-                                        vibrationManager?.vibrateTick()
-                                        viewModel.toggleTaskCompletion(task) 
-                                    },
-                                    onClick = { 
+                                    isSessionTask = task.id == uiState.sessionTaskId,
+                                    isSessionActive = uiState.isSessionActive,
+                                    onToggleComplete = {
                                         vibrationManager?.vibrateClick()
-                                        viewingTaskId = task.id 
+                                        viewModel.toggleTaskCompletion(task)
                                     },
-                                    onLongClick = { },
-                                    onStartSession = { },
-                                    onExpandToggle = {
-                                        expandedTaskIds = if (expandedTaskIds.contains(task.id)) {
-                                            expandedTaskIds - task.id
-                                        } else {
-                                            expandedTaskIds + task.id
-                                        }
-                                    },
-                                    onToggleSubtask = { subId ->
+                                    onToggleSubTask = { subId ->
+                                        vibrationManager?.vibrateTick()
                                         viewModel.toggleSubTask(task, subId)
                                     },
-                                    modifier = Modifier.animateItem(
-                                        fadeInSpec = if (performanceMode) snap() else spring(),
-                                        fadeOutSpec = if (performanceMode) snap() else spring(),
-                                        placementSpec = if (performanceMode) snap() else spring()
-                                    )
+                                    onDelete = {
+                                        vibrationManager?.vibrateTick()
+                                        viewModel.deleteTask(task)
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("Task deleted")
+                                        }
+                                    },
+                                    onStartSession = { viewModel.startSession(task.id) },
+                                    onStopSession = { viewModel.stopSession() },
+                                    onCardClick = { selectedTaskForEdit = task }
                                 )
+                            }
+                        }
+                    }
+
+                    // ── Completed section header ──
+                    if (uiState.completedToday.isNotEmpty()) {
+                        item(key = "completed_header") {
+                            CompletedSectionHeader(
+                                count = uiState.completedToday.size,
+                                expanded = showCompletedSection,
+                                onToggle = {
+                                    vibrationManager?.vibrateTick()
+                                    showCompletedSection = !showCompletedSection
+                                },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
+
+                        if (showCompletedSection) {
+                            items(uiState.completedToday, key = { "done_${it.id}" }) { task ->
+                                StaggeredEntrance(
+                                    index = uiState.completedToday.indexOf(task),
+                                    modifier = Modifier.animateItem()
+                                ) {
+                                    CompletedTaskCard(
+                                        task = task,
+                                        onToggleComplete = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.toggleTaskCompletion(task)
+                                        },
+                                        onDelete = {
+                                            vibrationManager?.vibrateTick()
+                                            viewModel.deleteTask(task)
+                                        },
+                                        onCardClick = { selectedTaskForEdit = task }
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
-
-        if (showEditor) {
-            TaskEditorSheet(
-                task = editingTask,
-                categories = state.categories,
-                onDismiss = { showEditor = false },
-                onSave = { title, desc, cat, priority, dueDate, subtasks ->
-                    if (editingTask == null) {
-                        viewModel.addTask(title, desc, cat, priority, dueDate, subtasks)
-                    } else {
-                        viewModel.updateTask(editingTask!!.copy(
-                            title = title,
-                            description = desc,
-                            category = cat,
-                            priority = priority,
-                            dueDate = dueDate,
-                            subTasks = subtasks
-                        ))
-                    }
-                    showEditor = false
-                },
-                onDelete = {
-                    editingTask?.let { viewModel.deleteTask(it) }
-                    showEditor = false
-                },
-                onAddCategory = { viewModel.addCategory(it) },
-                onAddToCalendar = { task -> 
-                    viewModel.addToCalendar(task)
-                }
-            )
-        }
-
-        if (showBrainDump) {
-            BrainDumpOverlay(
-                onDismiss = { showBrainDump = false },
-                performanceMode = performanceMode,
-                onConfirm = { title ->
-                    viewModel.addTask(title = title, category = "General", priority = 3)
-                    showBrainDump = false
-                }
-            )
-        }
-
-        AnimatedVisibility(
-            visible = viewingTask != null,
-            enter = if (performanceMode) fadeIn() else fadeIn() + scaleIn(initialScale = 0.9f) + slideInVertically { it / 4 },
-            exit = if (performanceMode) fadeOut() else fadeOut() + scaleOut(targetScale = 0.9f) + slideOutVertically { it / 4 }
-        ) {
-            viewingTask?.let { task ->
-                TaskDetailOverlay(
-                    task = task,
-                    onDismiss = { viewingTaskId = null },
-                    onToggleSubtask = { subId -> 
-                        vibrationManager?.vibrateTick()
-                        viewModel.toggleSubTask(task, subId) 
-                    },
-                    onToggleComplete = { 
-                        if (hapticEnabled) vibrationManager?.vibrateSuccess()
-                        viewModel.toggleTaskCompletion(task)
-                        viewingTaskId = null
-                    },
-                    onStartSession = {
-                        vibrationManager?.vibrateClick()
-                        viewModel.startSession(task.id)
-                        viewingTaskId = null
-                    },
-                    onAddToCalendar = {
-                        vibrationManager?.vibrateSuccess()
-                        viewModel.addToCalendar(task)
-                    }
-                )
-            }
-        }
     }
-}
 
-@Composable
-fun EmptyTasksState() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 80.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            modifier = Modifier.size(120.dp),
-            shape = RoundedCornerShape(40.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.AssignmentTurnedIn,
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(Modifier.height(32.dp))
-        @Suppress("DEPRECATION")
-        Text(
-            "ALL CLEAR",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 3.sp
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "No active tasks detected. Deploy a new objective using the action button.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(0.8f),
-            fontWeight = FontWeight.Medium
+    // ── Task detail/edit sheet ────────────────────────────────────────────────
+    selectedTaskForEdit?.let { task ->
+        TaskDetailSheet(
+            task = task,
+            categories = uiState.categories,
+            isSessionTask = task.id == uiState.sessionTaskId,
+            isSessionActive = uiState.isSessionActive,
+            onDismiss = { selectedTaskForEdit = null },
+            onSaveTask = { viewModel.updateTask(it) },
+            onDeleteTask = {
+                viewModel.deleteTask(task)
+                selectedTaskForEdit = null
+            },
+            onToggleSubTask = { subId -> viewModel.toggleSubTask(task, subId) },
+            onStartSession = { viewModel.startSession(task.id) },
+            onStopSession = { viewModel.stopSession() },
+            onAddToCalendar = { viewModel.addToCalendar(task) }
         )
     }
 }
 
-@Composable
-fun TaskSummaryHeader(activeCount: Int, completedToday: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        SummaryCard(
-            label = "PENDING",
-            count = activeCount.toString(),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f),
-            icon = Icons.Rounded.PendingActions
-        )
-        SummaryCard(
-            label = "RECORDS",
-            count = completedToday.toString(),
-            color = Color(0xFF4CAF50),
-            modifier = Modifier.weight(1f),
-            icon = Icons.Rounded.TaskAlt
-        )
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3 ─ Progress Header
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun SummaryCard(label: String, count: String, color: Color, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        color = color.copy(alpha = 0.08f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.15f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, modifier = Modifier.size(14.dp), tint = color)
-                Spacer(Modifier.width(8.dp))
-                @Suppress("DEPRECATION")
-                Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color, letterSpacing = 1.sp)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(count, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = color)
-        }
-    }
-}
-
-@Composable
-fun TaskCard(
-    task: TaskEntry,
-    isSessionTarget: Boolean,
-    performanceMode: Boolean,
-    isExpanded: Boolean,
-    onToggle: () -> Unit,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onStartSession: () -> Unit,
-    onExpandToggle: () -> Unit,
-    onToggleSubtask: (String) -> Unit,
+private fun TaskProgressHeader(
+    completionFraction: Float,
+    completedCount: Int,
+    totalCount: Int,
+    isSessionActive: Boolean,
+    sessionTimeMillis: Long,
+    sessionTaskId: Int?,
+    allTasks: List<TaskEntry>,
+    onStopSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "CardGlow")
-    
-    val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0f) } else infiniteTransition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.15f,
-        animationSpec = infiniteRepeatable(tween(2500, easing = EaseInOutSine), RepeatMode.Reverse),
-        label = "Glow"
-    )
-
-    val breathingScale by if (performanceMode) remember { mutableFloatStateOf(1f) } else infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.02f,
-        animationSpec = infiniteRepeatable(tween(4000, easing = EaseInOutSine), RepeatMode.Reverse),
-        label = "Breathing"
+    val containerAlpha by animateFloatAsState(
+        targetValue = if (completionFraction >= 1f && totalCount > 0) 0.55f else 0.28f,
+        animationSpec = mediumSpring,
+        label = "headerAlpha"
     )
 
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .scale(if (isSessionTarget && !performanceMode) breathingScale else 1f)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onLongPress = { onLongClick() }
-                )
-            },
-        shape = RoundedCornerShape(28.dp),
-        color = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                else if (isSessionTarget) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-                else MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            if (isSessionTarget) 2.dp else 1.dp,
-            if (isSessionTarget) MaterialTheme.colorScheme.primary
-            else if (task.priority == 1) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-        ),
-        shadowElevation = if ((task.priority == 1 || isSessionTarget) && !performanceMode) 4.dp else 0.dp
+        modifier = modifier.fillMaxWidth(),
+        shape = BouncyShape,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = containerAlpha),
+        tonalElevation = 0.dp
     ) {
-        Box {
-            if ((task.priority == 1 || isSessionTarget) && !task.isCompleted && !performanceMode) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-            }
-
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CategoryBadge(task.category)
-                    Spacer(Modifier.width(8.dp))
-                    PriorityBadge(task.priority)
-                    Spacer(Modifier.weight(1f))
-                    if (!task.isCompleted) {
-                        IconButton(onClick = onStartSession, modifier = Modifier.size(32.dp)) {
-                            Icon(
-                                if (isSessionTarget) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
-                                null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            if (task.isCompleted) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                            null,
-                            tint = if (task.isCompleted) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                            modifier = Modifier.size(22.dp)
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    AnimatedContent(
+                        targetState = when {
+                            totalCount == 0 -> "Nothing here yet"
+                            completionFraction >= 1f -> "All done today 🎉"
+                            completedCount == 0 -> "Ready to crush it?"
+                            else -> "$completedCount done, ${totalCount - completedCount} to go"
+                        },
+                        transitionSpec = {
+                            fadeIn(tween(300)) + slideInVertically { -it / 2 } togetherWith
+                                    fadeOut(tween(200))
+                        },
+                        label = "headerTitle"
+                    ) { title ->
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
-                }
-                
-                Spacer(Modifier.height(12.dp))
-                
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (task.isCompleted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
-                )
-
-                if (!task.description.isNullOrBlank() && !task.isCompleted) {
-                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = task.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        text = "Today's progress",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.65f),
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                if (task.subTasks.isNotEmpty() || task.dueDate != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically, 
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (task.subTasks.isNotEmpty()) {
-                            val doneCount = task.subTasks.count { it.isDone }
-                            Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(8.dp),
-                                onClick = onExpandToggle
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Rounded.PlaylistAddCheck, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("$doneCount/${task.subTasks.size}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    Icon(
-                                        if (isExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                                        null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                        
-                        if (task.dueDate != null) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Rounded.Schedule, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().lowercase(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                Spacer(Modifier.width(16.dp))
 
-                AnimatedVisibility(
-                    visible = isExpanded && task.subTasks.isNotEmpty(),
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(top = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        task.subTasks.forEach { sub ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
-                                    .clickable { onToggleSubtask(sub.id) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    if (sub.isDone) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                                    null,
-                                    tint = if (sub.isDone) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    sub.title,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = if (sub.isDone) FontWeight.Normal else FontWeight.Medium,
-                                    textDecoration = if (sub.isDone) TextDecoration.LineThrough else null,
-                                    color = if (sub.isDone) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
+                // Circular wavy progress ring
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(58.dp)) {
+                    ToolzWavyCircularProgressIndicator(
+                        progress = { completionFraction },
+                        modifier = Modifier.size(58.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    )
+                    Text(
+                        text = "${(completionFraction * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // Wavy linear progress bar
+            ToolzWavyLinearProgressIndicator(
+                progress = { completionFraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(CircleShape),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            )
+
+            // Active session banner (slides in)
+            AnimatedVisibility(
+                visible = isSessionActive,
+                enter = expandVertically(spring(dampingRatio = 0.6f)) + fadeIn(),
+                exit = shrinkVertically(tween(200)) + fadeOut()
+            ) {
+                SessionBanner(
+                    sessionTimeMillis = sessionTimeMillis,
+                    taskTitle = allTasks.find { it.id == sessionTaskId }?.title ?: "Unknown task",
+                    onStop = onStopSession,
+                    modifier = Modifier.padding(top = 14.dp)
+                )
             }
         }
     }
 }
 
 @Composable
-fun PriorityBadge(priority: Int) {
-    val color = when(priority) {
-        1 -> Color(0xFFD32F2F)
-        2 -> Color(0xFFF44336)
-        3 -> MaterialTheme.colorScheme.primary
-        4 -> Color(0xFF8BC34A)
-        else -> Color(0xFF9E9E9E)
-    }
+private fun SessionBanner(
+    sessionTimeMillis: Long,
+    taskTitle: String,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val vibrationManager = LocalVibrationManager.current
     Surface(
-        color = color.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        modifier = modifier.fillMaxWidth(),
+        shape = SmallExpressiveShape,
+        color = MaterialTheme.colorScheme.tertiaryContainer
     ) {
-        @Suppress("DEPRECATION")
-        Text(
-            text = "P$priority",
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            fontSize = 10.sp,
-            color = color
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Rounded.Timer,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = taskTitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = formatSessionTime(sessionTimeMillis),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            FilledTonalIconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    onStop()
+                },
+                modifier = Modifier.size(32.dp),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.25f),
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            ) {
+                Icon(Icons.Rounded.Stop, contentDescription = "Stop session", modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 4 ─ Active Task Card (with swipe-to-dismiss)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ActiveTaskCard(
+    task: TaskEntry,
+    isSessionTask: Boolean,
+    isSessionActive: Boolean,
+    onToggleComplete: () -> Unit,
+    onToggleSubTask: (String) -> Unit,
+    onDelete: () -> Unit,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit,
+    onCardClick: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    var subtasksExpanded by rememberSaveable { mutableStateOf(false) }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                vibrationManager?.vibrateTick()
+                onDelete()
+                true
+            } else false
+        },
+        positionalThreshold = { it * 0.38f }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { SwipeDismissBackground(dismissState.targetValue) },
+        enableDismissFromStartToEnd = false,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        TaskCardSurface(
+            task = task,
+            isSessionTask = isSessionTask,
+            isSessionActive = isSessionActive,
+            subtasksExpanded = subtasksExpanded,
+            onToggleComplete = onToggleComplete,
+            onToggleSubTask = onToggleSubTask,
+            onExpandSubtasks = { subtasksExpanded = !subtasksExpanded },
+            onStartSession = onStartSession,
+            onStopSession = onStopSession,
+            onCardClick = onCardClick
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskEditorSheet(
-    task: TaskEntry?,
-    categories: List<String>,
-    onDismiss: () -> Unit,
-    onSave: (String, String?, String, Int, Long?, List<SubTask>) -> Unit,
-    onDelete: () -> Unit,
-    onAddCategory: (String) -> Unit,
-    onAddToCalendar: (TaskEntry) -> Unit
+private fun SwipeDismissBackground(targetValue: SwipeToDismissBoxValue) {
+    val bgColor by animateColorAsState(
+        targetValue = when (targetValue) {
+            SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+        },
+        animationSpec = tween(220),
+        label = "swipeBg"
+    )
+    val iconAlpha by animateFloatAsState(
+        targetValue = if (targetValue == SwipeToDismissBoxValue.EndToStart) 1f else 0.4f,
+        animationSpec = mediumSpring,
+        label = "swipeIconAlpha"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (targetValue == SwipeToDismissBoxValue.EndToStart) 1f else 0.8f,
+        animationSpec = bouncySpring,
+        label = "swipeIconScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(SquircleShape)
+            .background(bgColor)
+            .padding(end = 24.dp),
+        contentAlignment = Alignment.CenterEnd
+    ) {
+        Icon(
+            Icons.Rounded.Delete,
+            contentDescription = "Delete task",
+            tint = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = iconAlpha),
+            modifier = Modifier
+                .size(26.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+        )
+    }
+}
+
+@Composable
+private fun TaskCardSurface(
+    task: TaskEntry,
+    isSessionTask: Boolean,
+    isSessionActive: Boolean,
+    subtasksExpanded: Boolean,
+    onToggleComplete: () -> Unit,
+    onToggleSubTask: (String) -> Unit,
+    onExpandSubtasks: () -> Unit,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit,
+    onCardClick: () -> Unit
+) {
+    val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
+
+    // Animate card state on completion (not used here – card only for active tasks)
+    val priorityColor = PriorityColors.getOrElse(task.priority - 1) { PriorityColors[0] }
+    val urgencyColor = task.dueDate?.let(::dueDateUrgencyColor)
+
+    val cardColor = MaterialTheme.colorScheme.surfaceColorAtElevation(
+        if (isSessionTask) 6.dp else 2.dp
+    )
+    val sessionBorderAlpha by animateFloatAsState(
+        targetValue = if (isSessionTask) 0.8f else 0f,
+        animationSpec = if (performanceMode) tween(120) else spring(dampingRatio = 0.6f),
+        label = "sessionBorderAlpha"
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SquircleShape)
+            .then(
+                if (isSessionTask) Modifier.border(
+                    width = 1.5.dp,
+                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = sessionBorderAlpha),
+                    shape = SquircleShape
+                ) else Modifier
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onCardClick
+            ),
+        shape = SquircleShape,
+        color = cardColor,
+        tonalElevation = if (performanceMode) 0.dp else if (isSessionTask) 4.dp else 1.dp,
+        shadowElevation = if (performanceMode) 0.dp else if (isSessionTask) 3.dp else 0.5.dp
+    ) {
+        Column(modifier = Modifier.animateContentSize(spring(dampingRatio = 0.65f))) {
+            // ── Priority stripe ───────────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(
+                        color = priorityColor.copy(alpha = 0.75f),
+                        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                    )
+            )
+
+            // ── Card body ─────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Checkbox
+                AnimatedCheckbox(
+                    checked = false,
+                    onCheck = onToggleComplete,
+                    color = priorityColor
+                )
+
+                Spacer(Modifier.width(10.dp))
+
+                // Title + metadata column
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    if (!task.description.isNullOrBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = task.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Badges row
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CategoryBadge(label = task.category)
+
+                        task.dueDate?.let { due ->
+                            DueDateBadge(
+                                label = formatDueDate(due),
+                                urgencyColor = urgencyColor
+                            )
+                        }
+
+                        if (task.subTasks.isNotEmpty()) {
+                            SubtaskCountBadge(
+                                done = task.subTasks.count { it.isDone },
+                                total = task.subTasks.size,
+                                expanded = subtasksExpanded,
+                                onToggle = {
+                                    vibrationManager?.vibrateTick()
+                                    onExpandSubtasks()
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                // Session / action button
+                SessionIconButton(
+                    isSessionTask = isSessionTask,
+                    isSessionActive = isSessionActive,
+                    onStartSession = onStartSession,
+                    onStopSession = onStopSession
+                )
+            }
+
+            // ── Subtasks (collapsible) ────────────────────────────────────────
+            AnimatedVisibility(
+                visible = subtasksExpanded && task.subTasks.isNotEmpty(),
+                enter = expandVertically(spring(dampingRatio = 0.7f)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = 56.dp, end = 16.dp, bottom = 14.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+                    task.subTasks.forEach { sub ->
+                        SubTaskRow(
+                            subTask = sub,
+                            onToggle = { onToggleSubTask(sub.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnimatedCheckbox(
+    checked: Boolean,
+    onCheck: () -> Unit,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val performanceMode = LocalPerformanceMode.current
+    val scale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed && !performanceMode) 0.85f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+        label = "checkPressScale"
+    )
+
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .graphicsLayer { scaleX = pressScale * scale.value; scaleY = pressScale * scale.value }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {
+                    scope.launch {
+                        if (!performanceMode) {
+                            scale.animateTo(
+                                targetValue = 1.35f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            )
+                            scale.animateTo(
+                                targetValue = 1f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            )
+                        }
+                        onCheck()
+                    }
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = if (checked) color.copy(alpha = 0.2f) else Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(2.dp, color.copy(alpha = 0.7f)),
+            modifier = Modifier.size(26.dp)
+        ) {
+            AnimatedVisibility(
+                visible = checked,
+                enter = scaleIn(spring(dampingRatio = Spring.DampingRatioLowBouncy)) + fadeIn(),
+                exit = scaleOut() + fadeOut()
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionIconButton(
+    isSessionTask: Boolean,
+    isSessionActive: Boolean,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
-    var title by remember { mutableStateOf(task?.title ?: "") }
-    var description by remember { mutableStateOf(task?.description ?: "") }
-    var category by remember { mutableStateOf(task?.category ?: categories.firstOrNull() ?: "General") }
-    var priority by remember { mutableStateOf(task?.priority ?: 3) }
-    var subTasks by remember { mutableStateOf(task?.subTasks ?: emptyList()) }
-    var dueDate by remember { mutableStateOf(task?.dueDate) }
+    val showStop = isSessionTask && isSessionActive
+    val performanceMode = LocalPerformanceMode.current
 
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showAddCategory by remember { mutableStateOf(false) }
-    var newCategoryName by remember { mutableStateOf("") }
-    var newSubtaskTitle by remember { mutableStateOf("") }
+    AnimatedContent(
+        targetState = showStop,
+        transitionSpec = {
+            (scaleIn(spring(dampingRatio = Spring.DampingRatioLowBouncy)) + fadeIn()) togetherWith
+                    (scaleOut(tween(150)) + fadeOut(tween(150)))
+        },
+        label = "sessionBtn"
+    ) { stop ->
+        if (stop) {
+            FilledIconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    onStopSession()
+                },
+                modifier = Modifier.size(36.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            ) {
+                Icon(Icons.Rounded.Stop, contentDescription = "Stop session", modifier = Modifier.size(18.dp))
+            }
+        } else {
+            FilledTonalIconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    onStartSession()
+                },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = "Start session", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5 ─ Sub-task row
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SubTaskRow(subTask: SubTask, onToggle: () -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
+
+    val checkScale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+
+    val strikeAlpha by animateFloatAsState(
+        targetValue = if (subTask.isDone) 1f else 0f,
+        animationSpec = if (performanceMode) tween(120) else spring(dampingRatio = 0.65f),
+        label = "subStrikeAlpha"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SmallExpressiveShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                vibrationManager?.vibrateTick()
+                scope.launch {
+                    if (!performanceMode) {
+                        checkScale.animateTo(
+                            0.8f,
+                            spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)
+                        )
+                        checkScale.animateTo(
+                            1f,
+                            spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
+                    }
+                    onToggle()
+                }
+            }
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (subTask.isDone) MaterialTheme.colorScheme.primary.copy(0.15f) else Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(
+                1.5.dp,
+                if (subTask.isDone) MaterialTheme.colorScheme.primary.copy(0.6f)
+                else MaterialTheme.colorScheme.outlineVariant
+            ),
+            modifier = Modifier
+                .size(20.dp)
+                .graphicsLayer { scaleX = checkScale.value; scaleY = checkScale.value }
+        ) {
+            AnimatedVisibility(
+                visible = subTask.isDone,
+                enter = scaleIn(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
+                exit = scaleOut() + fadeOut()
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = subTask.title,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (subTask.isDone)
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            else
+                MaterialTheme.colorScheme.onSurface,
+            textDecoration = if (subTask.isDone) TextDecoration.LineThrough else TextDecoration.None,
+            modifier = Modifier.graphicsLayer { alpha = if (subTask.isDone) 0.55f else 1f }
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6 ─ Completed task card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CompletedTaskCard(
+    task: TaskEntry,
+    onToggleComplete: () -> Unit,
+    onDelete: () -> Unit,
+    onCardClick: () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { it == SwipeToDismissBoxValue.EndToStart },
+        positionalThreshold = { it * 0.4f }
+    )
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) onDelete()
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { SwipeDismissBackground(dismissState.targetValue) },
+        enableDismissFromStartToEnd = false,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .clip(SmallExpressiveShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onCardClick
+                ),
+            shape = SmallExpressiveShape,
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(0.5.dp).copy(alpha = 0.6f),
+            tonalElevation = 0.dp
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (task == null) "NEW TASK" else "EDIT TASK",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black
-                )
-                Spacer(Modifier.weight(1f))
-                if (task != null) {
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateSuccess()
-                            onAddToCalendar(task) 
-                        },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.CalendarToday, "Add to calendar", tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateLongClick()
-                            onDelete() 
-                        },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                label = { Text("Task Title") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
-            )
-
-            OutlinedTextField(
-                value = description,
-                onValueChange = { description = it },
-                label = { Text("Notes & Details") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                maxLines = 3
-            )
-
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(16.dp),
-                onClick = { 
-                    vibrationManager?.vibrateClick()
-                    showDatePicker = true 
-                }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                // Filled check icon
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onToggleComplete
+                        )
                 ) {
-                    Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("DUE DATE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text(
-                            text = dueDate?.let { DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR) } ?: "Set a deadline",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    if (dueDate != null) {
-                        IconButton(onClick = { 
-                            vibrationManager?.vibrateTick()
-                            dueDate = null 
-                        }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("CATEGORY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { 
-                        vibrationManager?.vibrateClick()
-                        showAddCategory = true 
-                    }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    categories.forEach { cat ->
-                        FilterChip(
-                            selected = category == cat,
-                            onClick = { 
-                                vibrationManager?.vibrateTick()
-                                category = cat 
-                            },
-                            label = { Text(cat) },
-                            shape = RoundedCornerShape(12.dp)
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = "Mark incomplete",
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
-            }
 
-            Column {
-                Text("PRIORITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    (1..5).forEach { p ->
-                        val isSelected = priority == p
-                        val pColor = when(p) {
-                            1 -> Color(0xFFD32F2F)
-                            2 -> Color(0xFFF44336)
-                            3 -> MaterialTheme.colorScheme.primary
-                            4 -> Color(0xFF8BC34A)
-                            else -> Color(0xFF9E9E9E)
-                        }
-                        Surface(
-                            onClick = { 
-                                vibrationManager?.vibrateTick()
-                                priority = p 
-                            },
-                            modifier = Modifier.size(52.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) pColor else pColor.copy(alpha = 0.1f),
-                            border = BorderStroke(1.5.dp, if (isSelected) Color.White.copy(alpha = 0.3f) else pColor.copy(alpha = 0.2f))
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(p.toString(), color = if (isSelected) Color.White else pColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Column {
-                @Suppress("DEPRECATION")
-                Text("SUBTASKS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                subTasks.forEach { sub ->
-                    Surface(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
-                            Checkbox(checked = sub.isDone, onCheckedChange = { isDone ->
-                                vibrationManager?.vibrateTick()
-                                subTasks = subTasks.map { if (it.id == sub.id) it.copy(isDone = isDone) else it }
-                            })
-                            Text(sub.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            IconButton(onClick = { 
-                                vibrationManager?.vibrateTick()
-                                subTasks = subTasks.filter { it.id != sub.id } 
-                            }) {
-                                Icon(Icons.Rounded.RemoveCircleOutline, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
-                            }
-                        }
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        textDecoration = TextDecoration.LineThrough,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    CategoryBadge(label = task.category, alpha = 0.55f)
                 }
 
-                Spacer(Modifier.height(8.dp))
-                val focusManager = LocalFocusManager.current
-                OutlinedTextField(
-                    value = newSubtaskTitle,
-                    onValueChange = { newSubtaskTitle = it },
-                    placeholder = { Text("Add subtask...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            vibrationManager?.vibrateClick()
-                            if (newSubtaskTitle.isNotBlank()) {
-                                subTasks = subTasks + SubTask(UUID.randomUUID().toString(), newSubtaskTitle)
-                                newSubtaskTitle = ""
-                            }
-                        }) {
-                            Icon(Icons.Rounded.AddCircle, null, tint = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        vibrationManager?.vibrateClick()
-                        if (newSubtaskTitle.isNotBlank()) {
-                            subTasks = subTasks + SubTask(UUID.randomUUID().toString(), newSubtaskTitle)
-                            newSubtaskTitle = ""
-                        }
-                        focusManager.clearFocus()
-                    })
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = "View task",
+                    tint = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier.size(18.dp)
                 )
             }
+        }
+    }
+}
 
-            Button(
-                onClick = { 
-                    vibrationManager?.vibrateClick()
-                    if (title.isNotBlank()) onSave(title, description.takeIf { it.isNotBlank() }, category, priority, dueDate, subTasks) 
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp).padding(vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 7 ─ Completed section header & empty placeholder
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CompletedSectionHeader(
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onToggle
+            )
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+        Text(
+            text = "Completed today ($count)",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+        Icon(
+            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+            contentDescription = if (expanded) "Collapse" else "Expand",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier.size(18.dp)
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+    }
+}
+
+@Composable
+private fun EmptyTasksPlaceholder(filter: TaskFilter) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = when (filter) {
+                TaskFilter.ALL -> "✨"
+                TaskFilter.TODAY -> "📅"
+                TaskFilter.UPCOMING -> "🗓️"
+            },
+            style = MaterialTheme.typography.displaySmall
+        )
+        Text(
+            text = when (filter) {
+                TaskFilter.ALL -> "All clear!"
+                TaskFilter.TODAY -> "Nothing due today"
+                TaskFilter.UPCOMING -> "No upcoming tasks"
+            },
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = when (filter) {
+                TaskFilter.ALL -> "Tap + below to add your first task"
+                TaskFilter.TODAY -> "Set due dates to see tasks here"
+                TaskFilter.UPCOMING -> "Tasks due in the next two weeks appear here"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 8 ─ Quick-add bar (morphing input)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun QuickAddBar(
+    categories: List<String>,
+    onAddTask: (title: String, category: String, priority: Int, dueDate: Long?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val performanceMode = LocalPerformanceMode.current
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+
+    var title by remember { mutableStateOf("") }
+    var isFocused by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf("Personal") }
+    var selectedPriority by remember { mutableIntStateOf(3) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var selectedDueDate by remember { mutableStateOf<Long?>(null) }
+
+    val isExpanded = isFocused || title.isNotEmpty()
+
+    // Morphing corner radius
+    val cornerRadius by animateDpAsState(
+        targetValue = if (isExpanded) 20.dp else 32.dp,
+        animationSpec = if (performanceMode) tween(120) else spring(dampingRatio = 0.6f),
+        label = "quickAddCorner"
+    )
+    val surfaceElevation by animateDpAsState(
+        targetValue = if (isExpanded) 8.dp else 3.dp,
+        animationSpec = spring(dampingRatio = 0.7f),
+        label = "quickAddElevation"
+    )
+
+    fun submit() {
+        if (title.isBlank()) return
+        vibrationManager?.vibrateClick()
+        onAddTask(title.trim(), selectedCategory, selectedPriority, selectedDueDate)
+        title = ""
+        selectedDueDate = null
+        selectedPriority = 3
+        isFocused = false
+        focusManager.clearFocus()
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(cornerRadius),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = if (performanceMode) 0.dp else surfaceElevation,
+        tonalElevation = if (performanceMode) 2.dp else 0.dp
+    ) {
+        Column(modifier = Modifier.animateContentSize(spring(dampingRatio = 0.65f))) {
+
+            // ── Input row ────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("SAVE TASK", fontWeight = FontWeight.Bold)
+                val addIconScale by animateFloatAsState(
+                    targetValue = if (isExpanded) 0.85f else 1f,
+                    animationSpec = bouncySpring,
+                    label = "addIconScale"
+                )
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .graphicsLayer { scaleX = addIconScale; scaleY = addIconScale }
+                )
+
+                BasicTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { isFocused = it.isFocused },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    decorationBox = { inner ->
+                        Box {
+                            if (title.isEmpty()) {
+                                Text(
+                                    text = "Add a new task…",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            inner()
+                        }
+                    }
+                )
+
+                // Submit / clear button
+                AnimatedVisibility(
+                    visible = title.isNotEmpty(),
+                    enter = scaleIn(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
+                    exit = scaleOut(tween(150)) + fadeOut(tween(150))
+                ) {
+                    ToolzExpressiveIconButton(
+                        onClick = { submit() },
+                        modifier = Modifier.size(38.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(Icons.Rounded.Check, contentDescription = "Add task", modifier = Modifier.size(18.dp))
+                    }
+                }
             }
-            
-            Spacer(Modifier.height(24.dp))
+
+            // ── Expanded options ──────────────────────────────────────────────
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically(spring(dampingRatio = 0.65f)) + fadeIn(tween(200)),
+                exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+            ) {
+                Column(
+                    modifier = Modifier.padding(
+                        start = 16.dp, end = 16.dp, bottom = 14.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+
+                    // ── Priority selector ─────────────────────────────────────
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.Flag,
+                            contentDescription = "Priority",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        (1..5).forEach { p ->
+                            val isSelected = selectedPriority == p
+                            val pColor = PriorityColors[p - 1]
+                            val pScale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.18f else 1f,
+                                animationSpec = spring(Spring.DampingRatioLowBouncy),
+                                label = "pScale_$p"
+                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isSelected) pColor.copy(alpha = 0.22f) else pColor.copy(alpha = 0.10f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) pColor else pColor.copy(0.4f)
+                                ),
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .graphicsLayer { scaleX = pScale; scaleY = pScale }
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        vibrationManager?.vibrateTick()
+                                        selectedPriority = p
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = p.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
+                                        color = if (isSelected) pColor else pColor.copy(0.7f)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        // Date picker toggle
+                        val dateLabel = selectedDueDate?.let { formatDueDate(it) } ?: "Date"
+                        ExpressiveFilterChip(
+                            selected = selectedDueDate != null,
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                showDatePicker = true
+                            },
+                            label = {
+                                Text(
+                                    text = dateLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.CalendarMonth, null, modifier = Modifier.size(14.dp))
+                            },
+                            trailingIcon = if (selectedDueDate != null) {
+                                {
+                                    Icon(
+                                        Icons.Rounded.Close, null,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) { selectedDueDate = null }
+                                    )
+                                }
+                            } else null,
+                            shape = SmallExpressiveShape
+                        )
+                    }
+
+                    // ── Category chips ────────────────────────────────────────
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(horizontal = 0.dp)
+                    ) {
+                        items(categories) { cat ->
+                            ExpressiveFilterChip(
+                                selected = selectedCategory == cat,
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    selectedCategory = cat
+                                },
+                                label = {
+                                    Text(
+                                        text = cat,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                },
+                                shape = SmallExpressiveShape
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
+    // Date picker dialog
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState()
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDueDate ?: System.currentTimeMillis()
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    vibrationManager?.vibrateClick()
-                    dueDate = datePickerState.selectedDateMillis
+                    selectedDueDate = datePickerState.selectedDateMillis
                     showDatePicker = false
                 }) { Text("OK") }
             },
             dismissButton = {
-                TextButton(onClick = { 
-                    vibrationManager?.vibrateClick()
-                    showDatePicker = false 
-                }) { Text("CANCEL") }
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
             }
         ) {
             DatePicker(state = datePickerState)
         }
     }
+}
 
-    if (showAddCategory) {
-        AlertDialog(
-            onDismissRequest = { showAddCategory = false },
-            title = { Text("New Category") },
-            text = {
-                OutlinedTextField(
-                    value = newCategoryName,
-                    onValueChange = { newCategoryName = it },
-                    placeholder = { Text("Category name") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 9 ─ Task Detail & Edit Bottom Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TaskDetailSheet(
+    task: TaskEntry,
+    categories: List<String>,
+    isSessionTask: Boolean,
+    isSessionActive: Boolean,
+    onDismiss: () -> Unit,
+    onSaveTask: (TaskEntry) -> Unit,
+    onDeleteTask: () -> Unit,
+    onToggleSubTask: (String) -> Unit,
+    onStartSession: () -> Unit,
+    onStopSession: () -> Unit,
+    onAddToCalendar: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    // Local edit state
+    var editTitle by rememberSaveable { mutableStateOf(task.title) }
+    var editDescription by rememberSaveable { mutableStateOf(task.description ?: "") }
+    var editCategory by rememberSaveable { mutableStateOf(task.category) }
+    var editPriority by rememberSaveable { mutableIntStateOf(task.priority) }
+    var editDueDate by remember { mutableStateOf<Long?>(task.dueDate) }
+    var newSubTaskText by remember { mutableStateOf("") }
+    var editSubTasks by remember { mutableStateOf(task.subTasks) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    fun save() {
+        if (editTitle.isBlank()) return
+        onSaveTask(
+            task.copy(
+                title = editTitle.trim(),
+                description = editDescription.trim().ifBlank { null },
+                category = editCategory,
+                priority = editPriority,
+                dueDate = editDueDate,
+                subTasks = editSubTasks
+            )
+        )
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = MediumExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 4.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            // ── Sheet header ──────────────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (task.isCompleted) "Completed Task" else "Edit Task",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.weight(1f)
                 )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    vibrationManager?.vibrateClick()
-                    if (newCategoryName.isNotBlank()) {
-                        onAddCategory(newCategoryName)
-                        category = newCategoryName
-                        newCategoryName = ""
-                        showAddCategory = false
-                    }
-                }) { Text("ADD") }
-            },
-            dismissButton = {
-                TextButton(onClick = { 
-                    vibrationManager?.vibrateClick()
-                    showAddCategory = false 
-                }) { Text("CANCEL") }
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(
+                        Icons.Rounded.Delete,
+                        contentDescription = "Delete task",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                    )
+                }
             }
+
+            // ── Title field ───────────────────────────────────────────────────
+            OutlinedTextField(
+                value = editTitle,
+                onValueChange = { editTitle = it },
+                label = { Text("Task title") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = SmallExpressiveShape,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // ── Description field ─────────────────────────────────────────────
+            OutlinedTextField(
+                value = editDescription,
+                onValueChange = { editDescription = it },
+                label = { Text("Notes (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = SmallExpressiveShape,
+                minLines = 2,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            // ── Priority row ──────────────────────────────────────────────────
+            Text(
+                "Priority",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..5).forEach { p ->
+                    val isSelected = editPriority == p
+                    val pColor = PriorityColors[p - 1]
+                    val scale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.12f else 1f,
+                        animationSpec = spring(Spring.DampingRatioLowBouncy),
+                        label = "sheetPriority_$p"
+                    )
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .clip(SmallExpressiveShape)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                vibrationManager?.vibrateTick()
+                                editPriority = p
+                            },
+                        shape = SmallExpressiveShape,
+                        color = if (isSelected) pColor.copy(alpha = 0.2f) else pColor.copy(alpha = 0.07f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            if (isSelected) 1.5.dp else 1.dp,
+                            if (isSelected) pColor else pColor.copy(0.3f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(pColor, CircleShape)
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = PriorityLabels[p - 1],
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) pColor else pColor.copy(0.7f),
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // ── Category & Due date row ───────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Category",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(categories) { cat ->
+                            ExpressiveFilterChip(
+                                selected = editCategory == cat,
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    editCategory = cat
+                                },
+                                label = { Text(cat, style = MaterialTheme.typography.labelSmall) },
+                                shape = CircleShape
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Due date row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Due date:",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ExpressiveFilterChip(
+                    selected = editDueDate != null,
+                    onClick = { showDatePicker = true },
+                    label = {
+                        Text(
+                            text = editDueDate?.let(::formatDueDate) ?: "Set date",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.CalendarMonth, null, modifier = Modifier.size(14.dp)) },
+                    trailingIcon = if (editDueDate != null) {
+                        { Icon(Icons.Rounded.Close, null, modifier = Modifier
+                            .size(14.dp)
+                            .clickable(remember { MutableInteractionSource() }, null) { editDueDate = null }) }
+                    } else null,
+                    shape = CircleShape
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── Sub-tasks ─────────────────────────────────────────────────────
+            if (editSubTasks.isNotEmpty() || true) {
+                Text(
+                    "Sub-tasks (${editSubTasks.count { it.isDone }}/${editSubTasks.size})",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+
+                editSubTasks.forEach { sub ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SubTaskRow(
+                            subTask = sub,
+                            onToggle = {
+                                editSubTasks = editSubTasks.map {
+                                    if (it.id == sub.id) it.copy(isDone = !it.isDone) else it
+                                }
+                                onToggleSubTask(sub.id)
+                            }
+                        )
+                        Spacer(Modifier.weight(1f))
+                        IconButton(
+                            onClick = { editSubTasks = editSubTasks.filter { it.id != sub.id } },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "Remove sub-task",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Add new sub-task input
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newSubTaskText,
+                        onValueChange = { newSubTaskText = it },
+                        placeholder = { Text("Add sub-task…", style = MaterialTheme.typography.bodySmall) },
+                        modifier = Modifier.weight(1f),
+                        shape = SmallExpressiveShape,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = {
+                            if (newSubTaskText.isNotBlank()) {
+                                editSubTasks = editSubTasks + SubTask(
+                                    id = UUID.randomUUID().toString(),
+                                    title = newSubTaskText.trim(),
+                                    isDone = false
+                                )
+                                newSubTaskText = ""
+                            }
+                        })
+                    )
+                    AnimatedVisibility(
+                        visible = newSubTaskText.isNotBlank(),
+                        enter = scaleIn(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
+                        exit = scaleOut() + fadeOut()
+                    ) {
+                        FilledTonalIconButton(
+                            onClick = {
+                                editSubTasks = editSubTasks + SubTask(
+                                    id = UUID.randomUUID().toString(),
+                                    title = newSubTaskText.trim(),
+                                    isDone = false
+                                )
+                                newSubTaskText = ""
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = "Add", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // ── Action buttons ────────────────────────────────────────────────
+            ToolzExpressiveButton(
+                onClick = { save() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Save Changes", fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ToolzOutlinedExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateTick()
+                        if (isSessionTask && isSessionActive) onStopSession()
+                        else onStartSession()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        if (isSessionTask && isSessionActive) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (isSessionTask && isSessionActive) "Stop" else "Focus",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                ToolzOutlinedExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateTick()
+                        onAddToCalendar()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Calendar", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteConfirm) {
+        BasicAlertDialog(onDismissRequest = { showDeleteConfirm = false }) {
+            Surface(shape = SquircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Icon(
+                        Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Delete task?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "This action cannot be undone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ToolzOutlinedExpressiveButton(
+                            onClick = { showDeleteConfirm = false },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Cancel") }
+                        ToolzExpressiveButton(
+                            onClick = { onDeleteTask(); showDeleteConfirm = false },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        ) { Text("Delete", fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val state = rememberDatePickerState(initialSelectedDateMillis = editDueDate ?: System.currentTimeMillis())
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = { editDueDate = state.selectedDateMillis; showDatePicker = false }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+        ) { DatePicker(state = state) }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 10 ─ Badge composables
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CategoryBadge(label: String, alpha: Float = 1f) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = alpha * 0.6f)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = alpha),
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
         )
     }
 }
 
 @Composable
-fun TaskDetailOverlay(
-    task: TaskEntry,
-    onDismiss: () -> Unit,
-    onToggleSubtask: (String) -> Unit,
-    onToggleComplete: () -> Unit,
-    onStartSession: () -> Unit,
-    onAddToCalendar: () -> Unit
-) {
-    val hapticEnabled = LocalHapticEnabled.current
-    val vibrationManager = LocalVibrationManager.current
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+private fun DueDateBadge(label: String, urgencyColor: Color?) {
+    val color = urgencyColor ?: MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+    Surface(
+        shape = CircleShape,
+        color = (urgencyColor ?: Color.Transparent).copy(alpha = 0.12f),
+        border = if (urgencyColor != null) androidx.compose.foundation.BorderStroke(
+            0.8.dp, urgencyColor.copy(alpha = 0.5f)
+        ) else null
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
+            Icon(Icons.Rounded.CalendarMonth, null, tint = color, modifier = Modifier.size(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = color,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubtaskCountBadge(done: Int, total: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+        modifier = Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onToggle
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = "$done/$total",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                fontWeight = FontWeight.Bold
+            )
+            Icon(
+                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = "Toggle sub-tasks",
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(12.dp)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 11 ─ Sort Dropdown
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SortDropdownMenu(
+    expanded: Boolean,
+    currentOrder: TaskSortOrder,
+    onDismiss: () -> Unit,
+    onOrderSelected: (TaskSortOrder) -> Unit
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        shape = SmallExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Text(
+            text = "Sort by",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            fontWeight = FontWeight.Bold
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f))
+        TaskSortOrder.entries.forEach { order ->
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = when (order) {
+                            TaskSortOrder.URGENCY -> "Urgency"
+                            TaskSortOrder.PRIORITY -> "Priority"
+                            TaskSortOrder.DATE_ADDED -> "Date Added"
+                            TaskSortOrder.DUE_DATE -> "Due Date"
+                        },
+                        fontWeight = if (order == currentOrder) FontWeight.Bold else FontWeight.Normal,
+                        color = if (order == currentOrder) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface
+                    )
+                },
+                onClick = { onOrderSelected(order) },
+                trailingIcon = if (order == currentOrder) {
+                    {
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else null
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 12 ─ Previews
+// ─────────────────────────────────────────────────────────────────────────────
+
+private class SampleTaskProvider : PreviewParameterProvider<TaskEntry> {
+    private val sampleSubTasks = listOf(
+        SubTask(id = "1", title = "Research frameworks", isDone = true),
+        SubTask(id = "2", title = "Write first draft", isDone = false),
+        SubTask(id = "3", title = "Review with team", isDone = false)
+    )
+
+    override val values = sequenceOf(
+        TaskEntry(
+            id = 1,
+            title = "Design new onboarding flow",
+            description = "Create wireframes and user journey maps for the revamped sign-up.",
+            category = "Dev",
+            priority = 4,
+            dueDate = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(18),
+            subTasks = sampleSubTasks,
+            isCompleted = false
+        ),
+        TaskEntry(
+            id = 2,
+            title = "Morning jog — 5km target",
+            description = null,
+            category = "Fitness",
+            priority = 2,
+            dueDate = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(1),
+            subTasks = emptyList(),
+            isCompleted = false
+        ),
+        TaskEntry(
+            id = 3,
+            title = "Submit quarterly report",
+            description = "Compile metrics and attach board summary.",
+            category = "Work",
+            priority = 5,
+            dueDate = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(2),
+            subTasks = emptyList(),
+            isCompleted = false
+        )
+    )
+}
+
+@Preview(
+    name = "TodoScreen — Light",
+    showBackground = true,
+    showSystemUi = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO
+)
+@Preview(
+    name = "TodoScreen — Dark",
+    showBackground = true,
+    showSystemUi = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES
+)
+@Composable
+private fun TodoScreenPreview() {
+    ToolzTheme {
+        // Preview uses the standalone composables only (no ViewModel DI)
+        val sampleTasks = SampleTaskProvider().values.toList()
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.surface,
+            bottomBar = {
+                QuickAddBar(
+                    categories = listOf("Personal", "Dev", "Work", "Fitness"),
+                    onAddTask = { _, _, _, _ -> },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+        ) { innerPadding ->
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                    .padding(innerPadding)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CategoryBadge(task.category)
-                    Spacer(Modifier.width(8.dp))
-                    PriorityBadge(task.priority)
-                    Spacer(Modifier.weight(1f))
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            onDismiss() 
-                        },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
-                    ) {
-                        Icon(Icons.Rounded.Close, null)
-                    }
-                }
-
-                Column {
-                    Text(
-                        task.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    if (task.dueDate != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                                Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = DateUtils.getRelativeTimeSpanString(task.dueDate).toString().uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (!task.description.isNullOrBlank()) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.Notes, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(16.dp))
-                            Text(
-                                task.description,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                if (task.subTasks.isNotEmpty()) {
-                    Text("SUBTASKS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        task.subTasks.forEach { sub ->
-                            Surface(
-                                onClick = { 
-                                    vibrationManager?.vibrateTick()
-                                    onToggleSubtask(sub.id) 
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (sub.isDone) MaterialTheme.colorScheme.primary.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f),
-                                border = if (sub.isDone) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else null
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                                ) {
-                                    Icon(
-                                        if (sub.isDone) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                                        null,
-                                        tint = if (sub.isDone) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(16.dp))
-                                    Text(
-                                        sub.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        textDecoration = if (sub.isDone) TextDecoration.LineThrough else null,
-                                        color = if (sub.isDone) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.weight(1f))
-
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = onAddToCalendar,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    ) {
-                        Icon(Icons.Rounded.CalendarToday, null)
-                        Spacer(Modifier.width(12.dp))
-                        Text("ADD TO CALENDAR", fontWeight = FontWeight.Bold)
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (!task.isCompleted) {
-                            Button(
-                                onClick = {
-                                    vibrationManager?.vibrateClick()
-                                    onStartSession() 
-                                },
-                                modifier = Modifier.weight(1f).height(56.dp),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                            ) {
-                                Icon(Icons.Rounded.PlayArrow, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("START", fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Button(
-                            onClick = {
-                                if (hapticEnabled) vibrationManager?.vibrateSuccess()
-                                onToggleComplete() 
-                            },
-                            modifier = Modifier.weight(1.2f).height(56.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                                contentColor = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            Icon(if (task.isCompleted) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.Check, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (task.isCompleted) "RESTORE" else "DONE", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BrainDumpOverlay(
-    onDismiss: () -> Unit,
-    performanceMode: Boolean,
-    onConfirm: (String) -> Unit
-) {
-    val vibrationManager = LocalVibrationManager.current
-    var text by remember { mutableStateOf("") }
-    val focusManager = LocalFocusManager.current
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
-            .then(if (performanceMode) Modifier else Modifier.blur(12.dp))
-            .pointerInput(Unit) { detectTapGestures(onTap = { _ -> onDismiss() }) },
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .pointerInput(Unit) { detectTapGestures(onTap = { _ -> }) },
-            shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = if (performanceMode) 0.dp else 16.dp
-        ) {
-            Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Text("QUICK ADD", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                }
-
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    placeholder = { Text("What needs to be done?") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        vibrationManager?.vibrateClick()
-                        if (text.isNotBlank()) onConfirm(text)
-                        focusManager.clearFocus()
-                    }),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                TaskProgressHeader(
+                    completionFraction = 0.4f,
+                    completedCount = 2,
+                    totalCount = 5,
+                    isSessionActive = true,
+                    sessionTimeMillis = TimeUnit.MINUTES.toMillis(23) + TimeUnit.SECONDS.toMillis(41),
+                    sessionTaskId = 1,
+                    allTasks = sampleTasks,
+                    onStopSession = {},
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
 
-                Button(
-                    onClick = { 
-                        vibrationManager?.vibrateClick()
-                        if (text.isNotBlank()) onConfirm(text) 
-                    },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(16.dp)
+                ToolzConnectedButtonGroup(
+                    selectedIndex = 0,
+                    options = listOf("All", "Today", "Upcoming"),
+                    onOptionSelected = {},
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .fadingEdges(top = 24.dp, bottom = 64.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("ADD TASK", fontWeight = FontWeight.Bold)
+                    items(sampleTasks, key = { it.id }) { task ->
+                        StaggeredEntrance(index = sampleTasks.indexOf(task)) {
+                            TaskCardSurface(
+                                task = task,
+                                isSessionTask = task.id == 1,
+                                isSessionActive = true,
+                                subtasksExpanded = task.id == 1,
+                                onToggleComplete = {},
+                                onToggleSubTask = {},
+                                onExpandSubtasks = {},
+                                onStartSession = {},
+                                onStopSession = {},
+                                onCardClick = {}
+                            )
+                        }
+                    }
+
+                    item(key = "completed_header") {
+                        CompletedSectionHeader(count = 2, expanded = true, onToggle = {})
+                    }
+
+                    item(key = "completed_1") {
+                        CompletedTaskCard(
+                            task = sampleTasks.first().copy(isCompleted = true, title = "Read research paper"),
+                            onToggleComplete = {},
+                            onDelete = {},
+                            onCardClick = {}
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-private fun formatSessionTime(millis: Long): String {
-    val seconds = (millis / 1000) % 60
-    val minutes = (millis / (1000 * 60)) % 60
-    val hours = (millis / (1000 * 60 * 60))
-    return if (hours > 0) String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
-    else String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+@Preview(name = "QuickAddBar — Expanded", showBackground = true)
+@Composable
+private fun QuickAddBarPreview() {
+    ToolzTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp)
+        ) {
+            QuickAddBar(
+                categories = listOf("Personal", "Dev", "Work", "Fitness", "Shopping"),
+                onAddTask = { _, _, _, _ -> },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
 }
 
+@Preview(name = "Task cards — Light")
+@Preview(
+    name = "Task cards — Dark",
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES
+)
 @Composable
-fun CategoryBadge(category: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        @Suppress("DEPRECATION")
-        Text(
-            text = category.uppercase(),
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp,
-            color = MaterialTheme.colorScheme.primary
-        )
+private fun TaskCardPreview(@PreviewParameter(SampleTaskProvider::class) task: TaskEntry) {
+    ToolzTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp)
+        ) {
+            TaskCardSurface(
+                task = task,
+                isSessionTask = task.id == 1,
+                isSessionActive = task.id == 1,
+                subtasksExpanded = task.subTasks.isNotEmpty(),
+                onToggleComplete = {},
+                onToggleSubTask = {},
+                onExpandSubtasks = {},
+                onStartSession = {},
+                onStopSession = {},
+                onCardClick = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "Progress Header — Light", showBackground = true)
+@Composable
+private fun ProgressHeaderPreview() {
+    ToolzTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(16.dp)
+        ) {
+            TaskProgressHeader(
+                completionFraction = 0.67f,
+                completedCount = 4,
+                totalCount = 6,
+                isSessionActive = true,
+                sessionTimeMillis = TimeUnit.MINUTES.toMillis(12),
+                sessionTaskId = 1,
+                allTasks = SampleTaskProvider().values.toList(),
+                onStopSession = {}
+            )
+        }
     }
 }

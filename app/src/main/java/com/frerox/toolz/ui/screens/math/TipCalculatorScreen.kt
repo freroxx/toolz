@@ -27,6 +27,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -48,8 +51,9 @@ fun TipCalculatorScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("GRATUITY ENGINE", fontWeight = FontWeight.Black, letterSpacing = 2.sp, style = MaterialTheme.typography.labelMedium) },
+            ExpressiveTopAppBar(
+                title = "TIP CALCULATOR",
+                subtitle = "Precise tips!",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -93,12 +97,13 @@ fun TipCalculatorScreen(
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 // Main Result Card
-                Surface(
+                ExpressiveCard(
+                    onClick = {},
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(48.dp),
-                    color = MaterialTheme.colorScheme.primary,
+                    containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shadowElevation = 16.dp,
+                    elevation = 16.dp,
                     border = BorderStroke(2.dp, Color.White.copy(alpha = 0.1f))
                 ) {
                     Column(
@@ -136,11 +141,13 @@ fun TipCalculatorScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Input Section
-                Surface(
+                ExpressiveCard(
+                    onClick = {},
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(40.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                    elevation = 0.dp
                 ) {
                     Column(modifier = Modifier.padding(28.dp)) {
                         Surface(
@@ -212,14 +219,15 @@ fun TipCalculatorScreen(
                         ) {
                             listOf(10f, 15f, 20f, 25f).forEach { pct ->
                                 val isSelected = state.tipPercentage == pct && state.customTip.isEmpty()
-                                Surface(
+                                ExpressiveCard(
                                     onClick = { viewModel.onTipChange(pct) },
-                                    modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                    modifier = Modifier.weight(1f).height(44.dp),
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer,
+                                    elevation = if (isSelected) 4.dp else 0.dp
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         Text("${pct.toInt()}%", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
@@ -258,13 +266,15 @@ fun TipCalculatorScreen(
                             Text("PERSON COUNT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                             
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    modifier = Modifier.size(48.dp).bouncyClick { if (state.splitCount > 1) viewModel.onSplitChange(state.splitCount - 1) },
+                                ExpressiveCard(
+                                    onClick = { if (state.splitCount > 1) viewModel.onSplitChange(state.splitCount - 1) },
+                                    modifier = Modifier.size(48.dp),
                                     shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                    elevation = 2.dp
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Rounded.Remove, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                     }
                                 }
@@ -277,13 +287,15 @@ fun TipCalculatorScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 
-                                Surface(
-                                    modifier = Modifier.size(48.dp).bouncyClick { viewModel.onSplitChange(state.splitCount + 1) },
+                                ExpressiveCard(
+                                    onClick = { viewModel.onSplitChange(state.splitCount + 1) },
+                                    modifier = Modifier.size(48.dp),
                                     shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                    elevation = 2.dp
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         Icon(Icons.Rounded.Add, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                     }
                                 }

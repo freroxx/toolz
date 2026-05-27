@@ -111,6 +111,21 @@ import androidx.annotation.OptIn as AnnotationOptIn
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.*
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveSlider
+import com.frerox.toolz.ui.components.ExpressiveSwitch
+import com.frerox.toolz.ui.components.ExpressiveWavyLinearProgressIndicator
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.DragDropState
+import com.frerox.toolz.ui.components.rememberDragDropState
+import com.frerox.toolz.ui.components.dragDropColumn
+import com.frerox.toolz.ui.components.dragDropItem
+import com.frerox.toolz.ui.components.SquigglySlider
+import com.frerox.toolz.ui.components.KaraokeMicIcon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.ui.screens.media.*
 import com.frerox.toolz.ui.screens.media.ai.*
@@ -617,237 +632,156 @@ private fun ScreenTopBar(
     onResetCatalogOnboarding: () -> Unit = {},
     onGoToTop: () -> Unit = {}
 ) {
-    Surface(color = Color.Transparent, tonalElevation = 0.dp) {
-        Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
-            AnimatedContent(
-                targetState = state.isSelectionMode,
-                transitionSpec = {
-                    fadeIn(tween(200)) togetherWith fadeOut(tween(150))
-                },
-                label = "topBarMode"
-            ) { selectionMode ->
-                if (selectionMode) {
-                    TopAppBar(
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = "${state.selectedTracks.size}",
-                                        fontWeight = FontWeight.Black,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.titleMedium
-                                    )
+    Column(modifier = Modifier.background(Color.Transparent)) {
+        ExpressiveTopAppBar(
+            title = if (state.isSelectionMode) "${state.selectedTracks.size} SELECTED" else "STUDIO PLAYER",
+            subtitle = if (state.isSelectionMode) "Apply batch actions" else currentTabLabel ?: "Precision playback",
+            navigationIcon = {
+                IconButton(
+                    onClick = if (state.isSelectionMode) onClearSelection else onBack,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Icon(if (state.isSelectionMode) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack, null)
+                }
+            },
+            actions = {
+                if (state.isSelectionMode) {
+                    FilledTonalIconButton(
+                        onClick = onMultiAddPlaylist,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                } else {
+                    if (currentTabLabel == "Catalog") {
+                        IconButton(
+                            onClick = onGoToTop,
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        ) {
+                            Icon(Icons.Rounded.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    when (currentTab) {
+                        0 -> { // Tracks
+                            IconButton(onClick = onRefresh) {
+                                Icon(Icons.Rounded.Refresh, null)
+                            }
+                            Box {
+                                IconButton(onClick = { onShowSortMenu(true) }) {
+                                    Icon(Icons.AutoMirrored.Rounded.Sort, null)
                                 }
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    "SELECTED",
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    style = MaterialTheme.typography.labelMedium
+                                DropdownMenu(
+                                    expanded = showSortMenu,
+                                    onDismissRequest = { onShowSortMenu(false) },
+                                    shape = RoundedCornerShape(24.dp),
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    SortDropdownItem("By Title", Icons.Rounded.Title) {
+                                        onSort(SortOrder.TITLE); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("By Artist", Icons.Rounded.Person) {
+                                        onSort(SortOrder.ARTIST); onShowSortMenu(false)
+                                    }
+                                    SortDropdownItem("By Recent", Icons.Rounded.Schedule) {
+                                        onSort(SortOrder.RECENT); onShowSortMenu(false)
+                                    }
+                                }
+                            }
+                        }
+                        1 -> { // Library
+                            IconButton(onClick = onAddFolder) {
+                                Icon(Icons.Rounded.CreateNewFolder, null)
+                            }
+                        }
+                        2 -> { // Catalog
+                            IconButton(onClick = onRefresh) {
+                                Icon(Icons.Rounded.Refresh, null)
+                            }
+                        }
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+            largeFlexible = true,
+            modifier = Modifier.statusBarsPadding()
+        )
+
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
+        // Search bar
+        AnimatedVisibility(
+            visible = currentTab == 0,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column {
+                val searchFocused = remember { mutableStateOf(false) }
+                val borderAlpha by animateFloatAsState(
+                    targetValue = if (searchFocused.value || searchQuery.isNotEmpty()) 1f else 0f,
+                    animationSpec = tween(250),
+                    label = "searchBorder"
+                )
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                    placeholder = {
+                        Text(
+                            "Search tracks, artists…",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.Search,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        AnimatedVisibility(
+                            visible = searchQuery.isNotEmpty(),
+                            enter = fadeIn() + scaleIn(initialScale = 0.7f),
+                            exit = fadeOut() + scaleOut(targetScale = 0.7f)
+                        ) {
+                            IconButton(onClick = { onSearchChange("") }, modifier = Modifier.size(36.dp)) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = onClearSelection,
-                                modifier = Modifier
-                                    .padding(8.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            ) {
-                                Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                        },
-                        actions = {
-                            FilledTonalIconButton(
-                                onClick = onMultiAddPlaylist,
-                                shape = RoundedCornerShape(14.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null, tint = MaterialTheme.colorScheme.primary)
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else {
-                    TopAppBar(
-                        title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "MUSIC PLAYER",
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 4.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.titleSmall
-                                    )
-                                    AnimatedVisibility(
-                                        visible = currentTab == 2,
-                                        enter = fadeIn() + expandHorizontally(),
-                                        exit = fadeOut() + shrinkHorizontally()
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Spacer(Modifier.width(8.dp))
-                                            Surface(
-                                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                                shape = RoundedCornerShape(8.dp),
-                                                modifier = Modifier.combinedClickable(
-                                                    onClick = {},
-                                                    onLongClick = onResetCatalogOnboarding
-                                                )
-                                            ) {
-                                                Text(
-                                                    "BETA",
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Black,
-                                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier
-                                    .padding(8.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                        },
-                        actions = {
-                            if (currentTabLabel == "Catalog") {
-                                IconButton(
-                                    onClick = onGoToTop,
-                                    modifier = Modifier
-                                        .padding(end = 4.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-                                ) {
-                                    Icon(Icons.Rounded.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                            when (currentTab) {
-                                0 -> { // Tracks
-                                    IconButton(onClick = onRefresh) {
-                                        Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                    Box {
-                                        IconButton(onClick = { onShowSortMenu(true) }) {
-                                            Icon(Icons.AutoMirrored.Rounded.Sort, null, tint = MaterialTheme.colorScheme.onSurface)
-                                        }
-                                        DropdownMenu(
-                                            expanded = showSortMenu,
-                                            onDismissRequest = { onShowSortMenu(false) },
-                                            shape = RoundedCornerShape(24.dp),
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                        ) {
-                                            SortDropdownItem("By Title", Icons.Rounded.Title) {
-                                                onSort(SortOrder.TITLE); onShowSortMenu(false)
-                                            }
-                                            SortDropdownItem("By Artist", Icons.Rounded.Person) {
-                                                onSort(SortOrder.ARTIST); onShowSortMenu(false)
-                                            }
-                                            SortDropdownItem("By Recent", Icons.Rounded.Schedule) {
-                                                onSort(SortOrder.RECENT); onShowSortMenu(false)
-                                            }
-                                        }
-                                    }
-                                }
-                                1 -> { // Library
-                                    IconButton(onClick = onAddFolder) {
-                                        Icon(Icons.Rounded.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                }
-                                2 -> { // Catalog
-                                    IconButton(onClick = onRefresh) {
-                                        Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                }
-            }
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f),
-                modifier = Modifier.padding(top = 4.dp)
-            )
-
-            // Search bar
-            AnimatedVisibility(
-                visible = currentTab == 0,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column {
-                    val searchFocused = remember { mutableStateOf(false) }
-                    val borderAlpha by animateFloatAsState(
-                        targetValue = if (searchFocused.value || searchQuery.isNotEmpty()) 1f else 0f,
-                        animationSpec = tween(250),
-                        label = "searchBorder"
-                    )
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchChange,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 6.dp),
-                        placeholder = {
-                            Text(
-                                "Search tracks, artists…",
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Rounded.Search,
-                                null,
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            AnimatedVisibility(
-                                visible = searchQuery.isNotEmpty(),
-                                enter = fadeIn() + scaleIn(initialScale = 0.7f),
-                                exit = fadeOut() + scaleOut(targetScale = 0.7f)
-                            ) {
-                                IconButton(onClick = { onSearchChange("") }, modifier = Modifier.size(36.dp)) {
-                                    Icon(
-                                        Icons.Rounded.Close,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(32.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha * 0.5f),
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
+                        }
+                    },
+                    shape = RoundedCornerShape(32.dp),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha * 0.5f),
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Spacer(Modifier.height(6.dp))
             }
         }
     }
@@ -1146,10 +1080,11 @@ fun TrackList(
         // Slim loading bar at the very top — visible during incremental scan
         // while tracks are already appearing (non-blocking UI)
         if (state.isLoading) {
-            LinearProgressIndicator(
+            ExpressiveWavyLinearProgressIndicator(
+                progress = { 0.5f }, // Indeterminate-like look
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp)
+                    .height(8.dp)
                     .align(Alignment.TopCenter)
                     .zIndex(1f),
                 color = MaterialTheme.colorScheme.primary,
@@ -1721,20 +1656,19 @@ fun FolderCard(
         animationSpec = if (performanceMode) snap() else tween(300),
         label = "folderBorder"
     )
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp)
-            .bouncyClick(onClick = onClick),
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(180.dp),
         shape = RoundedCornerShape(28.dp),
-        color = if (isCurrentFolder)
+        containerColor = if (isCurrentFolder)
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
         else
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             if (isCurrentFolder) 1.5.dp else 1.dp,
             MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha)
-        )
+        ),
+        elevation = if (isCurrentFolder) 6.dp else 0.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // Background: two overlapping circles for depth (skip in performance mode)
@@ -2320,10 +2254,13 @@ private fun QuickAccessCard(
     contentColor: Color,
     onClick: () -> Unit
 ) {
-    Surface(
-        modifier = modifier.bouncyClick(onClick = onClick),
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier,
         shape = RoundedCornerShape(32.dp),
-        color = containerColor
+        containerColor = containerColor,
+        contentColor = contentColor,
+        elevation = 8.dp
     ) {
         Box(modifier = Modifier.fillMaxSize().padding(20.dp)) {
             Surface(
@@ -2345,14 +2282,13 @@ private fun QuickAccessCard(
 
 @Composable
 private fun QuickActionCard(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Surface(
-        modifier = modifier.bouncyClick(onClick = onClick),
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier,
         shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-        )
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Row(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -2388,17 +2324,14 @@ fun PlaylistCard(
 
     val performanceMode = LocalPerformanceMode.current
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(220.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { showContextMenu = true }
-            ),
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = { showContextMenu = true },
+        modifier = Modifier.fillMaxWidth().height(220.dp),
         shape = RoundedCornerShape(36.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        elevation = 4.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             // ── Background: custom thumb > mosaic > solid gradient ────────────
@@ -3414,13 +3347,13 @@ fun FullPlayerView(
                         Spacer(Modifier.height(24.dp))
                         val currentPos = sliderPos ?: playbackPosition
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            SquigglySlider(
-                                value = currentPos.toFloat(),
-                                onValueChange = { onSliderChange(it.toLong()) },
-                                onValueChangeFinished = onSliderChangeFinished,
-                                valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
-                                isPlaying = state.isPlaying
-                            )
+                        ExpressiveSlider(
+                            value = currentPos.toFloat(),
+                            onValueChange = { onSliderChange(it.toLong()) },
+                            onValueChangeFinished = onSliderChangeFinished,
+                            valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
+                            isPlaying = state.isPlaying
+                        )
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(formatDuration(currentPos), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                 Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
@@ -3669,7 +3602,7 @@ fun FullPlayerView(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(
+                    ExpressiveSwitch(
                         checked = state.showVisualizer,
                         onCheckedChange = {
                             if (!state.showVisualizer && !micPermission.status.isGranted) {
@@ -3696,18 +3629,35 @@ fun FullPlayerView(
                                 Text("Reset", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        Slider(
-                            value = state.visualizerSensitivity,
-                            onValueChange = onSetVisualizerSensitivity,
-                            valueRange = 0.1f..1.5f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary
-                            )
+                    ExpressiveSlider(
+                        value = state.visualizerSensitivity,
+                        onValueChange = onSetVisualizerSensitivity,
+                        valueRange = 0.1f..1.5f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
                         )
-                    }
+                    )
                 }
             }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        ExpressiveCard(
+            onClick = onToggleVisualizer,
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            elevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Show Visualizer", fontWeight = FontWeight.Bold)
+                ExpressiveSwitch(checked = state.showVisualizer, onCheckedChange = { onToggleVisualizer() })
+            }
+        }
 
             Spacer(Modifier.height(24.dp))
             Text(
@@ -3983,7 +3933,7 @@ fun AudioVisualizerHalo(
             if (currentTimerActive && remainingMs != null) {
                 Spacer(Modifier.height(14.dp))
                 val prog by animateFloatAsState(1f - (remainingMs.toFloat() / (90 * 60_000f)).coerceIn(0f, 1f), tween(800), label = "tP")
-                LinearProgressIndicator(progress = { prog }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = MaterialTheme.colorScheme.error, trackColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(progress = { prog }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = MaterialTheme.colorScheme.error, trackColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
             }
 
             Spacer(Modifier.height(18.dp))
@@ -5077,7 +5027,7 @@ fun MiniPlayer(
                                 fontWeight = FontWeight.Black,
                                 color = if (isDark) Color(0xFFE5E5E5).copy(alpha = 0.7f) else Color(0xFF222222).copy(alpha = 0.7f)
                             )
-                            LinearProgressIndicator(
+                            com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                                 progress = { animatedProgress },
                                 modifier = Modifier.weight(1f).height(4.dp).clip(CircleShape),
                                 color = dynamicColors.primary,
@@ -5102,7 +5052,7 @@ fun MiniPlayer(
                 enter = if (performanceMode) EnterTransition.None else fadeIn(tween(130)),
                 exit = if (performanceMode) ExitTransition.None else fadeOut(tween(90))
             ) {
-                LinearProgressIndicator(
+                com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
                     progress = { animatedProgress },
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = dynamicColors.primary,
@@ -5564,7 +5514,7 @@ fun LyricCustomizationSheet(
                             Text("Fast Seeking", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
                             Text("Long press lyrics to jump in song", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(
+                        ExpressiveSwitch(
                             checked = state.isSeekEnabled,
                             onCheckedChange = { onToggleSeek() }
                         )
@@ -5589,7 +5539,7 @@ fun LyricCustomizationSheet(
                             Text("Always Sync", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
                             Text("Prioritize synced lyrics over plain text", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(
+                        ExpressiveSwitch(
                             checked = state.alwaysSync,
                             onCheckedChange = { onToggleAlwaysSync() }
                         )
@@ -5614,7 +5564,7 @@ fun LyricCustomizationSheet(
                             Text("Synced Words", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
                             Text("Highlights lyrics word by word", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(
+                        ExpressiveSwitch(
                             checked = state.isWordSyncEnabled,
                             onCheckedChange = { onToggleWordSync() }
                         )

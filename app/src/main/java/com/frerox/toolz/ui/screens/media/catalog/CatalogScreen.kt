@@ -148,6 +148,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
+import com.frerox.toolz.ui.components.ExpressiveCarousel
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveSearchField
+import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
@@ -156,7 +162,10 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
-import com.frerox.toolz.ui.screens.media.rememberDynamicColors
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
+import com.frerox.toolz.ui.components.ExpressiveCarousel
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -907,78 +916,26 @@ private fun FeaturedCarousel(
     onTrackClick: (CatalogTrack, androidx.compose.ui.layout.LayoutCoordinates) -> Unit,
     onLongClick: (CatalogTrack) -> Unit
 ) {
-    val rowState = rememberLazyListState()
-    
-    LazyRow(
-        state = rowState,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
-            .drawWithContent {
-                drawContent()
-                val colors = listOf(Color.Black, Color.Transparent)
-                drawRect(
-                    brush = Brush.horizontalGradient(
-                        colors = colors,
-                        startX = size.width - 60f,
-                        endX = size.width
-                    ),
-                    blendMode = BlendMode.DstIn
+    ExpressiveCarousel(
+        items = tracks,
+        preferredItemWidth = 260.dp,
+        itemSpacing = 16.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) { track ->
+        var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+        val isFocused = focusedTrackUrl == track.sourceUrl
+        
+        FeaturedCarouselItem(
+            track = track,
+            isFocused = isFocused,
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { itemCoords = it }
+                .combinedClickable(
+                    onClick = { itemCoords?.let { onTrackClick(track, it) } },
+                    onLongClick = { onLongClick(track) }
                 )
-                drawRect(
-                    brush = Brush.horizontalGradient(
-                        colors = colors.reversed(),
-                        startX = 0f,
-                        endX = 60f
-                    ),
-                    blendMode = BlendMode.DstIn
-                )
-            }
-    ) {
-        itemsIndexed(tracks, key = { _, track -> track.sourceUrl }) { index, track ->
-            var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-            val isFocused = focusedTrackUrl == track.sourceUrl
-            
-            val entryAlpha = remember { Animatable(0f) }
-            val entryOffsetY = remember { Animatable(20f) }
-            
-            LaunchedEffect(Unit) {
-                delay(index * 100L)
-                launch { entryAlpha.animateTo(1f, tween(600)) }
-                launch { entryOffsetY.animateTo(0f, tween(600, easing = FastOutSlowInEasing)) }
-            }
-
-            // Calculate parallax offset based on scroll position
-            val parallaxOffset by remember {
-                derivedStateOf {
-                    val layoutInfo = rowState.layoutInfo
-                    val itemInfo = layoutInfo.visibleItemsInfo.find { it.index == index }
-                    if (itemInfo != null) {
-                        val center = (layoutInfo.viewportEndOffset + layoutInfo.viewportStartOffset) / 2f
-                        val itemCenter = (itemInfo.offset + itemInfo.size / 2f)
-                        (itemCenter - center) * 0.08f // Adjust strength
-                    } else 0f
-                }
-            }
-
-            FeaturedCarouselItem(
-                track = track,
-                isFocused = isFocused,
-                parallaxOffset = parallaxOffset,
-                modifier = Modifier
-                    .graphicsLayer {
-                        alpha = entryAlpha.value
-                        translationY = entryOffsetY.value
-                    }
-                    .onGloballyPositioned { itemCoords = it }
-                    .combinedClickable(
-                        onClick = { itemCoords?.let { onTrackClick(track, it) } },
-                        onLongClick = { onLongClick(track) }
-                    )
-            )
-        }
+        )
     }
 }
 
@@ -1140,55 +1097,30 @@ private fun CatalogSearchBar(
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit
 ) {
-    Surface(
+    ExpressiveSearchField(
+        query = query,
+        onQueryChange = onQueryChange,
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        placeholder = {
+            Text(
+                text = "Search songs, artists, moods...",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        leadingIcon = {
             Icon(
                 imageVector = Icons.Rounded.Search,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(24.dp)
             )
-            
-            Spacer(Modifier.width(12.dp))
-            
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                if (query.isEmpty()) {
-                    Text(
-                        text = "Search songs, artists, moods...",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    singleLine = true,
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary)
-                )
-            }
-            
+        },
+        trailingIcon = {
             AnimatedVisibility(
                 visible = query.isNotEmpty(),
                 enter = fadeIn() + scaleIn(),
@@ -1208,8 +1140,8 @@ private fun CatalogSearchBar(
                     )
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable

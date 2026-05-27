@@ -29,6 +29,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -62,15 +66,9 @@ fun FlashlightScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        "FLASHLIGHT",
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 3.sp,
-                        style         = MaterialTheme.typography.labelMedium,
-                    )
-                },
+            ExpressiveTopAppBar(
+                title = "FLASHLIGHT",
+                subtitle = "Optical beam control",
                 navigationIcon = {
                     IconButton(
                         onClick  = onBack,
@@ -83,6 +81,7 @@ fun FlashlightScreen(
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding()
             )
         },
         containerColor = Color.Transparent,
@@ -325,11 +324,13 @@ private fun ControlsPanel(
     onSetStrobe: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    ExpressiveCard(
+        onClick = {},
         modifier = modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(28.dp),
-        color    = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor    = MaterialTheme.colorScheme.surfaceContainerLow,
         border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+        elevation = 0.dp
     ) {
         Column(
             modifier            = Modifier.padding(22.dp),

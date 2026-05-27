@@ -1,16 +1,12 @@
 package com.frerox.toolz.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -20,6 +16,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import com.frerox.toolz.util.VibrationManager
 import kotlin.math.PI
@@ -32,6 +29,17 @@ val LocalHapticIntensity = staticCompositionLocalOf { 0.5f }
 val LocalBackgroundGradientEnabled = staticCompositionLocalOf { true }
 val LocalIsDarkTheme = staticCompositionLocalOf { false }
 val LocalVibrationManager = staticCompositionLocalOf<VibrationManager?> { null }
+
+private val ToolzExpressiveShapes = Shapes(
+    extraSmall = RoundedCornerShape(14.dp),
+    small = RoundedCornerShape(20.dp),
+    medium = RoundedCornerShape(28.dp),
+    large = RoundedCornerShape(36.dp),
+    extraLarge = RoundedCornerShape(48.dp),
+)
+
+val BouncyShape = RoundedCornerShape(32.dp)
+val SquircleShape = RoundedCornerShape(28.dp)
 
 private val DarkColorScheme = darkColorScheme(
     primary = PrimaryDark,
@@ -54,9 +62,16 @@ private val DarkColorScheme = darkColorScheme(
     onBackground = OnBackgroundDark,
     surface = SurfaceDark,
     onSurface = OnSurfaceDark,
+    surfaceDim = SurfaceDimDark,
+    surfaceBright = SurfaceBrightDark,
+    surfaceContainerLowest = SurfaceContainerLowestDark,
+    surfaceContainerLow = SurfaceContainerLowDark,
+    surfaceContainer = SurfaceContainerDark,
+    surfaceContainerHigh = SurfaceContainerHighDark,
+    surfaceContainerHighest = SurfaceContainerHighestDark,
     outline = PrimaryDark.copy(alpha = 0.5f),
     outlineVariant = SecondaryDark.copy(alpha = 0.3f),
-    surfaceTint = PrimaryDark
+    surfaceTint = PrimaryDark,
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -80,9 +95,16 @@ private val LightColorScheme = lightColorScheme(
     onBackground = OnBackgroundLight,
     surface = SurfaceLight,
     onSurface = OnSurfaceLight,
+    surfaceDim = SurfaceDimLight,
+    surfaceBright = SurfaceBrightLight,
+    surfaceContainerLowest = SurfaceContainerLowestLight,
+    surfaceContainerLow = SurfaceContainerLowLight,
+    surfaceContainer = SurfaceContainerLight,
+    surfaceContainerHigh = SurfaceContainerHighLight,
+    surfaceContainerHighest = SurfaceContainerHighestLight,
     outline = PrimaryLight.copy(alpha = 0.5f),
     outlineVariant = SecondaryLight.copy(alpha = 0.3f),
-    surfaceTint = PrimaryLight
+    surfaceTint = PrimaryLight,
 )
 
 /**
@@ -118,7 +140,7 @@ fun toolzAppBackgroundBrush(
 }
 
 /**
- * Animated background modifier.
+ * Animated background modifier with expressive depth.
  */
 @Composable
 fun Modifier.toolzBackground(): Modifier = composed {
@@ -135,11 +157,11 @@ fun Modifier.toolzBackground(): Modifier = composed {
         )
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
+    val infiniteTransition = rememberInfiniteTransition(label = "expressive_bg")
     val angle by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 2 * PI.toFloat(),
-        animationSpec = infiniteRepeatable(tween(25000, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(35000, easing = LinearEasing), RepeatMode.Restart),
         label = "angle"
     )
 
@@ -147,16 +169,24 @@ fun Modifier.toolzBackground(): Modifier = composed {
         val offset = Offset(x = (sin(angle) + 1f) / 2f, y = (cos(angle) + 1f) / 2f)
         Brush.radialGradient(
             colors = if (isDark) {
-                listOf(colorScheme.primary.copy(alpha = 0.12f), colorScheme.secondary.copy(alpha = 0.06f), colorScheme.background)
+                listOf(
+                    colorScheme.primary.copy(alpha = 0.15f), 
+                    colorScheme.secondary.copy(alpha = 0.08f), 
+                    colorScheme.background
+                )
             } else {
-                listOf(colorScheme.primary.copy(alpha = 0.08f), colorScheme.secondary.copy(alpha = 0.04f), colorScheme.background)
+                listOf(
+                    colorScheme.primary.copy(alpha = 0.1f), 
+                    colorScheme.secondary.copy(alpha = 0.05f), 
+                    colorScheme.background
+                )
             },
-            center = Offset(offset.x * 1500f, offset.y * 1500f),
-            radius = 2500f
+            center = Offset(offset.x * 2000f, offset.y * 2000f),
+            radius = 3000f
         )
     }
 
-    this.background(brush).background(colorScheme.background.copy(alpha = 0.4f))
+    this.background(brush).background(colorScheme.background.copy(alpha = 0.25f))
 }
 
 @Composable
@@ -172,9 +202,8 @@ fun ToolzTheme(
     vibrationManager: VibrationManager? = null,
     content: @Composable () -> Unit
 ) {
-    val context = LocalContext.current
     val colorScheme = when {
-        !dynamicColor && (customPrimary != null || customSecondary != null) -> {
+        (!dynamicColor) && (customPrimary != null || customSecondary != null) -> {
             val base = if (darkTheme) DarkColorScheme else LightColorScheme
             val primary = customPrimary ?: base.primary
             val secondary = customSecondary ?: base.secondary
@@ -192,7 +221,8 @@ fun ToolzTheme(
                 onBackground = if (darkTheme) Color(0xFFFBF8FF) else Color(0xFF1B1B1F)
             )
         }
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor -> {
+            val context = LocalContext.current
             val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             dynamic.copy(
                 onSurface = if (darkTheme) Color(0xFFFBF8FF) else dynamic.onSurface,
@@ -229,6 +259,12 @@ fun ToolzTheme(
         LocalIsDarkTheme provides darkTheme,
         LocalVibrationManager provides vibrationManager
     ) {
-        MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+        MaterialExpressiveTheme(
+            colorScheme = colorScheme,
+            motionScheme = MotionScheme.expressive(),
+            shapes = ToolzExpressiveShapes,
+            typography = Typography,
+            content = content,
+        )
     }
 }

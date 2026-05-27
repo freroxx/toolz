@@ -538,19 +538,52 @@ fun ToolzNavHost(
         startDestination = Screen.Loading.route,
         enterTransition = {
             if (performanceMode) fadeIn(animationSpec = tween(100))
-            else fadeIn(animationSpec = tween(300))
+            else fadeIn(animationSpec = tween(400)) + scaleIn(
+                initialScale = 0.92f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + slideInVertically(
+                initialOffsetY = { 24 },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         },
         exitTransition = {
             if (performanceMode) fadeOut(animationSpec = tween(100))
-            else fadeOut(animationSpec = tween(300))
+            else fadeOut(animationSpec = tween(300)) + scaleOut(
+                targetScale = 0.96f,
+                animationSpec = tween(300)
+            )
         },
         popEnterTransition = {
             if (performanceMode) fadeIn(animationSpec = tween(100))
-            else fadeIn(animationSpec = tween(300))
+            else fadeIn(animationSpec = tween(400)) + scaleIn(
+                initialScale = 0.96f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         },
         popExitTransition = {
             if (performanceMode) fadeOut(animationSpec = tween(100))
-            else fadeOut(animationSpec = tween(300))
+            else fadeOut(animationSpec = tween(300)) + scaleOut(
+                targetScale = 0.92f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + slideOutVertically(
+                targetOffsetY = { 24 },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         }
     ) {
         composable(Screen.Loading.route) {
@@ -684,7 +717,7 @@ fun ToolzNavHost(
             CaffeinateScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.Todo.route) {
-            TodoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            TodoScreen(viewModel = hiltViewModel(), onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.Calendar.route) {
             CalendarScreen(viewModel = hiltViewModel())

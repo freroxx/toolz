@@ -43,12 +43,20 @@ class NotificationVaultViewModel @Inject constructor(
     val hiddenApps = settingsRepository.hiddenNotificationApps
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
-    val categories = settingsRepository.customNotificationCategories
-        .map { it.toList().sortedBy { c -> if (c == "All") "" else c } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("All", "Social", "Finance", "Work", "General"))
-
     val appMappings = settingsRepository.appCategoryMappings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val categories = combine(
+        settingsRepository.customNotificationCategories,
+        appMappings
+    ) { custom, mappings ->
+        val allMappedCategories = mappings.values.toSet()
+        (custom + allMappedCategories + "General")
+            .toList()
+            .filter { it != "All" }
+            .sorted()
+            .let { listOf("All") + it }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("All", "Social", "Finance", "Work", "General"))
 
     val distinctPackages = repository.getDistinctPackages()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

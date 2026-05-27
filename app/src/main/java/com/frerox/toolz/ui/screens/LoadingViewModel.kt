@@ -17,7 +17,7 @@ import javax.inject.Inject
 class LoadingViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val aiSettingsManager: AiSettingsManager,
-    private val updateRepository: UpdateRepository
+    private val updateRepository: UpdateRepository,
 ) : ViewModel() {
 
     private val _isInitialized = MutableStateFlow(false)
@@ -25,6 +25,10 @@ class LoadingViewModel @Inject constructor(
 
     private val _loadingMessage = MutableStateFlow("PREPARING WORKSPACE")
     val loadingMessage = _loadingMessage.asStateFlow()
+
+    // Deterministic progress [0f → 1f] — wired to ToolzWavyLinearProgressIndicator
+    private val _loadingProgress = MutableStateFlow(0f)
+    val loadingProgress = _loadingProgress.asStateFlow()
 
     init {
         performInitialization()
@@ -34,45 +38,79 @@ class LoadingViewModel @Inject constructor(
         viewModelScope.launch {
             val lastLoading = settingsRepository.lastLoadingTime.first()
             val currentTime = System.currentTimeMillis()
-            val shouldSkipLoading = currentTime - lastLoading < 5 * 60 * 1000 // 5 minutes threshold
+            val shouldSkipLoading = currentTime - lastLoading < 5 * 60 * 1000L // 5-minute threshold
 
             if (shouldSkipLoading) {
+                // Fast-path: animate progress to 100 quickly and exit
+                animateProgressTo(1f, durationMs = 350)
                 _isInitialized.value = true
                 return@launch
             }
 
             val startTime = System.currentTimeMillis()
 
-            // 1. Sync AI keys
+            // ── Stage 1: Environment check ────────────────────────────────────
+            _loadingMessage.value = "PREPARING WORKSPACE"
+            animateProgressTo(0.15f)
+
+            // ── Stage 2: Sync AI keys ─────────────────────────────────────────
             _loadingMessage.value = "SYNCING INTELLIGENCE"
             try {
                 aiSettingsManager.syncRemoteKeys()
-            } catch (e: Exception) {
-                // Ignore sync errors during loading
+            } catch (_: Exception) {
+                // Non-fatal — continue loading
             }
+            animateProgressTo(0.50f)
 
-            // 2. Check for updates if needed
+            // ── Stage 3: Update check ─────────────────────────────────────────
             _loadingMessage.value = "CHECKING FOR UPDATES"
             try {
                 val lastCheck = settingsRepository.lastUpdateCheck.first()
-                if (System.currentTimeMillis() - lastCheck > 24 * 60 * 60 * 1000) {
+                if (System.currentTimeMillis() - lastCheck > 24 * 60 * 60 * 1000L) {
                     updateRepository.checkForUpdates()
                     settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
                 }
-            } catch (e: Exception) {
-                // Ignore update check errors during loading
+            } catch (_: Exception) {
+                // Non-fatal — continue loading
             }
+            animateProgressTo(0.80f)
 
-            // 3. Ensure a minimum loading time for visual consistency if it was too fast
+            // ── Stage 4: Minimum visual duration for polish ───────────────────
+            _loadingMessage.value = "ALMOST THERE"
             val elapsedTime = System.currentTimeMillis() - startTime
-            val minLoadingTime = 1500L // Increased for better visual feedback
-            if (elapsedTime < minLoadingTime) {
-                delay(minLoadingTime - elapsedTime)
+            val minLoadingTimeMs = 1600L
+            if (elapsedTime < minLoadingTimeMs) {
+                delay(minLoadingTimeMs - elapsedTime)
             }
 
+            // ── Stage 5: Complete ─────────────────────────────────────────────
+            animateProgressTo(1f)
             settingsRepository.setLastLoadingTime(System.currentTimeMillis())
             _loadingMessage.value = "READY"
+
+            // Brief pause at 100% so the user sees the completed state
+            delay(180)
             _isInitialized.value = true
         }
+    }
+
+    /**
+     * Smoothly interpolates [_loadingProgress] toward [target] over [durationMs].
+     * Uses small ticks to produce a fluid animation without flooding StateFlow.
+     */
+    private suspend fun animateProgressTo(
+        target: Float,
+        durationMs: Long = 400L,
+        stepMs: Long = 16L,
+    ) {
+        val start = _loadingProgress.value
+        if (start >= target) return
+        val steps = (durationMs / stepMs).coerceAtLeast(1)
+        val delta = target - start
+        for (i in 1..steps) {
+            _loadingProgress.value = start + delta * (i.toFloat() / steps)
+            delay(stepMs)
+        }
+        _loadingProgress.value = target
     }
 }
