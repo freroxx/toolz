@@ -63,6 +63,8 @@ import com.frerox.toolz.ui.screens.notepad.NotepadScreen
 import com.frerox.toolz.ui.screens.pdf.PdfViewModel
 import com.frerox.toolz.ui.screens.pdf.ToolzPdfScreen
 import com.frerox.toolz.ui.screens.sensors.*
+import com.frerox.toolz.ui.screens.settings.BackupRestoreScreen
+import com.frerox.toolz.ui.screens.settings.BackupRestoreViewModel
 import com.frerox.toolz.ui.screens.settings.SettingsScreen
 import com.frerox.toolz.ui.screens.settings.UpdateScreen
 import com.frerox.toolz.ui.screens.time.*
@@ -623,11 +625,19 @@ fun ToolzNavHost(
                 viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
+                onNavigateToBackupRestore = { navController.navigate(Screen.BackupRestore.route) },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable(Screen.BackupRestore.route) {
+            BackupRestoreScreen(
+                viewModel = hiltViewModel<BackupRestoreViewModel>(),
+                onBack = { navController.popBackStack() }
             )
         }
 

@@ -25,4 +25,10 @@ interface PdfMetadataDao {
 
     @Query("UPDATE pdf_metadata SET structuredOcrData = :structuredData WHERE uri = :uri")
     suspend fun updateStructuredOcrData(uri: String, structuredData: String)
+
+    @Query("SELECT * FROM pdf_metadata")
+    suspend fun getAllMetadataSync(): List<PdfMetadata>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMetadataList(entries: List<PdfMetadata>)
 }

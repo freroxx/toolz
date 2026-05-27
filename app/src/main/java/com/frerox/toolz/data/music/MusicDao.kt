@@ -64,4 +64,9 @@ interface MusicDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylists(playlists: List<Playlist>)
+    @Query("SELECT * FROM playlists")
+    suspend fun getAllPlaylistsSync(): List<Playlist>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTracks(tracks: List<MusicTrack>)
 }

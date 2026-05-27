@@ -191,6 +191,7 @@ class SettingsRepository @Inject constructor(
     private val PILL_TODO_ENABLED = booleanPreferencesKey("pill_todo_enabled")
     private val PILL_FOCUS_ENABLED = booleanPreferencesKey("pill_focus_enabled")
     private val BACKUP_FREQUENCY = stringPreferencesKey("backup_frequency")
+    private val AUTO_BACKUP_CUSTOM_DAYS = intPreferencesKey("auto_backup_custom_days")
 
     // Onboarding
     private val USER_NAME = stringPreferencesKey("user_name")
@@ -372,6 +373,7 @@ class SettingsRepository @Inject constructor(
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
     val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: false }
     val backupFrequency: Flow<String> = dataStore.data.map { it[BACKUP_FREQUENCY] ?: "Never" }
+    val autoBackupCustomDays: Flow<Int> = dataStore.data.map { it[AUTO_BACKUP_CUSTOM_DAYS] ?: 1 }
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
@@ -549,6 +551,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setPillTodoEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TODO_ENABLED] = enabled } }
     suspend fun setPillFocusEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FOCUS_ENABLED] = enabled } }
     suspend fun setBackupFrequency(freq: String) { dataStore.edit { it[BACKUP_FREQUENCY] = freq } }
+    suspend fun setAutoBackupCustomDays(days: Int) { dataStore.edit { it[AUTO_BACKUP_CUSTOM_DAYS] = days } }
 
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }

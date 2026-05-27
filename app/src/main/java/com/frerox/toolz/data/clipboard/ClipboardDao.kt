@@ -44,4 +44,9 @@ interface ClipboardDao {
 
     @Query("SELECT * FROM clipboard_entries WHERE isAiProcessed = 0 ORDER BY timestamp DESC")
     suspend fun getUnprocessedEntries(): List<ClipboardEntry>
+    @Query("SELECT * FROM clipboard_entries")
+    suspend fun getAllEntriesSync(): List<ClipboardEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEntries(entries: List<ClipboardEntry>)
 }
