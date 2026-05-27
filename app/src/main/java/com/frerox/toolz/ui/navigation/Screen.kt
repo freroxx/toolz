@@ -5,6 +5,7 @@ sealed class Screen(val route: String) {
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
     object Update : Screen("update")
+    object BackupRestore : Screen("backup_restore")
     
     // AI
     object AiAssistant : Screen("ai_assistant")

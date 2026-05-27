@@ -19,4 +19,9 @@ interface PdfAnnotationDao {
 
     @Query("DELETE FROM pdf_annotations WHERE fileUri = :fileUri")
     suspend fun clearAnnotations(fileUri: String)
+    @Query("SELECT * FROM pdf_annotations")
+    suspend fun getAllAnnotationsSync(): List<PdfAnnotation>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAnnotations(entries: List<PdfAnnotation>)
 }

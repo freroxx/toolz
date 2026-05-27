@@ -50,6 +50,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
     onNavigateToUpdate: () -> Unit,
+    onNavigateToBackupRestore: () -> Unit,
     onResetOnboarding: () -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -177,11 +178,6 @@ fun SettingsScreen(
         }
     }
 
-    val backupPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { viewModel.restoreBackup(it) }
-    }
 
     if (showResetDialog) {
         AlertDialog(
@@ -919,60 +915,16 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
                         ) {
-                            if (matches(searchQuery, "backup", "restore", "data", "save", "json", "export", "import")) {
-                                val currentFreq by viewModel.backupFrequency.collectAsState(initial = "Never")
+                            if (matches(searchQuery, "backup", "restore", "data", "save", "export", "import")) {
                                 SettingsItem(
                                     title = "Backup & Restore",
-                                    subtitle = "Export your data and settings",
+                                    subtitle = "Export, import and automate data backups",
                                     icon = Icons.Rounded.Backup,
-                                ) {
-                                    Column(modifier = Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Button(
-                                                onClick = { 
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.createBackup() 
-                                                },
-                                                modifier = Modifier.weight(1f),
-                                                shape = RoundedCornerShape(12.dp)
-                                            ) {
-                                                Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(18.dp))
-                                                Spacer(Modifier.width(8.dp))
-                                                Text("BACKUP")
-                                            }
-                                            Button(
-                                                onClick = { 
-                                                    vibrationManager?.vibrateClick()
-                                                    backupPicker.launch("application/json")
-                                                },
-                                                modifier = Modifier.weight(1f),
-                                                shape = RoundedCornerShape(12.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
-                                            ) {
-                                                Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
-                                                Spacer(Modifier.width(8.dp))
-                                                Text("IMPORT")
-                                            }
-                                        }
-
-                                        @Suppress("DEPRECATION")
-                                        Text("AUTOMATIC BACKUP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            listOf("Never", "Daily", "Weekly", "Monthly").forEach { freq ->
-                                                val isSelected = currentFreq == freq
-                                                ExpressiveFilterChip(
-                                                    selected = isSelected,
-                                                    onClick = { 
-                                                        vibrationManager?.vibrateTick()
-                                                        viewModel.setBackupFrequency(freq) 
-                                                    },
-                                                    label = { Text(freq) },
-                                                    shape = RoundedCornerShape(10.dp)
-                                                )
-                                            }
-                                        }
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onNavigateToBackupRestore()
                                     }
-                                }
+                                )
                             }
 
                             if (matches(searchQuery, "converter", "output", "path", "folder", "save", "storage")) {

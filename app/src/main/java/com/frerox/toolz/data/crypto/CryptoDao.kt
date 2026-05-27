@@ -16,4 +16,9 @@ interface CryptoDao {
 
     @Query("DELETE FROM crypto_history")
     suspend fun clearHistory()
+    @Query("SELECT * FROM crypto_history")
+    suspend fun getAllHistorySync(): List<CryptoHistoryEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistory(entries: List<CryptoHistoryEntry>)
 }
