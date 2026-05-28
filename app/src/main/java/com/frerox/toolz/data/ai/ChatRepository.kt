@@ -42,4 +42,10 @@ interface ChatRepository {
         sourcesJson: String,
         history: List<AiMessage>
     ): Flow<Result<ChatResponseChunk>>
+
+    /**
+     * Checks if a specific model is available for the given provider.
+     * This might involve calling a provider-specific API.
+     */
+    suspend fun checkModelAvailability(provider: String, model: String): Boolean
 }

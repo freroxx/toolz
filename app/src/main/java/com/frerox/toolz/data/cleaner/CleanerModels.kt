@@ -18,6 +18,7 @@ sealed class ScanState {
     data class Results(
         val categories: List<CleanCategory>,
         val totalCleanableBytes: Long,
+        val selectedBytes: Long,
         val filesScanned: Int
     ) : ScanState()
 
@@ -40,6 +41,7 @@ data class CleanCategory(
     val icon: String, // Icon name or resource ID
     val items: List<CleanItem>,
     val totalSize: Long,
+    val selectedSize: Long,
     val isSafeToClean: Boolean = false,
     val isExpanded: Boolean = false
 )

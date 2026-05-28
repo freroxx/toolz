@@ -17,7 +17,7 @@ data class AiChat(
     val createdAt: Long get() = timestamp
 }
 
-enum class DeepDiveState { NONE, PENDING, COMPLETED, FADED }
+enum class DeepDiveState { NONE, PENDING, IN_PROGRESS, COMPLETED, FADED }
 
 @Entity(
     tableName = "ai_messages",
@@ -73,4 +73,16 @@ interface AiDao {
 
     @Update
     suspend fun updateMessage(message: AiMessage)
+
+    @Query("SELECT * FROM ai_chats")
+    suspend fun getAllChatsSync(): List<AiChat>
+
+    @Query("SELECT * FROM ai_messages")
+    suspend fun getAllMessagesSync(): List<AiMessage>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChats(chats: List<AiChat>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessages(messages: List<AiMessage>)
 }

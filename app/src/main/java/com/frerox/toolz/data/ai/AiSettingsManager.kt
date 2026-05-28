@@ -211,4 +211,45 @@ class AiSettingsManager @Inject constructor(
     }
 
     fun isConfigured(): Boolean = PROVIDERS.any { resolveApiKey(it).source != ApiKeySource.NONE }
+
+    fun exportPortableSettings(): Map<String, String> {
+        return prefs.all.mapNotNull { (key, value) ->
+            val encoded = when (value) {
+                is String -> "string:$value"
+                is Boolean -> "boolean:$value"
+                is Int -> "int:$value"
+                is Long -> "long:$value"
+                is Float -> "float:$value"
+                is Set<*> -> {
+                    val values = value.filterIsInstance<String>()
+                    "string_set:${stringListAdapter.toJson(values)}"
+                }
+                else -> null
+            }
+            encoded?.let { key to it }
+        }.toMap()
+    }
+
+    fun importPortableSettings(snapshot: Map<String, String>, clearExisting: Boolean = true) {
+        val editor = prefs.edit()
+        if (clearExisting) editor.clear()
+        snapshot.forEach { (key, encoded) ->
+            val separator = encoded.indexOf(':')
+            if (separator <= 0) return@forEach
+            val type = encoded.substring(0, separator)
+            val raw = encoded.substring(separator + 1)
+            when (type) {
+                "string" -> editor.putString(key, raw)
+                "boolean" -> editor.putBoolean(key, raw.toBooleanStrictOrNull() ?: return@forEach)
+                "int" -> editor.putInt(key, raw.toIntOrNull() ?: return@forEach)
+                "long" -> editor.putLong(key, raw.toLongOrNull() ?: return@forEach)
+                "float" -> editor.putFloat(key, raw.toFloatOrNull() ?: return@forEach)
+                "string_set" -> {
+                    val values = runCatching { stringListAdapter.fromJson(raw).orEmpty() }.getOrDefault(emptyList())
+                    editor.putStringSet(key, values.toSet())
+                }
+            }
+        }
+        editor.commit()
+    }
 }

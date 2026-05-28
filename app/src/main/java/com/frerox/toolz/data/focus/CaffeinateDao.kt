@@ -27,4 +27,6 @@ interface CaffeinateDao {
     
     @Query("DELETE FROM caffeinate_apps")
     suspend fun deleteAll()
+    @Query("SELECT * FROM caffeinate_apps")
+    suspend fun getAllAppsSync(): List<CaffeinateApp>
 }
