@@ -1,68 +1,69 @@
 package com.frerox.toolz.ui.components
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 
-enum class ButtonState { Pressed, Idle }
-
+/**
+ * An optimized Material 3 Expressive bouncy click modifier.
+ * Uses unified interaction streams to deliver fluid, elastic physics
+ * and synchronized tactical haptic feedback.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 fun Modifier.bouncyClick(
     enabled: Boolean = true,
-    scaleDown: Float = 0.92f,
+    scaleDown: Float = 0.95f, // Tuned to the M3 Expressive sweet spot
     haptic: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) = composed {
-    var buttonState by remember { mutableStateOf(ButtonState.Idle) }
     val view = LocalView.current
     val hapticEnabled = LocalHapticEnabled.current
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
-    
+
+    // Unified interaction tracking system
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // Premium M3 Expressive Elastic Physics
     val scale by animateFloatAsState(
-        targetValue = if (buttonState == ButtonState.Pressed && enabled && !performanceMode) scaleDown else 1f,
+        targetValue = if (isPressed && enabled && !performanceMode) scaleDown else 1f,
         animationSpec = spring(
-            dampingRatio = 0.6f,
+            dampingRatio = 0.55f, // Delivers a clean, responsive overshoot bounce
             stiffness = Spring.StiffnessMediumLow
         ),
-        label = "BouncyClickScale"
+        label = "M3ExpressiveBouncyScale"
     )
+
+    // Tactile Feedback on initial touch-down
+    LaunchedEffect(isPressed) {
+        if (isPressed && enabled && haptic && hapticEnabled) {
+            vibrationManager?.vibrateTick()
+        }
+    }
 
     this
         .graphicsLayer {
             scaleX = scale
             scaleY = scale
         }
-        .drawWithContent {
-            drawContent()
-            if (buttonState == ButtonState.Pressed && enabled && !performanceMode) {
-                drawRect(
-                    color = Color.White.copy(alpha = 0.08f),
-                    blendMode = BlendMode.Overlay
-                )
-            }
-        }
         .combinedClickable(
             enabled = enabled,
-            interactionSource = remember { MutableInteractionSource() },
+            interactionSource = interactionSource,
             indication = null,
             onClick = {
                 if (haptic && hapticEnabled) {
@@ -74,27 +75,17 @@ fun Modifier.bouncyClick(
                 }
                 onClick()
             },
-            onLongClick = onLongClick?.let {
+            onLongClick = onLongClick?.let { longClickAction ->
                 {
                     if (haptic && hapticEnabled) {
-                        vibrationManager?.vibrateLongClick() ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        if (vibrationManager != null) {
+                            vibrationManager.vibrateLongClick()
+                        } else {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
                     }
-                    it()
+                    longClickAction()
                 }
             }
         )
-        .pointerInput(enabled) {
-            if (!enabled || performanceMode) return@pointerInput
-            awaitPointerEventScope {
-                while (true) {
-                    awaitFirstDown(false)
-                    if (haptic && hapticEnabled) {
-                        vibrationManager?.vibrateTick()
-                    }
-                    buttonState = ButtonState.Pressed
-                    waitForUpOrCancellation()
-                    buttonState = ButtonState.Idle
-                }
-            }
-        }
 }

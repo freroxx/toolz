@@ -13,4 +13,9 @@ interface StepDao {
 
     @Query("SELECT * FROM steps ORDER BY date DESC LIMIT 7")
     fun getRecentSteps(): Flow<List<StepEntry>>
+    @Query("SELECT * FROM steps")
+    suspend fun getAllStepsSync(): List<StepEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSteps(entries: List<StepEntry>)
 }

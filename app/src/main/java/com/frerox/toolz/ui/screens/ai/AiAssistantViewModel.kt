@@ -65,7 +65,10 @@ data class AiSettingsUiState(
     val promptFormat         : String    = "medium",
     val showGroqKeyMissingDialog: Boolean = false,
     val isGroqConfigured     : Boolean   = false,
+    val modelAvailability    : ModelAvailability = ModelAvailability.UNKNOWN,
 )
+
+enum class ModelAvailability { AVAILABLE, UNAVAILABLE, CHECKING, UNKNOWN }
 
 // ─────────────────────────────────────────────────────────────
 //  ViewModel
@@ -137,6 +140,7 @@ class AiAssistantViewModel @Inject constructor(
             )
         }
         _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
+        checkModelAvailability()
     }
 
     fun toggleDynamicPrompts(enabled: Boolean) {
@@ -334,13 +338,38 @@ class AiAssistantViewModel @Inject constructor(
             )
         }
         validateKey()
+        checkModelAvailability()
     }
 
     fun updateApiKey(key: String) {
         _settingsUiState.update { it.copy(apiKey = AiSettingsHelper.normalizeApiKeyInput(key)) }
         validateKey()
+        checkModelAvailability() // Re-check if API key changes
     }
-    fun updateModel(model: String) { _settingsUiState.update { it.copy(selectedModel = model) } }
+    fun updateModel(model: String) {
+        _settingsUiState.update { it.copy(selectedModel = model) }
+        checkModelAvailability()
+    }
+
+    private fun checkModelAvailability() {
+        val s = _settingsUiState.value
+        val provider = s.provider
+        val model = s.selectedModel
+
+        if (model.isBlank()) {
+            _settingsUiState.update { it.copy(modelAvailability = ModelAvailability.UNKNOWN) }
+            return
+        }
+
+        viewModelScope.launch {
+            _settingsUiState.update { it.copy(modelAvailability = ModelAvailability.CHECKING) }
+            val isAvailable = chatRepository.checkModelAvailability(provider, model)
+            _settingsUiState.update {
+                it.copy(modelAvailability = if (isAvailable) ModelAvailability.AVAILABLE else ModelAvailability.UNAVAILABLE)
+            }
+        }
+    }
+
     fun updateIcon(icon: String)   { _settingsUiState.update { it.copy(selectedIcon = icon, customIconUri = null) } }
     fun updateCustomIcon(uri: Uri?) { _settingsUiState.update { it.copy(customIconUri = uri?.toString(), selectedIcon = "CUSTOM") } }
 

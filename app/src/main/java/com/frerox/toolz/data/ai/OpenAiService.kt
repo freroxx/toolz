@@ -46,6 +46,16 @@ data class FunctionCall(
     val arguments: String,
 )
 
+@JsonClass(generateAdapter = true)
+data class OpenAiModelsResponse(
+    val data: List<OpenAiModel>,
+)
+
+@JsonClass(generateAdapter = true)
+data class OpenAiModel(
+    val id: String,
+)
+
 // ─────────────────────────────────────────────────────────────
 //  Claude (Anthropic) response models
 // ─────────────────────────────────────────────────────────────
@@ -88,6 +98,15 @@ interface OpenAiService {
         @Header("X-Title") title: String? = null,
         @Body request: OpenAiRequest,
     ): OpenAiResponse
+
+    /**
+     * OpenAI-compatible models list endpoint.
+     */
+    @retrofit2.http.GET
+    suspend fun listModels(
+        @Url url: String,
+        @Header("Authorization") authHeader: String,
+    ): OpenAiModelsResponse
 
     /**
      * Anthropic Claude Messages API.

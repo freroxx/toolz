@@ -12,55 +12,60 @@ object AiSettingsHelper {
     private val openAiCompatibleProviders = setOf("ChatGPT", "Groq", "DeepSeek", "OpenRouter")
 
     fun getRecommendedModel(provider: String): String = when (provider) {
-        "Gemini" -> "gemini-2.0-flash"
-        "ChatGPT" -> "gpt-4o-mini"
+        "Gemini" -> "gemini-3.0-flash"
+        "ChatGPT" -> "gpt-5.4-mini"
         "Groq" -> "llama-3.3-70b-versatile"
-        "Claude" -> "claude-3-5-sonnet-20241022"
+        "Claude" -> "claude-sonnet-4-6"
         "DeepSeek" -> "deepseek-chat"
-        "OpenRouter" -> "google/gemini-2.0-flash-001"
-        else -> "gemini-2.0-flash"
+        "OpenRouter" -> "anthropic/claude-sonnet-4-6"
+        else -> "gemini-3.0-flash"
     }
 
     fun getModels(provider: String): List<String> = when (provider) {
         "Gemini" -> listOf(
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-2.0-pro-exp-02-05",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-3.0-pro",
+            "gemini-3.0-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash"
         )
         "ChatGPT" -> listOf(
-            "gpt-4o-mini",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "o4-mini",
+            "o3",
             "gpt-4o",
-            "o3-mini",
-            "o1-mini",
-            "o1",
-            "gpt-4-turbo"
+            "gpt-4o-mini"
         )
         "Groq" -> listOf(
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
+            "llama-3.2-90b-vision-preview",
+            "llama-3.2-11b-vision-preview",
             "deepseek-r1-distill-llama-70b",
             "mixtral-8x7b-32768"
         )
         "Claude" -> listOf(
-            "claude-3-7-sonnet-20250219",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229"
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5"
         )
         "DeepSeek" -> listOf(
             "deepseek-chat",
             "deepseek-reasoner"
         )
         "OpenRouter" -> listOf(
-            "google/gemini-2.0-flash-001",
-            "anthropic/claude-3.5-sonnet",
-            "openai/gpt-4o-mini",
+            "anthropic/claude-sonnet-4-6",
+            "anthropic/claude-opus-4-7",
+            "openai/gpt-5.5",
+            "openai/gpt-5.4-mini",
+            "google/gemini-3.0-flash",
+            "google/gemini-3.0-pro",
             "deepseek/deepseek-chat",
-            "meta-llama/llama-3.3-70b-instruct",
-            "mistralai/mistral-7b-instruct",
-            "google/gemini-2.0-pro-exp-02-05:free"
+            "meta-llama/llama-3.3-70b-instruct"
         )
         else -> emptyList()
     }
@@ -71,12 +76,14 @@ object AiSettingsHelper {
         }
         return when (provider) {
             "Gemini" -> true
-            "ChatGPT" -> model.contains("gpt-4o", ignoreCase = true) || model.contains("gpt-4-turbo", ignoreCase = true)
-            "Claude" -> model.contains("sonnet", ignoreCase = true) || model.contains("opus", ignoreCase = true)
+            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) || model.contains("o", ignoreCase = true)
+            "Claude" -> true // All Claude 4 models natively support vision
             "OpenRouter" -> {
                 model.contains("gemini", ignoreCase = true) ||
-                    model.contains("claude", ignoreCase = true) ||
-                    model.contains("gpt-4", ignoreCase = true)
+                        model.contains("claude", ignoreCase = true) ||
+                        model.contains("gpt-5", ignoreCase = true) ||
+                        model.contains("gpt-4", ignoreCase = true) ||
+                        model.contains("vision", ignoreCase = true)
             }
             "DeepSeek" -> false
             else -> false
@@ -87,8 +94,8 @@ object AiSettingsHelper {
         return when (provider) {
             "Gemini" -> true
             "Claude" -> true
-            "ChatGPT" -> model.contains("gpt-4", ignoreCase = true) || model.contains("o1", ignoreCase = true) || model.contains("o3", ignoreCase = true)
-            "OpenRouter" -> model.contains("claude", ignoreCase = true) || model.contains("gemini", ignoreCase = true)
+            "ChatGPT" -> model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true) || model.contains("o", ignoreCase = true)
+            "OpenRouter" -> model.contains("claude", ignoreCase = true) || model.contains("gemini", ignoreCase = true) || model.contains("gpt-5", ignoreCase = true) || model.contains("gpt-4", ignoreCase = true)
             else -> false
         }
     }
@@ -161,20 +168,24 @@ object AiSettingsHelper {
     fun isPlaceholder(key: String): Boolean {
         if (key.isBlank()) return true
         val k = key.uppercase()
-        return k.contains("YOUR_") || k.contains("REPLACE_") || 
-               k == "MISSING" || k == "DEFAULT" || k == "UNDEFINED" || 
-               k == "NULL" || k == "API_KEY" || k.length < 10 ||
-               k.contains("INSERT_") || k.contains("KEY_HERE")
+        return k.contains("YOUR_") || k.contains("REPLACE_") ||
+                k == "MISSING" || k == "DEFAULT" || k == "UNDEFINED" ||
+                k == "NULL" || k == "API_KEY" || k.length < 10 ||
+                k.contains("INSERT_") || k.contains("KEY_HERE")
     }
 
     fun isDefaultKey(key: String): Boolean {
         if (key.isBlank() || isPlaceholder(key)) return false
         return key == BuildConfig.GEMINI_DEFAULT ||
-               key == BuildConfig.CHATGPT_DEFAULT ||
-               key == BuildConfig.GROQ_DEFAULT ||
-               key == BuildConfig.OPENROUTER_DEFAULT ||
-               key == BuildConfig.CLAUDE_DEFAULT ||
-               key == BuildConfig.DEEPSEEK_DEFAULT
+                key == BuildConfig.CHATGPT_DEFAULT ||
+                key == BuildConfig.GROQ_DEFAULT ||
+                key == BuildConfig.OPENROUTER_DEFAULT ||
+                key == BuildConfig.CLAUDE_DEFAULT ||
+                key == BuildConfig.DEEPSEEK_DEFAULT
+    }
+
+    fun isKnownModel(provider: String, model: String): Boolean {
+        return getModels(provider).contains(model)
     }
 
     val tutorials: Map<String, List<String>> = mapOf(
@@ -223,16 +234,16 @@ object AiSettingsHelper {
     )
 
     val detailedInfo: Map<String, String> = mapOf(
-        "Gemini" to "Google's fast multimodal assistant. Great for images and quick answers.",
-        "ChatGPT" to "OpenAI models with strong balance across writing, coding, and reasoning.",
-        "Groq" to "Very low-latency inference that feels especially fast in chat.",
-        "Claude" to "Anthropic models with strong writing quality, reasoning, and long context.",
-        "DeepSeek" to "Open models that are especially good for coding and cost-efficient reasoning.",
-        "OpenRouter" to "A model hub that gives you one place to try several providers."
+        "Gemini" to "Google's fast multimodal assistant. Class-leading context window lengths and strong speed.",
+        "ChatGPT" to "OpenAI's latest GPT-5 and o-series models, providing industry-leading reasoning and generation.",
+        "Groq" to "Extremely low-latency inference using LPUs. Feels virtually instantaneous in chat.",
+        "Claude" to "Anthropic's 4-series models offering top-tier writing, coding, reasoning, and enormous context.",
+        "DeepSeek" to "Powerful and extremely cost-efficient open-source models with top-tier math and coding.",
+        "OpenRouter" to "A universal API hub that gives you a single place to access almost any model."
     )
 
     const val disclaimerText =
-        "Higher-tier models are smarter but consume more tokens. Flash and mini models are best for everyday use."
+        "Higher-tier models are smarter but consume more tokens. Flash, Haiku, and Mini models are usually best for everyday mobile use."
 
     const val apiKeySuggestion =
         "Using your own API key gives you the best availability and the most predictable experience."

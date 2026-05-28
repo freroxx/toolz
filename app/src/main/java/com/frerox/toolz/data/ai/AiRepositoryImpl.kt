@@ -349,6 +349,44 @@ class AiRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun checkModelAvailability(provider: String, model: String): Boolean {
+        // 1. Check hardcoded list first for instant response
+        if (AiSettingsHelper.isKnownModel(provider, model)) return true
+
+        // 2. Try to fetch from API if key is available
+        val apiKey = settingsManager.resolveApiKey(provider).value
+        if (apiKey.isBlank()) return false
+
+        return when (provider) {
+            "ChatGPT", "Groq", "DeepSeek", "OpenRouter" -> {
+                val baseUrl = when (provider) {
+                    "ChatGPT" -> "https://api.openai.com/v1/models"
+                    "Groq" -> "https://api.groq.com/openai/v1/models"
+                    "DeepSeek" -> "https://api.deepseek.com/v1/models"
+                    "OpenRouter" -> "https://openrouter.ai/api/v1/models"
+                    else -> return false
+                }
+                try {
+                    val resp = openAiService.listModels(baseUrl, "Bearer $apiKey")
+                    resp.data.any { it.id.equals(model, ignoreCase = true) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to list models for $provider", e)
+                    false
+                }
+            }
+            "Gemini" -> {
+                // Gemini has a different API for listing models, but for now we'll just return false
+                // if not in our hardcoded list, or we could try a dummy call.
+                false
+            }
+            "Claude" -> {
+                // Anthropic doesn't have a public list models API yet.
+                false
+            }
+            else -> false
+        }
+    }
+
     private suspend fun callProvider(
         provider: String,
         keyState: ResolvedApiKey,

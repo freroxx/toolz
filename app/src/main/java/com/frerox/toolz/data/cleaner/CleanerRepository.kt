@@ -208,79 +208,92 @@ class CleanerRepository @Inject constructor(
                 val categories = mutableListOf<CleanCategory>()
                 
                 if (systemJunk.isNotEmpty()) {
+                    val items = systemJunk.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) }
                     categories.add(CleanCategory(
                         id = "temp",
                         name = "System Junk",
                         icon = "DeleteSweep",
-                        items = systemJunk.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) },
+                        items = items,
                         totalSize = systemJunk.sumOf { it.sizeBytes },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = true
                     ))
                 }
 
                 if (corpseEntries.isNotEmpty()) {
+                    val items = corpseEntries.sortedByDescending { it.sizeBytes }.map { CleanItem.Corpse(it) }
                     categories.add(CleanCategory(
                         id = "corpse",
                         name = "App Leftovers",
                         icon = "AutoDelete",
-                        items = corpseEntries.sortedByDescending { it.sizeBytes }.map { CleanItem.Corpse(it) },
+                        items = items,
                         totalSize = corpseEntries.sumOf { it.sizeBytes },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = true
                     ))
                 }
 
                 if (duplicateGroups.isNotEmpty()) {
-                    val totalDupesSize = duplicateGroups.sumOf { g -> g.files.filter { it.isSelected }.sumOf { g.sizeBytes } }
+                    val items = duplicateGroups.sortedByDescending { it.sizeBytes * it.files.size }.map { CleanItem.Duplicate(it) }
                     categories.add(CleanCategory(
                         id = "dupes",
                         name = "Duplicate Files",
                         icon = "FileCopy",
-                        items = duplicateGroups.sortedByDescending { it.sizeBytes * it.files.size }.map { CleanItem.Duplicate(it) },
-                        totalSize = totalDupesSize,
+                        items = items,
+                        totalSize = duplicateGroups.sumOf { g -> g.files.sumOf { g.sizeBytes } },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = false
                     ))
                 }
 
                 if (largeFiles.isNotEmpty()) {
+                    val items = largeFiles.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) }
                     categories.add(CleanCategory(
                         id = "large",
                         name = "Large Files",
                         icon = "Straighten",
-                        items = largeFiles.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) },
-                        totalSize = largeFiles.filter { it.isSelected }.sumOf { it.sizeBytes },
+                        items = items,
+                        totalSize = largeFiles.sumOf { it.sizeBytes },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = false
                     ))
                 }
 
                 if (unusedApps.isNotEmpty()) {
+                    val items = unusedApps.map { CleanItem.UnusedApp(it) }
                     categories.add(CleanCategory(
                         id = "unused_apps",
                         name = "Unused Apps",
                         icon = "AppSettingsAlt",
-                        items = unusedApps.map { CleanItem.UnusedApp(it) },
-                        totalSize = unusedApps.filter { it.isSelected }.sumOf { it.sizeBytes },
+                        items = items,
+                        totalSize = unusedApps.sumOf { it.sizeBytes },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = false
                     ))
                 }
 
                 if (documentFiles.isNotEmpty()) {
+                    val items = documentFiles.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) }
                     categories.add(CleanCategory(
                         id = "documents",
                         name = "Documents",
                         icon = "Description",
-                        items = documentFiles.sortedByDescending { it.sizeBytes }.map { CleanItem.GenericFile(it) },
-                        totalSize = documentFiles.filter { it.isSelected }.sumOf { it.sizeBytes },
+                        items = items,
+                        totalSize = documentFiles.sumOf { it.sizeBytes },
+                        selectedSize = calculateCategorySize(items),
                         isSafeToClean = false
                     ))
                 }
 
                 val totalCleanable = categories.sumOf { it.totalSize }
+                val selectedBytes = categories.sumOf { it.selectedSize }
                 refreshStorageInfo()
                 _storageInfo.update { it.copy(cleanableBytes = totalCleanable) }
 
                 _scanState.value = ScanState.Results(
                     categories = categories.sortedByDescending { it.totalSize },
                     totalCleanableBytes = totalCleanable,
+                    selectedBytes = selectedBytes,
                     filesScanned = scannedCount
                 )
 
@@ -424,7 +437,7 @@ class CleanerRepository @Inject constructor(
                         else -> item
                     }
                 }
-                cat.copy(items = updatedItems, totalSize = calculateCategorySize(updatedItems))
+                cat.copy(items = updatedItems, selectedSize = calculateCategorySize(updatedItems))
             } else cat
         }
         updateStateWithNewCategories(state, updatedCategories)
@@ -442,16 +455,16 @@ class CleanerRepository @Inject constructor(
                         CleanItem.Duplicate(item.group.copy(files = updatedFiles))
                     } else item
                 }
-                cat.copy(items = updatedItems, totalSize = calculateCategorySize(updatedItems))
+                cat.copy(items = updatedItems, selectedSize = calculateCategorySize(updatedItems))
             } else cat
         }
         updateStateWithNewCategories(state, updatedCategories)
     }
 
     private fun updateStateWithNewCategories(oldState: ScanState.Results, newCategories: List<CleanCategory>) {
-        val total = newCategories.sumOf { it.totalSize }
-        _scanState.value = oldState.copy(categories = newCategories, totalCleanableBytes = total)
-        _storageInfo.update { it.copy(cleanableBytes = total) }
+        val selected = newCategories.sumOf { it.selectedSize }
+        _scanState.value = oldState.copy(categories = newCategories, selectedBytes = selected)
+        _storageInfo.update { it.copy(cleanableBytes = oldState.totalCleanableBytes) } // Keep total cleanable as is
     }
 
     private fun calculateCategorySize(items: List<CleanItem>): Long {
