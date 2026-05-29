@@ -169,7 +169,7 @@ class FlashlightViewModel @Inject constructor(
      * Detects hardware torch-strength support on API 33+ devices.
      *
      * Why field reflection instead of the direct symbol
-     * [CameraCharacteristics.FLASH_INFO_STRENGTH_MAX_LEVEL]:
+     * [CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL]:
      *
      * The direct symbol requires compileSdk ≥ 33. When the project targets a
      * lower compileSdk the compiler reports "Unresolved reference" even though
@@ -182,13 +182,7 @@ class FlashlightViewModel @Inject constructor(
     private fun checkBrightnessSupport(characteristics: CameraCharacteristics) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         try {
-            @Suppress("UNCHECKED_CAST")
-            val key = CameraCharacteristics::class.java
-                .getDeclaredField("FLASH_INFO_STRENGTH_MAXIMUM_LEVEL")
-                .get(null) as? CameraCharacteristics.Key<Int> ?: return
-
-            // Explicit Int annotation prevents the generic Comparable<T> issue
-            val maxLevel: Int = characteristics.get(key) ?: return
+            val maxLevel = characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) ?: return
 
             if (maxLevel >= 2) {
                 _uiState.update {
@@ -212,6 +206,10 @@ class FlashlightViewModel @Inject constructor(
 
         val intent = Intent(context, FlashlightService::class.java).apply {
             action = if (newOn) FlashlightService.ACTION_TOGGLE else FlashlightService.ACTION_STOP
+            if (newOn) {
+                putExtra("mode", _uiState.value.mode.name)
+                putExtra("brightness", _uiState.value.brightness)
+            }
         }
         if (newOn) {
             context.startForegroundService(intent)
@@ -223,6 +221,10 @@ class FlashlightViewModel @Inject constructor(
     fun setMode(mode: FlashlightMode) {
         _uiState.update { it.copy(mode = mode) }
         saveSetting("flashlight_mode", mode.name)
+        
+        // Sync with service if it's running
+        FlashlightService.getInstance()?.setMode(mode)
+        
         if (_uiState.value.isOn) {
             startMode()
         }
@@ -232,6 +234,10 @@ class FlashlightViewModel @Inject constructor(
         val valClamped = normalised.coerceIn(0.1f, 1.0f)
         _uiState.update { it.copy(brightness = valClamped) }
         saveSetting("flashlight_brightness", valClamped)
+        
+        // Sync with service if it's running
+        FlashlightService.getInstance()?.setBrightness(valClamped)
+
         if (_uiState.value.isOn) {
             applyCurrentBrightness()
         }
@@ -246,6 +252,10 @@ class FlashlightViewModel @Inject constructor(
         val clamped = ms.coerceIn(40L, 500L)
         _uiState.update { it.copy(strobeIntervalMs = clamped) }
         saveSetting("flashlight_strobe_interval", clamped)
+        
+        // Sync with service if it's running
+        FlashlightService.getInstance()?.setStrobeMs(clamped)
+
         // If already strobing or in disco, restart with new timing (disco uses it as base)
         if (_uiState.value.isOn && (_uiState.value.mode == FlashlightMode.STROBE || _uiState.value.mode == FlashlightMode.DISCO)) {
             modeJob?.cancel()
@@ -256,6 +266,10 @@ class FlashlightViewModel @Inject constructor(
     fun setTimer(minutes: Int) {
         _uiState.update { it.copy(timerMinutes = minutes) }
         saveSetting("flashlight_timer", minutes)
+        
+        // Sync with service if it's running
+        FlashlightService.getInstance()?.setTimer(minutes)
+
         if (minutes > 0) {
             startTimer(minutes)
         } else {
@@ -268,6 +282,10 @@ class FlashlightViewModel @Inject constructor(
         _uiState.update { it.copy(discoIntervalRange = min to max) }
         saveSetting("flashlight_disco_min", min)
         saveSetting("flashlight_disco_max", max)
+        
+        // Sync with service if it's running
+        FlashlightService.getInstance()?.setDiscoRange(min, max)
+
         // If in disco, no need to restart job as it picks up values dynamically
     }
 
@@ -328,20 +346,12 @@ class FlashlightViewModel @Inject constructor(
         }
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun applyStrengthLevel(id: String) {
         try {
             val max   = _uiState.value.maxBrightness
             val level = (_uiState.value.brightness * max).toInt().coerceIn(1, max)
-            // Method reflection — avoids compile-time API 33 symbol dependency.
-            // CameraManager.turnOnTorchWithStrengthLevel(String, int) is a real
-            // public method on API 33+ devices; the reflection lookup is reliable.
-            cameraManager.javaClass
-                .getMethod(
-                    "turnOnTorchWithStrengthLevel",
-                    String::class.java,
-                    Int::class.javaPrimitiveType,
-                )
-                .invoke(cameraManager, id, level)
+            cameraManager.turnOnTorchWithStrengthLevel(id, level)
             Log.d(TAG, "Torch strength set to $level / $max")
         } catch (e: Exception) {
             Log.w(TAG, "turnOnTorchWithStrengthLevel failed: ${e.message}")

@@ -366,7 +366,7 @@ class ToolService : Service() {
 
     private fun createStopwatchNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Stopwatch.route) }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(this, 3001, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_TOGGLE }
         val togglePI = PendingIntent.getService(this, 1, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -401,7 +401,7 @@ class ToolService : Service() {
 
     private fun createTimerNotification(text: String? = null): Notification {
         val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Timer.route) }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(this, 3002, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TIMER_TOGGLE }
         val togglePI = PendingIntent.getService(this, 21, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -437,7 +437,7 @@ class ToolService : Service() {
 
     private fun createPomodoroNotification(text: String? = null): Notification {
         val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Pomodoro.route) }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(this, 3003, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_TOGGLE }
         val togglePI = PendingIntent.getService(this, 3, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
@@ -473,7 +473,7 @@ class ToolService : Service() {
 
     private fun createTodoNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Todo.route) }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(this, 3004, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_TODO_STOP }
         val stopPI = PendingIntent.getService(this, 41, stopIntent, PendingIntent.FLAG_IMMUTABLE)

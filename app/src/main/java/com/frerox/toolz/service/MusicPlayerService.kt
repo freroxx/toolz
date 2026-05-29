@@ -137,7 +137,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
         
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, 
+            this, 2001, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         

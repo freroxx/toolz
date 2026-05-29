@@ -17,12 +17,13 @@
     android:padding="0dp">
 
     <!-- Left color accent strip — tinted at runtime via setBackgroundColor -->
-    <View
+    <ImageView
         android:id="@+id/notif_mode_strip"
         android:layout_width="4dp"
         android:layout_height="match_parent"
         android:layout_marginEnd="14dp"
-        android:background="#FFFBC02D" />
+        android:src="@android:color/white"
+        android:scaleType="fitXY" />
 
     <!-- Flashlight icon — colorFilter applied at runtime for mode color -->
     <ImageView

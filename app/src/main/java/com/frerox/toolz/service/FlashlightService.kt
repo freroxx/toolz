@@ -3,6 +3,7 @@ package com.frerox.toolz.service
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.content.res.ColorStateList
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
@@ -63,7 +64,7 @@ class FlashlightService : Service() {
     private val _discoRange     = MutableStateFlow(40L to 300L)
     private val _timerMinutes   = MutableStateFlow(0)
 
-    val isOn: StateFlow<Boolean> = repository.isOn
+    val isOn: StateFlow<Boolean> get() = repository.isOn
 
     companion object {
         const val ACTION_TOGGLE        = "com.frerox.toolz.FLASHLIGHT_TOGGLE"
@@ -82,24 +83,75 @@ class FlashlightService : Service() {
     override fun onCreate() {
         super.onCreate()
         _inst = this
-        cam   = getSystemService(CAMERA_SERVICE) as CameraManager
-        findFlashCamera()
+        try {
+            cam = getSystemService(CAMERA_SERVICE) as CameraManager
+            findFlashCamera()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize CameraManager", e)
+        }
         createNotificationChannel()
         scope.launch { loadSettings() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val action = intent?.action
+        
+        // Handle incoming data if any
+        when (action) {
+            ACTION_BRIGHTNESS_UP, ACTION_BRIGHTNESS_DN, ACTION_CYCLE_MODE -> {
+                // Actions handled below in scope.launch
+            }
+            else -> {
+                // If it's a specific set action, we might have extras
+                intent?.let { handleExtras(it) }
+            }
+        }
+
+        // Android 14+ requirement: startForeground must be called early.
+        if (action != ACTION_STOP) {
+            val notif = buildNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                try {
+                    startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start foreground service", e)
+                    if (e is SecurityException) {
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                }
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+        }
+
         scope.launch {
-            when (intent?.action) {
+            when (action) {
                 ACTION_TOGGLE        -> if (isOn.value) doStop() else doStart()
                 ACTION_STOP          -> doStop()
                 ACTION_BRIGHTNESS_UP -> nudge(+0.15f)
                 ACTION_BRIGHTNESS_DN -> nudge(-0.15f)
                 ACTION_CYCLE_MODE    -> cycleMode()
-                else                 -> if (!isOn.value) doStart() else updateNotification()
+                else                 -> {
+                    if (!isOn.value && action != null) doStart() 
+                    else updateNotification()
+                }
             }
         }
         return START_STICKY
+    }
+
+    private fun handleExtras(intent: Intent) {
+        if (intent.hasExtra("brightness")) {
+            val b = intent.getFloatExtra("brightness", _brightness.value)
+            _brightness.value = b.coerceIn(0.1f, 1.0f)
+        }
+        if (intent.hasExtra("mode")) {
+            val mName = intent.getStringExtra("mode")
+            try {
+                mName?.let { _mode.value = FlashlightMode.valueOf(it) }
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -113,15 +165,21 @@ class FlashlightService : Service() {
 
     // ── Public API (called in-process by ViewModel / QuickControlActivity) ────
 
-    fun toggle()                      = scope.launch { if (isOn.value) doStop() else doStart() }
-    fun setBrightness(v: Float)       { _brightness.value = v.coerceIn(0.1f, 1.0f); if (isOn.value && _mode.value == FlashlightMode.STEADY) applyBrightness(); updateNotification() }
-    fun setMode(m: FlashlightMode)    { _mode.value = m; if (isOn.value) restartMode(); updateNotification() }
-    fun setStrobeMs(ms: Long)         { _strobeMs.value = ms.coerceIn(40L, 500L); if (isOn.value && _mode.value == FlashlightMode.STROBE) restartMode() }
-    fun setDiscoRange(min: Long, max: Long) { _discoRange.value = min to max }
+    fun toggle() {
+        scope.launch {
+            if (isOn.value) doStop() else doStart()
+        }
+    }
+
+    fun setBrightness(v: Float)       { _brightness.value = v.coerceIn(0.1f, 1.0f); if (isOn.value && _mode.value == FlashlightMode.STEADY) applyBrightness(); updateNotification(); broadcastStateChange() }
+    fun setMode(m: FlashlightMode)    { _mode.value = m; if (isOn.value) restartMode(); updateNotification(); broadcastStateChange() }
+    fun setStrobeMs(ms: Long)         { _strobeMs.value = ms.coerceIn(40L, 500L); if (isOn.value && _mode.value == FlashlightMode.STROBE) restartMode(); broadcastStateChange() }
+    fun setDiscoRange(min: Long, max: Long) { _discoRange.value = min.coerceAtMost(max) to max.coerceAtLeast(min); broadcastStateChange() }
     fun setTimer(minutes: Int) {
         _timerMinutes.value = minutes
         timerJob?.cancel()
         if (minutes > 0 && isOn.value) scheduleTimer(minutes)
+        broadcastStateChange()
     }
 
     // Expose current state for UI / TileService
@@ -133,12 +191,7 @@ class FlashlightService : Service() {
 
     private fun doStart() {
         repository.setOn(true)
-        val notif = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
+        // startForeground is now handled in onStartCommand for immediate execution
         restartMode()
         if (_timerMinutes.value > 0) scheduleTimer(_timerMinutes.value)
         broadcastStateChange()
@@ -220,9 +273,7 @@ class FlashlightService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && brightSupport) {
             try {
                 val lvl = (_brightness.value * maxBright).toInt().coerceIn(1, maxBright)
-                cam.javaClass
-                    .getMethod("turnOnTorchWithStrengthLevel", String::class.java, Int::class.javaPrimitiveType)
-                    .invoke(cam, id, lvl)
+                cam.turnOnTorchWithStrengthLevel(id, lvl)
                 return
             } catch (e: Exception) { Log.w(TAG, "Strength-level failed: ${e.message}") }
         }
@@ -247,11 +298,7 @@ class FlashlightService : Service() {
     private fun detectBrightSupport(c: CameraCharacteristics) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         try {
-            @Suppress("UNCHECKED_CAST")
-            val key = CameraCharacteristics::class.java
-                .getDeclaredField("FLASH_INFO_STRENGTH_MAXIMUM_LEVEL")
-                .get(null) as? CameraCharacteristics.Key<Int> ?: return
-            val max: Int = c.get(key) ?: return
+            val max = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) ?: return
             if (max >= 2) { brightSupport = true; maxBright = max }
         } catch (_: Exception) {}
     }
@@ -259,14 +306,25 @@ class FlashlightService : Service() {
     // ── Persistence ───────────────────────────────────────────────────────────
 
     private suspend fun loadSettings() {
-        val p = dataStore.data.first()
-        _mode.value         = FlashlightMode.valueOf(p[stringPreferencesKey("flashlight_mode")] ?: FlashlightMode.STEADY.name)
-        _brightness.value   = p[floatPreferencesKey("flashlight_brightness")] ?: 1.0f
-        _strobeMs.value     = p[longPreferencesKey("flashlight_strobe_interval")] ?: 80L
-        val dMin = p[longPreferencesKey("flashlight_disco_min")] ?: 40L
-        val dMax = p[longPreferencesKey("flashlight_disco_max")] ?: 300L
-        _discoRange.value   = dMin to dMax
-        _timerMinutes.value = p[intPreferencesKey("flashlight_timer")] ?: 0
+        try {
+            val p = dataStore.data.first()
+            val modeName = p[stringPreferencesKey("flashlight_mode")]
+            if (modeName != null) {
+                try {
+                    _mode.value = FlashlightMode.valueOf(modeName)
+                } catch (e: Exception) {
+                    _mode.value = FlashlightMode.STEADY
+                }
+            }
+            _brightness.value   = p[floatPreferencesKey("flashlight_brightness")] ?: 1.0f
+            _strobeMs.value     = p[longPreferencesKey("flashlight_strobe_interval")] ?: 80L
+            val dMin = p[longPreferencesKey("flashlight_disco_min")] ?: 40L
+            val dMax = p[longPreferencesKey("flashlight_disco_max")] ?: 300L
+            _discoRange.value   = minOf(dMin, dMax) to maxOf(dMin, dMax)
+            _timerMinutes.value = p[intPreferencesKey("flashlight_timer")] ?: 0
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load settings", e)
+        }
     }
 
     // ── Broadcast ─────────────────────────────────────────────────────────────
@@ -317,10 +375,13 @@ class FlashlightService : Service() {
         compact.setInt(R.id.notif_mode_strip, "setBackgroundColor", modeColor())
         compact.setImageViewResource(R.id.notif_icon,
             if (on) modeIconRes() else R.drawable.ic_flashlight_off)
+        // Use the proper RemoteViews method for color filter
         compact.setInt(R.id.notif_icon, "setColorFilter", modeColor())
         compact.setTextViewText(R.id.notif_mode_label, modeLabel())
         compact.setTextViewText(R.id.notif_bright_value, "$brightPct%")
         compact.setProgressBar(R.id.notif_brightness_bar, 100, brightPct, false)
+        // Use white for progress bar to ensure visibility on colorized notification backgrounds
+        compact.setColorStateList(R.id.notif_brightness_bar, "setProgressTintList", ColorStateList.valueOf(0xFFFFFFFF.toInt()))
         compact.setImageViewResource(R.id.notif_btn_toggle,
             if (on) R.drawable.ic_notif_power_off else R.drawable.ic_notif_power_on)
         compact.setOnClickPendingIntent(R.id.notif_btn_toggle, pi(ACTION_TOGGLE, 10))
@@ -331,6 +392,8 @@ class FlashlightService : Service() {
         expanded.setTextViewText(R.id.notif_exp_mode, modeLabel())
         expanded.setTextViewText(R.id.notif_exp_bright_label, "Intensity  $brightPct%")
         expanded.setProgressBar(R.id.notif_exp_bright_bar, 100, brightPct, false)
+        // Use white for progress bar to ensure visibility on colorized notification backgrounds
+        expanded.setColorStateList(R.id.notif_exp_bright_bar, "setProgressTintList", ColorStateList.valueOf(0xFFFFFFFF.toInt()))
 
         expanded.setImageViewResource(R.id.notif_exp_btn_bright_dn, R.drawable.ic_notif_brightness_dn)
         expanded.setImageViewResource(R.id.notif_exp_btn_toggle,
@@ -346,7 +409,7 @@ class FlashlightService : Service() {
         expanded.setOnClickPendingIntent(R.id.notif_exp_btn_stop,      pi(ACTION_STOP, 25))
 
         val tapIntent = PendingIntent.getActivity(
-            this, 0,
+            this, NOTIF_ID,
             Intent(this, MainActivity::class.java).apply {
                 putExtra("navigate_to", "flashlight")
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
