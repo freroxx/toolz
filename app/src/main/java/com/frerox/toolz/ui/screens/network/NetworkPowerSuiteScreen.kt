@@ -1,6 +1,7 @@
 package com.frerox.toolz.ui.screens.network
 
 import android.app.Activity
+import android.os.Parcelable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -148,6 +149,8 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import kotlinx.parcelize.Parcelize
+
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import androidx.compose.animation.slideInVertically
@@ -168,10 +171,11 @@ private enum class SuiteTab(val label: String) {
     TRAFFIC("Traffic")
 }
 
+@Parcelize
 private data class ShizukuPrompt(
     val featureName: String,
     val supportingText: String
-)
+) : Parcelable
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
