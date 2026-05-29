@@ -28,7 +28,7 @@ class QuickToolzTileService : TileService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ requires PendingIntent for startActivityAndCollapse
             val pendingIntent = android.app.PendingIntent.getActivity(
-                this, 0, intent,
+                this, 6001, intent,
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
             )
             startActivityAndCollapse(pendingIntent)

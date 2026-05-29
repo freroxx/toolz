@@ -83,19 +83,20 @@
             android:tint="#B3261E"
             android:contentDescription="Needle" />
 
-        <View
+        <ImageView
             android:layout_width="8dp"
             android:layout_height="8dp"
             android:layout_gravity="center"
-            android:background="@drawable/widget_button_tonal" />
+            android:src="@drawable/widget_button_tonal" />
     </FrameLayout>
 
-    <View
+    <ImageView
         android:layout_width="4dp"
         android:layout_height="12dp"
         android:layout_alignTop="@id/widget_compass_container"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="-6dp"
-        android:background="#6750A4" />
+        android:src="@android:color/white"
+        android:tint="#6750A4" />
 
 </RelativeLayout>

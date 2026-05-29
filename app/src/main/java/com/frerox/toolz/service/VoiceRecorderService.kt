@@ -173,7 +173,7 @@ class VoiceRecorderService : Service() {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.VoiceRecorder.route)
         }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(this, 4001, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleAction = if (_isPaused.value) ACTION_RESUME else ACTION_PAUSE
         val toggleIntent = Intent(this, VoiceRecorderService::class.java).apply { action = toggleAction }
