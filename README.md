@@ -164,4 +164,4 @@ AI is optional. You can use Toolz's core utilities without configuring personal 
 - Releases: [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
 - Discord: [discord.gg/aAswRUerwh](https://discord.gg/aAswRUerwh)
 
-If you want to report a bug, suggest an improvement, or contribute to Toolz, open an issue or pull request in this repository.
+If you want to report a bug, suggest an improvement, or contribute to Toolz, open an issue or pull request in this repository, you can also join the DISCORD server for fast fixes and suggestions.
