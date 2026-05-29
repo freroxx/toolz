@@ -94,6 +94,9 @@ class DashboardViewModel @Inject constructor(
     val offlineState = offlineManager.offlineState
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OfflineState.ONLINE)
 
+    val manualOfflineMode = settingsRepository.offlineModeEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val pinnedTools = settingsRepository.pinnedTools
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
@@ -272,6 +275,10 @@ class DashboardViewModel @Inject constructor(
 
     fun dismissUpdate() {
         viewModelScope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
+    }
+
+    fun togglePerformanceMode(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setPerformanceMode(enabled) }
     }
 
     // ── System stats ──────────────────────────────────────────────────────────

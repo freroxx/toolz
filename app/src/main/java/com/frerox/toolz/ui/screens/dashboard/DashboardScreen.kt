@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -143,11 +144,12 @@ fun DashboardScreen(
 
     val searchQuery  by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
-    val aiRoutes     by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
-    val stats        by viewModel.dashboardStats.collectAsStateWithLifecycle()
-    val updateVersion by viewModel.updateAvailableVersion.collectAsStateWithLifecycle(null)
-    val offlineState by viewModel.offlineState.collectAsStateWithLifecycle()
-    val notes        by notepadViewModel.notes.collectAsStateWithLifecycle()
+    val aiRoutes       by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
+    val stats          by viewModel.dashboardStats.collectAsStateWithLifecycle()
+    val updateVersion  by viewModel.updateAvailableVersion.collectAsStateWithLifecycle(null)
+    val offlineState   by viewModel.offlineState.collectAsStateWithLifecycle()
+    val manualOffline  by viewModel.manualOfflineMode.collectAsStateWithLifecycle()
+    val notes          by notepadViewModel.notes.collectAsStateWithLifecycle()
     val categories   by viewModel.categories.collectAsStateWithLifecycle()
 
     val navigate: (String) -> Unit = remember {
@@ -194,7 +196,9 @@ fun DashboardScreen(
         notes               = notes,
         categories          = categories,
         offlineState        = offlineState,
+        manualOffline       = manualOffline,
         onToggleOffline     = viewModel::toggleOfflineMode,
+        onTogglePerformance = viewModel::togglePerformanceMode,
         stats               = stats,
     )
 }
@@ -242,7 +246,9 @@ fun DashboardContent(
     notes: List<Note>,
     categories: List<ToolCategory>,
     offlineState: OfflineState,
+    manualOffline: Boolean,
     onToggleOffline: (Boolean) -> Unit,
+    onTogglePerformance: (Boolean) -> Unit,
     stats: DashboardStats,
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -251,19 +257,8 @@ fun DashboardContent(
     var showOfflineSheet by remember { mutableStateOf(false) }
     var toolForDetail    by remember { mutableStateOf<ToolItem?>(null) }
     var currentView      by remember(savedView) { mutableStateOf(savedView) }
-    var selectedCatIndex by remember { mutableIntStateOf(CATEGORY_ALL) }
 
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotBlank()) selectedCatIndex = CATEGORY_ALL
-    }
-
-    val visibleCategories = remember(categories, selectedCatIndex, searchQuery) {
-        when {
-            searchQuery.isNotBlank() -> categories
-            selectedCatIndex == CATEGORY_ALL -> categories
-            else -> listOfNotNull(categories.getOrNull(selectedCatIndex))
-        }
-    }
+    val visibleCategories = categories
 
     Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -277,6 +272,7 @@ fun DashboardContent(
                 onNavigate     = onNavigate,
                 categories     = categories,
                 offlineState   = offlineState,
+                manualOffline  = manualOffline,
                 onOfflineClick = {
                     vibrationManager?.vibrateTick()
                     if (offlineState == OfflineState.OFFLINE) onToggleOffline(false)
@@ -306,7 +302,9 @@ fun DashboardContent(
                 }
 
                 item(key = "header") {
-                    StaggeredEntrance(1) { DashboardHeader(userName, offlineState) }
+                    StaggeredEntrance(1) { 
+                        DashboardHeader(userName, offlineState, onTogglePerformance) 
+                    }
                 }
 
                 if (showDashboardStats) {
@@ -340,11 +338,9 @@ fun DashboardContent(
                 item(key = "tools_header") {
                     StaggeredEntrance(6) {
                         AllToolsHeader(
-                            categories       = categories,
-                            selectedCatIndex = selectedCatIndex,
-                            onCatSelect      = { vibrationManager?.vibrateTick(); selectedCatIndex = it },
-                            currentView      = currentView,
-                            onViewToggle     = {
+                            totalTools   = categories.sumOf { it.items.size },
+                            currentView  = currentView,
+                            onViewToggle = {
                                 vibrationManager?.vibrateTick()
                                 currentView = if (currentView == "LIST") "DEFAULT" else "LIST"
                             },
@@ -429,6 +425,7 @@ fun DashboardTopBar(
     onNavigate: (String) -> Unit,
     categories: List<ToolCategory>,
     offlineState: OfflineState,
+    manualOffline: Boolean,
     onOfflineClick: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
@@ -478,7 +475,7 @@ fun DashboardTopBar(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Offline toggle — AnimatedContent for container-color morph
                 AnimatedContent(
-                    targetState = isOffline,
+                    targetState = manualOffline,
                     transitionSpec = {
                         (scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn())
                             .togetherWith(scaleOut() + fadeOut())
@@ -569,25 +566,26 @@ fun SmartSearchBar(
         label        = "sAlpha",
     )
 
-    val borderAnim by animateColorAsState(
-        targetValue   = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
-        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f),
-        animationSpec = tween(240),
-        label         = "searchBorder",
-    )
-
     Column(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            modifier       = Modifier.fillMaxWidth().height(58.dp),
-            shape          = SquircleShape,
-            color          = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-            tonalElevation = 1.dp,
-            border         = BorderStroke(1.dp, borderAnim),
-        ) {
-            Row(
-                modifier          = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        ExpressiveSearchField(
+            query = query,
+            onQueryChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                AnimatedContent(
+                    targetState  = offlineState == OfflineState.OFFLINE,
+                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(160)) },
+                    label        = "phAnim",
+                ) { offline ->
+                    Text(
+                        text  = if (offline) "Search local tools…" else "Search or ask AI…",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            },
+            leadingIcon = {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(32.dp)) {
                     if (isAiSearching) {
                         ExpressiveCircularProgressIndicator(
@@ -604,40 +602,8 @@ fun SmartSearchBar(
                         )
                     }
                 }
-
-                Spacer(Modifier.width(12.dp))
-
-                BasicTextField(
-                    value         = query,
-                    onValueChange = onQueryChange,
-                    modifier      = Modifier.weight(1f),
-                    singleLine    = true,
-                    textStyle     = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color      = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
-                    decorationBox = { inner ->
-                        Box {
-                            if (query.isEmpty()) {
-                                AnimatedContent(
-                                    targetState  = offlineState == OfflineState.OFFLINE,
-                                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(160)) },
-                                    label        = "phAnim",
-                                ) { offline ->
-                                    Text(
-                                        text  = if (offline) "Search local tools…" else "Search or ask AI…",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                }
-                            }
-                            inner()
-                        }
-                    },
-                )
-
+            },
+            trailingIcon = {
                 AnimatedContent(
                     targetState = query.isNotEmpty(),
                     transitionSpec = {
@@ -662,7 +628,7 @@ fun SmartSearchBar(
                     }
                 }
             }
-        }
+        )
 
         // Local dropdown
         AnimatedVisibility(
@@ -770,7 +736,13 @@ private fun SearchRow(tool: ToolItem, onClick: () -> Unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun DashboardHeader(userName: String, offlineState: OfflineState) {
+fun DashboardHeader(
+    userName: String, 
+    offlineState: OfflineState,
+    onTogglePerformance: (Boolean) -> Unit
+) {
+    val performanceMode = LocalPerformanceMode.current
+
     val greeting = remember {
         when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
             in 0..5   -> "GOOD NIGHT"
@@ -785,13 +757,46 @@ fun DashboardHeader(userName: String, offlineState: OfflineState) {
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 20.dp)) {
-        Text(
-            greeting,
-            style         = MaterialTheme.typography.labelMedium,
-            fontWeight    = FontWeight.Black,
-            color         = MaterialTheme.colorScheme.primary,
-            letterSpacing = 2.5.sp,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                greeting,
+                style         = MaterialTheme.typography.labelMedium,
+                fontWeight    = FontWeight.Black,
+                color         = MaterialTheme.colorScheme.primary,
+                letterSpacing = 2.5.sp,
+            )
+
+            // Performance Mode Toggle in Header
+            Surface(
+                onClick = { onTogglePerformance(!performanceMode) },
+                shape = CircleShape,
+                color = if (performanceMode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        if (performanceMode) Icons.Rounded.Bolt else Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                    Text(
+                        if (performanceMode) "PERFORMANCE" else "QUALITY",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             text          = if (userName.isBlank()) "Explorer" else userName,
@@ -870,10 +875,10 @@ private fun StatCard(
     ExpressiveCard(
         onClick        = { vibrationManager?.vibrateClick(); onClick() },
         modifier       = modifier.height(124.dp),
-        shape          = SquircleShape,
+        shape          = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
         elevation      = 0.dp,
-        border         = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.13f)),
+        border         = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
     ) {
         Row(
             modifier          = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -961,19 +966,19 @@ private fun RecentItem(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
     Column(
         modifier            = Modifier
-            .width(72.dp)
+            .width(76.dp)
             .bouncyClick { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Surface(
-            modifier = Modifier.size(60.dp),
-            shape    = SquircleShape,
+            modifier = Modifier.size(64.dp),
+            shape    = MediumExpressiveShape,
             color    = tool.color.copy(alpha = 0.12f),
-            border   = BorderStroke(1.2.dp, tool.color.copy(alpha = 0.2f)),
+            border   = BorderStroke(1.5.dp, tool.color.copy(alpha = 0.22f)),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(26.dp))
+                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp))
             }
         }
         Text(
@@ -1024,10 +1029,10 @@ private fun PinnedItem(
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
         onLongClick = { vibrationManager?.vibrateLongClick(); onTogglePin(tool.route) },
-        modifier    = Modifier.size(width = 136.dp, height = 96.dp),
-        shape       = SquircleShape,
+        modifier    = Modifier.size(width = 140.dp, height = 100.dp),
+        shape       = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
-        border      = BorderStroke(1.2.dp, tool.color.copy(alpha = 0.2f)),
+        border      = BorderStroke(1.5.dp, tool.color.copy(alpha = 0.22f)),
         elevation   = 0.dp,
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -1212,14 +1217,10 @@ private fun QuickNoteCard(note: Note, onNavigate: (String) -> Unit) {
 
 @Composable
 fun AllToolsHeader(
-    categories: List<ToolCategory>,
-    selectedCatIndex: Int,
-    onCatSelect: (Int) -> Unit,
+    totalTools: Int,
     currentView: String,
     onViewToggle: () -> Unit,
 ) {
-    val totalTools = remember(categories) { categories.sumOf { it.items.size } }
-
     Column(modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp)) {
         Row(
             modifier              = Modifier.fillMaxWidth().padding(bottom = 12.dp),
@@ -1259,47 +1260,7 @@ fun AllToolsHeader(
                 }
             }
         }
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding        = PaddingValues(horizontal = 2.dp),
-        ) {
-            item {
-                CategoryChip("All", selectedCatIndex == CATEGORY_ALL) { onCatSelect(CATEGORY_ALL) }
-            }
-            items(categories.size) { i ->
-                val label = categories[i].title.split(" & ", " ").first().let {
-                    if (it.length > 8) it.take(7) + "…" else it
-                }
-                CategoryChip(label, selectedCatIndex == i) { onCatSelect(i) }
-            }
-        }
     }
-}
-
-@Composable
-private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    ExpressiveFilterChip(
-        selected = selected,
-        onClick  = onClick,
-        label    = {
-            Text(label,
-                style      = MaterialTheme.typography.labelMedium,
-                fontWeight = if (selected) FontWeight.Black else FontWeight.SemiBold,
-                letterSpacing = 0.2.sp)
-        },
-        shape  = BouncyShape,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            selectedLabelColor     = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled             = true,
-            selected            = selected,
-            borderColor         = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-            selectedBorderColor = Color.Transparent,
-        ),
-    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1309,20 +1270,20 @@ private fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) 
 @Composable
 fun SectionHeader(title: String) {
     Row(
-        modifier          = Modifier.padding(top = 24.dp, bottom = 12.dp),
+        modifier          = Modifier.padding(top = 28.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Surface(Modifier.size(width = 22.dp, height = 5.dp), CircleShape,
-                color = MaterialTheme.colorScheme.primary) {}
-            Surface(Modifier.size(width = 7.dp, height = 5.dp), CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)) {}
-        }
+        Surface(
+            modifier = Modifier.size(width = 24.dp, height = 6.dp),
+            shape    = CircleShape,
+            color    = MaterialTheme.colorScheme.primary
+        ) {}
         Spacer(Modifier.width(12.dp))
         Text(title,
-            style         = MaterialTheme.typography.titleSmall,
+            style         = MaterialTheme.typography.titleMedium,
             fontWeight    = FontWeight.Black,
-            letterSpacing = 1.6.sp)
+            letterSpacing = 1.8.sp,
+            color         = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
     }
 }
 
@@ -1378,17 +1339,28 @@ fun ToolGridCard(
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
-        modifier    = modifier.height(128.dp),
-        shape       = SquircleShape,
+        modifier    = modifier.height(132.dp),
+        shape       = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
         elevation   = 0.dp,
-        border      = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.13f)),
+        border      = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
     ) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            // Left accent strip
-            Box(Modifier.width(4.dp).fillMaxHeight().background(item.color.copy(alpha = 0.78f)))
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Background accent glow
+            Box(
+                Modifier
+                    .size(80.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 20.dp, y = (-20).dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(item.color.copy(alpha = 0.08f), Color.Transparent)
+                        )
+                    )
+            )
+
             Column(
-                modifier            = Modifier.weight(1f).fillMaxHeight().padding(14.dp),
+                modifier            = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(
@@ -1396,24 +1368,24 @@ fun ToolGridCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.Top,
                 ) {
-                    Surface(Modifier.size(44.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.13f)) {
+                    Surface(Modifier.size(48.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.15f)) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(item.icon, null, tint = item.color, modifier = Modifier.size(23.dp))
+                            Icon(item.icon, null, tint = item.color, modifier = Modifier.size(24.dp))
                         }
                     }
                     Icon(Icons.Rounded.ArrowOutward, null,
-                        modifier = Modifier.size(14.dp).alpha(0.2f))
+                        modifier = Modifier.size(14.dp).alpha(0.25f))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(item.title,
                         style         = MaterialTheme.typography.labelLarge,
                         fontWeight    = FontWeight.Black,
-                        letterSpacing = 0.3.sp,
+                        letterSpacing = 0.4.sp,
                         maxLines      = 1,
                         overflow      = TextOverflow.Ellipsis)
                     Text(item.description,
                         style      = MaterialTheme.typography.labelSmall,
-                        color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.52f),
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.Bold)
@@ -1452,19 +1424,19 @@ fun ToolListCard(
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
-        modifier    = Modifier.fillMaxWidth().height(80.dp),
-        shape       = SquircleShape,
+        modifier    = Modifier.fillMaxWidth().height(84.dp),
+        shape       = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
         elevation   = 0.dp,
-        border      = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.13f)),
+        border      = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
     ) {
         Row(
             modifier          = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(Modifier.size(50.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.12f)) {
+            Surface(Modifier.size(52.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.15f)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(item.icon, null, tint = item.color, modifier = Modifier.size(25.dp))
+                    Icon(item.icon, null, tint = item.color, modifier = Modifier.size(26.dp))
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -1493,10 +1465,10 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
     ExpressiveCard(
         onClick    = { vibrationManager?.vibrateClick(); onUpdate() },
         modifier   = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-        shape      = SquircleShape,
+        shape      = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
         elevation  = 0.dp,
-        border     = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        border     = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
     ) {
         Row(
             modifier              = Modifier.padding(18.dp).fillMaxWidth(),
@@ -1623,14 +1595,35 @@ fun UniversalPill(
     val secondary = MaterialTheme.colorScheme.secondary
     val tertiary  = MaterialTheme.colorScheme.tertiary
 
+    val pulseTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by pulseTransition.animateFloat(
+        initialValue = 1f, targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulseScale"
+    )
+    val glowAlpha by pulseTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glowAlpha"
+    )
+
     Surface(
-        modifier        = modifier.padding(horizontal = 18.dp).fillMaxWidth().height(88.dp),
-        shape           = SquircleShape,
+        modifier        = modifier
+            .padding(horizontal = 18.dp)
+            .fillMaxWidth()
+            .height(92.dp)
+            .graphicsLayer {
+                if (isActive && !performanceMode) {
+                    scaleX = pulseScale
+                    scaleY = pulseScale
+                }
+            },
+        shape           = ExtraLargeExpressiveShape,
         color           = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
         tonalElevation  = 12.dp,
-        shadowElevation = if (performanceMode) 0.dp else 28.dp,
+        shadowElevation = if (performanceMode) 0.dp else 32.dp,
         border          = BorderStroke(
-            width = if (isActive) 2.dp else 1.5.dp,
+            width = if (isActive) 2.2.dp else 1.8.dp,
             brush = if (isActive && !performanceMode)
                 Brush.sweepGradient(listOf(
                     primary.copy(alpha = 0.9f),
@@ -1638,10 +1631,23 @@ fun UniversalPill(
                     tertiary.copy(alpha = 0.5f),
                     primary.copy(alpha = 0.9f),
                 ))
-            else SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+            else SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)),
         ),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            if (isActive && !performanceMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(primary.copy(alpha = glowAlpha * 0.2f), Color.Transparent),
+                                radius = 400f
+                            )
+                        )
+                )
+            }
+
             HorizontalPager(
                 state    = pagerState,
                 modifier = Modifier
@@ -2220,6 +2226,7 @@ private fun _PreviewScaffold() {
                 onNavigate     = {},
                 categories     = cats,
                 offlineState   = OfflineState.ONLINE,
+                manualOffline  = false,
                 onOfflineClick = {},
                 onSettingsClick = {},
             )
@@ -2227,7 +2234,7 @@ private fun _PreviewScaffold() {
                 modifier       = Modifier.weight(1f).fadingEdges(bottom = 100.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
             ) {
-                item { DashboardHeader("Explorer", OfflineState.ONLINE) }
+                item { DashboardHeader("Explorer", OfflineState.ONLINE, {}) }
                 item {
                     StatsRow(DashboardStats(
                         batteryLevel         = 72,
@@ -2236,7 +2243,7 @@ private fun _PreviewScaffold() {
                         storageAvailableGb   = 28.4,
                     ), {})
                 }
-                item { AllToolsHeader(cats, CATEGORY_ALL, {}, "DEFAULT", {}) }
+                item { AllToolsHeader(cats.sumOf { it.items.size }, "DEFAULT", {}) }
                 cats.forEach { cat ->
                     item { SectionHeader(cat.title) }
                     item { ToolGridSection(cat.items, {}); Spacer(Modifier.height(4.dp)) }
