@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+    <!--
+      notification_flashlight_expanded.xml  —  Expanded notification view
+      Used as setCustomBigContentView().
+
+      Layout breakdown:
+      ┌─────────────────────────────────────────────────────────────┐
+      │ [4dp accent bar full-width]                                  │
+      │ Mode name (large) + brightness label                         │
+      │ [ProgressBar  brightness]                                    │
+      │ [Bright-] [Toggle] [Bright+]  |  [Cycle Mode]  [Stop]       │
+      └─────────────────────────────────────────────────────────────┘
+    -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="0dp">
+
+    <!-- Top mode color accent bar — colour set at runtime -->
+    <View
+        android:id="@+id/notif_exp_accent"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:background="#FFFBC02D" />
+
+    <!-- Content body -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="4dp">
+
+        <!-- Mode name row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/notif_exp_mode"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Steady Beam"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="?android:attr/textColorPrimary"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/notif_exp_bright_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Intensity  100%"
+                android:textSize="11sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Brightness bar -->
+        <ProgressBar
+            android:id="@+id/notif_exp_bright_bar"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="5dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="14dp"
+            android:max="100"
+            android:progress="100"
+            android:progressTint="#FFFBC02D"
+            android:progressBackgroundTint="#22FFFFFF" />
+
+        <!-- Action buttons row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingBottom="8dp">
+
+            <!-- Brightness down -->
+            <ImageButton
+                android:id="@+id/notif_exp_btn_bright_dn"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:src="@drawable/ic_notif_brightness_dn"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Decrease brightness"
+                android:padding="10dp"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <!-- Primary toggle (slightly larger) -->
+            <ImageButton
+                android:id="@+id/notif_exp_btn_toggle"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1.4"
+                android:src="@drawable/ic_notif_power_on"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Toggle flashlight"
+                android:padding="8dp"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <!-- Brightness up -->
+            <ImageButton
+                android:id="@+id/notif_exp_btn_bright_up"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:src="@drawable/ic_notif_brightness_up"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Increase brightness"
+                android:padding="10dp"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <!-- Divider -->
+            <View
+                android:layout_width="1dp"
+                android:layout_height="32dp"
+                android:background="#22FFFFFF"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
+
+            <!-- Cycle mode -->
+            <ImageButton
+                android:id="@+id/notif_exp_btn_mode"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:src="@drawable/ic_notif_cycle_mode"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Cycle mode"
+                android:padding="10dp"
+                android:tint="?android:attr/textColorSecondary" />
+
+            <!-- Stop / close -->
+            <ImageButton
+                android:id="@+id/notif_exp_btn_stop"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:src="@drawable/ic_notif_close"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Stop flashlight"
+                android:padding="10dp"
+                android:tint="?android:attr/textColorSecondary" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

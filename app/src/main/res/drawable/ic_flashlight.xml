@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ic_flashlight.xml
+  Neutral/monochrome flashlight — notification small icon.
+  Must be fully white (#FFFFFFFF) as Android renders small icons in white.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="
+            M17,4
+            C17,3.45 16.55,3 16,3
+            L8,3
+            C7.45,3 7,3.45 7,4
+            L7,7
+            C7,7.55 7.45,8 8,8
+            L16,8
+            C16.55,8 17,7.55 17,7 Z" />
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="
+            M6,8 L6,20
+            C6,20.55 6.45,21 7,21
+            L17,21
+            C17.55,21 18,20.55 18,20
+            L18,8 Z" />
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,21 L12,24"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round" />
+
+</vector>

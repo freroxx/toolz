@@ -16,6 +16,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import com.frerox.toolz.service.FlashlightService
+import android.content.Intent
+import kotlinx.coroutines.flow.first
+import com.frerox.toolz.data.repository.FlashlightRepository
 import javax.inject.Inject
 
 private const val TAG = "FlashlightVM"
@@ -25,7 +31,7 @@ private const val TAG = "FlashlightVM"
 // ─────────────────────────────────────────────────────────────
 
 enum class FlashlightMode {
-    STEADY, STROBE, SOS
+    STEADY, STROBE, SOS, DISCO
 }
 
 data class FlashlightState(
@@ -39,8 +45,14 @@ data class FlashlightState(
     val maxBrightness: Int             = 1,
     /** Strobe interval in milliseconds per half-cycle (on or off). */
     val strobeIntervalMs: Long         = 80L,
+    /** Min/Max interval for Disco mode in milliseconds. */
+    val discoIntervalRange: Pair<Long, Long> = 40L to 300L,
     /** True while the torch is physically lit (updated via TorchCallback). */
     val isPhysicallyOn: Boolean        = false,
+    /** Auto-off timer in minutes. 0 means disabled. */
+    val timerMinutes: Int              = 0,
+    /** Remaining time in seconds when timer is active. */
+    val remainingSeconds: Int?         = null,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -50,6 +62,8 @@ data class FlashlightState(
 @HiltViewModel
 class FlashlightViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val dataStore: DataStore<Preferences>,
+    private val repository: FlashlightRepository
 ) : ViewModel() {
 
     private val cameraManager =
@@ -63,6 +77,8 @@ class FlashlightViewModel @Inject constructor(
 
     /** Active SOS / strobe coroutine job. */
     private var modeJob: Job? = null
+    /** Timer job. */
+    private var timerJob: Job? = null
 
     // ── TorchCallback — keeps UI in sync with physical torch state ─────────
     /**
@@ -97,6 +113,40 @@ class FlashlightViewModel @Inject constructor(
     init {
         findCameraId()
         cameraManager.registerTorchCallback(torchCallback, null)
+        loadSettings()
+        
+        viewModelScope.launch {
+            repository.isOn.collect { isOn ->
+                _uiState.update { it.copy(isOn = isOn) }
+            }
+        }
+    }
+
+    private fun loadSettings() {
+        viewModelScope.launch {
+            dataStore.data.first().let { prefs ->
+                _uiState.update { it.copy(
+                    mode = FlashlightMode.valueOf(prefs[stringPreferencesKey("flashlight_mode")] ?: FlashlightMode.STEADY.name),
+                    brightness = prefs[floatPreferencesKey("flashlight_brightness")] ?: 1.0f,
+                    strobeIntervalMs = prefs[longPreferencesKey("flashlight_strobe_interval")] ?: 80L,
+                    discoIntervalRange = (prefs[longPreferencesKey("flashlight_disco_min")] ?: 40L) to (prefs[longPreferencesKey("flashlight_disco_max")] ?: 300L),
+                    timerMinutes = prefs[intPreferencesKey("flashlight_timer")] ?: 0
+                ) }
+            }
+        }
+    }
+
+    private fun saveSetting(key: String, value: Any) {
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                when (value) {
+                    is String -> prefs[stringPreferencesKey(key)] = value
+                    is Float -> prefs[floatPreferencesKey(key)] = value
+                    is Long -> prefs[longPreferencesKey(key)] = value
+                    is Int -> prefs[intPreferencesKey(key)] = value
+                }
+            }
+        }
     }
 
     private fun findCameraId() {
@@ -134,7 +184,7 @@ class FlashlightViewModel @Inject constructor(
         try {
             @Suppress("UNCHECKED_CAST")
             val key = CameraCharacteristics::class.java
-                .getDeclaredField("FLASH_INFO_STRENGTH_MAX_LEVEL")
+                .getDeclaredField("FLASH_INFO_STRENGTH_MAXIMUM_LEVEL")
                 .get(null) as? CameraCharacteristics.Key<Int> ?: return
 
             // Explicit Int annotation prevents the generic Comparable<T> issue
@@ -159,25 +209,30 @@ class FlashlightViewModel @Inject constructor(
 
     fun toggleFlashlight() {
         val newOn = !_uiState.value.isOn
-        _uiState.update { it.copy(isOn = newOn) }
-        if (newOn) startMode() else stopMode()
+
+        val intent = Intent(context, FlashlightService::class.java).apply {
+            action = if (newOn) FlashlightService.ACTION_TOGGLE else FlashlightService.ACTION_STOP
+        }
+        if (newOn) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     fun setMode(mode: FlashlightMode) {
-        val wasOn = _uiState.value.isOn
         _uiState.update { it.copy(mode = mode) }
-        if (wasOn) {
-            // Cancel old job without physically toggling off first
-            // to avoid the visible flash-off glitch during mode switch.
-            modeJob?.cancel()
+        saveSetting("flashlight_mode", mode.name)
+        if (_uiState.value.isOn) {
             startMode()
         }
     }
 
     fun setBrightness(normalised: Float) {
-        _uiState.update { it.copy(brightness = normalised.coerceIn(0.1f, 1.0f)) }
-        // Apply immediately if STEADY and on
-        if (_uiState.value.isOn && _uiState.value.mode == FlashlightMode.STEADY) {
+        val valClamped = normalised.coerceIn(0.1f, 1.0f)
+        _uiState.update { it.copy(brightness = valClamped) }
+        saveSetting("flashlight_brightness", valClamped)
+        if (_uiState.value.isOn) {
             applyCurrentBrightness()
         }
     }
@@ -190,10 +245,46 @@ class FlashlightViewModel @Inject constructor(
     fun setStrobeInterval(ms: Long) {
         val clamped = ms.coerceIn(40L, 500L)
         _uiState.update { it.copy(strobeIntervalMs = clamped) }
-        // If already strobing, restart with new timing
-        if (_uiState.value.isOn && _uiState.value.mode == FlashlightMode.STROBE) {
+        saveSetting("flashlight_strobe_interval", clamped)
+        // If already strobing or in disco, restart with new timing (disco uses it as base)
+        if (_uiState.value.isOn && (_uiState.value.mode == FlashlightMode.STROBE || _uiState.value.mode == FlashlightMode.DISCO)) {
             modeJob?.cancel()
             startMode()
+        }
+    }
+
+    fun setTimer(minutes: Int) {
+        _uiState.update { it.copy(timerMinutes = minutes) }
+        saveSetting("flashlight_timer", minutes)
+        if (minutes > 0) {
+            startTimer(minutes)
+        } else {
+            timerJob?.cancel()
+            _uiState.update { it.copy(remainingSeconds = null) }
+        }
+    }
+
+    fun setDiscoRange(min: Long, max: Long) {
+        _uiState.update { it.copy(discoIntervalRange = min to max) }
+        saveSetting("flashlight_disco_min", min)
+        saveSetting("flashlight_disco_max", max)
+        // If in disco, no need to restart job as it picks up values dynamically
+    }
+
+    private fun startTimer(minutes: Int) {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            var seconds = minutes * 60
+            while (seconds > 0) {
+                _uiState.update { it.copy(remainingSeconds = seconds) }
+                delay(1000)
+                seconds--
+            }
+            _uiState.update { it.copy(remainingSeconds = 0) }
+            if (_uiState.value.isOn) {
+                toggleFlashlight()
+            }
+            _uiState.update { it.copy(remainingSeconds = null, timerMinutes = 0) }
         }
     }
 
@@ -208,6 +299,7 @@ class FlashlightViewModel @Inject constructor(
                 }
                 FlashlightMode.STROBE -> runStrobe()
                 FlashlightMode.SOS    -> runSos()
+                FlashlightMode.DISCO  -> runDisco()
             }
         }
     }
@@ -275,13 +367,13 @@ class FlashlightViewModel @Inject constructor(
 
         while (true) {
             // S: · · ·
-            repeat(3) { setTorchRaw(true); delay(dotMs);  setTorchRaw(false); delay(gapMs) }
+            repeat(3) { applyCurrentBrightness(); delay(dotMs);  setTorchRaw(false); delay(gapMs) }
             delay(gapMs * 2)
             // O: — — —
-            repeat(3) { setTorchRaw(true); delay(dashMs); setTorchRaw(false); delay(gapMs) }
+            repeat(3) { applyCurrentBrightness(); delay(dashMs); setTorchRaw(false); delay(gapMs) }
             delay(gapMs * 2)
             // S: · · ·
-            repeat(3) { setTorchRaw(true); delay(dotMs);  setTorchRaw(false); delay(gapMs) }
+            repeat(3) { applyCurrentBrightness(); delay(dotMs);  setTorchRaw(false); delay(gapMs) }
             delay(wordMs)
         }
     }
@@ -289,7 +381,19 @@ class FlashlightViewModel @Inject constructor(
     private suspend fun runStrobe() {
         while (true) {
             val interval = _uiState.value.strobeIntervalMs
-            setTorchRaw(true)
+            applyCurrentBrightness()
+            delay(interval)
+            setTorchRaw(false)
+            delay(interval)
+        }
+    }
+
+    private suspend fun runDisco() {
+        while (true) {
+            val range = _uiState.value.discoIntervalRange
+            val interval = (range.first..range.second).random()
+            
+            applyCurrentBrightness()
             delay(interval)
             setTorchRaw(false)
             delay(interval)
@@ -304,5 +408,6 @@ class FlashlightViewModel @Inject constructor(
             cameraManager.unregisterTorchCallback(torchCallback)
         } catch (_: Exception) {}
         stopMode()
+        timerJob?.cancel()
     }
 }
