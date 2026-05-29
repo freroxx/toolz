@@ -5,8 +5,11 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,22 +22,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExpressiveCard
-import com.frerox.toolz.ui.components.StaggeredEntrance
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -70,14 +68,28 @@ fun FlashlightScreen(
                 title = "FLASHLIGHT",
                 subtitle = "Optical beam control",
                 navigationIcon = {
-                    IconButton(
+                    ToolzExpressiveIconButton(
                         onClick  = onBack,
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    // Quick Screen Light shortcut
+                    ToolzExpressiveIconButton(
+                        onClick = { /* Navigate to Screen Light or handled by caller */ },
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.Monitor, "Screen Light")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -99,6 +111,8 @@ fun FlashlightScreen(
                     onSetMode       = viewModel::setMode,
                     onSetBrightness = viewModel::setBrightness,
                     onSetStrobe     = viewModel::setStrobeInterval,
+                    onSetTimer      = viewModel::setTimer,
+                    onSetDiscoRange = viewModel::setDiscoRange,
                     modifier = Modifier
                         .fillMaxSize()
                         .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp)),
@@ -124,13 +138,10 @@ private fun FlashlightContent(
     onSetMode: (FlashlightMode) -> Unit,
     onSetBrightness: (Float) -> Unit,
     onSetStrobe: (Long) -> Unit,
+    onSetTimer: (Int) -> Unit,
+    onSetDiscoRange: (Long, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // ── Glow animations — always declared unconditionally ──────────────────
-    // The glow should animate only when the torch is on, but we MUST call
-    // animateFloat unconditionally to obey Compose composition rules.
-    // We derive the effective alpha from the raw animated value afterwards.
-
     val glowInf = rememberInfiniteTransition(label = "glow")
 
     // Outer halo pulse
@@ -154,7 +165,7 @@ private fun FlashlightContent(
         label = "midGlow",
     )
 
-    // Effective values — zero when torch is off (no rendering cost)
+    // Effective values
     val effectiveBrightness = if (state.isOn) state.brightness else 0f
     val outerGlow           = if (state.isOn) outerGlowRaw else 0f
     val midGlow             = if (state.isOn) midGlowRaw   else 0f
@@ -178,51 +189,53 @@ private fun FlashlightContent(
         modifier              = modifier,
         horizontalAlignment   = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.weight(0.5f))
+        Spacer(Modifier.weight(0.3f))
 
         // ── Glow rings + main button ───────────────────────────────────────
         Box(
             modifier         = Modifier.size(320.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // Outermost diffuse halo
-            GlowRing(
-                size   = 310.dp,
-                scale  = outerGlow,
-                alpha  = 0.18f * effectiveBrightness,
-                color  = BeamYellow,
-                solid  = false,
-            )
-            // Mid ring
-            GlowRing(
-                size   = 240.dp,
-                scale  = midGlow,
-                alpha  = 0.28f * effectiveBrightness,
-                color  = BeamYellow,
-                solid  = false,
-            )
-            // Inner solid ring
-            GlowRing(
-                size   = 195.dp,
-                scale  = 1f,
-                alpha  = 0.55f * effectiveBrightness,
-                color  = BeamAmber,
-                solid  = true,
-            )
+            StaggeredEntrance(index = 0) {
+                Box(contentAlignment = Alignment.Center) {
+                    // Outermost diffuse halo
+                    GlowRing(
+                        size   = 310.dp,
+                        scale  = outerGlow,
+                        alpha  = 0.18f * effectiveBrightness,
+                        color  = BeamYellow,
+                        solid  = false,
+                    )
+                    // Mid ring
+                    GlowRing(
+                        size   = 240.dp,
+                        scale  = midGlow,
+                        alpha  = 0.28f * effectiveBrightness,
+                        color  = BeamYellow,
+                        solid  = false,
+                    )
+                    // Inner solid ring
+                    GlowRing(
+                        size   = 195.dp,
+                        scale  = 1f,
+                        alpha  = 0.55f * effectiveBrightness,
+                        color  = BeamAmber,
+                        solid  = true,
+                    )
+                }
+            }
 
             // Main toggle button
             Surface(
                 modifier = Modifier
                     .size(170.dp)
                     .scale(buttonScale)
-                    .shadow(
-                        elevation  = if (state.isOn) (28 * effectiveBrightness).dp else 4.dp,
-                        shape      = CircleShape,
-                        spotColor  = if (state.isOn) BeamAmber else Color.Transparent,
-                    )
+                    .expressivePressScale(remember { MutableInteractionSource() }, true)
                     .bouncyClick { onToggle() },
                 shape  = CircleShape,
                 color  = if (state.isOn) BeamYellow else MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = if (state.isOn) 12.dp else 2.dp,
+                shadowElevation = if (state.isOn) 24.dp else 4.dp,
                 border = BorderStroke(
                     width = if (state.isOn) 3.dp else 1.dp,
                     color = if (state.isOn) BeamWhite.copy(alpha = 0.6f)
@@ -245,83 +258,103 @@ private fun FlashlightContent(
         Spacer(Modifier.height(28.dp))
 
         // ── Status chip ────────────────────────────────────────────────────
-        AnimatedContent(
-            targetState = state.isOn,
-            transitionSpec = {
-                fadeIn(tween(200)) togetherWith fadeOut(tween(200))
-            },
-            label = "statusChip",
-        ) { isOn ->
-            Surface(
-                color  = if (isOn) BeamYellow.copy(alpha = 0.15f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape  = RoundedCornerShape(20.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (isOn) BeamAmber.copy(alpha = 0.3f)
-                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                ),
-            ) {
-                Row(
-                    modifier              = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+        StaggeredEntrance(index = 1) {
+            AnimatedContent(
+                targetState = state.isOn,
+                transitionSpec = {
+                    fadeIn(tween(200)) togetherWith fadeOut(tween(200))
+                },
+                label = "statusChip",
+            ) { isOn ->
+                Surface(
+                    color  = if (isOn) BeamYellow.copy(alpha = 0.15f)
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape  = RoundedCornerShape(20.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isOn) BeamAmber.copy(alpha = 0.3f)
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                    ),
                 ) {
-                    // Status dot — blinks in SOS mode
-                    val dotAlpha = when {
-                        !isOn                          -> 0.4f
-                        state.mode == FlashlightMode.SOS -> sosDotAlpha
-                        else                           -> 1f
+                    Row(
+                        modifier              = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        val dotAlpha = when {
+                            !isOn                          -> 0.4f
+                            state.mode == FlashlightMode.SOS -> sosDotAlpha
+                            else                           -> 1f
+                        }
+                        Box(
+                            Modifier
+                                .size(7.dp)
+                                .alpha(dotAlpha)
+                                .background(
+                                    if (isOn) BeamAmber else MaterialTheme.colorScheme.outline,
+                                    CircleShape,
+                                )
+                        )
+                        Text(
+                            text = when {
+                                !isOn                            -> "STANDBY"
+                                state.mode == FlashlightMode.SOS    -> "SOS SIGNAL"
+                                state.mode == FlashlightMode.STROBE -> "STROBE ACTIVE"
+                                state.mode == FlashlightMode.DISCO  -> "DISCO MODE"
+                                else                             -> "BEAM ACTIVE"
+                            },
+                            style         = MaterialTheme.typography.labelSmall,
+                            fontWeight    = FontWeight.Black,
+                            letterSpacing = 1.5.sp,
+                            color         = if (isOn) BeamAmber
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Box(
-                        Modifier
-                            .size(7.dp)
-                            .alpha(dotAlpha)
-                            .background(
-                                if (isOn) BeamAmber else MaterialTheme.colorScheme.outline,
-                                CircleShape,
-                            )
-                    )
-                    Text(
-                        text = when {
-                            !isOn                            -> "STANDBY"
-                            state.mode == FlashlightMode.SOS    -> "SOS SIGNAL"
-                            state.mode == FlashlightMode.STROBE -> "STROBE"
-                            else                             -> "BEAM ACTIVE"
-                        },
-                        style         = MaterialTheme.typography.labelSmall,
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 1.5.sp,
-                        color         = if (isOn) BeamAmber
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
+        }
+
+        // Timer Indicator
+        AnimatedVisibility(visible = state.remainingSeconds != null) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "Auto-off in ${state.remainingSeconds?.let { s -> "%02d:%02d".format(s / 60, s % 60) }}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Spacer(Modifier.weight(1f))
 
         // ── Controls panel ─────────────────────────────────────────────────
-        ControlsPanel(
-            state           = state,
-            onSetMode       = onSetMode,
-            onSetBrightness = onSetBrightness,
-            onSetStrobe     = onSetStrobe,
-            modifier        = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        )
+        StaggeredEntrance(index = 2) {
+            ControlsPanel(
+                state           = state,
+                onSetMode       = onSetMode,
+                onSetBrightness = onSetBrightness,
+                onSetStrobe     = onSetStrobe,
+                onSetTimer      = onSetTimer,
+                onSetDiscoRange = onSetDiscoRange,
+                modifier        = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            )
+        }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Controls panel — brightness, mode, strobe speed
+//  Controls panel — brightness, mode, strobe speed, timer
 // ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ControlsPanel(
+internal fun ControlsPanel(
     state: FlashlightState,
     onSetMode: (FlashlightMode) -> Unit,
     onSetBrightness: (Float) -> Unit,
     onSetStrobe: (Long) -> Unit,
+    onSetTimer: (Int) -> Unit,
+    onSetDiscoRange: (Long, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     ExpressiveCard(
@@ -337,81 +370,71 @@ private fun ControlsPanel(
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             // ── Mode selector ─────────────────────────────────────────────
-            ControlLabel(
-                icon  = Icons.Rounded.SettingsSuggest,
-                label = "SIGNAL MODE",
-            )
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                FlashlightMode.entries.forEachIndexed { i, mode ->
-                    SegmentedButton(
-                        selected = state.mode == mode,
-                        onClick  = { onSetMode(mode) },
-                        shape    = SegmentedButtonDefaults.itemShape(i, FlashlightMode.entries.size),
-                        colors   = SegmentedButtonDefaults.colors(
-                            activeContainerColor = MaterialTheme.colorScheme.primary,
-                            activeContentColor   = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    ) {
-                        Text(
-                            mode.name,
-                            style      = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                        )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ControlLabel(
+                    icon  = Icons.Rounded.SettingsSuggest,
+                    label = "SIGNAL MODE",
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    FlashlightMode.entries.forEachIndexed { i, mode ->
+                        SegmentedButton(
+                            selected = state.mode == mode,
+                            onClick  = { onSetMode(mode) },
+                            shape    = SegmentedButtonDefaults.itemShape(i, FlashlightMode.entries.size),
+                            colors   = SegmentedButtonDefaults.colors(
+                                activeContainerColor = MaterialTheme.colorScheme.primary,
+                                activeContentColor   = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                        ) {
+                            Text(
+                                mode.name,
+                                style      = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
             }
 
             // ── Brightness slider ─────────────────────────────────────────
-            AnimatedVisibility(visible = state.mode == FlashlightMode.STEADY) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically,
-                    ) {
-                        ControlLabel(
-                            icon  = Icons.Rounded.Tune,
-                            label = "INTENSITY",
-                        )
-                        if (!state.isBrightnessSupported) {
-                            Text(
-                                "HW LIMITED",
-                                style      = MaterialTheme.typography.labelSmall,
-                                color      = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        } else {
-                            Text(
-                                "${(state.brightness * 100).toInt()}%",
-                                style      = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color      = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                    Slider(
-                        value          = state.brightness,
-                        onValueChange  = onSetBrightness,
-                        enabled        = state.isBrightnessSupported,
-                        valueRange     = 0.1f..1.0f,
-                        modifier       = Modifier.fillMaxWidth(),
-                        colors         = SliderDefaults.colors(
-                            thumbColor         = MaterialTheme.colorScheme.primary,
-                            activeTrackColor   = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            disabledThumbColor          = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f),
-                            disabledActiveTrackColor    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f),
-                            disabledInactiveTrackColor  = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.1f),
-                        ),
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically,
+                ) {
+                    ControlLabel(
+                        icon  = Icons.Rounded.Tune,
+                        label = "INTENSITY",
                     )
+                    if (!state.isBrightnessSupported) {
+                        Text(
+                            "HW LIMITED",
+                            style      = MaterialTheme.typography.labelSmall,
+                            color      = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else {
+                        Text(
+                            "${(state.brightness * 100).toInt()}%",
+                            style      = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
+                ExpressiveSlider(
+                    value          = state.brightness,
+                    onValueChange  = onSetBrightness,
+                    enabled        = state.isBrightnessSupported,
+                    valueRange     = 0.1f..1.0f,
+                    modifier       = Modifier.fillMaxWidth()
+                )
             }
 
             // ── Strobe speed slider ───────────────────────────────────────
             AnimatedVisibility(visible = state.mode == FlashlightMode.STROBE) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Slider value = 1 / interval, so higher = faster.
-                    // Map: slider 0..1 → interval 500ms..40ms (inverted).
                     val sliderValue = remember(state.strobeIntervalMs) {
                         1f - ((state.strobeIntervalMs - 40f) / (500f - 40f))
                     }
@@ -436,10 +459,9 @@ private fun ControlsPanel(
                             color      = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    Slider(
+                    ExpressiveSlider(
                         value         = sliderValue,
                         onValueChange = { v ->
-                            // Invert back to milliseconds
                             val ms = (500f - v * (500f - 40f)).roundToLong().coerceIn(40L, 500L)
                             onSetStrobe(ms)
                         },
@@ -448,13 +470,65 @@ private fun ControlsPanel(
                         colors        = SliderDefaults.colors(
                             thumbColor         = MaterialTheme.colorScheme.tertiary,
                             activeTrackColor   = MaterialTheme.colorScheme.tertiary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
                         ),
                     )
-                    // Speed hint labels
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Slow", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
-                        Text("Fast", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
+                }
+            }
+
+            // ── Disco Range selector ──────────────────────────────────────
+            AnimatedVisibility(visible = state.mode == FlashlightMode.DISCO) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically,
+                    ) {
+                        ControlLabel(
+                            icon  = Icons.Rounded.MusicNote,
+                            label = "PACE RANGE",
+                        )
+                        Text(
+                            "${state.discoIntervalRange.first}ms - ${state.discoIntervalRange.second}ms",
+                            style      = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color      = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    
+                    RangeSlider(
+                        value = state.discoIntervalRange.first.toFloat()..state.discoIntervalRange.second.toFloat(),
+                        onValueChange = { range ->
+                            onSetDiscoRange(range.start.toLong(), range.endInclusive.toLong())
+                        },
+                        valueRange = 30f..1000f,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.tertiary,
+                            activeTrackColor = MaterialTheme.colorScheme.tertiary,
+                        )
+                    )
+                }
+            }
+
+            // ── Timer selector ────────────────────────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ControlLabel(
+                    icon  = Icons.Rounded.Timer,
+                    label = "AUTO-OFF TIMER",
+                )
+                val timerOptions = listOf(0, 1, 5, 10, 30)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    items(timerOptions) { mins ->
+                        ExpressiveFilterChip(
+                            selected = state.timerMinutes == mins,
+                            onClick = { onSetTimer(mins) },
+                            label = { 
+                                Text(if (mins == 0) "OFF" else "${mins}m")
+                            }
+                        )
                     }
                 }
             }
@@ -586,7 +660,7 @@ private fun PermissionContent(
                 lineHeight = 22.sp,
             )
             Spacer(Modifier.height(36.dp))
-            Button(
+            ToolzExpressiveButton(
                 onClick  = onRequest,
                 shape    = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
@@ -602,3 +676,45 @@ private fun PermissionContent(
 // ─────────────────────────────────────────────────────────────
 
 private fun Float.roundToLong(): Long = (this + 0.5f).toLong()
+
+@Composable
+fun Modifier.expressivePressScale(
+    interactionSource: MutableInteractionSource,
+    enabled: Boolean,
+): Modifier {
+    val performanceMode = LocalPerformanceMode.current
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (enabled && isPressed && !performanceMode) 0.94f else 1f,
+        animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
+            dampingRatio = 0.6f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "expressivePressScale",
+    )
+
+    return this.then(
+        Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+    )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun FlashlightScreenPreview() {
+    com.frerox.toolz.ui.theme.ToolzTheme {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            FlashlightContent(
+                state = FlashlightState(isOn = true, mode = FlashlightMode.DISCO, timerMinutes = 5, remainingSeconds = 299),
+                onToggle = {},
+                onSetMode = {},
+                onSetBrightness = {},
+                onSetStrobe = {},
+                onSetTimer = {},
+                onSetDiscoRange = { _, _ -> }
+            )
+        }
+    }
+}

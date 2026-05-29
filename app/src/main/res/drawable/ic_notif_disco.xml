@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ic_notif_disco.xml — music note / disco icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="
+            M12,3 v10.55
+            c-0.59,-0.34 -1.27,-0.55 -2,-0.55
+            c-2.21,0 -4,1.79 -4,4
+            s1.79,4 4,4
+            4,-1.79 4,-4
+            V7 h4 V3 H12z" />
+</vector>

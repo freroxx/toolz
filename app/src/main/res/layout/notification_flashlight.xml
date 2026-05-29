@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  notification_flashlight.xml  —  Compact notification view
+  Used by NotificationCompat.DecoratedCustomViewStyle as setCustomContentView().
+
+  Layout breakdown (single row, 64dp recommended height):
+  ┌──────────────────────────────────────────────────────────────┐
+  │ [mode-strip 4dp] [icon 40dp] [mode-label + bright-bar] [btn] │
+  └──────────────────────────────────────────────────────────────┘
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="0dp">
+
+    <!-- Left color accent strip — tinted at runtime via setBackgroundColor -->
+    <View
+        android:id="@+id/notif_mode_strip"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:layout_marginEnd="14dp"
+        android:background="#FFFBC02D" />
+
+    <!-- Flashlight icon — colorFilter applied at runtime for mode color -->
+    <ImageView
+        android:id="@+id/notif_icon"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_marginEnd="14dp"
+        android:src="@drawable/ic_flashlight_off"
+        android:scaleType="fitCenter"
+        android:adjustViewBounds="true" />
+
+    <!-- Text block: mode label + brightness bar -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <!-- Mode label e.g. "STEADY BEAM" -->
+        <TextView
+            android:id="@+id/notif_mode_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="STEADY BEAM"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <!-- Brightness bar + percentage in one row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="5dp">
+
+            <ProgressBar
+                android:id="@+id/notif_brightness_bar"
+                style="@android:style/Widget.ProgressBar.Horizontal"
+                android:layout_width="0dp"
+                android:layout_height="4dp"
+                android:layout_weight="1"
+                android:max="100"
+                android:progress="100"
+                android:progressTint="#FFFBC02D"
+                android:progressBackgroundTint="#44FFFFFF" />
+
+            <TextView
+                android:id="@+id/notif_bright_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="100%"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="?android:attr/textColorSecondary" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Toggle button -->
+    <ImageButton
+        android:id="@+id/notif_btn_toggle"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="10dp"
+        android:src="@drawable/ic_notif_power_on"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="Toggle flashlight"
+        android:padding="8dp"
+        android:tint="?android:attr/textColorPrimary" />
+
+</LinearLayout>
