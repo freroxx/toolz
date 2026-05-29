@@ -1,6 +1,6 @@
 package com.frerox.toolz.ui.screens.light
 
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -10,27 +10,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Lightbulb
-import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExpressiveCard
-import com.frerox.toolz.ui.components.StaggeredEntrance
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlin.math.max
@@ -42,28 +36,27 @@ fun LightMeterScreen(
     viewModel: LightMeterViewModel,
     onBack: () -> Unit
 ) {
-    val luxValue by viewModel.luxValue.collectAsState()
+    val state by viewModel.uiState.collectAsState()
     val hasSensor = viewModel.hasSensor
     val performanceMode = LocalPerformanceMode.current
     
-    var maxLux by remember { mutableStateOf(0f) }
-    LaunchedEffect(luxValue) {
-        maxLux = max(maxLux, luxValue)
-    }
+    val currentLux = state.luxValue
+    val displayLux = if (state.unit == LightUnit.FOOT_CANDLE) currentLux * 0.092903f else currentLux
+    val unitLabel = if (state.unit == LightUnit.LUX) "LUX" else "FC"
 
     val (statusLabel, statusColor, statusDesc) = when {
-        luxValue < 5 -> Triple("Pitch Black", MaterialTheme.colorScheme.outline, "Absolute void of light")
-        luxValue < 20 -> Triple("Very Dim", MaterialTheme.colorScheme.secondary, "Shadowy environment")
-        luxValue < 100 -> Triple("Mood Lighting", MaterialTheme.colorScheme.primary, "Relaxed atmosphere")
-        luxValue < 250 -> Triple("Residential", MaterialTheme.colorScheme.tertiary, "Comfortable interior")
-        luxValue < 500 -> Triple("Office Standard", MaterialTheme.colorScheme.primary, "Optimal workspace")
-        luxValue < 1000 -> Triple("Detailed Task", MaterialTheme.colorScheme.secondary, "Precision work environment")
-        luxValue < 5000 -> Triple("Overcast Day", MaterialTheme.colorScheme.primary, "Bright natural ambient")
+        currentLux < 5 -> Triple("Pitch Black", MaterialTheme.colorScheme.outline, "Absolute void of light")
+        currentLux < 20 -> Triple("Very Dim", MaterialTheme.colorScheme.secondary, "Shadowy environment")
+        currentLux < 100 -> Triple("Mood Lighting", MaterialTheme.colorScheme.primary, "Relaxed atmosphere")
+        currentLux < 250 -> Triple("Residential", MaterialTheme.colorScheme.tertiary, "Comfortable interior")
+        currentLux < 500 -> Triple("Office Standard", MaterialTheme.colorScheme.primary, "Optimal workspace")
+        currentLux < 1000 -> Triple("Detailed Task", MaterialTheme.colorScheme.secondary, "Precision work environment")
+        currentLux < 5000 -> Triple("Overcast Day", MaterialTheme.colorScheme.primary, "Bright natural ambient")
         else -> Triple("Direct Sunlight", MaterialTheme.colorScheme.primary, "Extreme light intensity")
     }
 
     val animatedLux by animateFloatAsState(
-        targetValue = luxValue,
+        targetValue = currentLux,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "LuxValue"
     )
@@ -79,19 +72,37 @@ fun LightMeterScreen(
                 title = "LIGHT METER",
                 subtitle = "Ambient illumination analytics",
                 navigationIcon = {
-                    IconButton(
+                    ToolzExpressiveIconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { maxLux = 0f },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    ToolzExpressiveIconButton(
+                        onClick = { viewModel.toggleUnit() },
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset Max")
+                        Icon(if (state.unit == LightUnit.LUX) Icons.Rounded.Lightbulb else Icons.Rounded.FlashlightOn, "Toggle Unit")
+                    }
+                    ToolzExpressiveIconButton(
+                        onClick = { viewModel.resetStats() },
+                        modifier = Modifier.padding(8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset Stats")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -120,115 +131,165 @@ fun LightMeterScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     // Main Gauge
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(300.dp)
-                    ) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "glow")
-                        val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
-                            initialValue = 0.05f,
-                            targetValue = 0.12f,
-                            animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                            label = "glowAlpha"
-                        )
+                    StaggeredEntrance(index = 0) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(280.dp)
+                        ) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "glow")
+                            val glowAlpha by if (performanceMode) remember { mutableFloatStateOf(0.08f) } else infiniteTransition.animateFloat(
+                                initialValue = 0.05f,
+                                targetValue = 0.12f,
+                                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                                label = "glowAlpha"
+                            )
 
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(animatedColor.copy(alpha = glowAlpha), Color.Transparent),
-                                    radius = size.width / 1.1f
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(animatedColor.copy(alpha = glowAlpha), Color.Transparent),
+                                        radius = size.width / 1.1f
+                                    )
                                 )
-                            )
-                        }
+                            }
 
-                        LuxGauge(value = animatedLux, color = animatedColor)
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Rounded.Lightbulb,
-                                contentDescription = null,
-                                tint = animatedColor,
-                                modifier = Modifier.size(36.dp)
+                            ToolzWavyCircularProgressIndicator(
+                                progress = { min(currentLux / 2000f, 1f) },
+                                modifier = Modifier.size(260.dp),
+                                color = animatedColor,
+                                trackColor = animatedColor.copy(alpha = 0.1f)
                             )
-                            Text(
-                                text = "${luxValue.toInt()}",
-                                style = MaterialTheme.typography.displayLarge.copy(
+                            
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    Icons.Rounded.LightMode,
+                                    contentDescription = null,
+                                    tint = animatedColor,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Text(
+                                    text = if (displayLux < 10) "%.1f".format(displayLux) else displayLux.toInt().toString(),
+                                    style = MaterialTheme.typography.displayLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 72.sp,
+                                        letterSpacing = (-2).sp
+                                    )
+                                )
+                                Text(
+                                    text = unitLabel,
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 72.sp,
-                                    letterSpacing = (-2).sp
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                    letterSpacing = 2.sp
                                 )
-                            )
-                            Text(
-                                text = "LUMENS / M²",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                letterSpacing = 2.sp
-                            )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(40.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
 
-                    // Status Card
-                    ExpressiveCard(
-                        onClick = {},
-                        containerColor = animatedColor.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(32.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.5.dp, animatedColor.copy(alpha = 0.2f)),
-                        elevation = 0.dp
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                    // Status Chip
+                    StaggeredEntrance(index = 1) {
+                        Surface(
+                            color = animatedColor.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, animatedColor.copy(alpha = 0.2f))
                         ) {
-                            Surface(
-                                color = animatedColor.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(8.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Box(Modifier.size(8.dp).background(animatedColor, CircleShape))
                                 Text(
                                     text = statusLabel.uppercase(),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = animatedColor,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                     letterSpacing = 1.sp
                                 )
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = statusDesc,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    // History Sparkline
+                    StaggeredEntrance(index = 2) {
+                        ExpressiveCard(
+                            onClick = {},
+                            modifier = Modifier.fillMaxWidth().height(100.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                                SparklineChart(
+                                    data = state.history,
+                                    color = animatedColor,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Text(
+                                    "LIVE HISTORY",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                    modifier = Modifier.align(Alignment.TopStart)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
                     // Peak & Study Info
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        InfoCard(
-                            modifier = Modifier.weight(1f),
-                            label = "SESSION PEAK",
-                            value = "${maxLux.toInt()}",
-                            unit = "LUX",
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        
-                        val examReady = luxValue >= 500
-                        InfoCard(
-                            modifier = Modifier.weight(1f),
-                            label = "TASK READY",
-                            value = if (examReady) "OPTIMAL" else "LOW",
-                            unit = "LIGHT",
-                            color = if (examReady) Color(0xFF4CAF50) else Color(0xFFF44336)
-                        )
+                    StaggeredEntrance(index = 3) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            InfoCard(
+                                modifier = Modifier.weight(1f),
+                                label = "SESSION PEAK",
+                                value = if (state.maxLux < 10) "%.1f".format(state.maxLux.toUnit(state.unit)) else state.maxLux.toUnit(state.unit).toInt().toString(),
+                                unit = unitLabel,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            
+                            val examReady = currentLux >= 500
+                            InfoCard(
+                                modifier = Modifier.weight(1f),
+                                label = "TASK READY",
+                                value = if (examReady) "OPTIMAL" else "LOW",
+                                unit = "LEVEL",
+                                color = if (examReady) Color(0xFF4CAF50) else Color(0xFFF44336)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Avg & Min
+                    StaggeredEntrance(index = 4) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            InfoCard(
+                                modifier = Modifier.weight(1f),
+                                label = "AVERAGE",
+                                value = if (state.avgLux < 10) "%.1f".format(state.avgLux.toUnit(state.unit)) else state.avgLux.toUnit(state.unit).toInt().toString(),
+                                unit = unitLabel,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            InfoCard(
+                                modifier = Modifier.weight(1f),
+                                label = "MINIMUM",
+                                value = if (state.minLux == Float.MAX_VALUE) "-" else if (state.minLux < 10) "%.1f".format(state.minLux.toUnit(state.unit)) else state.minLux.toUnit(state.unit).toInt().toString(),
+                                unit = unitLabel,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
                     }
                     
                     Spacer(modifier = Modifier.height(32.dp))
@@ -236,6 +297,10 @@ fun LightMeterScreen(
             }
         }
     }
+}
+
+private fun Float.toUnit(unit: LightUnit): Float {
+    return if (unit == LightUnit.FOOT_CANDLE) this * 0.092903f else this
 }
 
 @Composable
@@ -249,7 +314,7 @@ fun InfoCard(modifier: Modifier, label: String, value: String, unit: String, col
         elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(20.dp).fillMaxWidth(),
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -280,39 +345,43 @@ fun InfoCard(modifier: Modifier, label: String, value: String, unit: String, col
 }
 
 @Composable
-fun LuxGauge(value: Float, color: Color) {
-    val sweepAngle = 240f
-    val startAngle = 150f
-    val progress = min(value / 2000f, 1f)
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = tween(1000, easing = LinearOutSlowInEasing),
-        label = "GaugeProgress"
-    )
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val strokeWidth = 20.dp.toPx()
+fun SparklineChart(data: List<Float>, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        if (data.size < 2) return@Canvas
         
-        // Background track
-        drawArc(
-            color = Color.LightGray.copy(alpha = 0.1f),
-            startAngle = startAngle,
-            sweepAngle = sweepAngle,
-            useCenter = false,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        val maxVal = max(data.maxOrNull() ?: 0f, 1f)
+        val minVal = data.minOrNull() ?: 0f
+        val range = max(maxVal - minVal, 1f)
+        
+        val width = size.width
+        val height = size.height
+        val stepX = width / (data.size - 1)
+        
+        val path = Path()
+        data.forEachIndexed { i, value ->
+            val x = i * stepX
+            val y = height - ((value - minVal) / range * height)
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
-
-        // Progress track
-        drawArc(
-            brush = Brush.sweepGradient(
-                0f to color.copy(alpha = 0.2f),
-                0.5f to color,
-                1f to color
-            ),
-            startAngle = startAngle,
-            sweepAngle = sweepAngle * animatedProgress,
-            useCenter = false,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        
+        // Fill area
+        val fillPath = Path().apply {
+            addPath(path)
+            lineTo(width, height)
+            lineTo(0f, height)
+            close()
+        }
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(color.copy(alpha = 0.2f), Color.Transparent)
+            )
         )
     }
 }
@@ -338,9 +407,22 @@ fun NoSensorState() {
         Text("SENSOR NOT DETECTED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Text(
             "This tool requires a hardware light sensor which appears to be missing on this device.",
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 16.dp)
         )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun LightMeterScreenPreview() {
+    com.frerox.toolz.ui.theme.ToolzTheme {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            // We can't easily mock the ViewModel here without Hilt or manual factory, 
+            // but we can use a dummy state if we refactor the screen to take state instead of ViewModel.
+            // For now, let's just preview the NoSensorState or a mock-like setup if possible.
+            NoSensorState()
+        }
     }
 }
