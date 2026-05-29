@@ -210,7 +210,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                     ) {
                         Surface(
                             modifier = Modifier.fillMaxSize(),
-                            color = Color.Transparent
+                            color = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.onBackground
                         ) {
                             val navController = rememberNavController()
                             val pdfViewModel: PdfViewModel = hiltViewModel()

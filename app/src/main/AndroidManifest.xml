@@ -94,6 +94,40 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".service.FlashlightService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_TYPE"
+                android:value="Flashlight control with custom patterns and brightness" />
+        </service>
+
+        <service
+            android:name=".service.FlashlightTileService"
+            android:label="Toolz: Flashlight"
+            android:icon="@drawable/ic_flashlight"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <activity
+            android:name=".ui.screens.light.FlashlightQuickControlActivity"
+            android:theme="@style/Theme.Toolz.Transparent"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".ui.screens.calendar.EventAlarmActivity"
             android:exported="false"
