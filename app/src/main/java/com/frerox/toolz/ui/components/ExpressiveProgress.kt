@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -23,6 +24,8 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -96,6 +99,7 @@ fun ExpressiveLoadingWheel(
         modifier = modifier
             .size(56.dp)
             .padding(8.dp)
+            .semantics { contentDescription = contentDesc }
             .graphicsLayer { rotationZ = rotationAnim }
     ) {
         repeat(numLines) { index ->
@@ -180,7 +184,7 @@ fun ExpressiveLoadingIndicator(
 fun ExpressiveScanningIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    frameColor: Color = MaterialTheme.colorScheme.outlineVariant,
+    frameColor: Color = MaterialTheme.colorScheme.surfaceDim,
 ) {
     val performanceMode = LocalPerformanceMode.current
     BoxWithConstraints(
@@ -353,7 +357,7 @@ fun ToolzLoadingIndicator(
 fun ExpressiveLinearProgressIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyLinearProgressIndicator(modifier = modifier, color = color, trackColor = trackColor, strokeCap = strokeCap)
 
@@ -363,7 +367,7 @@ fun ExpressiveLinearProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyLinearProgressIndicator(progress, modifier, color, trackColor, strokeCap)
 
@@ -372,7 +376,7 @@ fun ExpressiveLinearProgressIndicator(
 fun ExpressiveWavyLinearProgressIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyLinearProgressIndicator(modifier = modifier, color = color, trackColor = trackColor, strokeCap = strokeCap)
 
@@ -382,7 +386,7 @@ fun ExpressiveWavyLinearProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyLinearProgressIndicator(progress, modifier, color, trackColor, strokeCap)
 
@@ -391,7 +395,7 @@ fun ExpressiveWavyLinearProgressIndicator(
 fun ExpressiveCircularProgressIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyCircularProgressIndicator(modifier = modifier, color = color, trackColor = trackColor, strokeCap = strokeCap)
 
@@ -401,7 +405,7 @@ fun ExpressiveCircularProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) = ToolzWavyCircularProgressIndicator(progress, modifier, color, trackColor, strokeCap)
 
@@ -410,7 +414,7 @@ fun ExpressiveCircularProgressIndicator(
 fun ToolzWavyLinearProgressIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -437,7 +441,7 @@ fun ToolzWavyLinearProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -465,7 +469,7 @@ fun ToolzWavyLinearProgressIndicator(
 fun ToolzWavyCircularProgressIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -492,7 +496,7 @@ fun ToolzWavyCircularProgressIndicator(
     progress: () -> Float,
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     strokeCap: StrokeCap = StrokeCap.Butt,
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -555,26 +559,30 @@ fun ExpressiveContainedLoadingIndicator(
     modifier: Modifier = Modifier,
     progress: (() -> Float)? = null,
     color: Color = MaterialTheme.colorScheme.primary,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
 ) {
     if (progress != null) {
         ContainedLoadingIndicator(
             progress = progress,
             modifier = modifier,
             indicatorColor = color,
+            containerColor = containerColor,
         )
     } else {
         ContainedLoadingIndicator(
             modifier = modifier,
             indicatorColor = color,
+            containerColor = containerColor,
         )
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveProgressPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),

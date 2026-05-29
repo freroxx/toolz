@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -39,7 +40,8 @@ fun ExpressiveTopAppBar(
     navigationIcon: @Composable (() -> Unit) = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     scrollBehavior: TopAppBarScrollBehavior? = null,
     largeFlexible: Boolean = false,
@@ -128,7 +130,8 @@ fun ExpressiveTopAppBar(
     navigationIcon: @Composable (() -> Unit) = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     scrollBehavior: TopAppBarScrollBehavior? = null,
     largeFlexible: Boolean = false,
@@ -181,6 +184,7 @@ fun ToolzHorizontalFloatingToolbar(
     scrollBehavior: FloatingToolbarScrollBehavior? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val haptic = rememberToolzHapticFeedback()
     HorizontalFloatingToolbar(
         modifier = modifier,
         expanded = expanded,
@@ -195,7 +199,7 @@ fun ToolzHorizontalFloatingToolbar(
             {
                 AppBarRow(
                     overflowIndicator = {
-                        IconButton(onClick = { /* menu state check */ }) {
+                        IconButton(onClick = { haptic.tick() }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "More")
                         }
                     }
@@ -224,6 +228,7 @@ fun ToolzVerticalFloatingToolbar(
     scrollBehavior: FloatingToolbarScrollBehavior? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val haptic = rememberToolzHapticFeedback()
     VerticalFloatingToolbar(
         modifier = modifier,
         expanded = expanded,
@@ -238,7 +243,7 @@ fun ToolzVerticalFloatingToolbar(
             {
                 AppBarColumn(
                     overflowIndicator = {
-                        IconButton(onClick = { /* menu state check */ }) {
+                        IconButton(onClick = { haptic.tick() }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "More")
                         }
                     }
@@ -264,6 +269,7 @@ fun ExpressiveFlexibleBottomAppBar(
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp),
     actions: AppBarRowScope.() -> Unit
 ) {
+    val haptic = rememberToolzHapticFeedback()
     FlexibleBottomAppBar(
         modifier = modifier,
         containerColor = containerColor,
@@ -274,9 +280,7 @@ fun ExpressiveFlexibleBottomAppBar(
         AppBarRow(
             overflowIndicator = {
                 IconButton(
-                    onClick = {
-                        /* menu state check omitted due to API differences */
-                    },
+                    onClick = { haptic.tick() },
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
@@ -290,10 +294,11 @@ fun ExpressiveFlexibleBottomAppBar(
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveBarsPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(32.dp),

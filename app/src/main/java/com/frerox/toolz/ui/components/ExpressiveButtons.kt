@@ -1,36 +1,68 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Save
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonShapes
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonColors
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconButtonShapes
+import androidx.compose.material3.IconToggleButtonColors
+import androidx.compose.material3.IconToggleButtonShapes
+import androidx.compose.material3.LargeExtendedFloatingActionButton
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SelectableChipColors
+import androidx.compose.material3.SelectableChipElevation
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
+import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -45,29 +77,16 @@ fun ToolzExpressiveButton(
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val performanceMode = LocalPerformanceMode.current
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (enabled && isPressed && !performanceMode) 0.94f else 1f,
-        animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
-            dampingRatio = 0.6f,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
-        label = "toolzExpressiveButtonScale",
-    )
 
     Button(
         onClick = {
-            vibrationManager?.vibrateClick()
+            haptic.click()
             currentOnClick()
         },
-        modifier = modifier.graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
         enabled = enabled,
         colors = colors,
         shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
@@ -90,29 +109,16 @@ fun ToolzOutlinedExpressiveButton(
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val performanceMode = LocalPerformanceMode.current
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (enabled && isPressed && !performanceMode) 0.94f else 1f,
-        animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
-            dampingRatio = 0.6f,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
-        label = "toolzOutlinedExpressiveButtonScale",
-    )
 
     OutlinedButton(
         onClick = {
-            vibrationManager?.vibrateClick()
+            haptic.click()
             currentOnClick()
         },
-        modifier = modifier.graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
         enabled = enabled,
         colors = colors,
         shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
@@ -132,19 +138,54 @@ fun ToolzExpressiveIconButton(
     colors: IconButtonColors = IconButtonDefaults.filledIconButtonColors(),
     shapes: IconButtonShapes = IconButtonDefaults.shapes(),
     shape: Shape? = null,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+
     FilledIconButton(
         onClick = {
-            vibrationManager?.vibrateClick()
-            onClick()
+            haptic.click()
+            currentOnClick()
         },
         modifier = modifier,
         enabled = enabled,
         colors = colors,
         shapes = if (shape != null) IconButtonShapes(shape, shape) else shapes,
-        content = content
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzExpressiveIconToggleButton(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: IconToggleButtonColors = IconButtonDefaults.filledIconToggleButtonColors(
+        checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    ),
+    shapes: IconToggleButtonShapes = IconButtonDefaults.toggleableShapes(),
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+
+    FilledIconToggleButton(
+        checked = checked,
+        onCheckedChange = {
+            haptic.tick()
+            currentOnCheckedChange(it)
+        },
+        modifier = modifier,
+        enabled = enabled,
+        colors = colors,
+        shapes = shapes,
+        content = content,
     )
 }
 
@@ -156,17 +197,23 @@ fun ToolzLargeExtendedFloatingActionButton(
     icon: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     expanded: Boolean = true,
+    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
 ) {
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+
     LargeExtendedFloatingActionButton(
         onClick = {
-            vibrationManager?.vibrateClick()
-            onClick()
+            haptic.click()
+            currentOnClick()
         },
         modifier = modifier,
         icon = icon,
         text = text,
         expanded = expanded,
+        containerColor = containerColor,
+        contentColor = contentColor,
     )
 }
 
@@ -177,16 +224,24 @@ fun ExpressiveFilterChip(
     label: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    shape: Shape = RoundedCornerShape(22.dp),
+    shape: Shape = SmallExpressiveShape,
     leadingIcon: @Composable (() -> Unit)? = null,
     trailingIcon: @Composable (() -> Unit)? = null,
-    colors: SelectableChipColors = FilterChipDefaults.filterChipColors(),
+    colors: SelectableChipColors = FilterChipDefaults.filterChipColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        selectedTrailingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ),
     elevation: SelectableChipElevation? = FilterChipDefaults.filterChipElevation(),
     border: BorderStroke? = FilterChipDefaults.filterChipBorder(enabled = enabled, selected = selected),
     interactionSource: MutableInteractionSource? = null,
 ) {
     val performanceMode = LocalPerformanceMode.current
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
     val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
     val isPressed by resolvedInteractionSource.collectIsPressedAsState()
@@ -194,7 +249,7 @@ fun ExpressiveFilterChip(
         targetValue = when {
             performanceMode -> 1f
             isPressed -> 0.94f
-            selected -> 1.05f
+            selected -> 1.03f
             else -> 1f
         },
         animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
@@ -207,7 +262,7 @@ fun ExpressiveFilterChip(
     FilterChip(
         selected = selected,
         onClick = {
-            vibrationManager?.vibrateTick()
+            haptic.tick()
             currentOnClick()
         },
         label = label,
@@ -226,9 +281,6 @@ fun ExpressiveFilterChip(
     )
 }
 
-/**
- * Premium Split Button using official Material 3 Expressive APIs.
- */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ExpressiveSplitButton(
@@ -237,23 +289,37 @@ fun ExpressiveSplitButton(
     label: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    containerColor: Color = MaterialTheme.colorScheme.primary,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimary
+    checked: Boolean? = null,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingContentDescription: String? = "Expand",
 ) {
-    val vibrationManager = LocalVibrationManager.current
-    var expanded by remember { mutableStateOf(false) }
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnMenuClick by rememberUpdatedState(onMenuClick)
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+    var internalChecked by remember { mutableStateOf(false) }
+    val expanded = checked ?: internalChecked
 
     SplitButtonLayout(
         modifier = modifier,
         leadingButton = {
             SplitButtonDefaults.LeadingButton(
                 onClick = {
-                    vibrationManager?.vibrateClick()
-                    onClick()
+                    haptic.click()
+                    currentOnClick()
                 },
                 enabled = enabled,
             ) {
-                CompositionLocalProvider(LocalTextStyle provides MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Black)) {
+                if (leadingIcon != null) {
+                    leadingIcon()
+                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                }
+                CompositionLocalProvider(
+                    LocalTextStyle provides MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Black,
+                    ),
+                ) {
                     label()
                 }
             }
@@ -261,37 +327,64 @@ fun ExpressiveSplitButton(
         trailingButton = {
             SplitButtonDefaults.TrailingButton(
                 checked = expanded,
-                onCheckedChange = {
-                    vibrationManager?.vibrateTick()
-                    expanded = it
-                    onMenuClick()
+                onCheckedChange = { next ->
+                    haptic.tick()
+                    if (checked == null) internalChecked = next
+                    currentOnCheckedChange?.invoke(next)
+                    currentOnMenuClick()
                 },
                 enabled = enabled,
+                modifier = Modifier.semantics {
+                    stateDescription = if (expanded) "Expanded" else "Collapsed"
+                },
             ) {
                 val rotation by animateFloatAsState(
                     targetValue = if (expanded) 180f else 0f,
-                    label = "Trailing Icon Rotation",
+                    label = "splitButtonTrailingIconRotation",
                 )
                 Icon(
                     Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Expand",
-                    modifier = Modifier.size(24.dp).graphicsLayer {
-                        rotationZ = rotation
-                    }
+                    contentDescription = trailingContentDescription,
+                    modifier = Modifier
+                        .size(SplitButtonDefaults.TrailingIconSize)
+                        .graphicsLayer { rotationZ = rotation },
                 )
             }
-        }
+        },
     )
 }
 
+@Composable
+private fun Modifier.expressivePressScale(
+    interactionSource: MutableInteractionSource,
+    enabled: Boolean,
+): Modifier {
+    val performanceMode = LocalPerformanceMode.current
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (enabled && isPressed && !performanceMode) 0.94f else 1f,
+        animationSpec = if (performanceMode) tween(durationMillis = 90) else spring(
+            dampingRatio = 0.6f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "expressivePressScale",
+    )
+
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveButtonsPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ToolzExpressiveButton(onClick = {}) {
                 Text("Expressive Button")
@@ -304,18 +397,32 @@ private fun ExpressiveButtonsPreview() {
             ToolzLargeExtendedFloatingActionButton(
                 onClick = {},
                 icon = { Icon(Icons.Rounded.Add, null) },
-                text = { Text("Large FAB") }
+                text = { Text("Large FAB") },
             )
-            
+
+            var checked by remember { mutableStateOf(true) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolzExpressiveIconButton(onClick = {}) {
+                    Icon(Icons.Rounded.Save, null)
+                }
+                ToolzExpressiveIconToggleButton(
+                    checked = checked,
+                    onCheckedChange = { checked = it },
+                ) {
+                    Icon(if (checked) Icons.Rounded.Check else Icons.Rounded.Lock, null)
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExpressiveFilterChip(selected = true, onClick = {}, label = { Text("Selected") })
                 ExpressiveFilterChip(selected = false, onClick = {}, label = { Text("Unselected") })
             }
-            
+
             ExpressiveSplitButton(
                 onClick = {},
                 onMenuClick = {},
-                label = { Text("SPLIT BUTTON") }
+                leadingIcon = { Icon(Icons.Rounded.Save, null, Modifier.size(SplitButtonDefaults.LeadingIconSize)) },
+                label = { Text("SPLIT BUTTON") },
             )
         }
     }

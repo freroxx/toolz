@@ -1,11 +1,10 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -16,7 +15,6 @@ import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.material3.adaptive.WindowAdaptiveInfo
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteItemColors
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScope
@@ -38,7 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ExpressiveNavigationBar(
     modifier: Modifier = Modifier,
-    containerColor: Color = Color.Transparent,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLowest,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     tonalElevation: Dp = 0.dp,
     windowInsets: WindowInsets = NavigationBarDefaults.windowInsets,
@@ -65,16 +63,16 @@ fun RowScope.ExpressiveNavigationBarItem(
     label: @Composable (() -> Unit)? = null,
     alwaysShowLabel: Boolean = true,
     colors: NavigationBarItemColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        selectedIconColor = MaterialTheme.colorScheme.primary,
         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        selectedTextColor = MaterialTheme.colorScheme.primary,
         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+        indicatorColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     interactionSource: MutableInteractionSource? = null,
 ) {
     val performanceMode = LocalPerformanceMode.current
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
     val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
     val isPressed by resolvedInteractionSource.collectIsPressedAsState()
@@ -96,7 +94,7 @@ fun RowScope.ExpressiveNavigationBarItem(
     NavigationBarItem(
         selected = selected,
         onClick = {
-            vibrationManager?.vibrateTick()
+            haptic.tick()
             currentOnClick()
         },
         icon = {
@@ -131,21 +129,20 @@ fun ToolzWideNavigationRail(
 ) {
     val state = rememberWideNavigationRailState()
     val scope = rememberCoroutineScope()
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
 
-    ModalWideNavigationRail(
+    WideNavigationRail(
         modifier = modifier,
         state = state,
-        expandedHeaderTopPadding = expandedHeaderTopPadding,
         header = {
-            Column(modifier = Modifier.padding(start = 24.dp)) {
+            Column(modifier = Modifier.padding(start = 24.dp, top = expandedHeaderTopPadding)) {
                 if (header != null) {
                     header()
                     Spacer(Modifier.height(16.dp))
                 }
                 IconButton(
                     onClick = {
-                        vibrationManager?.vibrateTick()
+                        haptic.tick()
                         scope.launch {
                             if (state.targetValue == WideNavigationRailValue.Expanded) {
                                 state.collapse()
@@ -164,18 +161,66 @@ fun ToolzWideNavigationRail(
             }
         },
     ) {
-        items.forEachIndexed { index, item ->
-            WideNavigationRailItem(
-                railExpanded = state.targetValue == WideNavigationRailValue.Expanded,
-                icon = { Icon(item.second, contentDescription = item.first) },
-                label = { Text(item.first) },
-                selected = selectedItem == index,
-                onClick = { 
-                    vibrationManager?.vibrateClick()
-                    onItemSelected(index) 
-                },
-            )
-        }
+        WideRailItems(
+            items = items,
+            selectedItem = selectedItem,
+            railExpanded = state.targetValue == WideNavigationRailValue.Expanded,
+            onItemSelected = onItemSelected,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzModalWideNavigationRail(
+    selectedItem: Int,
+    onItemSelected: (Int) -> Unit,
+    items: List<Pair<String, ImageVector>>,
+    modifier: Modifier = Modifier,
+    header: @Composable (() -> Unit)? = null,
+    expandedHeaderTopPadding: Dp = 64.dp,
+) {
+    val state = rememberWideNavigationRailState()
+    val scope = rememberCoroutineScope()
+    val haptic = rememberToolzHapticFeedback()
+
+    ModalWideNavigationRail(
+        modifier = modifier,
+        state = state,
+        expandedHeaderTopPadding = expandedHeaderTopPadding,
+        header = {
+            Column(modifier = Modifier.padding(start = 24.dp)) {
+                if (header != null) {
+                    header()
+                    Spacer(Modifier.height(16.dp))
+                }
+                IconButton(
+                    onClick = {
+                        haptic.tick()
+                        scope.launch {
+                            if (state.targetValue == WideNavigationRailValue.Expanded) {
+                                state.collapse()
+                            } else {
+                                state.expand()
+                            }
+                        }
+                    },
+                ) {
+                    Icon(
+                        if (state.targetValue == WideNavigationRailValue.Expanded)
+                            Icons.Rounded.KeyboardDoubleArrowLeft else Icons.Rounded.Menu,
+                        contentDescription = "Toggle Rail",
+                    )
+                }
+            }
+        },
+    ) {
+        WideRailItems(
+            items = items,
+            selectedItem = selectedItem,
+            railExpanded = state.targetValue == WideNavigationRailValue.Expanded,
+            onItemSelected = onItemSelected,
+        )
     }
 }
 
@@ -195,10 +240,10 @@ fun ToolzNavigationSuiteScaffold(
     NavigationSuiteScaffold(
         navigationSuiteItems = navigationSuiteItems,
         layoutType = layoutType,
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         navigationSuiteColors = NavigationSuiteDefaults.colors(
             navigationBarContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            navigationRailContainerColor = Color.Transparent,
+            navigationRailContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         ),
         modifier = modifier,
         content = content
@@ -216,7 +261,7 @@ fun ExpressiveFabMenu(
     contentDescription: String? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
 
     FloatingActionButtonMenu(
         modifier = modifier,
@@ -225,7 +270,7 @@ fun ExpressiveFabMenu(
             ToggleFloatingActionButton(
                 checked = expanded,
                 onCheckedChange = { 
-                    vibrationManager?.vibrateTick()
+                    haptic.tick()
                     expanded = it 
                 },
             ) {
@@ -245,7 +290,7 @@ fun ExpressiveFabMenu(
         items.forEach { item ->
             FloatingActionButtonMenuItem(
                 onClick = { 
-                    vibrationManager?.vibrateClick()
+                    haptic.click()
                     expanded = false
                     item.third()
                 },
@@ -261,10 +306,35 @@ fun ExpressiveFabMenu(
     }
 }
 
-@Preview(showBackground = true)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun WideRailItems(
+    items: List<Pair<String, ImageVector>>,
+    selectedItem: Int,
+    railExpanded: Boolean,
+    onItemSelected: (Int) -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnItemSelected by rememberUpdatedState(onItemSelected)
+    items.forEachIndexed { index, item ->
+        WideNavigationRailItem(
+            railExpanded = railExpanded,
+            icon = { Icon(item.second, contentDescription = item.first) },
+            label = { Text(item.first) },
+            selected = selectedItem == index,
+            onClick = {
+                haptic.click()
+                currentOnItemSelected(index)
+            },
+        )
+    }
+}
+
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveNavigationPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Row(modifier = Modifier.fillMaxSize()) {
             ToolzWideNavigationRail(
                 selectedItem = 0,

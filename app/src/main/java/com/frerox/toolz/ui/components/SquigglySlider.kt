@@ -28,10 +28,40 @@ fun SquigglySlider(
     valueRange: ClosedFloatingPointRange<Float>,
     isPlaying: Boolean = true,
     activeColor: Color = MaterialTheme.colorScheme.primary,
-    inactiveColor: Color = MaterialTheme.colorScheme.surfaceVariant
+    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh
+) {
+    SquigglySlider(
+        value = { value },
+        onValueChange = onValueChange,
+        modifier = modifier,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = valueRange,
+        isPlaying = isPlaying,
+        activeColor = activeColor,
+        inactiveColor = inactiveColor,
+    )
+}
+
+@Composable
+fun SquigglySlider(
+    value: () -> Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    onValueChangeFinished: () -> Unit = {},
+    valueRange: ClosedFloatingPointRange<Float>,
+    isPlaying: Boolean = true,
+    activeColor: Color = MaterialTheme.colorScheme.primary,
+    inactiveColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+
+    LaunchedEffect(isDragged) {
+        if (isDragged) haptic.tick()
+    }
 
     // Compatibility check: In performance mode, we skip animations
     val performanceMode = LocalPerformanceMode.current
@@ -80,7 +110,12 @@ fun SquigglySlider(
                         val centerY = size.height / 2
 
                         val range = valueRange.endInclusive - valueRange.start
-                        val progress = if (range > 0) ((value - valueRange.start) / range).coerceIn(0f, 1f) else 0f
+                        val sliderValue = value()
+                        val progress = if (range > 0) {
+                            ((sliderValue - valueRange.start) / range).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
                         val thumbX = horizontalPadding + (canvasWidth * progress)
 
                         // 1. Inactive Track (Subtle glass line)
@@ -184,9 +219,12 @@ fun SquigglySlider(
         )
 
         Slider(
-            value = value,
-            onValueChange = onValueChange,
-            onValueChangeFinished = onValueChangeFinished,
+            value = value(),
+            onValueChange = currentOnValueChange,
+            onValueChangeFinished = {
+                haptic.click()
+                currentOnValueChangeFinished()
+            },
             valueRange = valueRange,
             interactionSource = interactionSource,
             colors = SliderDefaults.colors(

@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -125,15 +126,16 @@ fun ExpressiveSupportingPaneScaffold(
     )
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveLayoutsPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(modifier = Modifier.padding(16.dp)) {
             ExpressiveCarousel(items = listOf(1, 2, 3)) { item ->
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text("Item $item")

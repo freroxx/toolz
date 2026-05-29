@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -9,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -22,7 +24,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
 
 /**
@@ -35,7 +36,7 @@ fun ExpressiveSwitch(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     val performanceMode = LocalPerformanceMode.current
     
     val thumbOffset by animateDpAsState(
@@ -48,7 +49,11 @@ fun ExpressiveSwitch(
     )
     
     val containerColor by animateColorAsState(
-        targetValue = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        targetValue = if (checked) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
         label = "switch_container"
     )
     
@@ -61,7 +66,7 @@ fun ExpressiveSwitch(
     Surface(
         checked = checked,
         onCheckedChange = {
-            vibrationManager?.vibrateTick()
+            haptic.tick()
             onCheckedChange(it)
         },
         enabled = enabled,
@@ -104,23 +109,56 @@ fun ExpressiveSlider(
     colors: SliderColors = SliderDefaults.colors(),
     isPlaying: Boolean = false,
 ) {
-    val vibrationManager = LocalVibrationManager.current
-    
-    Slider(
-        value = value,
-        onValueChange = {
-            if (value != it) {
-                vibrationManager?.vibrateTick()
-            }
-            onValueChange(it)
-        },
+    ExpressiveSlider(
+        value = { value },
+        onValueChange = onValueChange,
         modifier = modifier,
         enabled = enabled,
         valueRange = valueRange,
         onValueChangeFinished = onValueChangeFinished,
         colors = colors,
+        isPlaying = isPlaying,
+    )
+}
+
+@Composable
+fun ExpressiveSlider(
+    value: () -> Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    onValueChangeFinished: (() -> Unit)? = null,
+    colors: SliderColors = SliderDefaults.colors(
+        activeTrackColor = MaterialTheme.colorScheme.primary,
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        thumbColor = MaterialTheme.colorScheme.primary,
+    ),
+    isPlaying: Boolean = false,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isDragged by interactionSource.collectIsDraggedAsState()
+
+    LaunchedEffect(isDragged) {
+        if (isDragged) haptic.tick()
+    }
+    
+    Slider(
+        value = value(),
+        onValueChange = currentOnValueChange,
+        modifier = modifier,
+        enabled = enabled,
+        valueRange = valueRange,
+        onValueChangeFinished = {
+            haptic.click()
+            currentOnValueChangeFinished?.invoke()
+        },
+        colors = colors,
+        interactionSource = interactionSource,
         thumb = {
-            val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
             val scale by animateFloatAsState(
                 targetValue = if (isPressed) 1.4f else 1f,
@@ -138,7 +176,7 @@ fun ExpressiveSlider(
                 shape = CircleShape,
                 color = colors.thumbColor,
                 shadowElevation = 4.dp,
-                border = BorderStroke(2.dp, Color.White.copy(alpha = 0.5f))
+                border = BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.9f))
             ) {}
         }
     )
@@ -158,12 +196,14 @@ fun ExpressiveSearchField(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val currentOnSearch by rememberUpdatedState(onSearch)
+    val haptic = rememberToolzHapticFeedback()
 
     SearchBarDefaults.InputField(
         query = query,
         onQueryChange = onQueryChange,
         onSearch = {
             expanded = false
+            haptic.click()
             currentOnSearch(it)
         },
         expanded = expanded,
@@ -176,10 +216,11 @@ fun ExpressiveSearchField(
     )
 }
 
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveInputsPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)

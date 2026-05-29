@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
@@ -11,7 +12,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import com.frerox.toolz.ui.theme.LocalVibrationManager
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -30,14 +30,13 @@ fun ToolzExpressiveButtonGroup(
     modifier: Modifier = Modifier,
     content: ButtonGroupScope.() -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     ButtonGroup(
         modifier = modifier,
         overflowIndicator = { menuState ->
             FilledIconButton(
                 onClick = {
-                    vibrationManager?.vibrateTick()
-                    // Using show/dismiss directly as isExpanded check might have API version issues
+                    haptic.tick()
                     menuState.show() 
                 },
             ) {
@@ -63,7 +62,7 @@ fun ToolzConnectedButtonGroup(
     modifier: Modifier = Modifier,
     enabled: Boolean = true
 ) {
-    val vibrationManager = LocalVibrationManager.current
+    val haptic = rememberToolzHapticFeedback()
     
     Row(
         modifier = modifier,
@@ -74,7 +73,7 @@ fun ToolzConnectedButtonGroup(
                 checked = selectedIndex == index,
                 onCheckedChange = {
                     if (it) {
-                        vibrationManager?.vibrateTick()
+                        haptic.tick()
                         onOptionSelected(index)
                     }
                 },
@@ -101,10 +100,11 @@ fun ToolzConnectedButtonGroup(
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Preview(showBackground = true)
+@Preview(name = "Light", showBackground = true)
+@Preview(name = "Dark", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 private fun ExpressiveButtonGroupPreview() {
-    ToolzTheme {
+    ToolzTheme(dynamicColor = false) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
