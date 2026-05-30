@@ -108,7 +108,9 @@ class FlashlightService : Service() {
         }
 
         // Android 14+ requirement: startForeground must be called early.
-        if (action != ACTION_STOP) {
+        val willStop = action == ACTION_STOP || (action == ACTION_TOGGLE && isOn.value)
+
+        if (!willStop && action != null) {
             val notif = buildNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 try {
