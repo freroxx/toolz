@@ -315,14 +315,70 @@ private fun FlashlightContent(
         }
 
         // Timer Indicator
-        AnimatedVisibility(visible = state.remainingSeconds != null) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "Auto-off in ${state.remainingSeconds?.let { s -> "%02d:%02d".format(s / 60, s % 60) }}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
+        AnimatedVisibility(
+            visible = state.remainingSeconds != null,
+            enter = fadeIn(tween(400)) + expandVertically(spring(stiffness = Spring.StiffnessLow)),
+            exit = fadeOut(tween(400)) + shrinkVertically(spring(stiffness = Spring.StiffnessLow))
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 16.dp)
+            ) {
+                ExpressiveCard(
+                    onClick = { onSetTimer(0) }, // Tapping cancels timer
+                    modifier = Modifier
+                        .widthIn(min = 200.dp)
+                        .padding(horizontal = 48.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    elevation = 0.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Timer,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            val remaining = state.remainingSeconds ?: 0
+                            Text(
+                                text = "Auto-off in %02d:%02d".format(remaining / 60, remaining % 60),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                        
+                        val totalSeconds = (state.timerMinutes * 60).toFloat()
+                        val currentSeconds = (state.remainingSeconds ?: 0).toFloat()
+                        val progress = if (totalSeconds > 0) currentSeconds / totalSeconds else 0f
+                        
+                        ToolzWavyLinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
+                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                    }
+                }
+                
+                Text(
+                    text = "Tap to cancel",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 4.dp),
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
 
         Spacer(Modifier.weight(1f))
