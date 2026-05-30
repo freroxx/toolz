@@ -107,7 +107,9 @@ class WifiTweaksViewModel @Inject constructor(
                     )
                 )
             }
-            emitMessage("Shizuku connection lost.")
+            emitMessage("Shizuku connection lost. Retrying in 3s...")
+            kotlinx.coroutines.delay(3000)
+            refreshShizukuState(refreshTweakStates = true, message = "Attempting to reconnect Shizuku...")
         }
     }
 
@@ -491,10 +493,20 @@ class WifiTweaksViewModel @Inject constructor(
         refreshTweakStates: Boolean = true,
         runFreshScan: Boolean = true
     ) {
+        val fine = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
         _uiState.update {
             it.copy(
                 isWifiEnabled = wifiManager.isWifiEnabled,
-                locationEnabled = isLocationEnabled()
+                locationEnabled = isLocationEnabled(),
+                hasPartialWifiPermissions = !fine && coarse
             )
         }
         loadNetworkConfig()
@@ -880,6 +892,10 @@ class WifiTweaksViewModel @Inject constructor(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
         val nearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
                 context,
@@ -888,7 +904,7 @@ class WifiTweaksViewModel @Inject constructor(
         } else {
             true
         }
-        return fine && nearby
+        return (fine || coarse) && nearby
     }
 
     private fun isLocationEnabled(): Boolean {
