@@ -193,21 +193,12 @@ private fun QuickSheetContent(
         // ── Mode selector ─────────────────────────────────────────────────────
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ControlLabel(icon = Icons.Rounded.SettingsSuggest, label = "SIGNAL MODE")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FlashlightMode.entries.forEach { mode ->
-                    val selected = state.mode == mode
-                    ExpressiveFilterChip(
-                        selected = selected,
-                        onClick = { onSetMode(mode) },
-                        label = { Text(mode.name, style = MaterialTheme.typography.labelSmall) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            }
+            ToolzConnectedButtonGroup(
+                selectedIndex = state.mode.ordinal,
+                options = FlashlightMode.entries.map { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } },
+                onOptionSelected = { index -> onSetMode(FlashlightMode.entries[index]) },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // ── Contextual Controls Panel ─────────────────────────────────────────

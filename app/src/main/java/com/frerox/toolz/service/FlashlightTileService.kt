@@ -26,14 +26,28 @@ class FlashlightTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val svc = FlashlightService.getInstance()
-        if (svc != null && svc.isOn.value) {
-            // Currently ON -> turn off directly
-            svc.toggle()
-        } else {
-            // Currently OFF -> start service to turn on
-            startFlashlightService()
+        val currentlyOn = svc?.isOn?.value ?: false
+
+        val i = Intent(this, FlashlightService::class.java).apply {
+            action = if (currentlyOn) FlashlightService.ACTION_STOP else FlashlightService.ACTION_TOGGLE
         }
-        // Let onStartListening triggered by ACTION_STATE_CHANGED update the tile
+
+        try {
+            if (!currentlyOn) {
+                startForegroundService(i)
+            } else {
+                startService(i)
+            }
+        } catch (e: Exception) {
+            // Fallback for older Android or restricted states
+            startService(i)
+        }
+
+        // Provide immediate feedback to the tile state
+        qsTile?.let { tile ->
+            tile.state = if (currentlyOn) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
+            tile.updateTile()
+        }
     }
 
     // ── Tile state ────────────────────────────────────────────────────────────
@@ -41,15 +55,6 @@ class FlashlightTileService : TileService() {
     override fun onStartListening() {
         super.onStartListening()
         updateTile()
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun startFlashlightService() {
-        val i = Intent(this, FlashlightService::class.java).apply {
-            action = FlashlightService.ACTION_TOGGLE
-        }
-        startForegroundService(i)
     }
 
     private fun updateTile() {
