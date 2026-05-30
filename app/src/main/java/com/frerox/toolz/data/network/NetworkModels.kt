@@ -168,7 +168,9 @@ data class TraceHop(
     val ip: String,
     val label: String = "Hop",
     val location: String = "Unknown",
-    val latencyMs: Long? = null
+    val latencyMs: Long? = null,
+    val lossPercent: Float = 0f,
+    val method: String = "Unknown"
 )
 
 data class RouterCredential(
@@ -191,13 +193,35 @@ data class CellularAuditInfo(
     val tac: String = "Unknown",
     val snr: String = "Unknown",
     val signalStrength: String = "Unknown",
+    val mobileDataEnabled: Boolean? = null,
+    val airplaneModeEnabled: Boolean? = null,
+    val preferredNetworkMode: String = "Unknown",
+    val dataSaverEnabled: Boolean? = null,
     val isAvailable: Boolean = false
 )
 
 data class IpAuditInfo(
     val routes: List<String> = emptyList(),
     val neighbors: List<String> = emptyList(),
+    val interfaces: List<String> = emptyList(),
+    val defaultRoute: String = "",
+    val dnsServers: List<String> = emptyList(),
     val isAvailable: Boolean = false
+)
+
+enum class RecommendationSeverity {
+    INFO, WARNING, CRITICAL
+}
+
+data class SmartFixRecommendation(
+    val id: String,
+    val title: String,
+    val description: String = "",
+    val reason: String = "",
+    val tweakIds: List<String> = emptyList(),
+    val severity: RecommendationSeverity = RecommendationSeverity.INFO,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    val isActionable: Boolean = true
 )
 
 data class PrivilegedState(

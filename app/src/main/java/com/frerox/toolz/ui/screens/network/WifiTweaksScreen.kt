@@ -41,6 +41,7 @@ import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.ui.components.fadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
@@ -149,7 +150,13 @@ fun WifiTweaksScreen(
             ) {
                 Spacer(Modifier.height(8.dp))
 
-                if (!permissionState.allPermissionsGranted) {
+                val fineGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_FINE_LOCATION && it.status.isGranted }
+                val coarseGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_COARSE_LOCATION && it.status.isGranted }
+                val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    permissionState.permissions.any { it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted }
+                } else true
+
+                if (!(fineGranted || coarseGranted) || !nearbyGranted) {
                     PermissionGate(
                         onGrant = {
                             vibrationManager?.vibrateClick()
@@ -164,6 +171,19 @@ fun WifiTweaksScreen(
                             primaryLabel = "Open Location",
                             onPrimary = {
                                 launchSettings(context, Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                            }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    if (uiState.hasPartialWifiPermissions) {
+                        ServiceWarningCard(
+                            title = "Limited accuracy",
+                            body = "Only approximate location is granted. Some Wi-Fi details (like SSID) might be hidden by Android.",
+                            primaryLabel = "Grant Fine Location",
+                            onPrimary = {
+                                vibrationManager?.vibrateClick()
+                                permissionState.launchMultiplePermissionRequest()
                             }
                         )
                         Spacer(Modifier.height(12.dp))
@@ -420,6 +440,45 @@ private fun DisabledServiceCard(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledTonalButton(onClick = onPrimary, shape = RoundedCornerShape(16.dp)) {
+                Text(primaryLabel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServiceWarningCard(
+    title: String,
+    body: String,
+    primaryLabel: String,
+    onPrimary: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
                 }
             }
             Spacer(Modifier.width(14.dp))

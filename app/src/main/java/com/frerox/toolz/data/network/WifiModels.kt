@@ -168,6 +168,7 @@ data class WifiTweaksUiState(
     val locationEnabled: Boolean = false,
     val isScanning: Boolean = false,
     val isRefreshingTweakStates: Boolean = false,
+    val hasPartialWifiPermissions: Boolean = false,
     val isBenchmarkingDns: Boolean = false,
     val dnsBenchmarkStatus: BenchmarkStatus = BenchmarkStatus.IDLE,
     val dnsBenchmarkResults: List<WifiDnsBenchmarkResult> = emptyList(),
