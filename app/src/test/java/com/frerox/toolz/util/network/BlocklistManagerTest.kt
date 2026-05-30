@@ -13,4 +13,15 @@ class BlocklistManagerTest {
         val expected = listOf("127.0.0.1 example.com", "example.org")
         assertEquals(expected, blocklistManager.parseData(input))
     }
+
+    @Test
+    fun `parseData returns empty for empty input`() {
+        assertEquals(emptyList<String>(), blocklistManager.parseData(""))
+    }
+
+    @Test
+    fun `parseData returns empty for only comments`() {
+        val input = "# comment1\n# comment2"
+        assertEquals(emptyList<String>(), blocklistManager.parseData(input))
+    }
 }
