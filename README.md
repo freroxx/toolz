@@ -222,7 +222,7 @@ Toolz uses different Android permissions depending on which tools you enable. Th
 
 ### Important Notes
 
-- **Toolz is not fully offline.** Many tools work entirely on-device, but connected features (AI, web search, catalog downloads, updates) require network access
+- **Toolz is not fully offline.** Many tools work entirely on-device, but connected features (AI, web search, catalog downloads, updates) require network access by default, however it does feature an offline mode that turns the app fully offline
 - **AI is optional.** You can use all core utilities without configuring personal provider keys
 - **No tracking, no ads.** Toolz is built for privacy-conscious users who want full control over their data
 
@@ -257,4 +257,4 @@ Toolz is open source. See the repository for license details.
 
 ---
 
-**Made with ❤️ by the Toolz community**
+**Made with ❤️ by frerox**
