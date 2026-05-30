@@ -3,38 +3,26 @@ package com.frerox.toolz.util.network
 import com.frerox.toolz.data.network.DnsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.net.InetAddress
 
 class DnsBenchmarkEngineTest {
 
     @Test
-    fun benchmark_reachableProvider_returnsLatency() {
+    fun `benchmark returns latency when reachable`() {
         val engine = DnsBenchmarkEngine()
-        // Use a known reachable address
-        val provider = DnsProvider(
-            id = "test",
-            name = "Test",
-            primaryAddress = "8.8.8.8"
-        )
-        
+        engine.reachableChecker = { _, _ -> true }
+        val provider = DnsProvider(id = "1", name = "Test", addresses = listOf("1.1.1.1"))
+
         val result = engine.benchmark(provider)
-        
-        // Assert result is positive latency, or -1 if unreachable (unlikely for 8.8.8.8 but possible)
-        assert(result >= 0 || result == -1L) { "Expected positive latency or -1, got $result" }
+        assert(result >= 0)
     }
 
     @Test
-    fun benchmark_unreachableProvider_returnsNegative() {
+    fun `benchmark returns -1 when not reachable`() {
         val engine = DnsBenchmarkEngine()
-        // Use a known unreachable address
-        val provider = DnsProvider(
-            id = "test",
-            name = "Test",
-            primaryAddress = "192.0.2.1"
-        )
-        
+        engine.reachableChecker = { _, _ -> false }
+        val provider = DnsProvider(id = "1", name = "Test", addresses = listOf("1.1.1.1"))
+
         val result = engine.benchmark(provider)
-        
         assertEquals(-1L, result)
     }
 }
