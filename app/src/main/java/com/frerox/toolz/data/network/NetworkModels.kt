@@ -102,10 +102,10 @@ enum class DnsProtocol {
 data class DnsProvider(
     val id: String,
     val name: String,
-    val primaryAddress: String,
-    val secondaryAddress: String? = null,
-    val privateDnsHostname: String? = null,
+    val addresses: List<String>,
+    val hostname: String? = null,
     val dohUrl: String? = null,
+    val icon: String? = null,
     val categories: Set<DnsCategory> = setOf(DnsCategory.SPEED),
     val protocols: Set<DnsProtocol> = setOf(DnsProtocol.DOH, DnsProtocol.DOT),
     val description: String = "",
@@ -222,6 +222,14 @@ data class SmartFixRecommendation(
     val severity: RecommendationSeverity = RecommendationSeverity.INFO,
     val icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     val isActionable: Boolean = true
+)
+
+data class Blocklist(
+    val id: String,
+    val name: String,
+    val url: String,
+    val isEnabled: Boolean = false,
+    val lastUpdated: Long = 0L
 )
 
 data class PrivilegedState(
