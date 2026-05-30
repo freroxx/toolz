@@ -276,7 +276,45 @@ private fun QuickSheetContent(
 
                 // Timer
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ControlLabel(icon = Icons.Rounded.Timer, label = "AUTO-OFF")
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ControlLabel(icon = Icons.Rounded.Timer, label = "AUTO-OFF")
+                        AnimatedVisibility(
+                            visible = state.remainingSeconds != null,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            val remaining = state.remainingSeconds ?: 0
+                            val displayTime = "%02d:%02d".format(remaining / 60, remaining % 60)
+                            Text(
+                                text = displayTime,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    
+                    AnimatedVisibility(visible = state.remainingSeconds != null) {
+                        val totalSeconds = (state.timerMinutes * 60).toFloat()
+                        val currentSeconds = (state.remainingSeconds ?: 0).toFloat()
+                        val progress = if (totalSeconds > 0) currentSeconds / totalSeconds else 0f
+                        
+                        ToolzWavyLinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .height(6.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                    }
+
                     val timerOptions = listOf(0, 1, 5, 10, 30)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(timerOptions) { mins ->
