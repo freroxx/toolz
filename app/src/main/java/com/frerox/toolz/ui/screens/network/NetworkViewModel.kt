@@ -124,13 +124,12 @@ class NetworkViewModel @Inject constructor(
         label: String,
         primaryAddress: String,
         secondaryAddress: String?,
-        privateDnsHostname: String?
+        hostname: String?
     ) {
         val customProvider = dnsEngine.customProvider(
             label = label.ifBlank { "Custom DNS" },
-            primaryAddress = primaryAddress,
-            secondaryAddress = secondaryAddress,
-            privateDnsHostname = privateDnsHostname
+            addresses = listOfNotNull(primaryAddress, secondaryAddress),
+            hostname = hostname
         )
         refreshDns(includeCustom = customProvider)
     }
@@ -140,17 +139,17 @@ class NetworkViewModel @Inject constructor(
             if (!ensurePrivilegedAccess("Shizuku access is required to apply Private DNS.")) {
                 return@launch
             }
-            if (provider.privateDnsHostname.isNullOrBlank()) {
+            if (provider.hostname.isNullOrBlank()) {
                 emitEvent("This provider needs a Private DNS hostname for one-tap apply.")
                 return@launch
             }
-            appendLog("> settings put global private_dns_spec ${provider.privateDnsHostname}")
-            val summary = privilegedNetworkManager.setPrivateDns(provider.privateDnsHostname)
+            appendLog("> settings put global private_dns_spec ${provider.hostname}")
+            val summary = privilegedNetworkManager.setPrivateDns(provider.hostname)
             val cache = privilegedNetworkManager.flushDnsCache()
             updateState {
                 copy(
                     privateDnsMode = "Provider hostname",
-                    privateDnsHost = provider.privateDnsHostname,
+                    privateDnsHost = provider.hostname,
                     cacheAnalytics = cache
                 )
             }

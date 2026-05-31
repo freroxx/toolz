@@ -40,7 +40,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.network.*
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.network.NetworkMonitor
+import com.frerox.toolz.util.network.PrivilegedNetworkManager
+import com.frerox.toolz.util.network.SpeedTestEngine
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -56,7 +59,10 @@ import kotlin.math.roundToInt
 class WifiTweaksViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val networkMonitor: NetworkMonitor,
-    private val shizukuExecutor: ShizukuShellExecutor
+    private val shizukuExecutor: ShizukuShellExecutor,
+    private val speedTestEngine: SpeedTestEngine,
+    private val privilegedNetworkManager: PrivilegedNetworkManager,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     @Suppress("DEPRECATION")
@@ -77,7 +83,13 @@ class WifiTweaksViewModel @Inject constructor(
         WifiTweaksUiState(
             tweaks = tweakCatalog,
             profiles = profileCatalog,
-            tweakResults = tweakCatalog.associate { it.id to TweakResult(id = it.id) }
+            tweakResults = tweakCatalog.associate { it.id to TweakResult(id = it.id) },
+            blocklists = listOf(
+                Blocklist("adguard", "AdGuard Base", "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt", true),
+                Blocklist("oisd", "OISD Big", "https://big.oisd.nl", false),
+                Blocklist("stevenblack", "Steven Black", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", false),
+                Blocklist("energized", "Energized Spark", "https://block.energized.pro/spark/formats/hosts.txt", false)
+            )
         )
     )
     val uiState: StateFlow<WifiTweaksUiState> = _uiState.asStateFlow()
@@ -133,10 +145,116 @@ class WifiTweaksViewModel @Inject constructor(
         } catch (_: Exception) {
         }
 
+        viewModelScope.launch {
+            settingsRepository.networkAutoConnectShizuku.collect { autoConnect ->
+                if (autoConnect && shizukuExecutor.isShizukuAvailable() && !uiState.value.shizukuStatus.isServiceReady) {
+                    if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                        refreshShizukuState(true)
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            combine(
+                settingsRepository.networkBenchmarkServers,
+                settingsRepository.networkLastTraceTarget
+            ) { servers, traceTarget ->
+                servers to traceTarget
+            }.collect { (servers, traceTarget) ->
+                _uiState.update { it.copy(
+                    selectedBenchmarkProviders = servers,
+                    lastTraceTarget = traceTarget
+                ) }
+            }
+        }
+
         registerScanReceiver()
+        startTelemetryRefresh()
         refreshEnvironment()
         startSignalMonitoring()
         startStabilityCheck()
+    }
+
+    private fun startTelemetryRefresh() {
+        viewModelScope.launch {
+            while (isActive) {
+                if (uiState.value.shizukuStatus.isServiceReady) {
+                    try {
+                        val ipAudit = privilegedNetworkManager.readIpAudit()
+                        val processes = privilegedNetworkManager.readProcessUsage()
+                        val dnsConfig = privilegedNetworkManager.readPrivateDnsConfig()
+
+                        _uiState.update {
+                            it.copy(
+                                networkConfig = it.networkConfig.copy(
+                                    ip = ipAudit.interfaces.firstOrNull() ?: it.networkConfig.ip,
+                                    gateway = ipAudit.defaultRoute.ifBlank { it.networkConfig.gateway }
+                                ),
+                                activeProcesses = processes,
+                                privateDnsMode = dnsConfig.first.replaceFirstChar(Char::titlecase),
+                                privateDnsHost = dnsConfig.second
+                            )
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+                delay(10_000)
+            }
+        }
+    }
+
+    fun runSpeedTest() {
+        if (uiState.value.speedTest.isRunning) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = true, progress = 0f, phaseLabel = "Warming up...")) }
+            try {
+                speedTestEngine.runDownloadTest().collect { (progress, speed) ->
+                    _uiState.update {
+                        it.copy(
+                            speedTest = it.speedTest.copy(
+                                downloadSpeedMbps = speed,
+                                progress = progress,
+                                phaseLabel = "Downloading..."
+                            )
+                        )
+                    }
+                }
+                _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = false, progress = 1f, phaseLabel = "Completed")) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = false, error = e.message, phaseLabel = "Error")) }
+            }
+        }
+    }
+
+    fun runTraceRoute(target: String = "1.1.1.1") {
+        viewModelScope.launch {
+            if (!uiState.value.shizukuStatus.isServiceReady) {
+                emitMessage("Shizuku access is required to run traceroute.")
+                return@launch
+            }
+            
+            settingsRepository.setNetworkLastTraceTarget(target)
+            
+            addLog("TRACE", "Starting trace to $target", LogLevel.INFO)
+            _uiState.update { it.copy(traceHops = emptyList(), isTracing = true) }
+            
+            val hops = privilegedNetworkManager.runTraceRoute(target)
+            if (hops.isNotEmpty()) {
+                _uiState.update { state ->
+                    state.copy(
+                        traceHops = hops,
+                        isTracing = false,
+                        traceHistory = (listOf(target) + state.traceHistory).distinct().take(10)
+                    )
+                }
+                addLog("TRACE", "Trace completed with ${hops.size} hops", LogLevel.SUCCESS)
+            } else {
+                _uiState.update { it.copy(isTracing = false) }
+                addLog("TRACE", "Trace failed or returned no results", LogLevel.ERROR)
+            }
+        }
     }
 
     fun startScan() {
@@ -353,18 +471,21 @@ class WifiTweaksViewModel @Inject constructor(
                 return@launch
             }
 
+            val selectedIds = _uiState.value.selectedBenchmarkProviders
+            val candidateProviders = dnsProviders.filter { it.first in selectedIds }
+            
             _uiState.update { 
                 it.copy(
                     isBenchmarkingDns = true,
                     dnsBenchmarkStatus = BenchmarkStatus.RUNNING,
-                    dnsBenchmarkResults = dnsProviders.map { p -> WifiDnsBenchmarkResult(p.first, p.second, p.third) }
+                    dnsBenchmarkResults = candidateProviders.map { p -> WifiDnsBenchmarkResult(p.first, p.second, p.third) }
                 )
             }
             
-            addLog("DNS", "Starting DNS benchmark...", LogLevel.INFO)
+            addLog("DNS", "Starting DNS benchmark with ${candidateProviders.size} providers...", LogLevel.INFO)
             
             val results = mutableListOf<WifiDnsBenchmarkResult>()
-            dnsProviders.forEach { (id, name, host) ->
+            candidateProviders.forEach { (id, name, host) ->
                 val latency = pingHost(host)
                 results.add(WifiDnsBenchmarkResult(id, name, host, latency))
                 _uiState.update { it.copy(dnsBenchmarkResults = results.toList()) }
@@ -383,12 +504,23 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
+    fun updateBenchmarkSelection(id: String, selected: Boolean) {
+        val current = _uiState.value.selectedBenchmarkProviders.toMutableSet()
+        if (selected) current.add(id) else current.remove(id)
+        viewModelScope.launch {
+            settingsRepository.setNetworkBenchmarkServers(current)
+        }
+    }
+
     private val dnsProviders = listOf(
         Triple("cloudflare", "Cloudflare", "1.1.1.1"),
         Triple("google", "Google", "8.8.8.8"),
         Triple("quad9", "Quad9", "9.9.9.9"),
         Triple("adguard", "AdGuard", "94.140.14.14"),
-        Triple("opendns", "OpenDNS", "208.67.222.222")
+        Triple("opendns", "OpenDNS", "208.67.222.222"),
+        Triple("mullvad", "Mullvad", "194.242.2.2"),
+        Triple("controld", "Control D", "76.76.2.0"),
+        Triple("nextdns", "NextDNS", "45.90.28.0")
     )
 
     fun applyCustomDns(hostname: String) {
@@ -416,6 +548,18 @@ class WifiTweaksViewModel @Inject constructor(
                 emitMessage("Failed to apply custom DNS.")
             }
         }
+    }
+
+    fun toggleBlocklist(id: String) {
+        _uiState.update { state ->
+            state.copy(
+                blocklists = state.blocklists.map {
+                    if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it
+                }
+            )
+        }
+        val list = _uiState.value.blocklists.find { it.id == id }
+        addLog("BLOCKLIST", "${if (list?.isEnabled == true) "Enabled" else "Disabled"} ${list?.name}", LogLevel.INFO)
     }
 
     private fun startStabilityCheck() {
@@ -451,14 +595,25 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
-    private suspend fun pingHost(host: String): Long? {
-        return runCatching {
-            val result = shizukuExecutor.executeForResult("ping -c 1 -W 1 $host")
-            if (result.isSuccess) {
+    suspend fun pingHost(host: String): Long? {
+        // Try Shizuku first if ready
+        if (uiState.value.shizukuStatus.isServiceReady) {
+            val result = runCatching { shizukuExecutor.executeForResult("ping -c 1 -W 1 $host") }.getOrNull()
+            if (result?.isSuccess == true) {
                 val match = "time=([\\d.]+)".toRegex().find(result.stdout)
-                match?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()
-            } else null
-        }.getOrNull()
+                return match?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()
+            }
+        }
+        
+        // Fallback to standard ping (works for many hosts even without root/shizuku)
+        return try {
+            val process = Runtime.getRuntime().exec("ping -c 1 -W 1 $host")
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val match = "time=([\\d.]+)".toRegex().find(output)
+            match?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun updateStabilityMetrics(gateway: Long?, dns: Long?, public: Long?) {
@@ -1310,36 +1465,36 @@ class WifiTweaksViewModel @Inject constructor(
     private fun buildProfiles(): List<WifiOptimizationProfile> {
         return listOf(
             WifiOptimizationProfile(
+                id = "profile_gaming",
+                title = "Gaming Pro",
+                description = "Lowest latency possible. Disables power saving and forces high performance.",
+                icon = Icons.Rounded.SportsEsports,
+                tweakIds = listOf("low_latency_mode", "scan_throttle", "data_stall_logic"),
+                accentLabel = "Pro Performance"
+            ),
+            WifiOptimizationProfile(
                 id = "profile_fast_lane",
-                title = "Fast lane",
-                description = "Roaming-first profile for mesh routers and busy homes.",
+                title = "Fast Lane",
+                description = "Roaming-first profile for mesh routers and busy environments.",
                 icon = Icons.Rounded.Speed,
-                tweakIds = listOf("scan_throttle", "aggressive_roaming", "mobile_data_always_on", "low_latency_mode"),
+                tweakIds = listOf("scan_throttle", "aggressive_roaming", "mobile_data_always_on"),
                 accentLabel = "Speed"
             ),
             WifiOptimizationProfile(
                 id = "profile_stability",
-                title = "Steady link",
+                title = "Steady Link",
                 description = "Best when Wi-Fi drops in the background or sticks to a bad access point.",
                 icon = Icons.Rounded.NetworkCheck,
-                tweakIds = listOf("avoid_bad_wifi", "suspend_optimizations", "ip_reachability", "data_stall_logic"),
+                tweakIds = listOf("avoid_bad_wifi", "suspend_optimizations", "ip_reachability"),
                 accentLabel = "Stability"
             ),
             WifiOptimizationProfile(
                 id = "profile_privacy",
-                title = "Privacy shield",
-                description = "Secure DNS baseline with room for manual MAC hardening.",
+                title = "Ghost Mode",
+                description = "Maximum privacy with MAC randomization and secure DNS defaults.",
                 icon = Icons.Rounded.Shield,
-                tweakIds = listOf("private_dns_quad9", "force_wpa3"),
+                tweakIds = listOf("manual_mac_randomization", "private_dns_cloudflare", "verbose_logging"),
                 accentLabel = "Privacy"
-            ),
-            WifiOptimizationProfile(
-                id = "profile_travel",
-                title = "Travel saver",
-                description = "Quickly moves between captive portals, hotel Wi-Fi, and cellular fallback.",
-                icon = Icons.Rounded.Wifi,
-                tweakIds = listOf("wifi_auto_wakeup", "mobile_data_always_on", "private_dns_cloudflare"),
-                accentLabel = "Travel"
             )
         )
     }

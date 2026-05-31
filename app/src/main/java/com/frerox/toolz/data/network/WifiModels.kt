@@ -188,5 +188,15 @@ data class WifiTweaksUiState(
     val showHiddenNetworks: Boolean = false,
     val scanSortMode: WifiScanSortMode = WifiScanSortMode.SIGNAL,
     val lastScanTimestamp: Long? = null,
-    val lastActionMessage: String? = null
+    val lastActionMessage: String? = null,
+    val speedTest: SpeedTestResult = SpeedTestResult(),
+    val traceHops: List<TraceHop> = emptyList(),
+    val isTracing: Boolean = false,
+    val activeProcesses: List<ProcessNetworkUsage> = emptyList(),
+    val blocklists: List<Blocklist> = emptyList(),
+    val privateDnsMode: String = "Automatic",
+    val privateDnsHost: String = "",
+    val selectedBenchmarkProviders: Set<String> = setOf("cloudflare", "google", "quad9", "adguard"),
+    val traceHistory: List<String> = emptyList(),
+    val lastTraceTarget: String = "1.1.1.1"
 )
