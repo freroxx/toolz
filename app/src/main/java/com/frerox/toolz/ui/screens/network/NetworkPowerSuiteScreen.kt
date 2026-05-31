@@ -48,6 +48,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
@@ -370,7 +372,7 @@ fun NetworkPowerSuiteScreen(
                                         label = customLabel,
                                         primaryAddress = customPrimary,
                                         secondaryAddress = customSecondary.ifBlank { null },
-                                        privateDnsHostname = customHostname.ifBlank { null }
+                                        hostname = customHostname.ifBlank { null }
                                     )
                                 },
                                 onApplyCustomHost = {
@@ -1081,65 +1083,61 @@ private fun HeroStatusCard(uiState: NetworkPowerUiState) {
     val tertiary = MaterialTheme.colorScheme.tertiary
     val surface = MaterialTheme.colorScheme.surface
 
-    GlassCard(
-        title = "Healthy Mesh",
-        icon = Icons.Rounded.AutoGraph,
-        subtitle = "Live mesh-gradient status and signal health",
-        modifier = Modifier.drawBehind {
-            val center = Offset(size.width * 0.8f, size.height * 0.5f)
-            val radius = size.minDimension * 0.8f
-            drawCircle(
-                brush = Brush.radialGradient(
-                    0f to primary.copy(alpha = 0.08f + 0.02f * sin(meshPhase)),
-                    0.5f to tertiary.copy(alpha = 0.04f + 0.02f * cos(meshPhase)),
-                    1f to Color.Transparent,
-                    center = center,
-                    radius = radius
+    // M3 Expressive styling using a Card
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val center = Offset(size.width * 0.8f, size.height * 0.5f)
+                val radius = size.minDimension * 0.8f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0f to primary.copy(alpha = 0.08f + 0.02f * sin(meshPhase)),
+                        0.5f to tertiary.copy(alpha = 0.04f + 0.02f * cos(meshPhase)),
+                        1f to Color.Transparent,
+                        center = center,
+                        radius = radius
+                    )
                 )
-            )
-        }
+            },
+        shape = RoundedCornerShape(32.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            StatusOrb(
-                score = uiState.networkHealthScore,
-                modifier = Modifier.size(140.dp)
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                AnimatedContent(
-                    targetState = uiState.wifiState.ssid,
-                    transitionSpec = {
-                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
-                    },
-                    label = "ssid_anim"
-                ) { ssid ->
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusOrb(
+                    score = uiState.networkHealthScore,
+                    modifier = Modifier.size(120.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = ssid,
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = uiState.wifiState.ssid,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Text(
+                        text = "${uiState.wifiState.rssi} dBm • ${uiState.wifiState.wifiStandard}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                Text(
-                    text = "${uiState.wifiState.rssi} dBm • ${uiState.wifiState.wifiStandard}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                
-                Spacer(Modifier.height(16.dp))
-                
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StatusBadge("Latency", "${uiState.stabilityInfo.avgLatency}ms")
-                    StatusBadge("Jitter", "${uiState.stabilityInfo.jitter}ms")
-                    StatusBadge("Packet Loss", "${uiState.stabilityInfo.packetLoss.roundToInt()}%")
-                }
+            }
+            
+            Spacer(Modifier.height(16.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatusBadge("Latency", "${uiState.stabilityInfo.avgLatency}ms", modifier = Modifier.weight(1f))
+                StatusBadge("Jitter", "${uiState.stabilityInfo.jitter}ms", modifier = Modifier.weight(1f))
+                StatusBadge("Loss", "${uiState.stabilityInfo.packetLoss.roundToInt()}%", modifier = Modifier.weight(1f))
             }
         }
     }
@@ -1193,7 +1191,7 @@ private fun DnsResultCard(
             ProtectedActionButton(
                 label = if (result.isRecommended) "Apply best" else "Apply",
                 privilegedReady = privilegedReady,
-                enabled = !result.provider.privateDnsHostname.isNullOrBlank(),
+                enabled = !result.provider.hostname.isNullOrBlank(),
                 onClick = onApply
             )
             if (result.isRecommended) {
@@ -1652,8 +1650,9 @@ private fun StatusOrb(
 }
 
 @Composable
-private fun StatusBadge(label: String, value: String) {
+private fun StatusBadge(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
+        modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
     ) {

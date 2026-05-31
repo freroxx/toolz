@@ -15,7 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,15 +29,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.network.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.ui.components.fadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -64,6 +69,9 @@ fun WifiTweaksScreen(
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showDetailSheet by remember { mutableStateOf<WifiScanResult?>(null) }
+    var showTerminalSheet by remember { mutableStateOf(false) }
+    var showBenchmarkSelectionSheet by remember { mutableStateOf(false) }
+    var sideNavVisible by remember { mutableStateOf(true) }
 
     val permissions = remember {
         buildList {
@@ -94,25 +102,9 @@ fun WifiTweaksScreen(
             contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                CenterAlignedTopAppBar(
-                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "Network Power-Suite",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black
-                            )
-                            Text(
-                                text = uiState.currentSsid,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
+                ExpressiveTopAppBar(
+                    title = "Network Power-Suite",
+                    subtitle = uiState.currentSsid,
                     navigationIcon = {
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
@@ -132,13 +124,11 @@ fun WifiTweaksScreen(
                                 Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
                             }
                         }
-                        IconButton(onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.resetAllSettings()
-                        }) {
-                            Icon(Icons.Rounded.SettingsBackupRestore, contentDescription = "Reset All")
-                        }
-                    }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
+                    )
                 )
             }
         ) { padding ->
@@ -164,198 +154,361 @@ fun WifiTweaksScreen(
                         }
                     )
                 } else {
-                    if (!uiState.locationEnabled) {
-                        DisabledServiceCard(
-                            title = "Location is off",
-                            body = "Android hides nearby Wi-Fi scan results until Location is enabled.",
-                            primaryLabel = "Open Location",
-                            onPrimary = {
-                                launchSettings(context, Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                            }
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
-
-                    if (uiState.hasPartialWifiPermissions) {
-                        ServiceWarningCard(
-                            title = "Limited accuracy",
-                            body = "Only approximate location is granted. Some Wi-Fi details (like SSID) might be hidden by Android.",
-                            primaryLabel = "Grant Fine Location",
-                            onPrimary = {
-                                vibrationManager?.vibrateClick()
-                                permissionState.launchMultiplePermissionRequest()
-                            }
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
-
-                    WifiTabs(
-                        selectedTab = selectedTab,
-                        onSelect = { index ->
-                            vibrationManager?.vibrateClick()
-                            selectedTab = index
+                    Row(modifier = Modifier.weight(1f)) {
+                        AnimatedVisibility(
+                            visible = sideNavVisible,
+                            enter = slideInHorizontally { -it } + fadeIn(),
+                            exit = slideOutHorizontally { -it } + fadeOut()
+                        ) {
+                            VerticalExpressiveTabs(
+                                selectedIndex = selectedTab,
+                                options = listOf(
+                                    "Overview" to Icons.Rounded.Dashboard,
+                                    "Analyzer" to Icons.Rounded.Wifi,
+                                    "Profiles" to Icons.Rounded.AutoAwesome,
+                                    "DNS" to Icons.Rounded.Public,
+                                    "Diag" to Icons.Rounded.Analytics,
+                                    "Traffic" to Icons.Rounded.Lan
+                                ),
+                                onOptionSelected = { index: Int ->
+                                    vibrationManager?.vibrateClick()
+                                    selectedTab = index
+                                },
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
                         }
-                    )
 
-                    Spacer(Modifier.height(12.dp))
+                        AnimatedContent(
+                            targetState = selectedTab,
+                            transitionSpec = {
+                                if (targetState > initialState) {
+                                    (slideInVertically { height -> height } + fadeIn()).togetherWith(
+                                        slideOutVertically { height -> -height } + fadeOut())
+                                } else {
+                                    (slideInVertically { height -> -height } + fadeIn()).togetherWith(
+                                        slideOutVertically { height -> height } + fadeOut())
+                                }.using(SizeTransform(clip = false))
+                            },
+                            label = "wifi_tweaks_tab_content",
+                            modifier = Modifier.weight(1f)
+                        ) { tab ->
+                            when (tab) {
+                                0 -> OverviewTab(
+                                    state = uiState,
+                                    onScan = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.startScan()
+                                    },
+                                    onFixConnection = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.fixMyConnection()
+                                    },
+                                    onReset = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.resetAllSettings()
+                                    },
+                                    onToggleAudio = viewModel::setAudioFeedback,
+                                    onOpenWifiSettings = {
+                                        launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
+                                    }
+                                )
 
-                    AnimatedContent(
-                        targetState = selectedTab,
-                        transitionSpec = {
-                            if (targetState > initialState) {
-                                (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
-                                    slideOutHorizontally { width -> -width } + fadeOut())
-                            } else {
-                                (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
-                                    slideOutHorizontally { width -> width } + fadeOut())
-                            }.using(SizeTransform(clip = false))
-                        },
-                        label = "wifi_tweaks_tab_content",
-                        modifier = Modifier.weight(1f)
-                    ) { tab ->
-                        when (tab) {
-                            0 -> OverviewTab(
-                                state = uiState,
-                                onScan = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.startScan()
-                                },
-                                onFixConnection = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.fixMyConnection()
-                                },
-                                onReset = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.resetAllSettings()
-                                },
-                                onToggleAudio = viewModel::setAudioFeedback,
-                                onOpenWifiSettings = {
-                                    launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
-                                }
-                            )
+                                1 -> AnalyzerTab(
+                                    state = uiState,
+                                    onScan = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.startScan()
+                                    },
+                                    onSortSelected = viewModel::setScanSortMode,
+                                    onToggleHidden = viewModel::setShowHiddenNetworks,
+                                    onSelectAP = { showDetailSheet = it }
+                                )
 
-                            1 -> AnalyzerTab(
-                                state = uiState,
-                                onScan = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.startScan()
-                                },
-                                onSortSelected = viewModel::setScanSortMode,
-                                onToggleHidden = viewModel::setShowHiddenNetworks,
-                                onSelectAP = { showDetailSheet = it }
-                            )
+                                2 -> ProfilesTab(
+                                    state = uiState,
+                                    onBindShizuku = {
+                                        requestShizuku(context)
+                                    },
+                                    onApplyProfile = { profile ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.applyProfile(profile)
+                                    },
+                                    onApplyTweak = { tweak ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.applyTweak(tweak)
+                                    },
+                                    onUndoTweak = { tweak ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.undoTweak(tweak)
+                                    },
+                                    onToggleBlocklist = { id ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.toggleBlocklist(id)
+                                    }
+                                )
 
-                            2 -> ProfilesTab(
-                                state = uiState,
-                                onBindShizuku = {
-                                    requestShizuku(context)
-                                },
-                                onApplyProfile = { profile ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.applyProfile(profile)
-                                },
-                                onApplyTweak = { tweak ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.applyTweak(tweak)
-                                },
-                                onUndoTweak = { tweak ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.undoTweak(tweak)
-                                }
-                            )
+                                3 -> DnsEngineTab(
+                                    state = uiState,
+                                    onBenchmark = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.benchmarkDns()
+                                    },
+                                    onApplyTweak = { tweak ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.applyTweak(tweak)
+                                    },
+                                    onRestoreAutomatic = {
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.restoreAutomaticPrivateDns()
+                                    },
+                                    onApplyCustom = { host ->
+                                        vibrationManager?.vibrateClick()
+                                        viewModel.applyCustomDns(host)
+                                    },
+                                    onShowSelection = { showBenchmarkSelectionSheet = true }
+                                )
 
-                            3 -> DnsEngineTab(
-                                state = uiState,
-                                onBenchmark = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.benchmarkDns()
-                                },
-                                onApplyTweak = { tweak ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.applyTweak(tweak)
-                                },
-                                onRestoreAutomatic = {
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.restoreAutomaticPrivateDns()
-                                },
-                                onApplyCustom = { host ->
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.applyCustomDns(host)
-                                }
-                            )
+                                4 -> DiagnosticsTab(
+                                    state = uiState,
+                                    onCopySummary = {
+                                        clipboard.setText(AnnotatedString(viewModel.buildDiagnosticSummary()))
+                                        scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
+                                    },
+                                    onOpenWifiSettings = {
+                                        launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
+                                    },
+                                    onOpenDevSettings = {
+                                        launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                                    },
+                                    onRunSpeedTest = { viewModel.runSpeedTest() },
+                                    onRunTraceRoute = { viewModel.runTraceRoute(it) }
+                                )
 
-                            else -> DiagnosticsTab(
-                                state = uiState,
-                                onCopySummary = {
-                                    clipboard.setText(AnnotatedString(viewModel.buildDiagnosticSummary()))
-                                    scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
-                                },
-                                onOpenWifiSettings = {
-                                    launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
-                                },
-                                onOpenDevSettings = {
-                                    launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-                                }
-                            )
+                                else -> TrafficTab(
+                                    state = uiState
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            FloatingActionButton(
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    sideNavVisible = !sideNavVisible
+                },
+                modifier = Modifier.align(Alignment.BottomStart),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = CircleShape
+            ) {
+                AnimatedContent(
+                    targetState = sideNavVisible,
+                    transitionSpec = {
+                        (fadeIn() + scaleIn()).togetherWith(fadeOut() + scaleOut())
+                    }
+                ) { visible ->
+                    Icon(
+                        if (visible) Icons.Rounded.ArrowBackIosNew else Icons.Rounded.ArrowForwardIos,
+                        contentDescription = "Toggle Navigation"
+                    )
+                }
+            }
+
+            FloatingActionButton(
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    showTerminalSheet = true 
+                },
+                modifier = Modifier.align(Alignment.BottomEnd),
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                shape = CircleShape
+            ) {
+                Icon(Icons.Rounded.Terminal, "Diagnostics Terminal")
+            }
+        }
+
+        if (showTerminalSheet) {
+            DiagnosticLogSheet(
+                logs = uiState.diagnosticLogs,
+                onDismiss = { showTerminalSheet = false }
+            )
+        }
+
+        if (showBenchmarkSelectionSheet) {
+            BenchmarkSelectionSheet(
+                state = uiState,
+                onToggle = viewModel::updateBenchmarkSelection,
+                onDismiss = { showBenchmarkSelectionSheet = false }
+            )
+        }
+
         if (showDetailSheet != null) {
             APDetailSheet(
                 result = showDetailSheet!!,
                 onDismiss = { showDetailSheet = null },
-                onPing = { /* Could add direct internal ping logic here or in VM */ }
+                onPing = { target ->
+                    scope.launch {
+                        val latency = viewModel.pingHost(target)
+                        snackbarHostState.showSnackbar("Ping to $target: ${latency ?: "Timeout"}ms")
+                    }
+                }
             )
         }
     }
 }
 
 @Composable
-private fun WifiTabs(
-    selectedTab: Int,
-    onSelect: (Int) -> Unit
+private fun VerticalExpressiveTabs(
+    selectedIndex: Int,
+    options: List<Pair<String, ImageVector>>,
+    onOptionSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val tabs = listOf("Overview", "Analyzer", "Profiles", "DNS", "Diag")
-    Surface(
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-        tonalElevation = 4.dp
+    Column(
+        modifier = modifier
+            .width(64.dp)
+            .fillMaxHeight()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            tabs.forEachIndexed { index, title ->
-                val selected = index == selectedTab
-                val container by animateColorAsState(
-                    targetValue = if (selected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        Color.Transparent
-                    },
-                    label = "tab_bg"
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(container)
-                        .clickable { onSelect(index) }
-                        .padding(horizontal = 4.dp, vertical = 14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
+        options.forEachIndexed { index, (label, icon) ->
+            val selected = selectedIndex == index
+            val containerColor by animateColorAsState(
+                if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                label = "tab_bg"
+            )
+            val contentColor by animateColorAsState(
+                if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                label = "tab_content"
+            )
+            
+            Surface(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onOptionSelected(index) },
+                color = containerColor,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = contentColor,
+                        modifier = Modifier.size(24.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BenchmarkSelectionSheet(
+    state: WifiTweaksUiState,
+    onToggle: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val providers = listOf(
+        Triple("cloudflare", "Cloudflare", "1.1.1.1"),
+        Triple("google", "Google", "8.8.8.8"),
+        Triple("quad9", "Quad9", "9.9.9.9"),
+        Triple("adguard", "AdGuard", "94.140.14.14"),
+        Triple("opendns", "OpenDNS", "208.67.222.222"),
+        Triple("mullvad", "Mullvad", "194.242.2.2"),
+        Triple("controld", "Control D", "76.76.2.0"),
+        Triple("nextdns", "NextDNS", "45.90.28.0")
+    )
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 32.dp)) {
+            Text("Select Benchmark Servers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(16.dp))
+            
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(providers) { (id, name, host) ->
+                    val selected = id in state.selectedBenchmarkProviders
+                    Surface(
+                        onClick = { onToggle(id, !selected) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent,
+                        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(name, fontWeight = FontWeight.Bold)
+                                Text(host, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Checkbox(checked = selected, onCheckedChange = { onToggle(id, it) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiagnosticLogSheet(
+    logs: List<DiagnosticLog>,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 32.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Diagnostic Terminal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, null)
+                }
+            }
+            
+            Spacer(Modifier.height(16.dp))
+            
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(400.dp),
+                color = Color.Black.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+            ) {
+                LazyColumn(
+                    modifier = Modifier.padding(12.dp).fadingEdges(top = 16.dp, bottom = 16.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(logs) { log ->
+                        Row(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(
+                                text = "[${log.tag}]",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = when (log.level) {
+                                    LogLevel.ERROR -> Color(0xFFC84B4B)
+                                    LogLevel.WARNING -> Color(0xFFD97D2C)
+                                    LogLevel.SUCCESS -> Color(0xFF2E9D66)
+                                    else -> MaterialTheme.colorScheme.primary
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = log.message,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -423,33 +576,31 @@ private fun DisabledServiceCard(
     primaryLabel: String,
     onPrimary: () -> Unit
 ) {
-    Surface(
+    ElevatedCard(
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Spacer(Modifier.width(14.dp))
+            Icon(
+                Icons.Rounded.Warning,
+                null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Text(title, fontWeight = FontWeight.Black)
+                Text(body, style = MaterialTheme.typography.bodySmall)
             }
-            Spacer(Modifier.width(8.dp))
-            FilledTonalButton(onClick = onPrimary, shape = RoundedCornerShape(16.dp)) {
-                Text(primaryLabel)
+            TextButton(onClick = onPrimary) {
+                Text(primaryLabel, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -462,33 +613,31 @@ private fun ServiceWarningCard(
     primaryLabel: String,
     onPrimary: () -> Unit
 ) {
-    Surface(
+    ElevatedCard(
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f)
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-                }
-            }
-            Spacer(Modifier.width(14.dp))
+            Icon(
+                Icons.Rounded.Info,
+                null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Text(title, fontWeight = FontWeight.Black)
+                Text(body, style = MaterialTheme.typography.bodySmall)
             }
-            Spacer(Modifier.width(8.dp))
-            FilledTonalButton(onClick = onPrimary, shape = RoundedCornerShape(16.dp)) {
-                Text(primaryLabel)
+            TextButton(onClick = onPrimary) {
+                Text(primaryLabel, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -531,39 +680,10 @@ private fun OverviewTab(
             InsightStrip(state = state)
         }
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("Live feedback", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                            Text(
-                                "Use sound while walking around a room to find the signal sweet spot.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = state.audioFeedbackEnabled,
-                            onCheckedChange = onToggleAudio
-                        )
-                    }
-                    SignalHistoryChart(
-                        history = state.rssiHistory,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                    )
-                }
-            }
+            LiveFeedbackCard(
+                state = state,
+                onToggleAudio = onToggleAudio
+            )
         }
         item {
             ElevatedCard(
@@ -686,15 +806,84 @@ private fun QuickActionFloatingCard(onFix: () -> Unit, onReset: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LiveFeedbackCard(
+    state: WifiTweaksUiState,
+    onToggleAudio: (Boolean) -> Unit
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(32.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Signal Soundscape", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(
+                        "Frequency shifts with signal strength. Walk around to find the peak.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioFeedbackEnabled,
+                    onCheckedChange = onToggleAudio,
+                    thumbContent = {
+                        Icon(
+                            if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
+                            null,
+                            Modifier.size(12.dp)
+                        )
+                    }
+                )
+            }
+            
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                SignalHistoryChart(
+                    history = state.rssiHistory,
+                    modifier = Modifier.fillMaxSize().padding(16.dp)
+                )
+                
+                // Visual peak indicator
+                val peakRssi = state.rssiHistory.maxByOrNull { it.rssi }?.rssi ?: -100
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                ) {
+                    StatusPill("Peak", "$peakRssi dBm")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun OverviewHeroCard(
     state: WifiTweaksUiState,
     onScan: () -> Unit,
     onOpenWifiSettings: () -> Unit
 ) {
-    val score = state.advice.healthScore
-    val accent = when {
+    val score = remember(state) {
+        val rssiBonus = ((state.currentRssi + 100) / 70f * 40f).coerceIn(0f, 40f)
+        val stabilityBonus = (1.0 - state.stability.packetLossRate) * 40f
+        val jitterBonus = (1.0 - (state.stability.jitterMs / 50.0).coerceIn(0.0, 1.0)) * 20f
+        (rssiBonus + stabilityBonus + jitterBonus).roundToInt().coerceIn(0, 100)
+    }
+    
+    val color = when {
         score >= 75 -> Color(0xFF2E9D66)
         score >= 55 -> Color(0xFFD97D2C)
         else -> Color(0xFFC84B4B)
@@ -741,8 +930,7 @@ private fun OverviewHeroCard(
                     Spacer(Modifier.width(12.dp))
                     SignalQualityGauge(
                         score = score,
-                        rssi = state.currentRssi,
-                        accent = accent
+                        rssi = state.currentRssi
                     )
                 }
 
@@ -753,9 +941,6 @@ private fun OverviewHeroCard(
                     InsightChip(Icons.Rounded.Wifi, "${state.currentRssi} dBm")
                     InsightChip(Icons.Rounded.Speed, "${state.networkConfig.linkSpeed} Mbps")
                     InsightChip(Icons.Rounded.Route, "Ch ${state.networkConfig.channel.takeIf { it != 0 } ?: "-"}")
-                    if (state.networkConfig.wifi6ECapable || state.networkConfig.wifi7Capable) {
-                        InsightChip(Icons.Rounded.Bolt, state.networkConfig.wifiStandard)
-                    }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -782,7 +967,7 @@ private fun OverviewHeroCard(
                         shape = RoundedCornerShape(20.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                     ) {
-                        Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Settings", style = MaterialTheme.typography.labelLarge)
                     }
@@ -793,7 +978,7 @@ private fun OverviewHeroCard(
 }
 
 @Composable
-private fun SignalQualityGauge(score: Int, rssi: Int, accent: Color) {
+private fun SignalQualityGauge(score: Int, rssi: Int) {
     val progress = (score / 100f).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
         targetValue = progress, 
@@ -922,6 +1107,20 @@ private fun InsightStrip(state: WifiTweaksUiState) {
                         disabledLeadingIconContentColor = MaterialTheme.colorScheme.secondary
                     )
                 )
+                
+                if (state.networkConfig.wifi6ECapable || state.networkConfig.wifi7Capable) {
+                    AssistChip(
+                        onClick = {},
+                        enabled = false,
+                        label = { Text(state.networkConfig.wifiStandard) },
+                        leadingIcon = { Icon(Icons.Rounded.Bolt, contentDescription = null) },
+                        colors = AssistChipDefaults.assistChipColors(
+                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                            disabledLeadingIconContentColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
             }
         }
     }
@@ -942,6 +1141,8 @@ private fun AnalyzerTab(
         WifiScanSortMode.SECURITY to "Security",
         WifiScanSortMode.NAME to "Name"
     )
+    
+    var ssidFilter by remember { mutableStateOf("ALL") }
 
     LazyColumn(
         modifier = Modifier
@@ -959,7 +1160,7 @@ private fun AnalyzerTab(
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Spectrum Visualizer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Box(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
                         SpectrumVisualizer(
                             results = state.scanResults,
                             currentBssid = state.networkConfig.bssid
@@ -1008,6 +1209,27 @@ private fun AnalyzerTab(
                             Text(if (state.isScanning) "Scanning" else "Scan")
                         }
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = ssidFilter == "ALL",
+                            onClick = { ssidFilter = "ALL" },
+                            label = { Text("All") },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        state.scanResults.map { it.ssid }.distinct().filter { it.isNotBlank() }.take(8).forEach { ssid ->
+                            FilterChip(
+                                selected = ssidFilter == ssid,
+                                onClick = { ssidFilter = ssid },
+                                label = { Text(ssid) },
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+                    }
+
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1029,6 +1251,17 @@ private fun AnalyzerTab(
                     }
                 }
             }
+        }
+
+        val filteredResults = state.scanResults.filter { 
+            ssidFilter == "ALL" || it.ssid == ssidFilter
+        }
+
+        items(filteredResults, key = { it.bssid }) { result ->
+            NetworkResultCard(
+                result = result,
+                onClick = { onSelectAP(result) }
+            )
         }
 
         item {
@@ -1054,34 +1287,6 @@ private fun AnalyzerTab(
                 }
             }
         }
-
-        if (state.scanResults.isEmpty()) {
-            item {
-                ElevatedCard(
-                    shape = RoundedCornerShape(32.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                    )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(28.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "No nearby networks yet. Run a scan to populate the analyzer.",
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        } else {
-            items(state.scanResults, key = { it.bssid }) { result ->
-                NetworkResultCard(result, onClick = { onSelectAP(result) })
-            }
-        }
     }
 }
 
@@ -1089,50 +1294,86 @@ private fun AnalyzerTab(
 private fun SpectrumVisualizer(results: List<WifiScanResult>, currentBssid: String) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
+    val errorColor = MaterialTheme.colorScheme.error
     
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold)
+
     Canvas(modifier = Modifier.fillMaxSize()) {
         val width = size.width
         val height = size.height
         
-        // Split into 2.4GHz and 5GHz sections or focus on primary? Let's show all relative.
         val minFreq = 2400f
-        val maxFreq = 5900f // Simplified broad range
+        val maxFreq = 6000f 
         
         // Draw baseline
-        drawLine(Color.Gray.copy(alpha = 0.2f), Offset(0f, height), Offset(width, height), strokeWidth = 2f)
+        drawLine(Color.Gray.copy(alpha = 0.15f), Offset(0f, height), Offset(width, height), strokeWidth = 1.dp.toPx())
 
-        // Draw frequency labels
-        val labels = listOf("2.4GHz" to 2450f, "5GHz" to 5500f)
-        labels.forEach { (text, freq) ->
+        // Draw frequency guides
+        val guides = listOf("2.4G" to 2442f, "5G" to 5500f, "6G" to 5950f)
+        guides.forEach { (text, freq) ->
             val x = ((freq - minFreq) / (maxFreq - minFreq)) * width
             if (x in 0f..width) {
-                drawLine(Color.Gray.copy(alpha = 0.1f), Offset(x, 0f), Offset(x, height), strokeWidth = 1f)
+                drawLine(Color.Gray.copy(alpha = 0.05f), Offset(x, 0f), Offset(x, height), strokeWidth = 1f)
+                val layout = textMeasurer.measure(text, labelStyle)
+                drawText(layout, color = Color.Gray.copy(alpha = 0.4f), topLeft = Offset(x - layout.size.width/2, height + 4.dp.toPx()))
             }
         }
 
-        results.forEach { ap ->
-            // Skip 6GHz for simple viz range if needed, but let's try mapping
+        results.sortedBy { it.rssi }.forEach { ap ->
             val normalizedFreq = (ap.frequency - minFreq) / (maxFreq - minFreq)
             if (normalizedFreq in 0f..1f) {
                 val centerX = normalizedFreq * width
-                val arcHeight = ((ap.rssi + 100f).coerceAtLeast(0f) / 70f) * height
-                // Width based on band
-                val arcWidth = when (ap.band) {
-                    "2.4 GHz" -> width * 0.12f
-                    "5 GHz" -> width * 0.06f
-                    else -> width * 0.04f
+                val arcHeight = ((ap.rssi + 100f).coerceIn(0f, 70f) / 70f) * height * 0.85f
+                
+                val arcWidth = when {
+                    ap.frequency < 3000 -> width * 0.14f // 2.4GHz
+                    ap.frequency < 5900 -> width * 0.08f // 5GHz
+                    else -> width * 0.06f // 6GHz
                 }
 
                 val path = Path().apply {
-                    moveTo(centerX - arcWidth, height)
-                    quadraticTo(centerX, height - arcHeight, centerX + arcWidth, height)
+                    moveTo(centerX - arcWidth/2, height)
+                    quadraticTo(centerX, height - arcHeight, centerX + arcWidth/2, height)
+                    close()
+                }
+                
+                val isCurrent = ap.bssid == currentBssid
+                val isHidden = ap.isHidden
+                val isSecure = ap.security.contains("WPA", ignoreCase = true) || ap.security.contains("SAE", ignoreCase = true)
+                
+                val baseColor = when {
+                    isCurrent -> primaryColor
+                    isHidden -> Color.Gray
+                    !isSecure -> errorColor
+                    else -> secondaryColor
                 }
                 
                 drawPath(
                     path = path,
-                    color = if (ap.bssid == currentBssid) primaryColor else secondaryColor.copy(alpha = 0.35f),
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                    brush = Brush.verticalGradient(
+                        listOf(baseColor.copy(alpha = if (isCurrent) 0.5f else 0.2f), Color.Transparent)
+                    )
                 )
+                
+                drawPath(
+                    path = path,
+                    color = baseColor.copy(alpha = if (isCurrent) 0.9f else 0.4f),
+                    style = Stroke(width = (if (isCurrent) 2.dp else 1.dp).toPx(), cap = StrokeCap.Round)
+                )
+                
+                // SSID Label for significant signals
+                if (ap.rssi > -75 || isCurrent) {
+                    val label = if (isHidden) "[Hidden]" else ap.ssid
+                    val layout = textMeasurer.measure(label, labelStyle.copy(color = baseColor))
+                    if (centerX + layout.size.width/2 < width && centerX - layout.size.width/2 > 0) {
+                        drawText(
+                            layout, 
+                            color = baseColor, 
+                            topLeft = Offset(centerX - layout.size.width/2, height - arcHeight - 14.dp.toPx())
+                        )
+                    }
+                }
             }
         }
     }
@@ -1140,28 +1381,36 @@ private fun SpectrumVisualizer(results: List<WifiScanResult>, currentBssid: Stri
 
 @Composable
 private fun ScanningPulse() {
-    val infiniteTransition = rememberInfiniteTransition(label = "scanning")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.1f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
-        label = "alpha"
-    )
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
+        initialValue = 0.5f,
+        targetValue = 1.5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
         label = "scale"
     )
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "alpha"
+    )
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .graphicsLayer(scaleX = scale, scaleY = scale, alpha = alpha)
-                .background(MaterialTheme.colorScheme.primary, CircleShape)
-        )
-    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
+            .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+    )
 }
 
 @Composable
@@ -1170,11 +1419,16 @@ private fun ProfilesTab(
     onBindShizuku: () -> Unit,
     onApplyProfile: (WifiOptimizationProfile) -> Unit,
     onApplyTweak: (WifiTweak) -> Unit,
-    onUndoTweak: (WifiTweak) -> Unit
+    onUndoTweak: (WifiTweak) -> Unit,
+    onToggleBlocklist: (String) -> Unit
 ) {
     val groupedTweaks = remember(state.tweaks) {
-        state.tweaks.groupBy { it.category }
+        state.tweaks.filter { !it.id.startsWith("private_dns_") }.groupBy { it.category }
     }
+    
+    var showCustomBlocklist by remember { mutableStateOf(false) }
+    var customName by remember { mutableStateOf("") }
+    var customUrl by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
@@ -1188,20 +1442,50 @@ private fun ProfilesTab(
         }
 
         item {
+            Text("Ready-to-use Profiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                state.profiles.forEach { profile ->
+                    ProfileCard(
+                        profile = profile,
+                        active = profile.tweakIds.all { state.tweakResults[it]?.isApplied == true },
+                        onApply = { onApplyProfile(profile) }
+                    )
+                }
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Block Lists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                IconButton(onClick = { showCustomBlocklist = true }) {
+                    Icon(Icons.Rounded.Add, "Add Custom List")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
             ElevatedCard(
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.elevatedCardColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                 )
             ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Quick profiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    state.profiles.forEach { profile ->
-                        ProfileCard(
-                            profile = profile,
-                            enabled = !profile.requiresShizuku || state.shizukuStatus.isServiceReady,
-                            onApply = { onApplyProfile(profile) }
-                        )
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (state.blocklists.isEmpty()) {
+                        Text("No blocklists configured. Use DNS engine to enable filtering.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        state.blocklists.forEach { list ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(list.name, fontWeight = FontWeight.Bold)
+                                    Text(list.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Switch(checked = list.isEnabled, onCheckedChange = { onToggleBlocklist(list.id) })
+                            }
+                        }
                     }
                 }
             }
@@ -1227,6 +1511,42 @@ private fun ProfilesTab(
             }
         }
     }
+
+    if (showCustomBlocklist) {
+        AlertDialog(
+            onDismissRequest = { showCustomBlocklist = false },
+            confirmButton = {
+                Button(onClick = { 
+                    showCustomBlocklist = false 
+                }) {
+                    Text("Add List")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomBlocklist = false }) {
+                    Text("Cancel")
+                }
+            },
+            title = { Text("Add Blocklist", fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = { customName = it },
+                        label = { Text("List Name") },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = customUrl,
+                        onValueChange = { customUrl = it },
+                        label = { Text("URL (hosts format)") },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            shape = RoundedCornerShape(28.dp)
+        )
+    }
 }
 
 @Composable
@@ -1235,10 +1555,12 @@ private fun DnsEngineTab(
     onBenchmark: () -> Unit,
     onApplyTweak: (WifiTweak) -> Unit,
     onRestoreAutomatic: () -> Unit,
-    onApplyCustom: (String) -> Unit
+    onApplyCustom: (String) -> Unit,
+    onShowSelection: () -> Unit
 ) {
     val dnsTweaks = state.tweaks.filter { it.id.startsWith("private_dns_") }
     var customHost by remember { mutableStateOf("") }
+    var dnsFilter by remember { mutableStateOf("ALL") }
 
     LazyColumn(
         modifier = Modifier
@@ -1260,19 +1582,27 @@ private fun DnsEngineTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("DNS Benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        FilledTonalButton(
-                            onClick = onBenchmark,
-                            enabled = !state.isBenchmarkingDns && state.shizukuStatus.isServiceReady,
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            if (state.isBenchmarkingDns) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(18.dp))
+                        Column {
+                            Text("DNS Benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            Text("${state.selectedBenchmarkProviders.size} servers selected", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            IconButton(onClick = onShowSelection) {
+                                Icon(Icons.Rounded.Settings, "Select Servers")
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Text("Run")
+                            FilledTonalButton(
+                                onClick = onBenchmark,
+                                enabled = !state.isBenchmarkingDns && state.shizukuStatus.isServiceReady,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                if (state.isBenchmarkingDns) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(18.dp))
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text("Run")
+                            }
                         }
                     }
 
@@ -1324,8 +1654,32 @@ private fun DnsEngineTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    dnsTweaks.forEach { tweak ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("ALL", "SEC", "SPD").forEach { filter ->
+                                FilterChip(
+                                    selected = dnsFilter == filter,
+                                    onClick = { dnsFilter = filter },
+                                    label = { Text(filter) },
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                            }
+                        }
+                    }
+                    
+                    val filteredTweaks = when(dnsFilter) {
+                        "SEC" -> dnsTweaks.filter { it.id.contains("quad9") || it.id.contains("adguard") }
+                        "SPD" -> dnsTweaks.filter { it.id.contains("cloudflare") || it.id.contains("google") }
+                        else -> dnsTweaks
+                    }
+
+                    filteredTweaks.forEach { tweak ->
                         PresetDnsRow(
                             tweak = tweak,
                             active = state.tweakResults[tweak.id]?.isApplied == true,
@@ -1386,8 +1740,12 @@ private fun DiagnosticsTab(
     state: WifiTweaksUiState,
     onCopySummary: () -> Unit,
     onOpenWifiSettings: () -> Unit,
-    onOpenDevSettings: () -> Unit
+    onOpenDevSettings: () -> Unit,
+    onRunSpeedTest: () -> Unit,
+    onRunTraceRoute: (String) -> Unit
 ) {
+    var traceTarget by remember(state.lastTraceTarget) { mutableStateOf(state.lastTraceTarget) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1403,37 +1761,95 @@ private fun DiagnosticsTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Diagnostic terminal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().height(200.dp),
-                        color = Color.Black.copy(alpha = 0.05f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                    Text("Speed Test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        LazyColumn(
-                            modifier = Modifier.padding(8.dp),
-                            reverseLayout = false
+                        Column {
+                            Text(
+                                text = "${state.speedTest.downloadSpeedMbps.roundToInt()} Mbps",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                text = state.speedTest.phaseLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        Button(
+                            onClick = onRunSpeedTest,
+                            enabled = !state.speedTest.isRunning,
+                            shape = RoundedCornerShape(16.dp)
                         ) {
-                            items(state.diagnosticLogs) { log ->
-                                Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                            Text(if (state.speedTest.isRunning) "Running" else "Run Test")
+                        }
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { state.speedTest.progress },
+                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    )
+                }
+            }
+        }
+
+        item {
+            ElevatedCard(
+                shape = RoundedCornerShape(32.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Trace Route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    
+                    OutlinedTextField(
+                        value = traceTarget,
+                        onValueChange = { traceTarget = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Target Host") },
+                        shape = RoundedCornerShape(16.dp),
+                        trailingIcon = {
+                            IconButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing) {
+                                if (state.isTracing) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Rounded.PlayArrow, null)
+                            }
+                        }
+                    )
+
+                    if (state.traceHops.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.traceHops.forEach { hop ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Hop ${hop.hop}", fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
+                                    Text(hop.ip, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(
-                                        text = "[${log.tag}]",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = when (log.level) {
-                                            LogLevel.ERROR -> Color(0xFFC84B4B)
-                                            LogLevel.WARNING -> Color(0xFFD97D2C)
-                                            LogLevel.SUCCESS -> Color(0xFF2E9D66)
-                                            else -> MaterialTheme.colorScheme.primary
-                                        }
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = log.message,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        text = hop.latencyMs?.let { "${it}ms" } ?: "*",
+                                        fontWeight = FontWeight.Black,
+                                        color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                                     )
                                 }
+                            }
+                        }
+                    } else if (state.traceHistory.isNotEmpty()) {
+                        Text("Recent Targets:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.traceHistory.forEach { host ->
+                                AssistChip(
+                                    onClick = { traceTarget = host; onRunTraceRoute(host) },
+                                    label = { Text(host) },
+                                    shape = RoundedCornerShape(12.dp)
+                                )
                             }
                         }
                     }
@@ -1504,6 +1920,126 @@ private fun DiagnosticsTab(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+private fun TrafficTab(
+    state: WifiTweaksUiState
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .fadingEdges(top = 16.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(bottom = 60.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            ElevatedCard(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Real-time Throughput", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${state.activeProcesses.sumOf { it.rxKbps }.roundToInt()} Kbps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(0xFF2E9D66))
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Upload", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${state.activeProcesses.sumOf { it.txKbps }.roundToInt()} Kbps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.activeProcesses.isEmpty()) {
+            item {
+                Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.CloudOff, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                        Spacer(Modifier.height(16.dp))
+                        Text("No active traffic detected", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Requires Shizuku for process mapping", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                    }
+                }
+            }
+        } else {
+            items(state.activeProcesses.sortedByDescending { it.rxKbps + it.txKbps }) { process ->
+                TrafficProcessCard(process)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrafficProcessCard(process: ProcessNetworkUsage) {
+    ElevatedCard(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (process.protocol == "UDP") Icons.Rounded.WifiTethering else Icons.Rounded.Lan,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(process.name, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = "${process.protocol} • ${process.state.lowercase().replaceFirstChar { it.uppercase() }}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = process.remoteAddr,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${process.txKbps.roundToInt()} ↑",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${process.rxKbps.roundToInt()} ↓",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFF2E9D66),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShizukuCockpit(
     state: WifiTweaksUiState,
     onBindShizuku: () -> Unit
@@ -1514,65 +2050,124 @@ private fun ShizukuCockpit(
         shizuku.isReachable -> MaterialTheme.colorScheme.secondaryContainer
         else -> MaterialTheme.colorScheme.errorContainer
     }
+    
+    val contentColor = when {
+        shizuku.isServiceReady -> Color(0xFF1E5D3F)
+        shizuku.isReachable -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onErrorContainer
+    }
 
     ElevatedCard(
         shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = container.copy(alpha = 0.9f))
+        colors = CardDefaults.elevatedCardColors(containerColor = container.copy(alpha = 0.95f))
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Shizuku cockpit", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                    Text(shizuku.detail, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (!shizuku.isServiceReady) {
-                    Button(onClick = onBindShizuku, shape = RoundedCornerShape(16.dp)) {
-                        Text("Connect")
-                    }
-                } else {
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = { Text("Ready") },
-                        leadingIcon = { Icon(Icons.Rounded.CheckCircle, contentDescription = null) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            disabledContainerColor = Color(0xFF2E9D66).copy(alpha = 0.14f),
-                            disabledLabelColor = Color(0xFF2E9D66),
-                            disabledLeadingIconContentColor = Color(0xFF2E9D66)
-                        )
+                    Text(
+                        "PRIVILEGED ENGINE", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        fontWeight = FontWeight.Black,
+                        color = contentColor.copy(alpha = 0.6f),
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        if (shizuku.isServiceReady) "Service Active" else "Engine Locked", 
+                        style = MaterialTheme.typography.headlineSmall, 
+                        fontWeight = FontWeight.Black,
+                        color = contentColor
                     )
                 }
+                
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    shape = CircleShape,
+                    color = contentColor.copy(alpha = 0.1f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (shizuku.isServiceReady) Icons.Rounded.Bolt else Icons.Rounded.Lock,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
             }
+
+            Text(
+                text = if (shizuku.isServiceReady) 
+                    "Full access granted. All advanced networking tweaks and real-time process audits are available." 
+                    else "Shizuku is required for advanced features like Private DNS management and TraceRoute.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = contentColor.copy(alpha = 0.8f)
+            )
+
+            if (!shizuku.isServiceReady) {
+                Button(
+                    onClick = onBindShizuku,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = contentColor, contentColor = container)
+                ) {
+                    Icon(Icons.Rounded.PowerSettingsNew, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Initialize Service")
+                }
+            }
+            
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                StatusPill("Binder", if (shizuku.isReachable) "Online" else "Offline")
-                StatusPill("Permission", if (shizuku.isAuthorized) "Granted" else "Needed")
-                StatusPill("Service", if (shizuku.isServiceReady) "Bound" else "Waiting")
-                StatusPill("State refresh", if (state.isRefreshingTweakStates) "Checking" else "Idle")
+                StatusBadge("Binder", if (shizuku.isReachable) "Online" else "Offline", shizuku.isReachable)
+                StatusBadge("Permission", if (shizuku.isAuthorized) "Granted" else "Pending", shizuku.isAuthorized)
             }
         }
     }
 }
 
 @Composable
+private fun StatusBadge(label: String, value: String, success: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = (if (success) Color(0xFF2E9D66) else Color.Gray).copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, (if (success) Color(0xFF2E9D66) else Color.Gray).copy(alpha = 0.2f))
+    ) {
+        Text(
+            text = "$label: $value",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = if (success) Color(0xFF1E5D3F) else Color.DarkGray
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun ProfileCard(
     profile: WifiOptimizationProfile,
-    enabled: Boolean,
+    active: Boolean,
     onApply: () -> Unit
 ) {
+    var showDetails by remember { mutableStateOf(false) }
+
     Surface(
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+        modifier = Modifier.combinedClickable(
+            onClick = onApply,
+            onLongClick = { showDetails = true }
+        )
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(280.dp)
                 .padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1588,29 +2183,57 @@ private fun ProfileCard(
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(profile.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(profile.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = profile.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(Modifier.height(8.dp))
                 AssistChip(
                     onClick = {},
                     enabled = false,
-                    label = { Text(profile.accentLabel) },
+                    label = { Text(if (active) "Active" else profile.accentLabel) },
                     shape = RoundedCornerShape(12.dp),
                     colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-                        disabledLabelColor = MaterialTheme.colorScheme.secondary
+                        disabledContainerColor = if (active) Color(0xFF2E9D66).copy(alpha = 0.12f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        disabledLabelColor = if (active) Color(0xFF2E9D66) else MaterialTheme.colorScheme.secondary
                     )
                 )
             }
-            Spacer(Modifier.width(12.dp))
-            Button(
-                onClick = onApply, 
-                enabled = enabled, 
-                shape = RoundedCornerShape(18.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
-            ) {
-                Text("Apply", style = MaterialTheme.typography.labelLarge)
-            }
         }
+    }
+
+    if (showDetails) {
+        AlertDialog(
+            onDismissRequest = { showDetails = false },
+            confirmButton = {
+                Button(onClick = onApply) {
+                    Text("Apply Profile")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDetails = false }) {
+                    Text("Close")
+                }
+            },
+            title = { Text(profile.title, fontWeight = FontWeight.Black) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(profile.description)
+                    Text("Included Tweaks:", fontWeight = FontWeight.Bold)
+                    profile.tweakIds.forEach { id ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Check, null, tint = Color(0xFF2E9D66), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(id.replace("_", " ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            shape = RoundedCornerShape(28.dp)
+        )
     }
 }
 
@@ -1733,27 +2356,58 @@ private fun PresetDnsRow(
     enabled: Boolean,
     onApply: () -> Unit
 ) {
-    val borderColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+    val borderColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+    val background = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+    
     Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        modifier = Modifier.border(1.dp, borderColor, RoundedCornerShape(22.dp))
+        shape = RoundedCornerShape(16.dp),
+        color = background,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+            .clickable(enabled = enabled, onClick = onApply)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(tweak.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
+            Icon(
+                imageVector = tweak.icon,
+                contentDescription = null,
+                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(tweak.title, fontWeight = FontWeight.Black)
-                Text(tweak.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = tweak.title.replace("Private DNS: ", ""),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = tweak.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onApply, enabled = enabled, shape = RoundedCornerShape(16.dp)) {
-                Text(if (active) "Reapply" else "Use")
+            if (active) {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = "Active",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Text(
+                    text = "USE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -1862,7 +2516,7 @@ private fun DetailRow(label: String, value: String) {
 }
 
 @Composable
-private fun InsightChip(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+private fun InsightChip(icon: ImageVector, text: String) {
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
@@ -1990,8 +2644,7 @@ private fun SignalBars(rssi: Int) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class, ExperimentalLayoutApi::class,
-    ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun APDetailSheet(result: WifiScanResult, onDismiss: () -> Unit, onPing: (String) -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -2014,7 +2667,7 @@ fun APDetailSheet(result: WifiScanResult, onDismiss: () -> Unit, onPing: (String
             }
 
             Button(
-                onClick = { onPing("192.168.1.1") }, 
+                onClick = { onPing(result.ssid) }, 
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 contentPadding = PaddingValues(vertical = 14.dp)
@@ -2058,7 +2711,6 @@ private fun lookupVendor(bssid: String): String {
 }
 
 private fun calculateDistance(rssi: Int, freq: Int): String {
-    // Friis path loss model simplified: d = 10 ^ ((27.55 - (20 * log10(freq)) + abs(rssi)) / 20)
     val exp = (27.55 - (20 * kotlin.math.log10(freq.toDouble())) + kotlin.math.abs(rssi)) / 20.0
     return "%.1f".format(10.0.pow(exp))
 }
@@ -2087,7 +2739,7 @@ private fun categoryTitle(category: TweakCategory): String {
     }
 }
 
-private fun requestShizuku(context: android.content.Context) {
+private fun requestShizuku(context: Context) {
     try {
         if (Shizuku.isPreV11()) {
             (context as? Activity)?.requestPermissions(arrayOf("rikka.shizuku.permission.API_V23"), WifiTweaksViewModel.SHIZUKU_CODE)
@@ -2098,7 +2750,7 @@ private fun requestShizuku(context: android.content.Context) {
     }
 }
 
-private fun launchSettings(context: android.content.Context, action: String) {
+private fun launchSettings(context: Context, action: String) {
     runCatching {
         context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }

@@ -43,7 +43,7 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
-    private fun isShizukuAvailable(): Boolean {
+    fun isShizukuAvailable(): Boolean {
         return try {
             Shizuku.pingBinder() && 
                     Shizuku.getVersion() >= 11 &&

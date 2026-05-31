@@ -256,6 +256,10 @@ class SettingsRepository @Inject constructor(
     // Loading Screen Persistence
     private val LAST_LOADING_TIME = longPreferencesKey("last_loading_time")
 
+    private val NETWORK_BENCHMARK_SERVERS = stringSetPreferencesKey("network_benchmark_servers")
+    private val NETWORK_LAST_TRACE_TARGET = stringPreferencesKey("network_last_trace_target")
+    private val NETWORK_AUTO_CONNECT_SHIZUKU = booleanPreferencesKey("network_auto_connect_shizuku")
+
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
     }
@@ -419,6 +423,12 @@ class SettingsRepository @Inject constructor(
     val lastCryptoAlgorithm: Flow<String?> = dataStore.data.map { it[CRYPTO_LAST_ALGORITHM] }
 
     val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
+
+    val networkBenchmarkServers: Flow<Set<String>> = dataStore.data.map {
+        it[NETWORK_BENCHMARK_SERVERS] ?: setOf("cloudflare", "google", "quad9", "adguard")
+    }
+    val networkLastTraceTarget: Flow<String> = dataStore.data.map { it[NETWORK_LAST_TRACE_TARGET] ?: "1.1.1.1" }
+    val networkAutoConnectShizuku: Flow<Boolean> = dataStore.data.map { it[NETWORK_AUTO_CONNECT_SHIZUKU] ?: true }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -623,6 +633,18 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setLastLoadingTime(timestamp: Long) {
         dataStore.edit { it[LAST_LOADING_TIME] = timestamp }
+    }
+
+    suspend fun setNetworkBenchmarkServers(servers: Set<String>) {
+        dataStore.edit { it[NETWORK_BENCHMARK_SERVERS] = servers }
+    }
+
+    suspend fun setNetworkLastTraceTarget(target: String) {
+        dataStore.edit { it[NETWORK_LAST_TRACE_TARGET] = target }
+    }
+
+    suspend fun setNetworkAutoConnectShizuku(enabled: Boolean) {
+        dataStore.edit { it[NETWORK_AUTO_CONNECT_SHIZUKU] = enabled }
     }
 
     suspend fun resetOnboarding() {
