@@ -56,6 +56,7 @@ class SettingsViewModel @Inject constructor(
     val appUpdateNotifications = repository.appUpdateNotifications
     val taskReminderNotifications = repository.taskReminderNotifications
     val eventReminderNotifications = repository.eventReminderNotifications
+    val flashlightNotificationsEnabled = repository.flashlightNotificationsEnabled
     val notificationRetentionDays = repository.notificationRetentionDays
 
     val widgetBackgroundColor = repository.widgetBackgroundColor
@@ -124,6 +125,7 @@ class SettingsViewModel @Inject constructor(
     fun setAppUpdateNotifications(enabled: Boolean) = viewModelScope.launch { repository.setAppUpdateNotifications(enabled) }
     fun setTaskReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTaskReminderNotifications(enabled) }
     fun setEventReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setEventReminderNotifications(enabled) }
+    fun setFlashlightNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setFlashlightNotificationsEnabled(enabled) }
     fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }
 
     fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color) }
