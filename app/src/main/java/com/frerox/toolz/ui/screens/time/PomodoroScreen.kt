@@ -1,40 +1,106 @@
 package com.frerox.toolz.ui.screens.time
 
-import android.view.HapticFeedbackConstants
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.CenterFocusStrong
+import androidx.compose.material.icons.rounded.Coffee
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.components.BouncyShape
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.components.ExpressiveSlider
+import com.frerox.toolz.ui.components.ExpressiveSwitch
+import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.LargeExpressiveShape
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.StaggeredEntrance
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.components.ToolzHorizontalFloatingToolbar
+import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
+import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.screens.time.components.PomodoroQuoteMarquee
+import com.frerox.toolz.ui.screens.time.components.PomodoroSettingsBottomSheet
+import com.frerox.toolz.ui.screens.time.components.PomodoroSuccessConfetti
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
-import java.util.*
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -43,264 +109,485 @@ fun PomodoroScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    val performanceMode = LocalPerformanceMode.current
-    val vibrationManager = LocalVibrationManager.current
-
-    val totalTime = state.mode.minutes * 60 * 1000L
-    
-    // Smooth bouncy progress tracking
-    val animatedProgress by animateFloatAsState(
-        targetValue = if (totalTime > 0) state.remainingTime.toFloat() / totalTime else 0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
-        label = "PomodoroProgress"
+    val rawActiveColor = state.mode.activeColor()
+    val activeColor by animateColorAsState(
+        targetValue = rawActiveColor,
+        animationSpec = tween(durationMillis = 600),
+        label = "activeColor"
     )
+    val view = LocalView.current
+    var showSettings by remember { mutableStateOf(false) }
+    var showConfetti by remember { mutableStateOf(false) }
 
-    // Energetic mode transition
-    val activeColor = if (state.mode == PomodoroMode.WORK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+    var lastCompleted by remember { mutableIntStateOf(state.sessionsCompleted) }
+    LaunchedEffect(state.sessionsCompleted) {
+        if (state.sessionsCompleted > lastCompleted && state.sessionsCompleted == state.sessionsGoal) {
+            showConfetti = true
+        }
+        lastCompleted = state.sessionsCompleted
+    }
+
+    DisposableEffect(state.keepScreenOn) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = state.keepScreenOn
+        onDispose { view.keepScreenOn = previous }
+    }
 
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "FOCUS FLOW",
-                subtitle = "Deep Work Protocol",
+                title = "Pomodoro",
+                subtitle = state.mode.supportingLabel,
+                titleHorizontalAlignment = Alignment.Start,
                 navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            onBack()
-                        },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(SmallExpressiveShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                    ToolzExpressiveIconButton(
+                        onClick = onBack,
+                        modifier = Modifier.padding(start = 8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        shape = SmallExpressiveShape,
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    ExpressiveFabMenu(
-                        items = listOf(
-                            Triple("Customize", Icons.Rounded.Edit, { vibrationManager?.vibrateClick() }),
-                            Triple("Stats", Icons.Rounded.BarChart, { vibrationManager?.vibrateClick() }),
-                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
-                        ),
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
-            )
-        },
-        containerColor = Color.Transparent,
-        floatingActionButton = {
-            ToolzHorizontalFloatingToolbar(
-                expanded = true,
-                modifier = Modifier.padding(bottom = 16.dp),
-                content = {
-                    FilledIconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            if (state.isFinished) viewModel.stopRingtone()
-                            viewModel.toggleStartStop()
-                        },
-                        modifier = Modifier.size(56.dp),
-                        shape = SmallExpressiveShape,
+                    ToolzExpressiveIconButton(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.padding(end = 8.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = if (state.isRunning) MaterialTheme.colorScheme.error else activeColor
-                        )
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        shape = SmallExpressiveShape,
                     ) {
-                        Icon(
-                            if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, 
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp)
-                        )
+                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
                     }
                 },
-                trailingContent = {
-                    clickableItem(
-                        onClick = {
-                            vibrationManager?.vibrateLongClick()
-                            viewModel.reset()
-                        },
-                        icon = { Icon(Icons.Rounded.Refresh, null) },
-                        label = "RESET"
-                    )
-                    clickableItem(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.skip()
-                        },
-                        icon = { Icon(Icons.Rounded.SkipNext, null) },
-                        label = "SKIP"
-                    )
-                }
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding(),
             )
         },
-        floatingActionButtonPosition = FabPosition.Center
+        floatingActionButton = {
+            PomodoroControlDock(
+                state = state,
+                activeColor = activeColor,
+                onToggle = {
+                    if (state.isFinished) viewModel.stopRingtone()
+                    viewModel.toggleStartStop()
+                },
+                onReset = viewModel::reset,
+                onSkip = viewModel::skip,
+            )
+        },
+        floatingActionButtonPosition = FabPosition.Center,
+        containerColor = Color.Transparent,
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 24.dp))
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+        Box(modifier = Modifier.fillMaxSize()) {
+            PomodoroContent(
+                state = state,
+                activeColor = activeColor,
+                contentPadding = padding,
+                onModeSelected = viewModel::selectMode,
+                onSilence = viewModel::stopRingtone,
+            )
+            
+            if (showConfetti) {
+                PomodoroSuccessConfetti(onFinished = { showConfetti = false })
+            }
+        }
+
+        if (showSettings) {
+            PomodoroSettingsBottomSheet(
+                state = state,
+                activeColor = activeColor,
+                onDismiss = { showSettings = false },
+                onWorkMinutesChanged = viewModel::setWorkMinutes,
+                onShortBreakMinutesChanged = viewModel::setShortBreakMinutes,
+                onLongBreakMinutesChanged = viewModel::setLongBreakMinutes,
+                onGoalChanged = viewModel::setSessionsGoal,
+                onAutoStartChanged = viewModel::setAutoStartNext,
+                onKeepScreenOnChanged = viewModel::setKeepScreenOn,
+                onShowQuotesChanged = viewModel::setShowQuotes,
+                onQuotesChanged = viewModel::setQuotes,
+                onAiFormat = viewModel::formatQuotesWithAi,
+                onResetQuotes = viewModel::resetQuotes,
+                onResetGoal = viewModel::resetGoal
+            )
+        }
+    }
+}
+
+@Composable
+private fun PomodoroContent(
+    state: PomodoroState,
+    activeColor: Color,
+    contentPadding: PaddingValues,
+    onModeSelected: (PomodoroMode) -> Unit,
+    onSilence: () -> Unit,
+) {
+    val performanceMode = LocalPerformanceMode.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .toolzBackground()
+            .padding(top = contentPadding.calculateTopPadding())
+            .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 28.dp))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 116.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        StaggeredEntrance(index = 0) {
+            PomodoroPhaseHeader(state = state, activeColor = activeColor)
+        }
+        StaggeredEntrance(index = 1) {
+            PomodoroTimerDial(state = state, activeColor = activeColor)
+        }
+        StaggeredEntrance(index = 2) {
+            PomodoroModeSelector(
+                selectedMode = state.mode,
+                enabled = !state.isRunning,
+                onModeSelected = onModeSelected,
+            )
+        }
+        if (state.showQuotes) {
+            StaggeredEntrance(index = 3) {
+                PomodoroQuoteMarquee(quotesText = state.quotes, activeColor = activeColor)
+            }
+        }
+        AnimatedVisibility(
+            visible = state.isFinished,
+            enter = fadeIn() + scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
+            exit = fadeOut() + scaleOut(),
+        ) {
+            CompletionBanner(mode = state.mode, onSilence = onSilence)
+        }
+        StaggeredEntrance(index = 4) {
+            PomodoroStatsRow(state = state, activeColor = activeColor)
+        }
+    }
+}
+
+@Composable
+private fun PomodoroPhaseHeader(state: PomodoroState, activeColor: Color) {
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+        shape = LargeExpressiveShape,
+        containerColor = activeColor.copy(alpha = 0.14f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, activeColor.copy(alpha = 0.26f)),
+        elevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(56.dp),
+                shape = BouncyShape,
+                color = activeColor,
+                contentColor = if (state.mode == PomodoroMode.WORK) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onTertiary
+                },
             ) {
-                // Mode Indicator with Bouncy Shape
-                StaggeredEntrance(index = 0) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Surface(
-                            color = activeColor.copy(alpha = 0.12f),
-                            shape = BouncyShape,
-                            border = BorderStroke(1.5.dp, activeColor.copy(alpha = 0.25f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 28.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(24.dp),
-                                    tint = activeColor
-                                )
-                                Spacer(Modifier.width(16.dp))
-                                Text(
-                                    text = if (state.mode == PomodoroMode.WORK) "FOCUS PHASE" else "RECOVERY PHASE",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Black,
-                                    color = activeColor,
-                                    letterSpacing = 2.sp
-                                )
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(20.dp))
-                        
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                            shape = SmallExpressiveShape
-                        ) {
-                            Text(
-                                text = "CYCLE SEQUENCE: #${state.sessionsCompleted + 1}",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(56.dp))
-
-                // Session Countdown with Wavy Dial in Squircle Container
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(340.dp)) {
-                    // Dynamic background glow
-                    if (!performanceMode) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "PomodoroGlow")
-                        val glowScale by infiniteTransition.animateFloat(
-                            initialValue = 0.95f,
-                            targetValue = 1.05f,
-                            animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                            label = "Scale"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .scale(glowScale)
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf(activeColor.copy(alpha = 0.1f), Color.Transparent)
-                                    ),
-                                    CircleShape
-                                )
-                        )
-                    }
-
-                    Surface(
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
-                        shape = SquircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
-                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = formatPomodoroTime(state.remainingTime),
-                                    style = MaterialTheme.typography.displayLarge.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 96.sp,
-                                        letterSpacing = (-6).sp
-                                    ),
-                                    color = if (state.isRunning) activeColor else MaterialTheme.colorScheme.onSurface
-                                )
-                                
-                                AnimatedVisibility(
-                                    visible = !state.isRunning && state.remainingTime > 0,
-                                    enter = fadeIn() + scaleIn(),
-                                    exit = fadeOut() + scaleOut()
-                                ) {
-                                    Text(
-                                        "READY TO SYNC",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Black,
-                                        color = activeColor.copy(alpha = 0.6f),
-                                        letterSpacing = 3.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Official Circular Wavy Progress Indicator
-                    ToolzWavyCircularProgressIndicator(
-                        progress = { animatedProgress },
-                        modifier = Modifier.fillMaxSize(),
-                        color = activeColor,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f),
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
                     )
                 }
-
-                Spacer(modifier = Modifier.height(64.dp))
-                
-                // Energetic Finish Overlay
-                AnimatedVisibility(
-                    visible = state.isFinished && !state.isRunning,
-                    enter = fadeIn() + scaleIn(animationSpec = spring(Spring.DampingRatioLowBouncy)),
-                    exit = fadeOut() + scaleOut()
-                ) {
-                    ExpressiveCard(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.stopRingtone() 
-                        },
-                        modifier = Modifier.fillMaxWidth().height(80.dp),
-                        shape = BouncyShape,
-                        containerColor = MaterialTheme.colorScheme.error,
-                        elevation = 0.dp
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(28.dp), tint = Color.White)
-                                Spacer(Modifier.width(16.dp))
-                                Text("SESSION COMPLETE • TAP TO SILENCE", fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 1.sp)
-                            }
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(100.dp))
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = state.mode.label,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = phaseMessage(state),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
 }
 
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
+    val rawProgress = 1f - (state.remainingTime.toFloat() / state.totalTime.toFloat())
+    val animatedProgress by animateFloatAsState(
+        targetValue = rawProgress.coerceIn(0f, 1f),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        label = "PomodoroProgress",
+    )
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+    ) {
+        val dialSize = maxWidth.coerceAtMost(330.dp)
+        Box(
+            modifier = Modifier.size(dialSize),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(22.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    AnimatedContent(
+                        targetState = formatPomodoroTime(state.remainingTime),
+                        transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)).togetherWith(fadeOut()) },
+                        label = "PomodoroTime",
+                    ) { time ->
+                        Text(
+                            text = time,
+                            style = MaterialTheme.typography.displayMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.sp,
+                            ),
+                            color = if (state.isRunning) activeColor else MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (state.isRunning) "In session" else "Ready",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            ToolzWavyCircularProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier.fillMaxSize(),
+                color = activeColor,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f),
+                strokeCap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PomodoroModeSelector(
+    selectedMode: PomodoroMode,
+    enabled: Boolean,
+    onModeSelected: (PomodoroMode) -> Unit,
+) {
+    ToolzConnectedButtonGroup(
+        selectedIndex = PomodoroMode.entries.indexOf(selectedMode),
+        options = PomodoroMode.entries.map { it.label },
+        enabled = enabled,
+        onOptionSelected = { onModeSelected(PomodoroMode.entries[it]) },
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun PomodoroStatsRow(state: PomodoroState, activeColor: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        StatCard(
+            modifier = Modifier.weight(1f),
+            icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+            label = "Today",
+            value = "${state.sessionsCompleted}/${state.sessionsGoal}",
+            accent = activeColor,
+            progress = (state.sessionsCompleted.toFloat() / state.sessionsGoal.toFloat()).coerceIn(0f, 1f)
+        )
+        StatCard(
+            modifier = Modifier.weight(1f),
+            icon = { Icon(Icons.Rounded.Timer, contentDescription = null) },
+            label = "Next",
+            value = nextPhaseLabel(state),
+            accent = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+@Composable
+private fun StatCard(
+    modifier: Modifier,
+    icon: @Composable () -> Unit,
+    label: String,
+    value: String,
+    accent: Color,
+    progress: Float? = null,
+) {
+    ExpressiveCard(
+        onClick = {},
+        modifier = modifier,
+        shape = MediumExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
+        elevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(shape = SmallExpressiveShape, color = accent.copy(alpha = 0.14f), contentColor = accent) {
+                    Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                        icon()
+                    }
+                }
+                if (progress != null) {
+                    Text(
+                        text = "${(progress * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        color = accent
+                    )
+                }
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (progress != null) {
+                ToolzWavyLinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                    color = accent,
+                    trackColor = accent.copy(alpha = 0.1f),
+                    strokeCap = StrokeCap.Round
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompletionBanner(mode: PomodoroMode, onSilence: () -> Unit) {
+    ExpressiveCard(
+        onClick = onSilence,
+        modifier = Modifier.fillMaxWidth(),
+        shape = BouncyShape,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        elevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Session complete", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(
+                    if (mode == PomodoroMode.WORK) "Break is ready. Tap to silence." else "Focus is ready. Tap to silence.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PomodoroControlDock(
+    state: PomodoroState,
+    activeColor: Color,
+    onToggle: () -> Unit,
+    onReset: () -> Unit,
+    onSkip: () -> Unit,
+) {
+    ToolzHorizontalFloatingToolbar(
+        expanded = true,
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(bottom = 14.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        trailingContent = {
+            clickableItem(
+                onClick = onReset,
+                icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                label = "Reset",
+            )
+            clickableItem(
+                onClick = onSkip,
+                icon = { Icon(Icons.Rounded.SkipNext, contentDescription = null) },
+                label = "Skip",
+            )
+        },
+    ) {
+        ToolzExpressiveButton(
+            onClick = onToggle,
+            shape = BouncyShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else activeColor,
+                contentColor = if (state.isRunning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+            ),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        ) {
+            Icon(
+                if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (state.isRunning) "Pause" else "Start", fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun PomodoroMode.activeColor(): Color = when (this) {
+    PomodoroMode.WORK -> MaterialTheme.colorScheme.primary
+    PomodoroMode.SHORT_BREAK -> MaterialTheme.colorScheme.tertiary
+    PomodoroMode.LONG_BREAK -> MaterialTheme.colorScheme.secondary
+}
+
+private fun phaseMessage(state: PomodoroState): String = when {
+    state.isRunning && state.mode == PomodoroMode.WORK -> "Protect this block and stay with one task."
+    state.isRunning -> "Take the recovery seriously."
+    state.isFinished -> "The next phase is queued."
+    else -> "Choose a phase, then start when you are ready."
+}
+
+private fun nextPhaseLabel(state: PomodoroState): String = when {
+    state.mode != PomodoroMode.WORK -> "Focus"
+    (state.sessionsCompleted + 1) % 4 == 0 -> "Long break"
+    else -> "Short break"
+}
+
 private fun formatPomodoroTime(timeMillis: Long): String {
-    val totalSeconds = (timeMillis + 999) / 1000
+    val totalSeconds = ((timeMillis + 999) / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
