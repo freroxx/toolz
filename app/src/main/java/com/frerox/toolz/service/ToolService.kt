@@ -3,6 +3,7 @@ package com.frerox.toolz.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Binder
@@ -110,6 +111,7 @@ class ToolService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ensureForeground()
         when (intent?.action) {
             ACTION_STOPWATCH_TOGGLE -> if (_isStopwatchRunning.value) pauseStopwatch() else startStopwatch()
             ACTION_STOPWATCH_STOP -> resetStopwatch()
@@ -201,10 +203,40 @@ class ToolService : Service() {
             manager.cancel(NotificationHelper.ID_TIMER)
             manager.cancel(NotificationHelper.ID_POMODORO)
             manager.cancel(NotificationHelper.ID_TODO)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         } else {
             val manager = getSystemService(NotificationManager::class.java)
             if (!isTimerNotificationsEnabled) manager.cancel(NotificationHelper.ID_TIMER)
-            if (!isPomodoroNotificationsEnabled) manager.cancel(NotificationHelper.ID_POMODORO)
+            if (!isPomodoroNotificationsEnabled) {
+                manager.cancel(NotificationHelper.ID_POMODORO)
+            } else if (!_isPomodoroRunning.value) {
+                // Persistent notification when enabled but not running
+                updatePomodoroNotification()
+            }
+            ensureForeground()
+        }
+    }
+
+    private fun ensureForeground() {
+        if (!isGlobalNotificationsEnabled) return
+
+        val notif = when {
+            _isStopwatchRunning.value -> createStopwatchNotification()
+            _isTimerRunning.value -> createTimerNotification()
+            _isPomodoroRunning.value -> createPomodoroNotification()
+            _isTodoSessionActive.value -> createTodoNotification()
+            isPomodoroNotificationsEnabled -> createPomodoroNotification()
+            else -> {
+                stopForeground(STOP_FOREGROUND_DETACH)
+                return
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NotificationHelper.ID_POMODORO, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NotificationHelper.ID_POMODORO, notif)
         }
     }
 

@@ -270,6 +270,18 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 }
             }
         }
+
+        lifecycleScope.launch {
+            settingsRepository.pomodoroNotifications.collect { enabled ->
+                val intent = Intent(this@MainActivity, com.frerox.toolz.service.ToolService::class.java)
+                if (enabled) {
+                    startForegroundService(intent)
+                } else {
+                    // We don't stop the service here because it might be running a timer
+                    // ToolService should handle its own lifecycle based on settings and state
+                }
+            }
+        }
     }
 
     private fun hasActivityRecognitionPermission(): Boolean {

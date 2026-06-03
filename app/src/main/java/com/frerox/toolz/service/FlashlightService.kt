@@ -99,8 +99,23 @@ class FlashlightService : Service() {
                 .collect { 
                     persistentNotif = it
                     if (it) {
-                        updateNotification()
+                        val notif = buildNotification()
+                        val type = if (isOn.value) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            try {
+                                startForeground(NOTIF_ID, notif, type)
+                            } catch (e: Exception) {
+                                // Fallback to specialUse if camera fails (e.g. no permission)
+                                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                            }
+                        } else {
+                            startForeground(NOTIF_ID, notif)
+                        }
+                    } else if (!isOn.value) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
                     }
+                    updateNotification()
                 }
         }
     }
@@ -124,12 +139,16 @@ class FlashlightService : Service() {
 
         if (!willStop) {
             val notif = buildNotification()
+            val type = if (isOn.value || action == ACTION_TOGGLE) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 try {
-                    startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+                    startForeground(NOTIF_ID, notif, type)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start foreground service", e)
-                    if (e is SecurityException) {
+                    Log.e(TAG, "Failed to start foreground service with type $type, falling back to SPECIAL_USE", e)
+                    try {
+                        startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed to start foreground service even with SPECIAL_USE", e2)
                         stopSelf()
                         return START_NOT_STICKY
                     }
@@ -455,7 +474,7 @@ class FlashlightService : Service() {
     }
 
     private fun updateNotification() {
-        if (!isOn.value) return
+        if (!isOn.value && !persistentNotif) return
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID, buildNotification())
     }
