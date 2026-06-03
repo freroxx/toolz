@@ -65,7 +65,7 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
         QuickLinkEntry::class,
         CryptoHistoryEntry::class
     ], 
-    version = 39,
+    version = 41,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class)

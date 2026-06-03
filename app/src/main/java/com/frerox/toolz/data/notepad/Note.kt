@@ -19,5 +19,8 @@ data class Note(
     val attachedAudioUri: String? = null,
     val attachedAudioName: String? = null,
     val attachedImageUri: String? = null,
-    val cardSize: String = "AUTO"
+    val cardSize: String = "AUTO",
+    val summary: String? = null,
+    val isDeleted: Boolean = false,
+    val deletedTimestamp: Long = 0L
 )
