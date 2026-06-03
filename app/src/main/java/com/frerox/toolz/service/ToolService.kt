@@ -45,6 +45,7 @@ class ToolService : Service() {
     // Notifications State
     private var isGlobalNotificationsEnabled = true
     private var isTimerNotificationsEnabled = true
+    private var isPomodoroNotificationsEnabled = true
 
     // Stopwatch State
     private val _stopwatchTime = MutableStateFlow(0L)
@@ -61,20 +62,32 @@ class ToolService : Service() {
     val timerInitial: StateFlow<Long> = _timerInitial
     private val _isTimerRunning = MutableStateFlow(false)
     val isTimerRunning: StateFlow<Boolean> = _isTimerRunning
+    private val _timerFinishedCount = MutableStateFlow(0)
+    val timerFinishedCount: StateFlow<Int> = _timerFinishedCount
     private var timerJob: Job? = null
     private var timerEndTimestamp: Long = 0L
 
     // Pomodoro State
-    private val _pomodoroRemaining = MutableStateFlow(25 * 60 * 1000L) // Default to 25:00
+    private val _pomodoroRemaining = MutableStateFlow(25 * 60 * 1000L)
     val pomodoroRemaining: StateFlow<Long> = _pomodoroRemaining
     private val _isPomodoroRunning = MutableStateFlow(false)
     val isPomodoroRunning: StateFlow<Boolean> = _isPomodoroRunning
     private val _pomodoroSessionsDone = MutableStateFlow(0)
     val pomodoroSessionsDone: StateFlow<Int> = _pomodoroSessionsDone
+    private val _pomodoroMode = MutableStateFlow("WORK")
+    val pomodoroModeState: StateFlow<String> = _pomodoroMode
+    private val _pomodoroTotalMs = MutableStateFlow(25 * 60 * 1000L)
+    val pomodoroTotalMs: StateFlow<Long> = _pomodoroTotalMs
+    private val _pomodoroFinishedCount = MutableStateFlow(0)
+    val pomodoroFinishedCount: StateFlow<Int> = _pomodoroFinishedCount
     private var pomodoroJob: Job? = null
-    private var pomodoroMode = "WORK"
     private var pomodoroEndTimestamp: Long = 0L
     private var workSessionsCount = 0
+
+    // Pomodoro settings cache
+    private var pomodoroWorkMinutes = 25
+    private var pomodoroShortBreakMinutes = 5
+    private var pomodoroLongBreakMinutes = 15
 
     // Todo Session State
     private val _todoSessionTime = MutableStateFlow(0L)
@@ -104,7 +117,7 @@ class ToolService : Service() {
             ACTION_TIMER_STOP -> resetTimer()
             ACTION_POMODORO_TOGGLE -> {
                 if (_isPomodoroRunning.value) pausePomodoro()
-                else startPomodoro(_pomodoroRemaining.value, pomodoroMode)
+                else startPomodoro(_pomodoroRemaining.value, _pomodoroMode.value)
             }
             ACTION_POMODORO_STOP, ACTION_POMODORO_RESET -> resetPomodoro()
             ACTION_POMODORO_SKIP -> skipPomodoro()
@@ -127,11 +140,50 @@ class ToolService : Service() {
         serviceScope.launch {
             combine(
                 settingsRepository.notificationsEnabled,
-                settingsRepository.timerNotifications
-            ) { global, timer -> global to timer }.collect { (global, timer) ->
+                settingsRepository.timerNotifications,
+                settingsRepository.pomodoroNotifications
+            ) { global, timer, pomodoro -> Triple(global, timer, pomodoro) }.collect { (global, timer, pomodoro) ->
                 isGlobalNotificationsEnabled = global
                 isTimerNotificationsEnabled = timer
+                isPomodoroNotificationsEnabled = pomodoro
                 refreshNotifications()
+            }
+        }
+
+        serviceScope.launch {
+            combine(
+                _isPomodoroRunning,
+                _pomodoroMode,
+                _pomodoroSessionsDone,
+                _pomodoroRemaining
+            ) { running, mode, done, remaining ->
+                // Use debounce or similar if needed, but here we just want to ensure 
+                // the widget is synced whenever these change.
+                // However, we don't want to push every millisecond when running.
+                running to Triple(mode, done, remaining)
+            }.collect { (running, state) ->
+                // If running, we only push if mode or done changed, or if it just started.
+                // If not running, we push on any change.
+                pushPomodoroWidgetState()
+            }
+        }
+
+        serviceScope.launch {
+            combine(
+                settingsRepository.pomodoroWorkMinutes,
+                settingsRepository.pomodoroShortBreakMinutes,
+                settingsRepository.pomodoroLongBreakMinutes
+            ) { work, short, long -> Triple(work, short, long) }.collect { (work, short, long) ->
+                pomodoroWorkMinutes = work
+                pomodoroShortBreakMinutes = short
+                pomodoroLongBreakMinutes = long
+                
+                // Update totalMs if not running
+                if (!_isPomodoroRunning.value) {
+                    _pomodoroTotalMs.value = durationForMode(_pomodoroMode.value)
+                    _pomodoroRemaining.value = _pomodoroTotalMs.value
+                    pushPomodoroWidgetState()
+                }
             }
         }
     }
@@ -141,6 +193,19 @@ class ToolService : Service() {
         if (_isTimerRunning.value) updateTimerNotification()
         if (_isPomodoroRunning.value) updatePomodoroNotification()
         if (_isTodoSessionActive.value) updateTodoNotification()
+        
+        // Remove notifications if disabled
+        if (!isGlobalNotificationsEnabled) {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.cancel(NotificationHelper.ID_STOPWATCH)
+            manager.cancel(NotificationHelper.ID_TIMER)
+            manager.cancel(NotificationHelper.ID_POMODORO)
+            manager.cancel(NotificationHelper.ID_TODO)
+        } else {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (!isTimerNotificationsEnabled) manager.cancel(NotificationHelper.ID_TIMER)
+            if (!isPomodoroNotificationsEnabled) manager.cancel(NotificationHelper.ID_POMODORO)
+        }
     }
 
     // --- Stopwatch Logic ---
@@ -205,12 +270,14 @@ class ToolService : Service() {
     }
 
     fun setTimerInitial(millis: Long) {
+        if (_isTimerRunning.value) return
         _timerInitial.value = millis
         _timerRemaining.value = millis
     }
 
     private fun onTimerFinished() {
         _isTimerRunning.value = false
+        _timerFinishedCount.value++
         showAlarmNotification("Timer", "Time is up!", NotificationHelper.ID_TIMER_ALARM, Screen.Timer.route)
         updateTimerNotification("Time is up!")
     }
@@ -218,22 +285,19 @@ class ToolService : Service() {
     // --- Pomodoro Logic ---
     fun startPomodoro(durationMillis: Long, mode: String) {
         val actualDuration = if (durationMillis <= 0) {
-            when (mode) {
-                "SHORT_BREAK" -> 5 * 60 * 1000L
-                "LONG_BREAK" -> 15 * 60 * 1000L
-                else -> 25 * 60 * 1000L
-            }
+            durationForMode(mode)
         } else durationMillis
 
         _pomodoroRemaining.value = actualDuration
-        pomodoroMode = mode
+        _pomodoroMode.value = mode
+        _pomodoroTotalMs.value = durationForMode(mode)
         _isPomodoroRunning.value = true
         pomodoroEndTimestamp = SystemClock.elapsedRealtime() + actualDuration
         pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
             while (_pomodoroRemaining.value > 0 && _isPomodoroRunning.value) {
                 _pomodoroRemaining.value = (pomodoroEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
-                pushPomodoroWidgetState()
+                // Removed redundant pushPomodoroWidgetState() from here as it's handled reactively or by Chronometer
                 delay(1000)
             }
             if (_pomodoroRemaining.value == 0L && _isPomodoroRunning.value) {
@@ -246,15 +310,19 @@ class ToolService : Service() {
     }
 
     private fun onPomodoroFinished() {
-        if (pomodoroMode == "WORK") {
+        val completedMode = _pomodoroMode.value
+        if (completedMode == "WORK") {
             workSessionsCount++
-            _pomodoroSessionsDone.value++
+            serviceScope.launch {
+                settingsRepository.setPomodoroSessionsCompleted(_pomodoroSessionsDone.value + 1)
+            }
         }
         
-        val title   = if (pomodoroMode == "WORK") "Work Session Finished" else "Break Finished"
-        val message = if (pomodoroMode == "WORK") "Time to take a break! 🌱" else "Ready to focus? 🔥"
+        val title   = if (completedMode == "WORK") "Work Session Finished" else "Break Finished"
+        val message = if (completedMode == "WORK") "Time to take a break! 🌱" else "Ready to focus? 🔥"
         showAlarmNotification(title, message, NotificationHelper.ID_POMODORO_ALARM, Screen.Pomodoro.route)
         vibrateFinish()
+        _pomodoroFinishedCount.value++
         
         // Cycle mode automatically
         cyclePomodoroMode()
@@ -264,16 +332,14 @@ class ToolService : Service() {
     }
 
     private fun cyclePomodoroMode() {
-        pomodoroMode = when {
-            pomodoroMode == "WORK" && workSessionsCount % 4 == 0 -> "LONG_BREAK"
-            pomodoroMode == "WORK" -> "SHORT_BREAK"
+        val nextMode = when {
+            _pomodoroMode.value == "WORK" && workSessionsCount % 4 == 0 -> "LONG_BREAK"
+            _pomodoroMode.value == "WORK" -> "SHORT_BREAK"
             else -> "WORK"
         }
-        _pomodoroRemaining.value = when (pomodoroMode) {
-            "SHORT_BREAK" -> 5 * 60 * 1000L
-            "LONG_BREAK" -> 15 * 60 * 1000L
-            else -> 25 * 60 * 1000L
-        }
+        _pomodoroMode.value = nextMode
+        _pomodoroTotalMs.value = durationForMode(nextMode)
+        _pomodoroRemaining.value = _pomodoroTotalMs.value
     }
 
     fun pausePomodoro() {
@@ -286,13 +352,19 @@ class ToolService : Service() {
     fun resetPomodoro() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
-        _pomodoroRemaining.value = when (pomodoroMode) {
-            "SHORT_BREAK" -> 5 * 60 * 1000L
-            "LONG_BREAK" -> 15 * 60 * 1000L
-            else -> 25 * 60 * 1000L
-        }
+        _pomodoroRemaining.value = durationForMode(_pomodoroMode.value)
+        _pomodoroTotalMs.value = _pomodoroRemaining.value
         serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
+        
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.cancel(NotificationHelper.ID_POMODORO)
+    }
+
+    fun resetPomodoroGoal() {
+        serviceScope.launch {
+            settingsRepository.setPomodoroSessionsCompleted(0)
+        }
     }
 
     /** Skip current Pomodoro session — treated as finished without alarm. */
@@ -300,15 +372,31 @@ class ToolService : Service() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
         
-        if (pomodoroMode == "WORK") {
+        if (_pomodoroMode.value == "WORK") {
             workSessionsCount++
-            _pomodoroSessionsDone.value++
+            serviceScope.launch {
+                settingsRepository.setPomodoroSessionsCompleted(_pomodoroSessionsDone.value + 1)
+            }
         }
         
         cyclePomodoroMode()
         
         serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    fun setPomodoroMode(mode: String) {
+        if (_isPomodoroRunning.value) return
+        _pomodoroMode.value = mode
+        _pomodoroTotalMs.value = durationForMode(mode)
+        _pomodoroRemaining.value = _pomodoroTotalMs.value
+        serviceScope.launch { pushPomodoroWidgetState() }
+    }
+
+    private fun durationForMode(mode: String): Long = when (mode) {
+        "SHORT_BREAK" -> pomodoroShortBreakMinutes * 60 * 1000L
+        "LONG_BREAK" -> pomodoroLongBreakMinutes * 60 * 1000L
+        else -> pomodoroWorkMinutes * 60 * 1000L
     }
 
     // --- Todo Session Logic ---
@@ -446,7 +534,7 @@ class ToolService : Service() {
         val stopPI = PendingIntent.getService(this, 31, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
-            .setContentTitle("Pomodoro ($pomodoroMode)")
+            .setContentTitle("Pomodoro (${_pomodoroMode.value})")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(_isPomodoroRunning.value)
             .setContentIntent(pendingIntent)
@@ -467,6 +555,7 @@ class ToolService : Service() {
     }
 
     private fun updatePomodoroNotification(text: String? = null) {
+        if (!isGlobalNotificationsEnabled || !isPomodoroNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_POMODORO, createPomodoroNotification(text))
     }
@@ -511,15 +600,10 @@ class ToolService : Service() {
 
     private suspend fun pushPomodoroWidgetState() {
         try {
-            val totalMs = when (pomodoroMode) {
-                "SHORT_BREAK" -> 5 * 60 * 1000f
-                "LONG_BREAK"  -> 15 * 60 * 1000f
-                else          -> 25 * 60 * 1000f
-            }
             widgetUpdateManager.updatePomodoroWidget(
-                mode = pomodoroMode,
+                mode = _pomodoroMode.value,
                 remainingMs = _pomodoroRemaining.value.toFloat(),
-                totalMs = totalMs,
+                totalMs = _pomodoroTotalMs.value.toFloat(),
                 isRunning = _isPomodoroRunning.value,
                 sessionsDone = _pomodoroSessionsDone.value,
                 sessionsGoal = 8

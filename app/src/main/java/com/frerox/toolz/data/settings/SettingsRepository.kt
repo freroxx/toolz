@@ -44,8 +44,21 @@ class SettingsRepository @Inject constructor(
     private val TASK_REMINDER_NOTIFICATIONS = booleanPreferencesKey("task_reminder_notifications")
     private val EVENT_REMINDER_NOTIFICATIONS = booleanPreferencesKey("event_reminder_notifications")
     private val FLASHLIGHT_NOTIFICATIONS = booleanPreferencesKey("flashlight_notifications")
+    private val POMODORO_NOTIFICATIONS = booleanPreferencesKey("pomodoro_notifications")
     private val KARAOKE_ENABLED = booleanPreferencesKey("karaoke_enabled")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
+
+    // Pomodoro Settings
+    private val POMODORO_WORK_MINUTES = intPreferencesKey("pomodoro_work_minutes")
+    private val POMODORO_SHORT_BREAK_MINUTES = intPreferencesKey("pomodoro_short_break_minutes")
+    private val POMODORO_LONG_BREAK_MINUTES = intPreferencesKey("pomodoro_long_break_minutes")
+    private val POMODORO_AUTO_START = booleanPreferencesKey("pomodoro_auto_start")
+    private val POMODORO_KEEP_SCREEN_ON = booleanPreferencesKey("pomodoro_keep_screen_on")
+    private val POMODORO_SESSIONS_GOAL = intPreferencesKey("pomodoro_sessions_goal")
+    private val POMODORO_SESSIONS_COMPLETED = intPreferencesKey("pomodoro_sessions_completed")
+    private val POMODORO_RINGTONE_URI = stringPreferencesKey("pomodoro_ringtone_uri")
+    private val POMODORO_SHOW_QUOTES = booleanPreferencesKey("pomodoro_show_quotes")
+    private val POMODORO_QUOTES = stringPreferencesKey("pomodoro_quotes")
 
     private val SEARCH_FIRST_TIME = booleanPreferencesKey("search_first_time")
     private val SEARCH_ADBLOCK_ENABLED = booleanPreferencesKey("search_adblock_enabled")
@@ -74,6 +87,34 @@ class SettingsRepository @Inject constructor(
     companion object {
         val SEARCH_AUTOFILL_ENABLED = booleanPreferencesKey("search_autofill_enabled")
         val LAST_BIOMETRIC_VERIFICATION_TIME = longPreferencesKey("last_biometric_verification_time")
+
+        val DEFAULT_POMODORO_QUOTES = """
+            "And the universe said I love you because you are love." (The End Poem, Minecraft)
+            "It is possible to commit no mistakes and still lose. That is not weakness, that is life." (Captain Picard, Star Trek)
+            "All we have to decide is what to do with the time that is given us." (Gandalf, The Lord of the Rings)
+            "It gets easier. Every day it gets a little easier. But you gotta do it every day — that’s the hard part. But it does get easier." (The Jogging Baboon, BoJack Horseman)
+            "What is better — to be born good, or to overcome your evil nature through great effort?" (Paarthurnax, Skyrim)
+            "In the midst of winter, I found there was, within me, an invincible summer." (Albert Camus)
+            "You have power over your mind — not outside events. Realize this, and you will find strength." (Marcus Aurelius, Meditations)
+            "The first principle is that you must not fool yourself, and you are the easiest person to fool." (Richard Feynman)
+            "Somewhere, something incredible is waiting to be known." (Carl Sagan)
+            "Tell me, what is it you plan to do with your one wild and precious life?" (Mary Oliver)
+            "We are all in the gutter, but some of us are looking at the stars." (Oscar Wilde)
+            "I have loved the stars too fondly to be fearful of the night." (Sarah Williams)
+            "A man chooses, a slave obeys." (Andrew Ryan, BioShock)
+            "We choose to go to the Moon in this decade and do the other things, not because they are easy, but because they are hard." (John F. Kennedy)
+            "The cosmos is within us. We are made of star-stuff. We are a way for the universe to know itself." (Carl Sagan)
+            "Do not pray for an easy life, pray for the strength to endure a difficult one." (Bruce Lee)
+            "Even in the darkest times, hope is something you give yourself. That is the meaning of inner strength." (Iroh, Avatar: The Airbender)
+            "The monsters turned out to be just regular people." (Cheryl Mason, Silent Hill 3)
+            "Time you enjoy wasting is not wasted time." (Marthe Troly-Curtin)
+            "You are the player. Wake up." (The End Poem, Minecraft)
+            "The mystery of life isn't a problem to solve, but a reality to experience." (Frank Herbert, Dune)
+            "To live is the rarest thing in the world. Most people exist, that is all." (Oscar Wilde)
+            "I must not fear. Fear is the mind-killer." (Bene Gesserit Litany, Dune)
+            "The world is not beautiful; therefore, it is." (Kino, Kino's Journey)
+            "Don't ever think you're nothing. There's always a place for you, somewhere." (Sora, Kingdom Hearts)
+        """.trimIndent()
     }
 
     val searchAutofillEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_AUTOFILL_ENABLED] ?: true }
@@ -310,9 +351,23 @@ class SettingsRepository @Inject constructor(
     val appUpdateNotifications: Flow<Boolean> = dataStore.data.map { it[APP_UPDATE_NOTIFICATIONS] ?: true }
     val taskReminderNotifications: Flow<Boolean> = dataStore.data.map { it[TASK_REMINDER_NOTIFICATIONS] ?: true }
     val eventReminderNotifications: Flow<Boolean> = dataStore.data.map { it[EVENT_REMINDER_NOTIFICATIONS] ?: true }
+    val pomodoroNotifications: Flow<Boolean> = dataStore.data.map { it[POMODORO_NOTIFICATIONS] ?: true }
     val flashlightNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[FLASHLIGHT_NOTIFICATIONS] ?: false }
     val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
+    
+    // Pomodoro Flows
+    val pomodoroWorkMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_WORK_MINUTES] ?: 25 }
+    val pomodoroShortBreakMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_SHORT_BREAK_MINUTES] ?: 5 }
+    val pomodoroLongBreakMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_LONG_BREAK_MINUTES] ?: 15 }
+    val pomodoroAutoStart: Flow<Boolean> = dataStore.data.map { it[POMODORO_AUTO_START] ?: false }
+    val pomodoroKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[POMODORO_KEEP_SCREEN_ON] ?: true }
+    val pomodoroSessionsGoal: Flow<Int> = dataStore.data.map { it[POMODORO_SESSIONS_GOAL] ?: 8 }
+    val pomodoroSessionsCompleted: Flow<Int> = dataStore.data.map { it[POMODORO_SESSIONS_COMPLETED] ?: 0 }
+    val pomodoroRingtoneUri: Flow<String?> = dataStore.data.map { it[POMODORO_RINGTONE_URI] ?: defaultAlarmUri }
+    val pomodoroShowQuotes: Flow<Boolean> = dataStore.data.map { it[POMODORO_SHOW_QUOTES] ?: true }
+    val pomodoroQuotes: Flow<String> = dataStore.data.map { it[POMODORO_QUOTES] ?: DEFAULT_POMODORO_QUOTES }
+
     val hiddenNotificationApps: Flow<Set<String>> = dataStore.data.map { it[HIDDEN_NOTIFICATION_APPS] ?: emptySet() }
     val customNotificationCategories: Flow<Set<String>> = dataStore.data.map { it[CUSTOM_NOTIFICATION_CATEGORIES] ?: setOf("Social", "Finance", "Work", "General") }
     val appCategoryMappings: Flow<Map<String, String>> = dataStore.data.map { pref ->
@@ -481,6 +536,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setAppUpdateNotifications(enabled: Boolean) { dataStore.edit { it[APP_UPDATE_NOTIFICATIONS] = enabled } }
     suspend fun setTaskReminderNotifications(enabled: Boolean) { dataStore.edit { it[TASK_REMINDER_NOTIFICATIONS] = enabled } }
     suspend fun setEventReminderNotifications(enabled: Boolean) { dataStore.edit { it[EVENT_REMINDER_NOTIFICATIONS] = enabled } }
+    suspend fun setPomodoroNotifications(enabled: Boolean) { dataStore.edit { it[POMODORO_NOTIFICATIONS] = enabled } }
     suspend fun setFlashlightNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[FLASHLIGHT_NOTIFICATIONS] = enabled } }
     suspend fun setKaraokeEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_ENABLED] = enabled } }
     suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
@@ -516,6 +572,18 @@ class SettingsRepository @Inject constructor(
             pref[APP_NAME_MAPPINGS] = current.filterNot { it.startsWith("$packageName:") }.toSet()
         }
     }
+
+    // Pomodoro Setters
+    suspend fun setPomodoroWorkMinutes(minutes: Int) { dataStore.edit { it[POMODORO_WORK_MINUTES] = minutes } }
+    suspend fun setPomodoroShortBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_SHORT_BREAK_MINUTES] = minutes } }
+    suspend fun setPomodoroLongBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_LONG_BREAK_MINUTES] = minutes } }
+    suspend fun setPomodoroAutoStart(enabled: Boolean) { dataStore.edit { it[POMODORO_AUTO_START] = enabled } }
+    suspend fun setPomodoroKeepScreenOn(enabled: Boolean) { dataStore.edit { it[POMODORO_KEEP_SCREEN_ON] = enabled } }
+    suspend fun setPomodoroSessionsGoal(goal: Int) { dataStore.edit { it[POMODORO_SESSIONS_GOAL] = goal } }
+    suspend fun setPomodoroSessionsCompleted(completed: Int) { dataStore.edit { it[POMODORO_SESSIONS_COMPLETED] = completed } }
+    suspend fun setPomodoroRingtoneUri(uri: String) { dataStore.edit { it[POMODORO_RINGTONE_URI] = uri } }
+    suspend fun setPomodoroShowQuotes(enabled: Boolean) { dataStore.edit { it[POMODORO_SHOW_QUOTES] = enabled } }
+    suspend fun setPomodoroQuotes(quotes: String) { dataStore.edit { it[POMODORO_QUOTES] = quotes } }
 
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
