@@ -11,8 +11,8 @@ import javax.inject.Singleton
 @Singleton
 class SpeedTestEngine @Inject constructor() {
 
-    // Using a 5MB file for a more sustained test
-    private val testUrl = "https://speed.cloudflare.com/__down?bytes=5242880"
+    // Using a 25MB file for more precision
+    private val testUrl = "https://speed.cloudflare.com/__down?bytes=26214400"
     private val WARMUP_PERIOD_MS = 500L
     private val WINDOW_SIZE = 5
 
@@ -23,7 +23,7 @@ class SpeedTestEngine @Inject constructor() {
             connection.connectTimeout = 5000
             connection.readTimeout = 5000
             
-            val totalBytes = 5242880L // 5MB
+            val totalBytes = 26214400L // 25MB
             var bytesRead = 0L
             val buffer = ByteArray(16384) // Larger buffer
             

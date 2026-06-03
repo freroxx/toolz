@@ -13,8 +13,8 @@ class DnsLatencyEngine @Inject constructor(
         return dnsEngine.providerLibrary().map { provider ->
             DnsLatency(
                 name = provider.name,
-                address = provider.primaryAddress,
-                hostname = provider.privateDnsHostname
+                address = provider.addresses.firstOrNull() ?: "",
+                hostname = provider.hostname
             )
         }
     }
@@ -23,9 +23,9 @@ class DnsLatencyEngine @Inject constructor(
         return dnsEngine.benchmarkTopProviders().map { result ->
             DnsLatency(
                 name = result.provider.name,
-                address = result.provider.primaryAddress,
+                address = result.provider.addresses.firstOrNull() ?: "",
                 latencyMs = result.metrics.latencyMs,
-                hostname = result.provider.privateDnsHostname
+                hostname = result.provider.hostname
             )
         }
     }
