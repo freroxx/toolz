@@ -1,8 +1,12 @@
 package com.frerox.toolz.ui.screens.notepad
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.ai.AiSettingsHelper
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.ai.ApiKeySource
 import com.frerox.toolz.data.ai.MessageContent
@@ -26,7 +30,21 @@ import javax.inject.Inject
 
 private const val TAG = "NotepadViewModel"
 private const val GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-private const val AI_MODEL = "llama-3.3-70b-versatile"
+private const val DEFAULT_AI_MODEL = "llama-3.1-8b-instant"
+
+// ─────────────────────────────────────────────────────────────
+//  AI models and structured responses
+// ─────────────────────────────────────────────────────────────
+
+data class AiGeneratedNote(
+    val title: String,
+    val content: String,
+    val colorHex: String,
+    val fontSize: Float,
+    val isBold: Boolean,
+    val isItalic: Boolean,
+    val reasoning: String? = null
+)
 
 // ─────────────────────────────────────────────────────────────
 //  AI style suggestion model
@@ -87,18 +105,58 @@ class NotepadViewModel @Inject constructor(
     private val _isAiStyling     = MutableStateFlow(false)
     val isAiStyling: StateFlow<Boolean> = _isAiStyling.asStateFlow()
 
+    private val _selectedAiModel = MutableStateFlow(DEFAULT_AI_MODEL)
+    val selectedAiModel: StateFlow<String> = _selectedAiModel.asStateFlow()
+
+    private val _availableModels = MutableStateFlow<List<String>>(emptyList())
+    val availableModels: StateFlow<List<String>> = _availableModels.asStateFlow()
+
     private val _isFocusMode = MutableStateFlow(false)
     val isFocusMode: StateFlow<Boolean> = _isFocusMode.asStateFlow()
+
+    val deletedNotes: StateFlow<List<Note>> = noteDao.getDeletedNotes()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var lastDeletedNote: Note? = null
     private var lastDeletedNotes: List<Note>? = null
 
-    init { loadPdfs() }
+    init {
+        loadPdfs()
+        loadAvailableModels()
+    }
+
+    fun refreshPdfs() {
+        loadPdfs()
+    }
+
+    fun refreshTracks() {
+        // Assuming musicRepository handles updates, but we can re-load if needed
+    }
 
     private fun loadPdfs() {
         viewModelScope.launch {
             _availablePdfs.value = pdfRepository.getPdfFiles()
         }
+    }
+
+    private fun loadAvailableModels() {
+        viewModelScope.launch {
+            val providers = AiSettingsHelper.providers
+            val models = mutableListOf<String>()
+            providers.forEach { provider ->
+                if (aiSettingsManager.resolveApiKey(provider).source != ApiKeySource.NONE) {
+                    models.addAll(AiSettingsHelper.getModels(provider))
+                }
+            }
+            _availableModels.value = models.distinct()
+            if (DEFAULT_AI_MODEL !in models && models.isNotEmpty()) {
+                _selectedAiModel.value = models.first()
+            }
+        }
+    }
+
+    fun setSelectedModel(model: String) {
+        _selectedAiModel.value = model
     }
 
     // ── CRUD ───────────────────────────────────────────────────────────────
@@ -151,7 +209,7 @@ class NotepadViewModel @Inject constructor(
         viewModelScope.launch {
             lastDeletedNote = note
             lastDeletedNotes = null
-            noteDao.deleteNote(note)
+            noteDao.moveToTrash(note.id, System.currentTimeMillis())
         }
     }
 
@@ -159,18 +217,30 @@ class NotepadViewModel @Inject constructor(
         viewModelScope.launch {
             lastDeletedNotes = notes
             lastDeletedNote = null
-            noteDao.deleteNotes(notes)
+            noteDao.moveMultipleToTrash(notes.map { it.id }, System.currentTimeMillis())
         }
+    }
+
+    fun permanentlyDeleteNote(note: Note) {
+        viewModelScope.launch { noteDao.permanentlyDeleteNote(note) }
+    }
+
+    fun restoreNote(note: Note) {
+        viewModelScope.launch { noteDao.restoreFromTrash(note.id) }
+    }
+
+    fun emptyTrash() {
+        viewModelScope.launch { noteDao.emptyTrash() }
     }
 
     fun undoDelete() {
         viewModelScope.launch {
             lastDeletedNote?.let {
-                noteDao.insertNote(it)
+                noteDao.restoreFromTrash(it.id)
                 lastDeletedNote = null
             }
             lastDeletedNotes?.let { notes ->
-                notes.forEach { noteDao.insertNote(it) }
+                notes.forEach { noteDao.restoreFromTrash(it.id) }
                 lastDeletedNotes = null
             }
         }
@@ -180,6 +250,24 @@ class NotepadViewModel @Inject constructor(
         viewModelScope.launch { noteDao.updatePinned(note.id, !note.isPinned) }
     }
 
+    suspend fun persistImage(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val contentResolver = context.contentResolver
+            val fileName = "note_img_${System.currentTimeMillis()}.jpg"
+            val file = java.io.File(context.filesDir, fileName)
+            
+            contentResolver.openInputStream(uri)?.use { input ->
+                file.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            Uri.fromFile(file).toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to persist image", e)
+            null
+        }
+    }
+
     // ── AI: Summarize ──────────────────────────────────────────────────────
 
     /**
@@ -187,6 +275,13 @@ class NotepadViewModel @Inject constructor(
      * The result is stored in [aiSummary] and cleared by [clearAiSummary].
      */
     fun summarizeNote(note: Note) {
+        // Smart AI token saver: if summary exists and note hasn't changed, reuse it.
+        // Content change check is implicitly handled by addNote/updateNote resetting summary to null.
+        if (!note.summary.isNullOrBlank()) {
+            _aiSummary.value = note.summary
+            return
+        }
+
         viewModelScope.launch {
             _isAiSummarizing.value = true
             _aiSummary.value       = null
@@ -205,7 +300,7 @@ class NotepadViewModel @Inject constructor(
                 }
 
                 val request = OpenAiRequest(
-                    model    = AI_MODEL,
+                    model    = _selectedAiModel.value,
                     messages = listOf(
                         OpenAiMessage(
                             "system",
@@ -230,8 +325,15 @@ class NotepadViewModel @Inject constructor(
                         )
                     }
                 }
-                _aiSummary.value = response.choices.firstOrNull()?.message?.content
+                val summaryResult = response.choices.firstOrNull()?.message?.content
                     ?: "Could not generate a summary."
+                
+                _aiSummary.value = summaryResult
+                
+                // Cache the summary if successful
+                if (summaryResult != "Could not generate a summary.") {
+                    noteDao.insertNote(note.copy(summary = summaryResult))
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Summarize failed: ${e.message}")
@@ -290,7 +392,7 @@ Examples:
                 """.trimIndent()
 
                 val request = OpenAiRequest(
-                    model    = AI_MODEL,
+                    model    = _selectedAiModel.value,
                     messages = listOf(
                         OpenAiMessage("system", MessageContent.Text(systemPrompt)),
                         OpenAiMessage("user",   MessageContent.Text(noteBody)),
@@ -323,11 +425,166 @@ Examples:
         _aiStyle.value = null
     }
 
-    fun toggleFocusMode() {
+    fun toggleFocusMode(context: android.content.Context? = null) {
         _isFocusMode.value = !_isFocusMode.value
+        
+        // Side effect: Toggle Caffeinate if context is provided
+        context?.let { ctx ->
+            val intent = Intent(ctx, com.frerox.toolz.service.CaffeinateService::class.java)
+            if (_isFocusMode.value) {
+                intent.action = com.frerox.toolz.service.CaffeinateService.ACTION_START
+                intent.putExtra(com.frerox.toolz.service.CaffeinateService.EXTRA_INFINITE, true)
+                ctx.startService(intent)
+            } else {
+                intent.action = com.frerox.toolz.service.CaffeinateService.ACTION_STOP
+                ctx.startService(intent)
+            }
+        }
+    }
+
+    // ── AI: New Features ──────────────────────────────────────────────────
+
+    /**
+     * Generates a new note from scratch using AI.
+     */
+    fun generateNoteAi(prompt: String?, onComplete: (AiGeneratedNote?) -> Unit) {
+        viewModelScope.launch {
+            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            if (key.isBlank()) {
+                onComplete(null)
+                return@launch
+            }
+
+            try {
+                val systemPrompt = """
+You are a creative note generation AI. Create a new note based on the user's prompt.
+If no prompt is given, create a high-quality random thought, quote, task list, or idea.
+Prompt: ${prompt ?: "None"}
+
+Return ONLY a JSON object.
+JSON schema:
+{
+  "title": "...",
+  "content": "...",
+  "colorHex": "#RRGGBB",
+  "fontSize": 14-22,
+  "isBold": boolean,
+  "isItalic": boolean,
+  "reasoning": "..."
+}
+                """.trimIndent()
+
+                val userPrompt = prompt ?: "Create a new interesting note for me."
+
+                val request = OpenAiRequest(
+                    model = _selectedAiModel.value,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text(systemPrompt)),
+                        OpenAiMessage("user", MessageContent.Text(userPrompt)),
+                    ),
+                    maxTokens = 1000,
+                )
+
+                val response = withContext(Dispatchers.IO) {
+                    runGroqRequest(key) { requestKey ->
+                        openAiService.getChatCompletion(
+                            url = GROQ_URL,
+                            authHeader = "Bearer $requestKey",
+                            request = request,
+                        )
+                    }
+                }
+
+                val raw = response.choices.firstOrNull()?.message?.content ?: ""
+                onComplete(parseAiGeneratedNote(raw))
+            } catch (e: Exception) {
+                Log.e(TAG, "Generate note failed: ${e.message}")
+                onComplete(null)
+            }
+        }
+    }
+
+    /**
+     * Edits an existing note based on a user prompt.
+     */
+    fun editNoteWithPromptAi(note: Note, prompt: String, onComplete: (AiGeneratedNote?) -> Unit) {
+        viewModelScope.launch {
+            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            if (key.isBlank()) {
+                onComplete(null)
+                return@launch
+            }
+
+            try {
+                val noteBody = "Current Title: ${note.title}\nCurrent Content: ${note.content}"
+                val systemPrompt = """
+You are a note editor AI. Modify the given note based on the user's instructions.
+Instruction: $prompt
+
+Return ONLY a JSON object with the updated fields.
+JSON schema:
+{
+  "title": "...",
+  "content": "...",
+  "colorHex": "#RRGGBB",
+  "fontSize": 14-22,
+  "isBold": boolean,
+  "isItalic": boolean,
+  "reasoning": "..."
+}
+                """.trimIndent()
+
+                val request = OpenAiRequest(
+                    model = _selectedAiModel.value,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text(systemPrompt)),
+                        OpenAiMessage("user", MessageContent.Text(noteBody)),
+                    ),
+                    maxTokens = 1000,
+                )
+
+                val response = withContext(Dispatchers.IO) {
+                    runGroqRequest(key) { requestKey ->
+                        openAiService.getChatCompletion(
+                            url = GROQ_URL,
+                            authHeader = "Bearer $requestKey",
+                            request = request,
+                        )
+                    }
+                }
+
+                val raw = response.choices.firstOrNull()?.message?.content ?: ""
+                onComplete(parseAiGeneratedNote(raw))
+            } catch (e: Exception) {
+                Log.e(TAG, "Edit note failed: ${e.message}")
+                onComplete(null)
+            }
+        }
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
+
+    private fun parseAiGeneratedNote(raw: String): AiGeneratedNote? {
+        return try {
+            val cleaned = raw.replace(Regex("```[a-z]*"), "").replace("```", "").trim()
+            val start = cleaned.indexOf('{')
+            val end = cleaned.lastIndexOf('}')
+            if (start == -1 || end <= start) return null
+
+            val json = JSONObject(cleaned.substring(start, end + 1))
+            AiGeneratedNote(
+                title = json.optString("title", "Untitled"),
+                content = json.optString("content", ""),
+                colorHex = json.optString("colorHex", "#FFF9C4"),
+                fontSize = json.optDouble("fontSize", 17.0).toFloat().coerceIn(12f, 28f),
+                isBold = json.optBoolean("isBold", false),
+                isItalic = json.optBoolean("isItalic", false),
+                reasoning = json.optString("reasoning", "")
+            )
+        } catch (_: JSONException) {
+            null
+        }
+    }
 
     private suspend fun <T> runGroqRequest(
         initialKey: String,
