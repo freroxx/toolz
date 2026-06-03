@@ -80,6 +80,8 @@ class FlashlightService : Service() {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    private var persistentNotif = false
+
     override fun onCreate() {
         super.onCreate()
         _inst = this
@@ -91,6 +93,16 @@ class FlashlightService : Service() {
         }
         createNotificationChannel()
         scope.launch { loadSettings() }
+
+        scope.launch {
+            dataStore.data.map { it[booleanPreferencesKey("flashlight_notifications")] ?: false }
+                .collect { 
+                    persistentNotif = it
+                    if (it) {
+                        updateNotification()
+                    }
+                }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -110,7 +122,7 @@ class FlashlightService : Service() {
         // Android 14+ requirement: startForeground must be called early.
         val willStop = action == ACTION_STOP || (action == ACTION_TOGGLE && isOn.value)
 
-        if (!willStop && action != null) {
+        if (!willStop) {
             val notif = buildNotification()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 try {
@@ -204,8 +216,12 @@ class FlashlightService : Service() {
         modeJob?.cancel()
         timerJob?.cancel()
         rawTorch(false)
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (persistentNotif) {
+            updateNotification()
+        } else {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
         broadcastStateChange()
     }
 
