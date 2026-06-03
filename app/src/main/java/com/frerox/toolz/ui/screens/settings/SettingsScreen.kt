@@ -75,6 +75,8 @@ fun SettingsScreen(
     val appUpdateNotifications by viewModel.appUpdateNotifications.collectAsState(initial = true)
     val taskReminderNotifications by viewModel.taskReminderNotifications.collectAsState(initial = true)
     val eventReminderNotifications by viewModel.eventReminderNotifications.collectAsState(initial = true)
+    val pomodoroNotifications by viewModel.pomodoroNotifications.collectAsState(initial = true)
+    val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
@@ -891,6 +893,24 @@ fun SettingsScreen(
                                             icon = Icons.Rounded.Event,
                                             checked = eventReminderNotifications,
                                             onCheckedChange = { viewModel.setEventReminderNotifications(it) }
+                                        )
+                                    }
+                                    if (matches(searchQuery, "pomodoro", "focus", "timer")) {
+                                        SettingsToggleItem(
+                                            title = "Pomodoro Timer",
+                                            subtitle = "Session status and quick controls",
+                                            icon = Icons.Rounded.AvTimer,
+                                            checked = pomodoroNotifications,
+                                            onCheckedChange = { viewModel.setPomodoroNotifications(it) }
+                                        )
+                                    }
+                                    if (matches(searchQuery, "flashlight", "light", "notification")) {
+                                        SettingsToggleItem(
+                                            title = "Flashlight Notification",
+                                            subtitle = "Toggle from notification bar",
+                                            icon = Icons.Rounded.FlashlightOn,
+                                            checked = flashlightNotificationsEnabled,
+                                            onCheckedChange = { viewModel.setFlashlightNotificationsEnabled(it) }
                                         )
                                     }
                                     if (matches(searchQuery, "update", "app", "version")) {
