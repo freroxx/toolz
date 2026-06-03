@@ -387,8 +387,7 @@ class DashboardViewModel @Inject constructor(
             "SYSTEM & HEALTH",
             listOf(
                 ToolItem("Password Vault", Icons.Rounded.Security, Screen.PasswordVault.route, "Encrypted", Color(0xFF2E7D32)),
-                ToolItem("Network Tweaks", Icons.Rounded.NetworkCheck, Screen.NetworkPowerSuite.route, "Power tools", Color(0xFF1976D2)),
-                ToolItem("Wifi Optimizer", Icons.Rounded.SignalWifiStatusbar4Bar, Screen.WifiTweaks.route, "Signal tweaks", Color(0xFF4CAF50)),
+                ToolItem("Network Tweaks", Icons.Rounded.NetworkCheck, Screen.WifiTweaks.route, "Power tools", Color(0xFF1976D2)),
                 ToolItem("Random Gen", Icons.Rounded.Key, Screen.PasswordGenerator.route, "Secure keys", Color(0xFF455A64)),
                 ToolItem("Device Info", Icons.Rounded.Info, Screen.DeviceInfo.route, "Hardware", Color(0xFF757575)),
                 ToolItem("Battery Info", Icons.Rounded.BatteryChargingFull, Screen.BatteryInfo.route, "Status", Color(0xFF2E7D32)),

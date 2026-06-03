@@ -24,9 +24,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "cloudflare",
             name = "Cloudflare",
-            primaryAddress = "1.1.1.1",
-            secondaryAddress = "1.0.0.1",
-            privateDnsHostname = "1dot1dot1dot1.cloudflare-dns.com",
+            addresses = listOf("1.1.1.1", "1.0.0.1"),
+            hostname = "1dot1dot1dot1.cloudflare-dns.com",
             dohUrl = "https://cloudflare-dns.com/dns-query",
             categories = setOf(DnsCategory.SPEED, DnsCategory.PRIVACY),
             description = "Low-latency global resolver with strong uptime.",
@@ -35,9 +34,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "google",
             name = "Google Public DNS",
-            primaryAddress = "8.8.8.8",
-            secondaryAddress = "8.8.4.4",
-            privateDnsHostname = "dns.google",
+            addresses = listOf("8.8.8.8", "8.8.4.4"),
+            hostname = "dns.google",
             dohUrl = "https://dns.google/dns-query",
             categories = setOf(DnsCategory.SPEED, DnsCategory.SECURITY),
             description = "Reliable anycast DNS with broad regional coverage.",
@@ -46,9 +44,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "quad9",
             name = "Quad9",
-            primaryAddress = "9.9.9.9",
-            secondaryAddress = "149.112.112.112",
-            privateDnsHostname = "dns.quad9.net",
+            addresses = listOf("9.9.9.9", "149.112.112.112"),
+            hostname = "dns.quad9.net",
             dohUrl = "https://dns.quad9.net/dns-query",
             categories = setOf(DnsCategory.SECURITY, DnsCategory.PRIVACY),
             description = "Threat-filtering resolver tuned for malicious domain blocking.",
@@ -57,9 +54,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "adguard",
             name = "AdGuard",
-            primaryAddress = "94.140.14.14",
-            secondaryAddress = "94.140.15.15",
-            privateDnsHostname = "dns.adguard.com",
+            addresses = listOf("94.140.14.14", "94.140.15.15"),
+            hostname = "dns.adguard.com",
             dohUrl = "https://dns.adguard-dns.com/dns-query",
             categories = setOf(DnsCategory.PRIVACY, DnsCategory.SECURITY),
             description = "Privacy-forward resolver with filtering variants.",
@@ -68,9 +64,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "nextdns",
             name = "NextDNS",
-            primaryAddress = "45.90.28.0",
-            secondaryAddress = "45.90.30.0",
-            privateDnsHostname = "dns.nextdns.io",
+            addresses = listOf("45.90.28.0", "45.90.30.0"),
+            hostname = "dns.nextdns.io",
             dohUrl = "https://dns.nextdns.io",
             categories = setOf(DnsCategory.PRIVACY, DnsCategory.SECURITY),
             description = "Customizable filtering and analytics platform.",
@@ -79,9 +74,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "mullvad",
             name = "Mullvad DNS",
-            primaryAddress = "194.242.2.2",
-            secondaryAddress = "194.242.2.3",
-            privateDnsHostname = "dns.mullvad.net",
+            addresses = listOf("194.242.2.2", "194.242.2.3"),
+            hostname = "dns.mullvad.net",
             dohUrl = "https://dns.mullvad.net/dns-query",
             categories = setOf(DnsCategory.PRIVACY, DnsCategory.SECURITY),
             description = "Minimal-logging resolver from the Mullvad privacy stack.",
@@ -90,9 +84,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "opendns",
             name = "OpenDNS",
-            primaryAddress = "208.67.222.222",
-            secondaryAddress = "208.67.220.220",
-            privateDnsHostname = "doh.opendns.com",
+            addresses = listOf("208.67.222.222", "208.67.220.220"),
+            hostname = "doh.opendns.com",
             dohUrl = "https://doh.opendns.com/dns-query",
             categories = setOf(DnsCategory.SECURITY, DnsCategory.FAMILY),
             description = "Cisco-backed resolver with family-safe variants.",
@@ -101,9 +94,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "cleanbrowsing",
             name = "CleanBrowsing",
-            primaryAddress = "185.228.168.168",
-            secondaryAddress = "185.228.169.168",
-            privateDnsHostname = "security-filter-dns.cleanbrowsing.org",
+            addresses = listOf("185.228.168.168", "185.228.169.168"),
+            hostname = "security-filter-dns.cleanbrowsing.org",
             dohUrl = "https://doh.cleanbrowsing.org/doh/security-filter/",
             categories = setOf(DnsCategory.FAMILY, DnsCategory.SECURITY),
             description = "Family and security filtering built into the resolver.",
@@ -112,9 +104,8 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "controld",
             name = "Control D",
-            primaryAddress = "76.76.2.0",
-            secondaryAddress = "76.76.10.0",
-            privateDnsHostname = "freedns.controld.com",
+            addresses = listOf("76.76.2.0", "76.76.10.0"),
+            hostname = "freedns.controld.com",
             dohUrl = "https://freedns.controld.com/p2",
             categories = setOf(DnsCategory.PRIVACY, DnsCategory.FAMILY),
             description = "Flexible profiles for privacy, ad blocking, and family controls.",
@@ -123,8 +114,7 @@ class DnsEngine @Inject constructor() {
         DnsProvider(
             id = "comodo",
             name = "Comodo Secure DNS",
-            primaryAddress = "8.26.56.26",
-            secondaryAddress = "8.20.247.20",
+            addresses = listOf("8.26.56.26", "8.20.247.20"),
             categories = setOf(DnsCategory.SECURITY),
             protocols = setOf(DnsProtocol.DOH),
             description = "Legacy malware-focused filtering resolver.",
@@ -136,20 +126,18 @@ class DnsEngine @Inject constructor() {
 
     fun customProvider(
         label: String,
-        primaryAddress: String,
-        secondaryAddress: String?,
-        privateDnsHostname: String?
+        addresses: List<String>,
+        hostname: String?
     ): DnsProvider {
         return DnsProvider(
             id = "custom-${label.lowercase().replace("\\s+".toRegex(), "-")}",
             name = label,
-            primaryAddress = primaryAddress,
-            secondaryAddress = secondaryAddress,
-            privateDnsHostname = privateDnsHostname,
+            addresses = addresses,
+            hostname = hostname,
             categories = setOf(DnsCategory.SPEED, DnsCategory.PRIVACY),
             protocols = buildSet {
                 add(DnsProtocol.DOH)
-                if (!privateDnsHostname.isNullOrBlank()) add(DnsProtocol.DOT)
+                if (!hostname.isNullOrBlank()) add(DnsProtocol.DOT)
             },
             description = "Custom provider configured by the user.",
             badge = "Custom",
@@ -207,7 +195,7 @@ class DnsEngine @Inject constructor() {
         timeoutMs: Int = 1200
     ): DnsBenchmarkResult = withContext(Dispatchers.IO) {
         val samples = (0 until samplesPerProvider).map {
-            measureLatency(provider.primaryAddress, timeoutMs = timeoutMs)
+            measureLatency(provider.addresses.first(), timeoutMs = timeoutMs)
         }
         val successfulSamples = samples.filterNotNull()
         val latency = successfulSamples.averageOrNull()?.toLong()
