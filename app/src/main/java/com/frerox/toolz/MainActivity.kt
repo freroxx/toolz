@@ -49,6 +49,8 @@ import androidx.navigation.navArgument
 import androidx.work.*
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.data.repository.FlashlightRepository
+import com.frerox.toolz.service.FlashlightService
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.ui.screens.LoadingScreen
 import com.frerox.toolz.ui.screens.LoadingViewModel
@@ -126,6 +128,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     @Inject
     lateinit var offlineManager: OfflineManager
+
+    @Inject
+    lateinit var flashlightRepository: FlashlightRepository
 
     private val currentIntentState = mutableStateOf<Intent?>(null)
     private val currentIntentVersion = mutableStateOf(0L)
@@ -251,6 +256,17 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                     }
                 } else {
                     stopStepService()
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            settingsRepository.flashlightNotificationsEnabled.collect { enabled ->
+                val intent = Intent(this@MainActivity, FlashlightService::class.java)
+                if (enabled) {
+                    startForegroundService(intent)
+                } else if (!flashlightRepository.isOn.value) {
+                    stopService(intent)
                 }
             }
         }
