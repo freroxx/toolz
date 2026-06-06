@@ -40,8 +40,8 @@ fun ExpressiveTopAppBar(
     navigationIcon: @Composable (() -> Unit) = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        containerColor = Color.Transparent,
+        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(0.95f),
     ),
     scrollBehavior: TopAppBarScrollBehavior? = null,
     largeFlexible: Boolean = false,
@@ -130,8 +130,8 @@ fun ExpressiveTopAppBar(
     navigationIcon: @Composable (() -> Unit) = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        containerColor = Color.Transparent,
+        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(0.95f),
     ),
     scrollBehavior: TopAppBarScrollBehavior? = null,
     largeFlexible: Boolean = false,
@@ -182,6 +182,7 @@ fun ToolzHorizontalFloatingToolbar(
     leadingContent: (@Composable RowScope.() -> Unit)? = null,
     trailingContent: (AppBarRowScope.() -> Unit)? = null,
     scrollBehavior: FloatingToolbarScrollBehavior? = null,
+    onOverflowClick: (() -> Unit)? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
@@ -199,7 +200,10 @@ fun ToolzHorizontalFloatingToolbar(
             {
                 AppBarRow(
                     overflowIndicator = {
-                        IconButton(onClick = { haptic.tick() }) {
+                        IconButton(onClick = { 
+                            haptic.tick()
+                            onOverflowClick?.invoke()
+                        }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "More")
                         }
                     }
@@ -226,6 +230,7 @@ fun ToolzVerticalFloatingToolbar(
     leadingContent: (@Composable ColumnScope.() -> Unit)? = null,
     trailingContent: (AppBarColumnScope.() -> Unit)? = null,
     scrollBehavior: FloatingToolbarScrollBehavior? = null,
+    onOverflowClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
@@ -243,7 +248,10 @@ fun ToolzVerticalFloatingToolbar(
             {
                 AppBarColumn(
                     overflowIndicator = {
-                        IconButton(onClick = { haptic.tick() }) {
+                        IconButton(onClick = { 
+                            haptic.tick()
+                            onOverflowClick?.invoke()
+                        }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "More")
                         }
                     }

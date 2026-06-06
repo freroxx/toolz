@@ -192,6 +192,7 @@ fun ExpressiveSearchField(
     leadingIcon: @Composable (() -> Unit)? = null,
     trailingIcon: @Composable (() -> Unit)? = null,
     enabled: Boolean = true,
+    colors: TextFieldColors = TextFieldDefaults.colors(),
     onSearch: (String) -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -213,6 +214,7 @@ fun ExpressiveSearchField(
         placeholder = placeholder,
         leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
+        colors = colors,
     )
 }
 

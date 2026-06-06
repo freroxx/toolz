@@ -336,6 +336,40 @@ fun ExpressivePulseIndicator(
     }
 }
 
+@Composable
+fun ExpressiveTypingDots(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    Row(
+        modifier = modifier.padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val infiniteTransition = rememberInfiniteTransition(label = "typing")
+        
+        repeat(3) { i ->
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.2f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(600, easing = EaseInOutSine),
+                    repeatMode = RepeatMode.Reverse,
+                    initialStartOffset = StartOffset(i * 150)
+                ),
+                label = "dot$i"
+            )
+            
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .graphicsLayer { this.alpha = alpha }
+                    .background(color, androidx.compose.foundation.shape.CircleShape)
+            )
+        }
+    }
+}
+
 /**
  * Official Material 3 Expressive Progress Indicators.
  */

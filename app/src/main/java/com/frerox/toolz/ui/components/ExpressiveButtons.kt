@@ -355,9 +355,9 @@ fun ExpressiveSplitButton(
 }
 
 @Composable
-private fun Modifier.expressivePressScale(
+fun Modifier.expressivePressScale(
     interactionSource: MutableInteractionSource,
-    enabled: Boolean,
+    enabled: Boolean = true,
 ): Modifier {
     val performanceMode = LocalPerformanceMode.current
     val isPressed by interactionSource.collectIsPressedAsState()

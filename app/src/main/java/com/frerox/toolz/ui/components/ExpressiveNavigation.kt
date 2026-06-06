@@ -1,6 +1,7 @@
 package com.frerox.toolz.ui.components
 
 import android.content.res.Configuration
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -21,6 +23,7 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScope
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -222,6 +225,70 @@ fun ToolzModalWideNavigationRail(
             onItemSelected = onItemSelected,
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzFloatingToolbar(
+    expanded: Boolean,
+    selectedTab: com.frerox.toolz.ui.screens.dashboard.DashboardTab,
+    onTabSelected: (com.frerox.toolz.ui.screens.dashboard.DashboardTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptic = rememberToolzHapticFeedback()
+
+    HorizontalFloatingToolbar(
+        modifier = modifier
+            .padding(bottom = 24.dp)
+            .navigationBarsPadding(),
+        expanded = expanded,
+        shape = ExtraLargeExpressiveShape,
+        content = {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                com.frerox.toolz.ui.screens.dashboard.DashboardTab.entries.forEach { tab ->
+                    val selected = selectedTab == tab
+                    val color by animateColorAsState(
+                        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        animationSpec = tween(300),
+                        label = "tabColor"
+                    )
+                    
+                    val scale by animateFloatAsState(
+                        targetValue = if (selected) 1.15f else 1f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                        label = "tabScale"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .bouncyClick {
+                                haptic.tick()
+                                onTabSelected(tab)
+                            }
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.title,
+                            tint = color,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                        )
+                    }
+                }
+            }
+        }
+    )
 }
 
 /**
