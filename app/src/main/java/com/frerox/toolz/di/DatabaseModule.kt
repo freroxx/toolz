@@ -21,6 +21,7 @@ import com.frerox.toolz.data.calendar.EventDao
 import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.search.SearchDao
+import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.util.security.KeyManager
 import dagger.Module
 import dagger.Provides
@@ -131,5 +132,10 @@ object DatabaseModule {
     @Provides
     fun provideCryptoDao(database: AppDatabase): CryptoDao {
         return database.cryptoDao()
+    }
+
+    @Provides
+    fun provideDeviceSpecsDao(database: AppDatabase): DeviceSpecsDao {
+        return database.deviceSpecsDao()
     }
 }
