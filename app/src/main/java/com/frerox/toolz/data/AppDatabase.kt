@@ -41,6 +41,9 @@ import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.search.SearchHistoryEntry
+import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
+import com.frerox.toolz.data.device.cache.DeviceSpecsDao
+import com.frerox.toolz.data.device.cache.DeviceSpecConverters
 
 @Database(
     entities = [
@@ -63,12 +66,13 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
         SearchHistoryEntry::class,
         BookmarkEntry::class,
         QuickLinkEntry::class,
-        CryptoHistoryEntry::class
+        CryptoHistoryEntry::class,
+        DeviceSpecCacheEntity::class
     ], 
-    version = 41,
+    version = 42,
     exportSchema = false
 )
-@TypeConverters(CommonConverters::class, TodoConverters::class)
+@TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun musicDao(): MusicDao
@@ -86,4 +90,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun passwordDao(): PasswordDao
     abstract fun searchDao(): SearchDao
     abstract fun cryptoDao(): CryptoDao
+    abstract fun deviceSpecsDao(): DeviceSpecsDao
 }

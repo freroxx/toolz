@@ -16,6 +16,10 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.ai.LrcLibService
+import com.frerox.toolz.data.device.DeviceSpecsApi
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -28,6 +32,13 @@ object NetworkModule {
         .add(ClaudeMessageAdapter())
         .add(KotlinJsonAdapterFactory())
         .build()
+
+    @Provides
+    @Singleton
+    fun provideKotlinxJson(): Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
 
     @Provides
     @Singleton
@@ -65,4 +76,14 @@ object NetworkModule {
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(LrcLibService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideDeviceSpecsApi(okHttpClient: OkHttpClient, json: Json): DeviceSpecsApi =
+        Retrofit.Builder()
+            .baseUrl("https://toolz-app.vercel.app/")
+            .client(okHttpClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(DeviceSpecsApi::class.java)
 }
