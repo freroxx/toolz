@@ -144,6 +144,8 @@ fun DashboardScreen(
 
     val searchQuery  by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isAiSearching by viewModel.isAiSearching.collectAsStateWithLifecycle()
+    val isAiThinking by viewModel.isAiThinking.collectAsStateWithLifecycle()
+    val aiResponse   by viewModel.aiResponse.collectAsStateWithLifecycle()
     val aiRoutes       by viewModel.aiSuggestedRoutes.collectAsStateWithLifecycle()
     val stats          by viewModel.dashboardStats.collectAsStateWithLifecycle()
     val updateVersion  by viewModel.updateAvailableVersion.collectAsStateWithLifecycle(null)
@@ -160,47 +162,66 @@ fun DashboardScreen(
         }
     }
 
-    DashboardContent(
-        onNavigate          = navigate,
-        onTogglePin         = { vibrationManager?.vibrateTick(); viewModel.togglePinnedTool(it) },
-        userName            = userName,
-        pinnedTools         = pinnedTools,
-        recentTools         = recentTools,
-        showRecentTools     = showRecent,
-        showQuickNotes      = showNotes,
-        showDashboardStats  = showStats,
-        savedView           = savedView,
-        musicState          = musicState,
-        musicViewModel      = musicViewModel,
-        timerState          = timerState,
-        timerViewModel      = timerViewModel,
-        stopwatchState      = stopwatchState,
-        stopwatchViewModel  = stopwatchViewModel,
-        pomodoroState       = pomodoroState,
-        pomodoroViewModel   = pomodoroViewModel,
-        stepsState          = stepsState,
-        stepsViewModel      = stepsViewModel,
-        recordingState      = recordingState,
-        recorderViewModel   = recorderViewModel,
-        todoViewModel       = todoViewModel,
-        caffeinateViewModel = caffeinateViewModel,
-        catalogState        = catalogState,
-        showPill            = showPill,
-        fillThePill         = fillThePill,
-        searchQuery         = searchQuery,
-        isAiSearching       = isAiSearching,
-        aiSuggestedRoutes   = aiRoutes,
-        onSearchChange      = viewModel::updateSearchQuery,
-        updateVersion       = updateVersion,
-        onDismissUpdate     = viewModel::dismissUpdate,
-        notes               = notes,
-        categories          = categories,
-        offlineState        = offlineState,
-        manualOffline       = manualOffline,
-        onToggleOffline     = viewModel::toggleOfflineMode,
-        onTogglePerformance = viewModel::togglePerformanceMode,
-        stats               = stats,
-    )
+    val spotlightTool by viewModel.spotlightTool.collectAsStateWithLifecycle()
+    val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
+    val tabCategories by viewModel.tabCategories.collectAsStateWithLifecycle()
+
+    Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
+        DashboardContent(
+            onNavigate          = navigate,
+            onTogglePin         = { vibrationManager?.vibrateTick(); viewModel.togglePinnedTool(it) },
+            userName            = userName,
+            pinnedTools         = pinnedTools,
+            recentTools         = recentTools,
+            showRecentTools     = showRecent,
+            showQuickNotes      = showNotes,
+            showDashboardStats  = showStats,
+            savedView           = savedView,
+            musicState          = musicState,
+            musicViewModel      = musicViewModel,
+            timerState          = timerState,
+            timerViewModel      = timerViewModel,
+            stopwatchState      = stopwatchState,
+            stopwatchViewModel  = stopwatchViewModel,
+            pomodoroState       = pomodoroState,
+            pomodoroViewModel   = pomodoroViewModel,
+            stepsState          = stepsState,
+            stepsViewModel      = stepsViewModel,
+            recordingState      = recordingState,
+            recorderViewModel   = recorderViewModel,
+            todoViewModel       = todoViewModel,
+            caffeinateViewModel = caffeinateViewModel,
+            catalogState        = catalogState,
+            showPill            = showPill,
+            fillThePill         = fillThePill,
+            searchQuery         = searchQuery,
+            isAiSearching       = isAiSearching,
+            isAiThinking        = isAiThinking,
+            aiResponse          = aiResponse,
+            aiSuggestedRoutes   = aiRoutes,
+            onSearchChange      = viewModel::updateSearchQuery,
+            onTransferToAi      = { viewModel.transferToAiAssistant { onNavigate(Screen.AiAssistant.route + "?chatId=$it") } },
+            updateVersion       = updateVersion,
+            onDismissUpdate     = viewModel::dismissUpdate,
+            notes               = notes,
+            categories          = categories,
+            tabCategories       = tabCategories,
+            selectedTab         = selectedTab,
+            offlineState        = offlineState,
+            manualOffline       = manualOffline,
+            onToggleOffline     = viewModel::toggleOfflineMode,
+            onTogglePerformance = viewModel::togglePerformanceMode,
+            stats               = stats,
+            spotlightTool       = spotlightTool,
+        )
+
+        ToolzFloatingToolbar(
+            expanded = true,
+            selectedTab = selectedTab,
+            onTabSelected = { viewModel.setSelectedTab(it) },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -239,17 +260,23 @@ fun DashboardContent(
     fillThePill: Boolean,
     searchQuery: String,
     isAiSearching: Boolean,
+    isAiThinking: Boolean,
+    aiResponse: String?,
     aiSuggestedRoutes: List<String>,
     onSearchChange: (String) -> Unit,
+    onTransferToAi: () -> Unit,
     updateVersion: String?,
     onDismissUpdate: () -> Unit,
     notes: List<Note>,
     categories: List<ToolCategory>,
+    tabCategories: List<ToolCategory>,
+    selectedTab: DashboardTab,
     offlineState: OfflineState,
     manualOffline: Boolean,
     onToggleOffline: (Boolean) -> Unit,
     onTogglePerformance: (Boolean) -> Unit,
     stats: DashboardStats,
+    spotlightTool: ToolItem?,
 ) {
     val vibrationManager = LocalVibrationManager.current
     val performanceMode  = LocalPerformanceMode.current
@@ -258,18 +285,19 @@ fun DashboardContent(
     var toolForDetail    by remember { mutableStateOf<ToolItem?>(null) }
     var currentView      by remember(savedView) { mutableStateOf(savedView) }
 
-    val visibleCategories = categories
-
-    Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // ── Top bar ───────────────────────────────────────────────────────
+            // ── Simplified Top Bar ───────────────────────────────────────────
             DashboardTopBar(
                 searchQuery    = searchQuery,
                 onSearchChange = onSearchChange,
                 isAiSearching  = isAiSearching,
+                isAiThinking   = isAiThinking,
+                aiResponse     = aiResponse,
                 aiRoutes       = aiSuggestedRoutes,
                 onNavigate     = onNavigate,
+                onTransferToAi = onTransferToAi,
                 categories     = categories,
                 offlineState   = offlineState,
                 manualOffline  = manualOffline,
@@ -281,88 +309,54 @@ fun DashboardContent(
                 onSettingsClick = { onNavigate(Screen.Settings.route) },
             )
 
-            // ── Scrollable body ───────────────────────────────────────────────
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .let {
-                        if (performanceMode) it
-                        else it.fadingEdges(top = 12.dp, bottom = 120.dp)
-                    },
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-            ) {
-
-                if (updateVersion != null) {
-                    item(key = "update") {
-                        StaggeredEntrance(0) {
-                            UpdateBanner(updateVersion, { onNavigate(Screen.Update.route) }, onDismissUpdate)
-                        }
+            // ── Tab Content ──────────────────────────────────────────────────
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(400, delayMillis = 100)) + 
+                     slideInVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) { it / 8 }) togetherWith
+                    fadeOut(animationSpec = tween(200))
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                label = "tabContent"
+            ) { tab ->
+                when (tab) {
+                    DashboardTab.HOME -> {
+                        HomeTabContent(
+                            onNavigate = onNavigate,
+                            onTogglePin = onTogglePin,
+                            userName = userName,
+                            pinnedTools = pinnedTools,
+                            recentTools = recentTools,
+                            showRecentTools = showRecentTools,
+                            showQuickNotes = showQuickNotes,
+                            showDashboardStats = showDashboardStats,
+                            stats = stats,
+                            spotlightTool = spotlightTool,
+                            notes = notes,
+                            categories = categories,
+                            tabCategories = tabCategories,
+                            updateVersion = updateVersion,
+                            onDismissUpdate = onDismissUpdate,
+                            onTogglePerformance = onTogglePerformance,
+                            offlineState = offlineState,
+                            searchQuery = searchQuery
+                        )
                     }
-                }
-
-                item(key = "header") {
-                    StaggeredEntrance(1) { 
-                        DashboardHeader(userName, offlineState, onTogglePerformance) 
-                    }
-                }
-
-                if (showDashboardStats) {
-                    item(key = "stats") {
-                        StaggeredEntrance(2) { StatsRow(stats, onNavigate) }
-                    }
-                }
-
-                if (showRecentTools && recentTools.isNotEmpty()) {
-                    item(key = "recent") {
-                        StaggeredEntrance(3) {
-                            RecentSection(recentTools, categories, onNavigate)
-                        }
-                    }
-                }
-
-                if (pinnedTools.isNotEmpty()) {
-                    item(key = "pinned") {
-                        StaggeredEntrance(4) {
-                            PinnedSection(pinnedTools, categories, onTogglePin, onNavigate)
-                        }
-                    }
-                }
-
-                if (showQuickNotes && notes.isNotEmpty()) {
-                    item(key = "notes") {
-                        StaggeredEntrance(5) { NotesSection(notes, onNavigate) }
-                    }
-                }
-
-                item(key = "tools_header") {
-                    StaggeredEntrance(6) {
-                        AllToolsHeader(
-                            totalTools   = categories.sumOf { it.items.size },
-                            currentView  = currentView,
+                    else -> {
+                        TabGridContent(
+                            tab = tab,
+                            categories = tabCategories,
+                            currentView = currentView,
+                            onNavigate = onNavigate,
+                            onLongClick = { toolForDetail = it },
                             onViewToggle = {
                                 vibrationManager?.vibrateTick()
                                 currentView = if (currentView == "LIST") "DEFAULT" else "LIST"
-                            },
+                            }
                         )
                     }
                 }
-
-                visibleCategories.forEachIndexed { ci, cat ->
-                    item(key = "cat_hdr_${cat.title}") {
-                        StaggeredEntrance(ci + 7) { SectionHeader(cat.title) }
-                    }
-                    item(key = "cat_body_${cat.title}") {
-                        if (currentView == "LIST") {
-                            ToolListSection(cat.items, onNavigate, { toolForDetail = it })
-                        } else {
-                            ToolGridSection(cat.items, onNavigate, { toolForDetail = it })
-                        }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-
-                item(key = "bottom_space") { Spacer(Modifier.height(160.dp)) }
             }
         }
 
@@ -371,7 +365,7 @@ fun DashboardContent(
             UniversalPill(
                 modifier            = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 20.dp)
+                    .padding(bottom = 120.dp) // Lifted higher to avoid floating toolbar
                     .navigationBarsPadding(),
                 musicState          = musicState,
                 musicViewModel      = musicViewModel,
@@ -393,20 +387,259 @@ fun DashboardContent(
                 offlineState        = offlineState,
             )
         }
+    }
 
-        if (showOfflineSheet) {
-            OfflineSheet(onDismiss = { showOfflineSheet = false },
-                onGoOnline = { onToggleOffline(false); showOfflineSheet = false })
+    if (showOfflineSheet) {
+        OfflineSheet(onDismiss = { showOfflineSheet = false },
+            onGoOnline = { onToggleOffline(false); showOfflineSheet = false })
+    }
+
+    toolForDetail?.let { tool ->
+        ToolDetailSheet(
+            tool        = tool,
+            isPinned    = pinnedTools.contains(tool.route),
+            onDismiss   = { toolForDetail = null },
+            onNavigate  = { toolForDetail = null; onNavigate(it) },
+            onTogglePin = { onTogglePin(tool.route) },
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB CONTENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun HomeTabContent(
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit,
+    userName: String,
+    pinnedTools: Set<String>,
+    recentTools: List<String>,
+    showRecentTools: Boolean,
+    showQuickNotes: Boolean,
+    showDashboardStats: Boolean,
+    stats: DashboardStats,
+    spotlightTool: ToolItem?,
+    notes: List<Note>,
+    categories: List<ToolCategory>,
+    tabCategories: List<ToolCategory>,
+    updateVersion: String?,
+    onDismissUpdate: () -> Unit,
+    onTogglePerformance: (Boolean) -> Unit,
+    offlineState: OfflineState,
+    searchQuery: String,
+) {
+    val performanceMode = LocalPerformanceMode.current
+    val allTools = remember(categories) { categories.flatMap { it.items } }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .let {
+                if (performanceMode) it
+                else it.fadingEdges(top = 12.dp, bottom = 120.dp)
+            },
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+    ) {
+        if (updateVersion != null) {
+            item(key = "update_banner") {
+                UpdateBanner(updateVersion, { onNavigate(Screen.Update.route) }, onDismissUpdate)
+            }
         }
 
-        toolForDetail?.let { tool ->
-            ToolDetailSheet(
-                tool        = tool,
-                isPinned    = pinnedTools.contains(tool.route),
-                onDismiss   = { toolForDetail = null },
-                onNavigate  = { toolForDetail = null; onNavigate(it) },
-                onTogglePin = { onTogglePin(tool.route) },
+        item(key = "dashboard_header") {
+            DashboardHeader(userName, offlineState, onTogglePerformance) 
+        }
+
+        if (pinnedTools.isNotEmpty()) {
+            item(key = "pinned_grid") {
+                val pinnedItems = remember(pinnedTools, allTools) {
+                    pinnedTools.mapNotNull { route -> allTools.find { it.route == route } }
+                }
+                Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                    SectionHeader("PINNED")
+                    ToolGridSection(pinnedItems, onNavigate, { onTogglePin(it.route) })
+                }
+            }
+        }
+
+        if (recentTools.isNotEmpty() && showRecentTools) {
+            item(key = "recent_section") {
+                RecentSection(recentTools, categories, onNavigate)
+            }
+        }
+
+        if (showDashboardStats) {
+            item(key = "stats_row") {
+                StatsRow(stats, onNavigate)
+            }
+        }
+
+        if (showQuickNotes && notes.isNotEmpty()) {
+            item(key = "notes_section") {
+                NotesSection(notes, onNavigate)
+            }
+        }
+
+        // Smart Flow tools in Home
+        tabCategories.forEachIndexed { ci, cat ->
+            item(key = "cat_header_${cat.title}") {
+                SectionHeader("ESSENTIALS")
+            }
+            item(key = "cat_body_${cat.title}") {
+                ToolGridSection(cat.items, onNavigate)
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+
+        item(key = "dashboard_bottom_spacer") { Spacer(Modifier.height(160.dp)) }
+    }
+}
+
+@Composable
+fun TabGridContent(
+    tab: DashboardTab,
+    categories: List<ToolCategory>,
+    currentView: String,
+    onNavigate: (String) -> Unit,
+    onLongClick: (ToolItem) -> Unit,
+    onViewToggle: () -> Unit,
+) {
+    val performanceMode = LocalPerformanceMode.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .let {
+                    if (performanceMode) it
+                    else it.fadingEdges(top = 12.dp, bottom = 120.dp)
+                },
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        ) {
+            categories.forEachIndexed { ci, cat ->
+                item(key = "cat_header_${cat.title}") {
+                    SectionHeader(cat.title)
+                }
+                item(key = "cat_body_${cat.title}") {
+                    if (currentView == "LIST") {
+                        ToolListSection(cat.items, onNavigate, onLongClick)
+                    } else {
+                        ToolGridSection(cat.items, onNavigate, onLongClick)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+            item(key = "tab_bottom_spacer") { Spacer(Modifier.height(160.dp)) }
+        }
+    }
+}
+
+@Composable
+fun PinnedCarouselItem(
+    tool: ToolItem,
+    onNavigate: (String) -> Unit,
+    onTogglePin: (String) -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    ExpressiveCard(
+        onClick = { 
+            vibrationManager?.vibrateClick()
+            onNavigate(tool.route) 
+        },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            onTogglePin(tool.route)
+        },
+        modifier = Modifier.fillMaxSize(),
+        shape = MediumExpressiveShape,
+        containerColor = tool.color.copy(alpha = 0.12f),
+        border = null, // Removed border
+        elevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = SmallExpressiveShape,
+                color = tool.color.copy(alpha = 0.2f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
+                }
+            }
+            Text(
+                tool.title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPOTLIGHT SECTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun SpotlightSection(tool: ToolItem, onNavigate: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        SectionHeader("FOR YOU")
+        ExpressiveCard(
+            onClick = { 
+                vibrationManager?.vibrateClick()
+                onNavigate(tool.route) 
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(110.dp),
+            shape = BouncyShape,
+            containerColor = tool.color.copy(alpha = 0.15f),
+            border = null, // Removed border
+            elevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    shape = MediumExpressiveShape,
+                    color = tool.color.copy(alpha = 0.2f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Spotlight: ${tool.title}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        tool.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                }
+                Icon(
+                    Icons.Rounded.AutoAwesome,
+                    null,
+                    tint = tool.color,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
@@ -421,8 +654,11 @@ fun DashboardTopBar(
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     isAiSearching: Boolean,
+    isAiThinking: Boolean,
+    aiResponse: String?,
     aiRoutes: List<String>,
     onNavigate: (String) -> Unit,
+    onTransferToAi: () -> Unit,
     categories: List<ToolCategory>,
     offlineState: OfflineState,
     manualOffline: Boolean,
@@ -430,107 +666,44 @@ fun DashboardTopBar(
     onSettingsClick: () -> Unit,
 ) {
     val isOffline = offlineState == OfflineState.OFFLINE
+    val vibrationManager = LocalVibrationManager.current
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp), // Reduced vertical padding
     ) {
-        Spacer(Modifier.height(8.dp))
-
         Row(
-            modifier              = Modifier.fillMaxWidth(),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
-                Text(
-                    "TOOLZ",
-                    style         = MaterialTheme.typography.headlineLarge,
-                    fontWeight    = FontWeight.Black,
-                    letterSpacing = (-1.5).sp,
-                )
-                AnimatedContent(
-                    targetState = isOffline,
-                    transitionSpec = {
-                        (fadeIn(tween(220)) + slideInVertically { -it / 2 })
-                            .togetherWith(fadeOut(tween(160)))
-                    },
-                    label = "topBarSubtitle",
-                ) { offline ->
-                    Text(
-                        text       = if (offline) "Offline · local only" else "Modern utility suite",
-                        style      = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color      = if (offline)
-                            MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        letterSpacing = 0.2.sp,
-                    )
-                }
-            }
+            SmartSearchBar(
+                modifier = Modifier.weight(1f),
+                query = searchQuery,
+                onQueryChange = onSearchChange,
+                isAiSearching = isAiSearching,
+                isAiThinking = isAiThinking,
+                aiResponse = aiResponse,
+                aiRoutes = aiRoutes,
+                onNavigate = onNavigate,
+                onTransferToAi = onTransferToAi,
+                categories = categories,
+                offlineState = offlineState,
+            )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Offline toggle — AnimatedContent for container-color morph
-                AnimatedContent(
-                    targetState = manualOffline,
-                    transitionSpec = {
-                        (scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn())
-                            .togetherWith(scaleOut() + fadeOut())
-                    },
-                    label = "offlineToggleBtn",
-                ) { offline ->
-                    FilledTonalIconButton(
-                        onClick  = onOfflineClick,
-                        modifier = Modifier.size(46.dp),
-                        shape    = SmallExpressiveShape,
-                        colors   = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (offline)
-                                MaterialTheme.colorScheme.errorContainer
-                            else
-                                MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = if (offline)
-                                MaterialTheme.colorScheme.onErrorContainer
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    ) {
-                        Icon(
-                            imageVector        = if (offline) Icons.Rounded.CloudOff else Icons.Rounded.Cloud,
-                            contentDescription = if (offline) "Offline — tap to go online" else "Go offline",
-                            modifier           = Modifier.size(20.dp),
-                        )
-                    }
-                }
+            Spacer(Modifier.width(12.dp))
 
-                FilledTonalIconButton(
-                    onClick  = onSettingsClick,
-                    modifier = Modifier.size(46.dp),
-                    shape    = SmallExpressiveShape,
-                    colors   = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                ) {
-                    Icon(Icons.Rounded.Settings, "Settings", modifier = Modifier.size(20.dp))
-                }
+            IconButton(
+                onClick = onSettingsClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+            ) {
+                Icon(Icons.Rounded.Settings, "Settings", modifier = Modifier.size(20.dp))
             }
         }
-
-        Spacer(Modifier.height(14.dp))
-
-        SmartSearchBar(
-            query         = searchQuery,
-            onQueryChange = onSearchChange,
-            isAiSearching = isAiSearching,
-            aiRoutes      = aiRoutes,
-            onNavigate    = onNavigate,
-            categories    = categories,
-            offlineState  = offlineState,
-        )
-
-        Spacer(Modifier.height(4.dp))
     }
 }
 
@@ -544,10 +717,14 @@ fun SmartSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     isAiSearching: Boolean,
+    isAiThinking: Boolean,
+    aiResponse: String?,
     aiRoutes: List<String>,
     onNavigate: (String) -> Unit,
+    onTransferToAi: () -> Unit,
     categories: List<ToolCategory>,
     offlineState: OfflineState,
+    modifier: Modifier = Modifier,
 ) {
     val performanceMode = LocalPerformanceMode.current
     val allTools  = remember(categories) { categories.flatMap { it.items } }
@@ -559,72 +736,51 @@ fun SmartSearchBar(
         }.take(5)
     }
 
-    val sparkle = rememberInfiniteTransition(label = "sparkle")
-    val sparkleAlpha by sparkle.animateFloat(
-        initialValue = 0.5f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label        = "sAlpha",
-    )
+    val isUrl = remember(query) {
+        query.trim().let { 
+            it.startsWith("http://") || it.startsWith("https://") || 
+            (it.contains(".") && !it.contains(" ") && it.length > 3 && it.substringAfterLast(".").all { c -> c.isLetter() })
+        }
+    }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier) {
         ExpressiveSearchField(
             query = query,
             onQueryChange = onQueryChange,
             modifier = Modifier.fillMaxWidth(),
+            onSearch = { 
+                if (isUrl) {
+                    val url = if (query.startsWith("http")) query else "https://$query"
+                    onNavigate(Screen.Browser.createRoute(url))
+                }
+            },
             placeholder = {
-                AnimatedContent(
-                    targetState  = offlineState == OfflineState.OFFLINE,
-                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(160)) },
-                    label        = "phAnim",
-                ) { offline ->
-                    Text(
-                        text  = if (offline) "Search local tools…" else "Search or ask AI…",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-                        fontWeight = FontWeight.Medium,
+                Text(
+                    text = if (offlineState == OfflineState.OFFLINE) "Search tools…" else "Search or ask AI…",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            leadingIcon = {
+                if (isAiSearching || isAiThinking) {
+                    ExpressiveCircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.Transparent,
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.Search, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             },
-            leadingIcon = {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(32.dp)) {
-                    if (isAiSearching) {
-                        ExpressiveCircularProgressIndicator(
-                            modifier   = Modifier.size(20.dp),
-                            color      = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Rounded.Search, null,
-                            tint     = if (query.isNotEmpty()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            },
             trailingIcon = {
-                AnimatedContent(
-                    targetState = query.isNotEmpty(),
-                    transitionSpec = {
-                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.82f, animationSpec = tween(180)))
-                            .togetherWith(fadeOut(tween(140)) + scaleOut(targetScale = 0.82f, animationSpec = tween(140)))
-                    },
-                    label = "trailingSearch",
-                ) { hasQuery ->
-                    if (hasQuery) {
-                        IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Rounded.Close, "Clear",
-                                modifier = Modifier.size(18.dp),
-                                tint     = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    } else if (offlineState == OfflineState.ONLINE) {
-                        Icon(
-                            Icons.Rounded.AutoAwesome, null,
-                            tint     = MaterialTheme.colorScheme.primary.copy(
-                                alpha = if (performanceMode) 0.65f else sparkleAlpha),
-                            modifier = Modifier.size(18.dp),
-                        )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -632,16 +788,16 @@ fun SmartSearchBar(
 
         // Local dropdown
         AnimatedVisibility(
-            visible = localHits.isNotEmpty() && aiRoutes.isEmpty(),
+            visible = localHits.isNotEmpty() && aiRoutes.isEmpty() && aiResponse == null,
             enter   = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
             exit    = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
         ) {
             SearchDropdown(tools = localHits, onNavigate = onNavigate)
         }
 
-        // AI dropdown
+        // AI dropdown (Routes)
         AnimatedVisibility(
-            visible = aiRoutes.isNotEmpty(),
+            visible = aiRoutes.isNotEmpty() && aiResponse == null,
             enter   = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
             exit    = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
         ) {
@@ -649,6 +805,134 @@ fun SmartSearchBar(
                 aiRoutes.mapNotNull { r -> allTools.find { it.route == r } }
             }
             SearchDropdown(tools = aiTools, onNavigate = onNavigate, isAi = true)
+        }
+
+        // AI conversational response
+        AnimatedVisibility(
+            visible = aiResponse != null,
+            enter   = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+            exit    = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
+        ) {
+            aiResponse?.let { response ->
+                AiSearchResponseDropdown(
+                    response = response,
+                    isThinking = isAiThinking,
+                    onTransfer = onTransferToAi
+                )
+            }
+        }
+
+        // URL suggestion
+        AnimatedVisibility(
+            visible = isUrl && aiResponse == null,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            UrlSuggestionRow(query = query, onNavigate = onNavigate)
+        }
+    }
+}
+
+@Composable
+private fun UrlSuggestionRow(query: String, onNavigate: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    val url = if (query.startsWith("http")) query else "https://$query"
+    
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        shape = SquircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        onClick = {
+            vibrationManager?.vibrateClick()
+            onNavigate(Screen.Browser.createRoute(url))
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Language, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Open Website", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+fun AiSearchResponseDropdown(
+    response: String,
+    isThinking: Boolean,
+    onTransfer: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    
+    Surface(
+        modifier       = Modifier.fillMaxWidth().padding(top = 6.dp),
+        shape          = SquircleShape,
+        color          = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 4.dp,
+        border         = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 8.dp)
+            ) {
+                Icon(Icons.Rounded.AutoAwesome, null,
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp))
+                Text(
+                    "AI RESPONSE",
+                    style         = MaterialTheme.typography.labelSmall,
+                    fontWeight    = FontWeight.Black,
+                    color         = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp,
+                )
+            }
+
+            Text(
+                text = response,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            if (isThinking) {
+                ExpressiveTypingDots(color = MaterialTheme.colorScheme.primary)
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            ToolzExpressiveButton(
+                onClick = { 
+                    vibrationManager?.vibrateClick()
+                    onTransfer()
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("CONTINUE IN AI ASSISTANT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -744,80 +1028,51 @@ fun DashboardHeader(
     val performanceMode = LocalPerformanceMode.current
 
     val greeting = remember {
-        when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-            in 0..5   -> "GOOD NIGHT"
-            in 6..11  -> "GOOD MORNING"
-            in 12..16 -> "GOOD AFTERNOON"
-            else      -> "GOOD EVENING"
+        val calendar = java.util.Calendar.getInstance()
+        when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
+            in 0..5   -> "Good Night"
+            in 6..11  -> "Good Morning"
+            in 12..16 -> "Good Afternoon"
+            else      -> "Good Evening"
         }
     }
-    val date = remember {
-        try { LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMM d")) }
-        catch (_: Exception) { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date()) }
-    }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 20.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                greeting,
-                style         = MaterialTheme.typography.labelMedium,
-                fontWeight    = FontWeight.Black,
-                color         = MaterialTheme.colorScheme.primary,
-                letterSpacing = 2.5.sp,
-            )
+            Column {
+                Text(
+                    text = if (userName.isBlank()) "Explorer" else userName,
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-1.0).sp,
+                )
+                Text(
+                    text = greeting,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    letterSpacing = 1.sp
+                )
+            }
 
-            // Performance Mode Toggle in Header
+            // Discreet Performance Toggle
             Surface(
                 onClick = { onTogglePerformance(!performanceMode) },
                 shape = CircleShape,
-                color = if (performanceMode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f)),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        if (performanceMode) Icons.Rounded.Bolt else Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        if (performanceMode) "PERFORMANCE" else "QUALITY",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
+                Icon(
+                    if (performanceMode) Icons.Rounded.Bolt else Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp).size(16.dp),
+                    tint = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
             }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text          = if (userName.isBlank()) "Explorer" else userName,
-            style         = MaterialTheme.typography.displaySmall,
-            fontWeight    = FontWeight.Black,
-            letterSpacing = (-1.5).sp,
-        )
-        Spacer(Modifier.height(10.dp))
-        Surface(
-            shape  = BouncyShape,
-            color  = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f)),
-        ) {
-            Text(
-                text          = date.uppercase(),
-                modifier      = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                style         = MaterialTheme.typography.labelSmall,
-                fontWeight    = FontWeight.Black,
-                color         = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                letterSpacing = 1.3.sp,
-            )
         }
     }
 }
@@ -830,7 +1085,7 @@ fun DashboardHeader(
 fun StatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
     Row(
         modifier              = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         val battColor = when {
             stats.isBatteryCharging -> MaterialTheme.colorScheme.primary
@@ -839,10 +1094,10 @@ fun StatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
         }
         StatCard(
             modifier = Modifier.weight(1f),
-            label    = "BATTERY",
+            label    = "POWER",
             value    = "${stats.batteryLevel}%",
-            sub      = if (stats.isBatteryCharging) "CHARGING" else "DRAINING",
-            icon     = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.Battery5Bar,
+            sub      = if (stats.isBatteryCharging) "CHARGING" else "BATTERY",
+            icon     = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd,
             color    = battColor,
             progress = stats.batteryLevel / 100f,
             onClick  = { onNavigate(Screen.BatteryInfo.route) },
@@ -851,7 +1106,7 @@ fun StatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
             modifier = Modifier.weight(1f),
             label    = "STORAGE",
             value    = "${stats.storageAvailableGb.toInt()}GB",
-            sub      = "FREE",
+            sub      = "REMAINING",
             icon     = Icons.Rounded.Storage,
             color    = MaterialTheme.colorScheme.tertiary,
             progress = 1f - stats.storageUsedPercentage,
@@ -874,63 +1129,54 @@ private fun StatCard(
     val vibrationManager = LocalVibrationManager.current
     ExpressiveCard(
         onClick        = { vibrationManager?.vibrateClick(); onClick() },
-        modifier       = modifier.height(124.dp),
-        shape          = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        modifier       = modifier.height(110.dp),
+        shape          = ExtraLargeExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
         elevation      = 0.dp,
-        border         = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
+        border         = null,
     ) {
-        Row(
-            modifier          = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(
-                modifier            = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceBetween,
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Subtle progress fill
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .background(color.copy(alpha = 0.06f))
+            )
+
+            Row(
+                modifier          = Modifier.fillMaxSize().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
+                    modifier            = Modifier.weight(1f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Surface(Modifier.size(32.dp), SmallExpressiveShape, color = color.copy(alpha = 0.13f)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
-                        }
-                    }
                     Text(label,
                         style         = MaterialTheme.typography.labelSmall,
                         fontWeight    = FontWeight.Black,
                         letterSpacing = 1.sp,
-                        color         = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
-                }
-                Column {
+                        color         = color.copy(alpha = 0.8f))
                     Text(value,
-                        style      = MaterialTheme.typography.headlineMedium,
+                        style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace)
                     Text(sub,
                         style         = MaterialTheme.typography.labelSmall,
-                        color         = color.copy(alpha = 0.8f),
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 0.8.sp)
+                        color         = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        fontWeight    = FontWeight.Bold)
                 }
-            }
-            // Wavy circular progress
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
-                ToolzWavyCircularProgressIndicator(
-                    progress   = { progress.coerceIn(0f, 1f) },
-                    modifier   = Modifier.fillMaxSize(),
-                    color      = color,
-                    trackColor = color.copy(alpha = 0.1f),
-                )
-                Text(
-                    "${(progress.coerceIn(0f, 1f) * 100).toInt()}",
-                    style      = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    color      = color,
-                )
+                
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape    = SquircleShape,
+                    color    = color.copy(alpha = 0.12f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+                    }
+                }
             }
         }
     }
@@ -950,7 +1196,7 @@ fun RecentSection(
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
         SectionHeader("RECENTLY USED")
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding        = PaddingValues(horizontal = 2.dp),
         ) {
             items(recentTools.take(8)) { route ->
@@ -966,29 +1212,28 @@ private fun RecentItem(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
     Column(
         modifier            = Modifier
-            .width(76.dp)
+            .width(64.dp) // More compact
             .bouncyClick { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Surface(
-            modifier = Modifier.size(64.dp),
-            shape    = MediumExpressiveShape,
-            color    = tool.color.copy(alpha = 0.12f),
-            border   = BorderStroke(1.5.dp, tool.color.copy(alpha = 0.22f)),
+            modifier = Modifier.size(56.dp),
+            shape    = ExtraLargeExpressiveShape,
+            color    = tool.color.copy(alpha = 0.1f),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(28.dp))
+                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
             }
         }
         Text(
             tool.title,
             style      = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
-            maxLines   = 2,
+            maxLines   = 1,
             overflow   = TextOverflow.Ellipsis,
             textAlign  = TextAlign.Center,
-            lineHeight = 13.sp,
+            letterSpacing = 0.5.sp,
         )
     }
 }
@@ -1143,7 +1388,7 @@ private fun QuickNoteCard(note: Note, onNavigate: (String) -> Unit) {
         modifier   = Modifier.size(width = cardW, height = cardH),
         shape      = shape,
         containerColor = noteColor.copy(alpha = cardAlpha),
-        border     = BorderStroke(1.5.dp, noteColor.copy(alpha = 0.3f)),
+        border     = null, // Removed border
         elevation  = 0.dp,
     ) {
         Column(
@@ -1273,17 +1518,11 @@ fun SectionHeader(title: String) {
         modifier          = Modifier.padding(top = 28.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            modifier = Modifier.size(width = 24.dp, height = 6.dp),
-            shape    = CircleShape,
-            color    = MaterialTheme.colorScheme.primary
-        ) {}
-        Spacer(Modifier.width(12.dp))
         Text(title,
-            style         = MaterialTheme.typography.titleMedium,
+            style         = MaterialTheme.typography.labelLarge, // Smaller, cleaner header
             fontWeight    = FontWeight.Black,
-            letterSpacing = 1.8.sp,
-            color         = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
+            letterSpacing = 2.sp,
+            color         = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
     }
 }
 
@@ -1306,19 +1545,7 @@ fun ToolGridSection(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     row.forEachIndexed { ci, item ->
-                        val si = ri * cols + ci
-                        StaggeredEntrance(
-                            index    = si,
-                            modifier = Modifier.weight(1f),
-                            enter    = fadeIn(tween(360, si * 42)) +
-                                    slideInVertically(tween(400, si * 42)) { 28 } +
-                                    scaleIn(
-                                        animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow),
-                                        initialScale  = 0.90f,
-                                    ),
-                        ) {
-                            ToolGridCard(item, Modifier.fillMaxWidth(), onNavigate) { onLongClick(item) }
-                        }
+                        ToolGridCard(item, Modifier.weight(1f), onNavigate) { onLongClick(item) }
                     }
                     repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -1339,57 +1566,32 @@ fun ToolGridCard(
     ExpressiveCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
-        modifier    = modifier.height(132.dp),
-        shape       = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
+        modifier    = modifier.height(110.dp),
+        shape       = RoundedCornerShape(24.dp), // More squared for grid
+        containerColor = item.color.copy(alpha = 0.08f),
         elevation   = 0.dp,
-        border      = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
+        border      = null,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Background accent glow
-            Box(
-                Modifier
-                    .size(80.dp)
-                    .align(Alignment.TopEnd)
-                    .offset(x = 20.dp, y = (-20).dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(item.color.copy(alpha = 0.08f), Color.Transparent)
-                        )
-                    )
-            )
-
             Column(
                 modifier            = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(
-                    modifier              = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.Top,
+                Surface(
+                    modifier = Modifier.size(36.dp),
+                    shape    = MediumExpressiveShape,
+                    color    = item.color.copy(alpha = 0.15f)
                 ) {
-                    Surface(Modifier.size(48.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.15f)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(item.icon, null, tint = item.color, modifier = Modifier.size(24.dp))
-                        }
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(item.icon, null, tint = item.color, modifier = Modifier.size(20.dp))
                     }
-                    Icon(Icons.Rounded.ArrowOutward, null,
-                        modifier = Modifier.size(14.dp).alpha(0.25f))
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(item.title,
-                        style         = MaterialTheme.typography.labelLarge,
-                        fontWeight    = FontWeight.Black,
-                        letterSpacing = 0.4.sp,
-                        maxLines      = 1,
-                        overflow      = TextOverflow.Ellipsis)
-                    Text(item.description,
-                        style      = MaterialTheme.typography.labelSmall,
-                        color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        maxLines   = 1,
-                        overflow   = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Bold)
-                }
+                Text(item.title,
+                    style         = MaterialTheme.typography.labelLarge,
+                    fontWeight    = FontWeight.Black,
+                    letterSpacing = 0.5.sp,
+                    maxLines      = 1,
+                    overflow      = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1406,10 +1608,8 @@ fun ToolListSection(
     onLongClick: (ToolItem) -> Unit = {},
 ) {
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items.forEachIndexed { i, item ->
-            StaggeredEntrance(i) {
-                ToolListCard(item, onNavigate) { onLongClick(item) }
-            }
+        items.forEach { item ->
+            ToolListCard(item, onNavigate) { onLongClick(item) }
         }
     }
 }
@@ -1425,16 +1625,16 @@ fun ToolListCard(
         onClick     = { vibrationManager?.vibrateClick(); onNavigate(item.route) },
         onLongClick = { vibrationManager?.vibrateLongClick(); onLongClick() },
         modifier    = Modifier.fillMaxWidth().height(84.dp),
-        shape       = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.42f),
+        shape       = ExtraLargeExpressiveShape, // Matching grid cards
+        containerColor = item.color.copy(alpha = 0.08f), // Use tool color subtly
         elevation   = 0.dp,
-        border      = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
+        border      = null,
     ) {
         Row(
             modifier          = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(Modifier.size(52.dp), SmallExpressiveShape, color = item.color.copy(alpha = 0.15f)) {
+            Surface(Modifier.size(52.dp), MediumExpressiveShape, color = item.color.copy(alpha = 0.15f)) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(item.icon, null, tint = item.color, modifier = Modifier.size(26.dp))
                 }
@@ -1468,7 +1668,7 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
         shape      = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
         elevation  = 0.dp,
-        border     = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+        border     = null, // Removed border
     ) {
         Row(
             modifier              = Modifier.padding(18.dp).fillMaxWidth(),
@@ -2222,8 +2422,11 @@ private fun _PreviewScaffold() {
                 searchQuery    = "",
                 onSearchChange = {},
                 isAiSearching  = false,
+                isAiThinking   = false,
+                aiResponse     = null,
                 aiRoutes       = emptyList(),
                 onNavigate     = {},
+                onTransferToAi = {},
                 categories     = cats,
                 offlineState   = OfflineState.ONLINE,
                 manualOffline  = false,

@@ -100,6 +100,8 @@ class SettingsViewModel @Inject constructor(
     val musicKeepScreenOnLyrics = repository.musicKeepScreenOnLyrics
     val karaokeEnabled = repository.karaokeEnabled
     val aiClipboardMonitoringEnabled = repository.aiClipboardMonitoringEnabled
+    val aiSearchEnabled = repository.aiSearchEnabled
+    val aiSearchChatEnabled = repository.aiSearchChatEnabled
 
     val performanceMode = repository.performanceMode
 
@@ -165,6 +167,7 @@ class SettingsViewModel @Inject constructor(
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
 
     fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
+    fun setAiSearchChatEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiSearchChatEnabled(enabled) }
 
     fun clearDeviceInfoCache() = viewModelScope.launch {
         deviceSpecsRepository.clearCache()

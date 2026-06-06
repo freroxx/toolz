@@ -148,6 +148,8 @@ fun SettingsScreen(
     }
 
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
+    val aiSearchEnabled by viewModel.aiSearchEnabled.collectAsState(initial = false)
+    val aiSearchChatEnabled by viewModel.aiSearchChatEnabled.collectAsState(initial = true)
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
 
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
@@ -543,6 +545,15 @@ fun SettingsScreen(
                                 )
                             }
                             if (!offlineModeEnabled) {
+                                if (matches(searchQuery, "ai", "search", "conversational", "smart", "chat")) {
+                                    SettingsToggleItem(
+                                        title = "AI Conversational Search",
+                                        subtitle = "Answer questions directly in search bar",
+                                        icon = Icons.Rounded.AutoAwesome,
+                                        checked = aiSearchChatEnabled,
+                                        onCheckedChange = { viewModel.setAiSearchChatEnabled(it) }
+                                    )
+                                }
                                 if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
                                     val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
                                     SettingsToggleItem(
@@ -1555,37 +1566,36 @@ fun SettingsItem(
     onClick: (() -> Unit)? = null,
     extraContent: @Composable (ColumnScope.() -> Unit)? = null
 ) {
-    ExpressiveCard(
+    Surface(
         onClick = { onClick?.invoke() },
         modifier = Modifier.fillMaxWidth(),
         enabled = onClick != null,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        elevation = 0.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f))
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Surface(
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     @Suppress("DEPRECATION")
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     @Suppress("DEPRECATION")
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                 }
                 if (onClick != null) {
-                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
                 }
             }
             extraContent?.let {
@@ -1606,34 +1616,33 @@ fun SettingsToggleItem(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true
 ) {
-    ExpressiveCard(
+    Surface(
         onClick = { if (enabled) onCheckedChange(!checked) },
         modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f),
         enabled = enabled,
-        shape = MaterialTheme.shapes.extraLarge,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        elevation = 0.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f))
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                 }
             }
             ExpressiveSwitch(
