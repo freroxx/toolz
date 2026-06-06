@@ -9,20 +9,29 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
-import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.WindowManager
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.device.DeviceSpecMapper
+import com.frerox.toolz.data.device.DeviceSpecResponse
+import com.frerox.toolz.data.device.DeviceSpecUiModel
+import com.frerox.toolz.data.device.DeviceSpecsRepository
+import retrofit2.HttpException
+import org.json.JSONObject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.*
@@ -30,15 +39,130 @@ import javax.inject.Inject
 
 @HiltViewModel
 class DeviceInfoViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val specsRepository: DeviceSpecsRepository,
 ) : ViewModel() {
 
-    private val _deviceData = MutableStateFlow(getDetailedDeviceInfo(context))
-    val deviceData = _deviceData.asStateFlow()
+    // 1. Unified Query Key Generator matching Vercel's global CDN lookup template
+    private val defaultModelQuery: String by lazy {
+        Build.MODEL.trim().ifBlank { Build.DEVICE.trim() }.ifBlank { "Unknown" }
+    }
+
+    // 2. State Initialization Pipeline
+    private val _uiState = MutableStateFlow(
+        DeviceInfoUiState(
+            localDevice = getDetailedDeviceInfo(context),
+            queryModel = defaultModelQuery,
+            isRemoteLoading = true
+        )
+    )
+    val uiState = _uiState.asStateFlow()
+
+    init {
+        // Initial silent retrieval utilizing server edge cache signatures
+        refresh(refreshLocal = false, query = defaultModelQuery)
+    }
 
     fun refresh() {
-        _deviceData.value = getDetailedDeviceInfo(context)
+        refresh(refreshLocal = true, query = _uiState.value.queryModel)
     }
+
+    // 3. Manual query modifications (e.g., search text field overrides)
+    fun updateQuery(newQuery: String) {
+        val cleanQuery = newQuery.trim()
+        if (cleanQuery.isBlank() || cleanQuery.length < 2) return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    queryModel = cleanQuery,
+                    isRemoteLoading = true,
+                    remoteError = null
+                )
+            }
+            executeSearch(cleanQuery, forceRefresh = true)
+        }
+    }
+
+    // 4. Cleaned baseline refresh scheduler
+    private fun refresh(refreshLocal: Boolean, query: String) {
+        viewModelScope.launch {
+            val targetQuery = query
+
+            _uiState.update {
+                it.copy(
+                    isRemoteLoading = it.remoteSpec == null,
+                    isRefreshing = refreshLocal,
+                    remoteError = null,
+                    queryModel = targetQuery
+                )
+            }
+
+            if (refreshLocal) {
+                val local = withContext(Dispatchers.IO) { getDetailedDeviceInfo(context) }
+                _uiState.update { it.copy(localDevice = local) }
+            }
+
+            executeSearch(targetQuery, forceRefresh = refreshLocal)
+        }
+    }
+
+    // 5. Single-Flight Server Search (Vercel serverless layer handles internal fallbacks)
+    private suspend fun executeSearch(query: String, forceRefresh: Boolean = false) {
+        try {
+            val result = withContext(Dispatchers.IO) {
+                specsRepository.getDeviceSpecs(query, forceRefresh = forceRefresh)
+            }
+
+            result.map { (response, isCached) -> DeviceSpecMapper.mapResponse(response, isCached) }
+                .onSuccess { parsedSpecs ->
+                    updateSuccessState(parsedSpecs)
+                }
+                .onFailure { exception ->
+                    handleFailure(exception)
+                }
+        } catch (e: Exception) {
+            handleFailure(e)
+        }
+    }
+
+    private fun updateSuccessState(specs: DeviceSpecUiModel) {
+        _uiState.update {
+            it.copy(
+                remoteSpec = specs,
+                isRemoteLoading = false,
+                isRefreshing = false,
+                remoteError = null,
+                lastUpdatedMillis = System.currentTimeMillis(),
+                isFromCache = specs.isFromCache
+            )
+        }
+    }
+
+    private fun handleFailure(error: Throwable) {
+        val errorMessage = when (error) {
+            is HttpException -> {
+                val errorBody = error.response()?.errorBody()?.string()
+                try {
+                    errorBody?.let { JSONObject(it).getString("error") }
+                        ?: "Device specifications not found."
+                } catch (e: Exception) {
+                    if (error.code() == 404) "Device profile not available in database."
+                    else "Server error (${error.code()})"
+                }
+            }
+            else -> error.message?.takeIf(String::isNotBlank)
+                ?: "Could not load market specifications right now."
+        }
+        _uiState.update {
+            it.copy(
+                isRemoteLoading = false,
+                isRefreshing = false,
+                remoteError = errorMessage,
+            )
+        }
+    }
+}
 
     private fun getDetailedDeviceInfo(context: Context): DetailedDeviceData {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -239,7 +363,6 @@ class DeviceInfoViewModel @Inject constructor(
         }
         return false
     }
-}
 
 data class DetailedDeviceData(
     val brand: String,
@@ -279,4 +402,15 @@ data class DetailedDeviceData(
     
     val wifiIp: String,
     val isRooted: Boolean
+)
+
+data class DeviceInfoUiState(
+    val localDevice: DetailedDeviceData,
+    val queryModel: String,
+    val remoteSpec: DeviceSpecUiModel? = null,
+    val isRemoteLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
+    val remoteError: String? = null,
+    val lastUpdatedMillis: Long? = null,
+    val isFromCache: Boolean = false
 )

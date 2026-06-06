@@ -1765,203 +1765,69 @@ fun AiSettingsDialog(
                 ) { tab ->
                     if (tab == 0) {
                         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                            // Provider
-                            SettingsSection("Provider") {
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    items(AiSettingsHelper.providers) { p ->
-                                        val isSelected = state.provider == p
-                                        val pColor = AiDesign.providerColor(p) ?: MaterialTheme.colorScheme.primary
-                                        ExpressiveFilterChip(
-                                            selected = isSelected, onClick = { onProviderChange(p) },
-                                            label = { Text(p, fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium) },
-                                            leadingIcon = { Icon(getIconForConfig("AUTO", p), null, Modifier.size(14.dp)) },
-                                            shape = MediumExpressiveShape,
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = pColor.copy(alpha = 0.15f),
-                                                selectedLabelColor = pColor,
-                                                selectedLeadingIconColor = pColor,
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, selectedBorderColor = pColor.copy(alpha = 0.3f)),
-                                        )
-                                    }
-                                }
-                            }
-                            // Model
-                            SettingsSection("Model") {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Box {
-                                        Surface(onClick = { showModelMenu = true }, shape = MediumExpressiveShape, color = AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
-                                            Row(Modifier.padding(16.dp).fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                                Text(state.selectedModel, fontWeight = FontWeight.Bold, color = AiDesign.textColor())
-                                                Icon(Icons.Rounded.UnfoldMore, null, tint = AiDesign.textColor(0.6f))
-                                            }
-                                        }
-                                        DropdownMenu(expanded = showModelMenu, onDismissRequest = { showModelMenu = false }, containerColor = AiDesign.cardColor(), shape = LargeExpressiveShape) {
-                                            AiSettingsHelper.getModels(state.provider).forEach { m ->
-                                                DropdownMenuItem({ Text(m) }, { onModelChange(m); showModelMenu = false })
-                                            }
-                                        }
-                                    }
+                            SettingsProviderRow(state.provider, onProviderChange)
 
-                                    // Custom Model Input
-                                    OutlinedTextField(
-                                        value = state.selectedModel,
-                                        onValueChange = onModelChange,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        label = { Text("Custom Model Name") },
-                                        shape = MediumExpressiveShape,
-                                        singleLine = true,
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = AiDesign.glassColor(),
-                                            unfocusedContainerColor = AiDesign.glassColor(),
-                                            unfocusedBorderColor = AiDesign.glassBorder(),
-                                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                        ),
-                                        trailingIcon = {
-                                            AnimatedContent(targetState = state.modelAvailability, label = "modelAvailability") { availability ->
-                                                when (availability) {
-                                                    ModelAvailability.AVAILABLE -> Icon(Icons.Rounded.CheckCircle, "Available", tint = Color(0xFF4CAF50))
-                                                    ModelAvailability.UNAVAILABLE -> Icon(Icons.Rounded.Error, "Unavailable", tint = MaterialTheme.colorScheme.error)
-                                                    ModelAvailability.CHECKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                                    ModelAvailability.UNKNOWN -> null
-                                                }
-                                            }
-                                        },
-                                        supportingText = {
-                                            Text(
-                                                when (state.modelAvailability) {
-                                                    ModelAvailability.AVAILABLE -> "Available"
-                                                    ModelAvailability.UNAVAILABLE -> "Unavailable"
-                                                    ModelAvailability.CHECKING -> "Checking..."
-                                                    ModelAvailability.UNKNOWN -> ""
-                                                },
-                                                color = when (state.modelAvailability) {
-                                                    ModelAvailability.AVAILABLE -> Color(0xFF4CAF50)
-                                                    ModelAvailability.UNAVAILABLE -> MaterialTheme.colorScheme.error
-                                                    else -> AiDesign.textColor(0.5f)
-                                                }
-                                            )
-                                        }
-                                    )
-                                }
-                            }
-                            // API Key
-                            SettingsSection("API Key") {
-                                OutlinedTextField(
-                                    state.apiKey, onApiKeyChange, Modifier.fillMaxWidth(), shape = MediumExpressiveShape,
-                                    placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(state.provider), color = AiDesign.textColor(0.3f)) },
-                                    trailingIcon = { if (state.apiKey.isNotEmpty()) IconButton({ onApiKeyChange("") }) { Icon(Icons.Rounded.Close, null, tint = AiDesign.textColor(0.5f)) } },
-                                    supportingText = { if (state.apiKey.isEmpty() && state.isRemoteKeyAvailable) Text("Using shared key (limited quota)", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
-                                    colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder(), focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                                )
-                                Row(Modifier.fillMaxWidth(), Arrangement.End) {
-                                    TextButton({ showTutorial = true }) { Text("Guide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
-                                    TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AiSettingsHelper.getApiKeyUrl(state.provider)))) }) { Text("Get Key →", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
-                                }
-                            }
-                            // Suggested Prompts
-                            SettingsSection("Suggested Prompts") {
-                                Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
-                                    Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Dynamic Prompts", fontWeight = FontWeight.Bold)
-                                            Text("Generate based on chat history", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
-                                        }
-                                        ExpressiveSwitch(checked = state.dynamicPromptsEnabled, onCheckedChange = onToggleDynamicPrompts)
-                                    }
-                                }
-                                AnimatedVisibility(visible = state.dynamicPromptsEnabled) {
-                                    Column(Modifier.padding(top = 8.dp)) {
-                                        Text("Prompt Length", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
-                                        ToolzConnectedButtonGroup(
-                                            selectedIndex = listOf("short", "medium", "long").indexOf(state.promptFormat).coerceAtLeast(0),
-                                            options = listOf("Short", "Medium", "Long"),
-                                            onOptionSelected = { onPromptFormatChange(listOf("short", "medium", "long")[it]) },
-                                        )
-                                    }
-                                }
-                            }
-                            // Advanced
-                            SettingsSection("Advanced") {
-                                Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
-                                    Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Search Toggle Icon", fontWeight = FontWeight.Bold)
-                                            Text("Show web search toggle in input", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
-                                        }
-                                        ExpressiveSwitch(checked = aiSearchIconVisible, onCheckedChange = onSetAiSearchIconVisible)
-                                    }
-                                }
-                            }
-                            // Test + Save Preset
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                ToolzExpressiveButton(onTest, Modifier.weight(1f).height(48.dp), enabled = !state.isTesting, shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
-                                    if (state.isTesting) ToolzWavyCircularProgressIndicator(Modifier.size(16.dp), MaterialTheme.colorScheme.secondary, Color.Transparent)
-                                    else Text("Test Connection", fontWeight = FontWeight.Bold)
-                                }
-                                ToolzExpressiveIconButton(onRefresh, shape = MediumExpressiveShape, colors = IconButtonDefaults.filledIconButtonColors(containerColor = AiDesign.glassColor()), modifier = Modifier.size(48.dp)) {
-                                    Icon(Icons.Rounded.Sync, null, tint = AiDesign.textColor())
-                                }
-                            }
-                            if (state.testResult != null) {
-                                Surface(color = if (state.testResult.startsWith("✓")) Color(0xFF4CAF50).copy(alpha = 0.14f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), shape = MediumExpressiveShape) {
-                                    Text(state.testResult, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                            ToolzExpressiveButton({ showConfigSave = true }, Modifier.fillMaxWidth().height(48.dp), shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)) {
-                                Text(if (state.editingConfig != null) "Update Preset" else "Save as Preset", fontWeight = FontWeight.Black)
-                            }
+                            SettingsModelSection(
+                                selectedModel = state.selectedModel,
+                                provider = state.provider,
+                                modelAvailability = state.modelAvailability,
+                                showModelMenu = showModelMenu,
+                                onModelChange = onModelChange,
+                                onShowModelMenuChange = { showModelMenu = it }
+                            )
+
+                            SettingsApiKeySection(
+                                apiKey = state.apiKey,
+                                provider = state.provider,
+                                isRemoteKeyAvailable = state.isRemoteKeyAvailable,
+                                onApiKeyChange = onApiKeyChange,
+                                onShowTutorial = { showTutorial = true }
+                            )
+
+                            SettingsPromptsSection(
+                                dynamicPromptsEnabled = state.dynamicPromptsEnabled,
+                                promptFormat = state.promptFormat,
+                                onToggleDynamicPrompts = onToggleDynamicPrompts,
+                                onPromptFormatChange = onPromptFormatChange
+                            )
+
+                            SettingsAdvancedSection(
+                                aiSearchIconVisible = aiSearchIconVisible,
+                                onSetAiSearchIconVisible = onSetAiSearchIconVisible
+                            )
+
+                            SettingsTestSaveSection(
+                                isTesting = state.isTesting,
+                                testResult = state.testResult,
+                                onTest = onTest,
+                                onRefresh = onRefresh,
+                                onShowConfigSave = { showConfigSave = true },
+                                editingConfig = state.editingConfig
+                            )
+
                             AnimatedVisibility(visible = showConfigSave || state.editingConfig != null) {
-                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    OutlinedTextField(configName, { configName = it }, Modifier.fillMaxWidth(), label = { Text("Preset Name") }, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder()))
-                                    // Icon picker row
-                                    Text("Preset Icon", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        item {
-                                            Surface(onClick = onCustomIconClick, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (state.selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (state.selectedIcon == "CUSTOM") 2.dp else 1.dp, if (state.selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    if (state.customIconUri != null) AsyncImage(state.customIconUri, null, Modifier.fillMaxSize().clip(MediumExpressiveShape), contentScale = ContentScale.Crop)
-                                                    else Icon(Icons.Rounded.AddAPhoto, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.6f))
-                                                }
-                                            }
-                                        }
-                                        items(listOf("AUTO","GEMINI","CHATGPT","GROQ","CLAUDE","DEEPSEEK","BOT","SPARKLE")) { ik ->
-                                            val isSelected = state.selectedIcon == ik
-                                            Surface(onClick = { onIconChange(ik) }, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
-                                                Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig(ik, state.provider), null, Modifier.size(24.dp), tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else AiDesign.textColor(0.7f)) }
-                                            }
-                                        }
+                                SettingsPresetEditSection(
+                                    configName = configName,
+                                    onConfigNameChange = { configName = it },
+                                    selectedIcon = state.selectedIcon,
+                                    onIconChange = onIconChange,
+                                    customIconUri = state.customIconUri,
+                                    onCustomIconClick = onCustomIconClick,
+                                    provider = state.provider,
+                                    onSaveConfig = {
+                                        onSaveConfig(it)
+                                        showConfigSave = false
                                     }
-                                    ToolzExpressiveButton({ onSaveConfig(configName); showConfigSave = false }, Modifier.fillMaxWidth().height(52.dp), enabled = configName.isNotBlank(), shape = MediumExpressiveShape) { Text("Save Preset", fontWeight = FontWeight.Black) }
-                                }
+                                )
                             }
                         }
                     } else {
-                        LazyColumn(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (savedConfigs.isEmpty()) {
-                                item {
-                                    Column(Modifier.fillMaxWidth().padding(top = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Surface(modifier = Modifier.size(64.dp), shape = SquircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                                            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bookmarks, null, Modifier.size(28.dp).alpha(0.3f), tint = AiDesign.textColor()) }
-                                        }
-                                        Text("No presets saved", color = AiDesign.textColor(0.4f), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
-                                    }
-                                }
-                            }
-                            items(savedConfigs, key = { it.name }) { config ->
-                                Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
-                                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        AiAvatar(config, 42.dp, performanceMode = true)
-                                        Column(Modifier.weight(1f)) {
-                                            Text(config.name, fontWeight = FontWeight.Black, color = AiDesign.textColor())
-                                            Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
-                                        }
-                                        ToolzExpressiveIconButton({ onEditConfig(config); activeTab = 0 }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)), shape = SmallExpressiveShape) { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
-                                        ToolzExpressiveIconButton({ onDeleteConfig(config) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)), shape = SmallExpressiveShape) { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)) }
-                                    }
-                                }
-                            }
-                        }
+                        SettingsPresetsList(
+                            savedConfigs = savedConfigs,
+                            onEditConfig = onEditConfig,
+                            onDeleteConfig = onDeleteConfig,
+                            onActiveTabChange = { activeTab = it }
+                        )
                     }
                 }
             }
@@ -1974,6 +1840,291 @@ fun AiSettingsDialog(
         },
     )
     if (showTutorial) GuideDialog { showTutorial = false }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings Sub-composables
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SettingsProviderRow(
+    currentProvider: String,
+    onProviderChange: (String) -> Unit
+) {
+    SettingsSection("Provider") {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(AiSettingsHelper.providers) { p ->
+                val isSelected = currentProvider == p
+                val pColor = AiDesign.providerColor(p) ?: MaterialTheme.colorScheme.primary
+                ExpressiveFilterChip(
+                    selected = isSelected, onClick = { onProviderChange(p) },
+                    label = { Text(p, fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium) },
+                    leadingIcon = { Icon(getIconForConfig("AUTO", p), null, Modifier.size(14.dp)) },
+                    shape = MediumExpressiveShape,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = pColor.copy(alpha = 0.15f),
+                        selectedLabelColor = pColor,
+                        selectedLeadingIconColor = pColor,
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, selectedBorderColor = pColor.copy(alpha = 0.3f)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsModelSection(
+    selectedModel: String,
+    provider: String,
+    modelAvailability: ModelAvailability,
+    showModelMenu: Boolean,
+    onModelChange: (String) -> Unit,
+    onShowModelMenuChange: (Boolean) -> Unit
+) {
+    SettingsSection("Model") {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box {
+                Surface(
+                    onClick = { onShowModelMenuChange(true) },
+                    shape = MediumExpressiveShape,
+                    color = AiDesign.glassColor(),
+                    border = BorderStroke(1.dp, AiDesign.glassBorder())
+                ) {
+                    Row(
+                        Modifier.padding(16.dp).fillMaxWidth(),
+                        Arrangement.SpaceBetween,
+                        Alignment.CenterVertically
+                    ) {
+                        Text(selectedModel, fontWeight = FontWeight.Bold, color = AiDesign.textColor())
+                        Icon(Icons.Rounded.UnfoldMore, null, tint = AiDesign.textColor(0.6f))
+                    }
+                }
+                DropdownMenu(
+                    expanded = showModelMenu,
+                    onDismissRequest = { onShowModelMenuChange(false) },
+                    containerColor = AiDesign.cardColor(),
+                    shape = LargeExpressiveShape
+                ) {
+                    AiSettingsHelper.getModels(provider).forEach { m ->
+                        DropdownMenuItem({ Text(m) }, { onModelChange(m); onShowModelMenuChange(false) })
+                    }
+                }
+            }
+
+            // Custom Model Input
+            OutlinedTextField(
+                value = selectedModel,
+                onValueChange = onModelChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Custom Model Name") },
+                shape = MediumExpressiveShape,
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = AiDesign.glassColor(),
+                    unfocusedContainerColor = AiDesign.glassColor(),
+                    unfocusedBorderColor = AiDesign.glassBorder(),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                ),
+                trailingIcon = {
+                    AnimatedContent(targetState = modelAvailability, label = "modelAvailability") { availability ->
+                        when (availability) {
+                            ModelAvailability.AVAILABLE -> Icon(Icons.Rounded.CheckCircle, "Available", tint = Color(0xFF4CAF50))
+                            ModelAvailability.UNAVAILABLE -> Icon(Icons.Rounded.Error, "Unavailable", tint = MaterialTheme.colorScheme.error)
+                            ModelAvailability.CHECKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            ModelAvailability.UNKNOWN -> null
+                        }
+                    }
+                },
+                supportingText = {
+                    Text(
+                        when (modelAvailability) {
+                            ModelAvailability.AVAILABLE -> "Available"
+                            ModelAvailability.UNAVAILABLE -> "Unavailable"
+                            ModelAvailability.CHECKING -> "Checking..."
+                            ModelAvailability.UNKNOWN -> ""
+                        },
+                        color = when (modelAvailability) {
+                            ModelAvailability.AVAILABLE -> Color(0xFF4CAF50)
+                            ModelAvailability.UNAVAILABLE -> MaterialTheme.colorScheme.error
+                            else -> AiDesign.textColor(0.5f)
+                        }
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsApiKeySection(
+    apiKey: String,
+    provider: String,
+    isRemoteKeyAvailable: Boolean,
+    onApiKeyChange: (String) -> Unit,
+    onShowTutorial: () -> Unit
+) {
+    val context = LocalContext.current
+    SettingsSection("API Key") {
+        OutlinedTextField(
+            apiKey, onApiKeyChange, Modifier.fillMaxWidth(), shape = MediumExpressiveShape,
+            placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(provider), color = AiDesign.textColor(0.3f)) },
+            trailingIcon = { if (apiKey.isNotEmpty()) IconButton({ onApiKeyChange("") }) { Icon(Icons.Rounded.Close, null, tint = AiDesign.textColor(0.5f)) } },
+            supportingText = { if (apiKey.isEmpty() && isRemoteKeyAvailable) Text("Using shared key (limited quota)", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
+            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder(), focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+        )
+        Row(Modifier.fillMaxWidth(), Arrangement.End) {
+            TextButton(onShowTutorial) { Text("Guide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+            TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AiSettingsHelper.getApiKeyUrl(provider)))) }) { Text("Get Key →", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPromptsSection(
+    dynamicPromptsEnabled: Boolean,
+    promptFormat: String,
+    onToggleDynamicPrompts: (Boolean) -> Unit,
+    onPromptFormatChange: (String) -> Unit
+) {
+    SettingsSection("Suggested Prompts") {
+        Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Dynamic Prompts", fontWeight = FontWeight.Bold)
+                    Text("Generate based on chat history", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                }
+                ExpressiveSwitch(checked = dynamicPromptsEnabled, onCheckedChange = onToggleDynamicPrompts)
+            }
+        }
+        AnimatedVisibility(visible = dynamicPromptsEnabled) {
+            Column(Modifier.padding(top = 8.dp)) {
+                Text("Prompt Length", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
+                ToolzConnectedButtonGroup(
+                    selectedIndex = listOf("short", "medium", "long").indexOf(promptFormat).coerceAtLeast(0),
+                    options = listOf("Short", "Medium", "Long"),
+                    onOptionSelected = { onPromptFormatChange(listOf("short", "medium", "long")[it]) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsAdvancedSection(
+    aiSearchIconVisible: Boolean,
+    onSetAiSearchIconVisible: (Boolean) -> Unit
+) {
+    SettingsSection("Advanced") {
+        Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Search Toggle Icon", fontWeight = FontWeight.Bold)
+                    Text("Show web search toggle in input", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                }
+                ExpressiveSwitch(checked = aiSearchIconVisible, onCheckedChange = onSetAiSearchIconVisible)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTestSaveSection(
+    isTesting: Boolean,
+    testResult: String?,
+    onTest: () -> Unit,
+    onRefresh: () -> Unit,
+    onShowConfigSave: () -> Unit,
+    editingConfig: AiConfig?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ToolzExpressiveButton(onTest, Modifier.weight(1f).height(48.dp), enabled = !isTesting, shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
+                if (isTesting) ToolzWavyCircularProgressIndicator(Modifier.size(16.dp), MaterialTheme.colorScheme.secondary, Color.Transparent)
+                else Text("Test Connection", fontWeight = FontWeight.Bold)
+            }
+            ToolzExpressiveIconButton(onRefresh, shape = MediumExpressiveShape, colors = IconButtonDefaults.filledIconButtonColors(containerColor = AiDesign.glassColor()), modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.Sync, null, tint = AiDesign.textColor())
+            }
+        }
+        if (testResult != null) {
+            Surface(color = if (testResult.startsWith("✓")) Color(0xFF4CAF50).copy(alpha = 0.14f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), shape = MediumExpressiveShape) {
+                Text(testResult, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        ToolzExpressiveButton(onShowConfigSave, Modifier.fillMaxWidth().height(48.dp), shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)) {
+            Text(if (editingConfig != null) "Update Preset" else "Save as Preset", fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun SettingsPresetEditSection(
+    configName: String,
+    onConfigNameChange: (String) -> Unit,
+    selectedIcon: String,
+    onIconChange: (String) -> Unit,
+    customIconUri: String?,
+    onCustomIconClick: () -> Unit,
+    provider: String,
+    onSaveConfig: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(configName, onConfigNameChange, Modifier.fillMaxWidth(), label = { Text("Preset Name") }, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder()))
+        // Icon picker row
+        Text("Preset Icon", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                Surface(onClick = onCustomIconClick, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (selectedIcon == "CUSTOM") 2.dp else 1.dp, if (selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (customIconUri != null) AsyncImage(customIconUri, null, Modifier.fillMaxSize().clip(MediumExpressiveShape), contentScale = ContentScale.Crop)
+                        else Icon(Icons.Rounded.AddAPhoto, null, Modifier.size(20.dp), tint = AiDesign.textColor(0.6f))
+                    }
+                }
+            }
+            items(listOf("AUTO","GEMINI","CHATGPT","GROQ","CLAUDE","DEEPSEEK","BOT","SPARKLE")) { ik ->
+                val isSelected = selectedIcon == ik
+                Surface(onClick = { onIconChange(ik) }, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
+                    Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig(ik, provider), null, Modifier.size(24.dp), tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else AiDesign.textColor(0.7f)) }
+                }
+            }
+        }
+        ToolzExpressiveButton({ onSaveConfig(configName) }, Modifier.fillMaxWidth().height(52.dp), enabled = configName.isNotBlank(), shape = MediumExpressiveShape) { Text("Save Preset", fontWeight = FontWeight.Black) }
+    }
+}
+
+@Composable
+private fun SettingsPresetsList(
+    savedConfigs: List<AiConfig>,
+    onEditConfig: (AiConfig) -> Unit,
+    onDeleteConfig: (AiConfig) -> Unit,
+    onActiveTabChange: (Int) -> Unit
+) {
+    LazyColumn(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (savedConfigs.isEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(modifier = Modifier.size(64.dp), shape = SquircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bookmarks, null, Modifier.size(28.dp).alpha(0.3f), tint = AiDesign.textColor()) }
+                    }
+                    Text("No presets saved", color = AiDesign.textColor(0.4f), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+        items(savedConfigs, key = { it.name }) { config ->
+            Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    AiAvatar(config, 42.dp, performanceMode = true)
+                    Column(Modifier.weight(1f)) {
+                        Text(config.name, fontWeight = FontWeight.Black, color = AiDesign.textColor())
+                        Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                    }
+                    ToolzExpressiveIconButton({ onEditConfig(config); onActiveTabChange(0) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)), shape = SmallExpressiveShape) { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                    ToolzExpressiveIconButton({ onDeleteConfig(config) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)), shape = SmallExpressiveShape) { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)) }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

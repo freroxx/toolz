@@ -650,7 +650,7 @@ fun SettingsScreen(
                                 )
                             }
 
-                            if (matches(searchQuery, "vibration", "haptic", "intensity", "feedback")) {
+                            if (matches(searchQuery, "vibration", "haptic", "intensity", "feedback", "tuner")) {
                                 SettingsToggleItem(
                                     title = "Haptic Feedback",
                                     subtitle = "Tactile response on interaction",
@@ -661,18 +661,19 @@ fun SettingsScreen(
 
                                 if (hapticFeedback) {
                                     SettingsItem(
-                                        title = "Vibration Strength",
+                                        title = "Haptic Tuner",
                                         subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
-                                        icon = Icons.Rounded.GraphicEq
+                                        icon = Icons.Rounded.Tune
                                     ) {
-                                        ExpressiveSlider(
-                                            value = hapticIntensity,
-                                            onValueChange = { viewModel.setHapticIntensity(it) },
-                                            onValueChangeFinished = { vibrationManager?.vibrateClick() },
-                                            valueRange = 0.1f..1f,
-                                            modifier = Modifier.padding(top = 8.dp),
-                                            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                        )
+                                        Column(modifier = Modifier.padding(top = 12.dp)) {
+                                            HapticTuner(
+                                                intensity = hapticIntensity,
+                                                onIntensityChange = { 
+                                                    viewModel.setHapticIntensity(it)
+                                                    vibrationManager?.vibrateClick()
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -977,6 +978,19 @@ fun SettingsScreen(
                                         }
                                     }
                                 }
+                            }
+
+                            if (matches(searchQuery, "device", "info", "cache", "reset", "specs", "market")) {
+                                SettingsItem(
+                                    title = "Reset Device Info Cache",
+                                    subtitle = "Clear saved market specifications",
+                                    icon = Icons.Rounded.RestartAlt,
+                                    onClick = {
+                                        vibrationManager?.vibrateSuccess()
+                                        viewModel.clearDeviceInfoCache()
+                                        android.widget.Toast.makeText(context, "Device info cache cleared", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                )
                             }
                         }
                     }
@@ -1370,6 +1384,85 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                     Spacer(Modifier.width(10.dp))
                     @Suppress("DEPRECATION")
                     Text("DISCORD", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HAPTIC TUNER
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun HapticTuner(
+    intensity: Float,
+    onIntensityChange: (Float) -> Unit
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(intensity.coerceIn(0.1f, 1f))
+                    .height(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Box(
+                modifier = Modifier
+                    .weight((1f - intensity).coerceIn(0.1f, 1f))
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+        }
+
+        ExpressiveSlider(
+            value = intensity,
+            onValueChange = onIntensityChange,
+            onValueChangeFinished = { haptic.click() },
+            valueRange = 0.1f..1f,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary
+            )
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            listOf("SOFT", "CRISP", "STRONG").forEachIndexed { i, label ->
+                val target = when(i) {
+                    0 -> 0.1f
+                    1 -> 0.5f
+                    else -> 1.0f
+                }
+                val isSelected = (intensity - target).let { if (it < 0) -it else it } < 0.2f
+                
+                Surface(
+                    onClick = { 
+                        onIntensityChange(target)
+                        haptic.tick()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                    modifier = Modifier.height(32.dp).bouncyClick {}
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        )
+                    }
                 }
             }
         }
