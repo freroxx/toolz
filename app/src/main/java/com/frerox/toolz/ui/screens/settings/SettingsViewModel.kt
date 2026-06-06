@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.frerox.toolz.data.device.DeviceSpecsRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.BackupWorker
 import com.frerox.toolz.util.VibrationManager
@@ -22,6 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    private val deviceSpecsRepository: DeviceSpecsRepository,
     val vibrationManager: VibrationManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -163,6 +165,10 @@ class SettingsViewModel @Inject constructor(
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
 
     fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
+
+    fun clearDeviceInfoCache() = viewModelScope.launch {
+        deviceSpecsRepository.clearCache()
+    }
 
     fun setPdfAiOcrEnhance(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiOcrEnhance(enabled) }
     fun setAiClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiClipboardMonitoringEnabled(enabled) }
