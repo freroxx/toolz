@@ -78,18 +78,18 @@ class LoadingViewModel @Inject constructor(
             // ── Stage 4: Minimum visual duration for polish ───────────────────
             _loadingMessage.value = "ALMOST THERE"
             val elapsedTime = System.currentTimeMillis() - startTime
-            val minLoadingTimeMs = 1600L
+            val minLoadingTimeMs = 1000L // Reduced from 1600L for instant feel
             if (elapsedTime < minLoadingTimeMs) {
                 delay(minLoadingTimeMs - elapsedTime)
             }
 
             // ── Stage 5: Complete ─────────────────────────────────────────────
-            animateProgressTo(1f)
+            animateProgressTo(1f, durationMs = 200) // Faster final progress
             settingsRepository.setLastLoadingTime(System.currentTimeMillis())
             _loadingMessage.value = "READY"
 
             // Brief pause at 100% so the user sees the completed state
-            delay(180)
+            delay(100)
             _isInitialized.value = true
         }
     }

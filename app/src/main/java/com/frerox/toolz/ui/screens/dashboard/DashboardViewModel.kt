@@ -32,6 +32,14 @@ import javax.inject.Inject
 // Data Models
 // ─────────────────────────────────────────────────────────────────────────────
 
+enum class DashboardTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    HOME("Home", Icons.Rounded.Home),
+    TIME("Time", Icons.Rounded.Schedule),
+    MEDIA("Media", Icons.Rounded.LibraryMusic),
+    UTILITIES("Tools", Icons.Rounded.Construction),
+    SYSTEM("System", Icons.Rounded.SettingsInputComponent)
+}
+
 data class ToolCategory(
     val title: String,
     val items: List<ToolItem>,
@@ -65,6 +73,7 @@ class DashboardViewModel @Inject constructor(
     private val aiRepository: ChatRepository,
     private val noteDao: NoteDao,
     private val taskDao: TaskDao,
+    private val aiDao: com.frerox.toolz.data.ai.AiDao,
     private val settingsRepository: SettingsRepository,
     private val updateRepository: UpdateRepository,
     private val offlineManager: OfflineManager,
@@ -77,14 +86,22 @@ class DashboardViewModel @Inject constructor(
     private val _isAiSearching = MutableStateFlow(false)
     val isAiSearching = _isAiSearching.asStateFlow()
 
+    private val _isAiThinking = MutableStateFlow(false)
+    val isAiThinking = _isAiThinking.asStateFlow()
+
+    private val _aiResponse = MutableStateFlow<String?>(null)
+    val aiResponse = _aiResponse.asStateFlow()
+
     private val _aiSuggestedRoutes = MutableStateFlow<List<String>>(emptyList())
     val aiSuggestedRoutes = _aiSuggestedRoutes.asStateFlow()
 
-    // ── Category filter ───────────────────────────────────────────────────────
-    // CATEGORY_ALL (-1) means "show everything". Any other value is a 0-based
-    // index into the categories list. The HorizontalFloatingToolbar binds to this.
-    private val _selectedCategoryIndex = MutableStateFlow(CATEGORY_ALL)
-    val selectedCategoryIndex = _selectedCategoryIndex.asStateFlow()
+    // ── Navigation ────────────────────────────────────────────────────────────
+    private val _selectedTab = MutableStateFlow(DashboardTab.HOME)
+    val selectedTab = _selectedTab.asStateFlow()
+
+    fun setSelectedTab(tab: DashboardTab) {
+        _selectedTab.value = tab
+    }
 
     // ── Stats ─────────────────────────────────────────────────────────────────
     private val _dashboardStats = MutableStateFlow(DashboardStats())
@@ -120,36 +137,31 @@ class DashboardViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), getDashboardCategories())
 
-    // ── Derived: tools visible in the current category filter ─────────────────
-    // Used by the grid so it never has to compute filter logic in composition.
-    val filteredTools: StateFlow<List<ToolItem>> = combine(
+    // ── Derived: categories visible in the current tab ────────────────────────
+    val tabCategories: StateFlow<List<ToolCategory>> = combine(
         categories,
-        _selectedCategoryIndex,
-        _searchQuery,
-    ) { cats, catIndex, query ->
-        val baseItems = if (catIndex == CATEGORY_ALL) {
-            cats.flatMap { it.items }
-        } else {
-            cats.getOrNull(catIndex)?.items ?: emptyList()
+        _selectedTab,
+        _searchQuery
+    ) { allCats, tab, query ->
+        val tabSpecificCats = when (tab) {
+            DashboardTab.HOME -> allCats.filter { it.title == "SMART FLOW & AI" }
+            DashboardTab.TIME -> allCats.filter { it.title == "TIME & AGENDA" }
+            DashboardTab.MEDIA -> allCats.filter { it.title == "MEDIA & AUDIO" }
+            DashboardTab.UTILITIES -> allCats.filter { it.title == "UTILITIES & MATH" || it.title == "SENSORS & VISION" }
+            DashboardTab.SYSTEM -> allCats.filter { it.title == "SYSTEM & HEALTH" }
         }
+
         if (query.isBlank()) {
-            baseItems
+            tabSpecificCats
         } else {
             val q = query.trim().lowercase()
-            baseItems.filter { tool ->
-                tool.title.lowercase().contains(q) ||
-                        tool.description.lowercase().contains(q)
-            }
+            tabSpecificCats.map { cat ->
+                cat.copy(items = cat.items.filter { 
+                    it.title.lowercase().contains(q) || it.description.lowercase().contains(q) 
+                })
+            }.filter { it.items.isNotEmpty() }
         }
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
-        getDashboardCategories().flatMap { it.items },
-    )
-
-    // ── Local search results (pre-AI) ─────────────────────────────────────────
-    private val _localSearchResults = MutableStateFlow<List<ToolItem>>(emptyList())
-    val localSearchResults = _localSearchResults.asStateFlow()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // ── Update availability ───────────────────────────────────────────────────
     val updateAvailableVersion = combine(settingsRepository.updateAvailableVersion, offlineState) { v, s ->
@@ -164,22 +176,40 @@ class DashboardViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
+    // ── Spotlight ─────────────────────────────────────────────────────────────
+    private val _spotlightTool = MutableStateFlow<ToolItem?>(null)
+    val spotlightTool = _spotlightTool.asStateFlow()
+
     init {
         setupSearchDebounce()
         checkForUpdates()
         startStatsUpdate()
+        updateSpotlightTool()
     }
 
-    // ── Category filter ───────────────────────────────────────────────────────
-
-    fun setSelectedCategory(index: Int) {
-        _selectedCategoryIndex.value = index
+    private fun updateSpotlightTool() {
+        viewModelScope.launch {
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val allTools = getDashboardCategories().flatMap { it.items }
+            
+            _spotlightTool.value = when {
+                hour in 6..9 -> allTools.find { it.route == Screen.Todo.route }
+                hour in 22..23 || hour in 0..4 -> allTools.find { it.route == Screen.Notepad.route }
+                else -> allTools.random()
+            }
+        }
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
 
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+        
+        // Instant URL detection
+        if (query.trim().let { it.startsWith("http://") || it.startsWith("https://") || (it.contains(".") && !it.contains(" ") && it.length > 3) }) {
+            // We don't auto-navigate here to avoid jarring the user, 
+            // but we could provide a special "Open URL" suggestion.
+        }
     }
 
     @OptIn(FlowPreview::class)
@@ -201,8 +231,8 @@ class DashboardViewModel @Inject constructor(
 
     private fun performLocalSearch(query: String) {
         val q = query.trim().lowercase()
-        _localSearchResults.value = if (q.isBlank()) emptyList()
-        else categories.value.flatMap { it.items }.filter { tool ->
+        // Here we search across all categories to give broad local hits
+        categories.value.flatMap { it.items }.filter { tool ->
             tool.title.lowercase().contains(q) || tool.description.lowercase().contains(q)
         }
     }
@@ -212,6 +242,9 @@ class DashboardViewModel @Inject constructor(
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             _isAiSearching.value = true
+            _isAiThinking.value = true
+            _aiResponse.value = null
+            
             try {
                 val toolContext = categories.value.flatMap { it.items }
                     .joinToString("\n") { "[TOOL] ${it.title}: ${it.description} (Route: ${it.route})" }
@@ -229,7 +262,10 @@ class DashboardViewModel @Inject constructor(
                 } else ""
 
                 val prompt = """
-                    You are the 'Toolz Intelligence Engine'. Match user intent to the most relevant tools.
+                    You are the 'Toolz Intelligence Engine'.
+                    
+                    Phase 1: Direct Tool Match
+                    Match user intent to the most relevant tools.
                     USER QUERY: "$query"
                     $toolContext
                     $notesContext
@@ -248,6 +284,11 @@ class DashboardViewModel @Inject constructor(
                             _aiSuggestedRoutes.value = routes
                         } else {
                             _aiSuggestedRoutes.value = emptyList()
+                            
+                            // Phase 2: Conversational Fallback
+                            if (settingsRepository.aiSearchChatEnabled.first()) {
+                                performConversationalSearch(query)
+                            }
                         }
                     }
                 }
@@ -255,7 +296,42 @@ class DashboardViewModel @Inject constructor(
                 _aiSuggestedRoutes.value = emptyList()
             } finally {
                 _isAiSearching.value = false
+                _isAiThinking.value = false
             }
+        }
+    }
+
+    private suspend fun performConversationalSearch(query: String) {
+        val prompt = "The user is searching for something that doesn't directly match a tool. Answer their question concisely: \"$query\""
+        
+        aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+            result.onSuccess { chunk ->
+                _aiResponse.value = (_aiResponse.value ?: "") + chunk.text
+            }
+        }
+    }
+
+    fun transferToAiAssistant(onComplete: (Int) -> Unit) {
+        viewModelScope.launch {
+            val query = _searchQuery.value
+            val response = _aiResponse.value ?: return@launch
+            
+            val chat = com.frerox.toolz.data.ai.AiChat(title = query.take(30))
+            val chatId = aiDao.insertChat(chat).toInt()
+            
+            aiDao.insertMessage(com.frerox.toolz.data.ai.AiMessage(
+                chatId = chatId,
+                text = query,
+                isUser = true
+            ))
+            
+            aiDao.insertMessage(com.frerox.toolz.data.ai.AiMessage(
+                chatId = chatId,
+                text = response,
+                isUser = false
+            ))
+            
+            onComplete(chatId)
         }
     }
 

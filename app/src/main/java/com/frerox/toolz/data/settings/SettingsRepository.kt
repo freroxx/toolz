@@ -285,6 +285,7 @@ class SettingsRepository @Inject constructor(
     // AI Search
     private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
     private val AI_SEARCH_ICON_VISIBLE = booleanPreferencesKey("ai_search_icon_visible")
+    private val AI_SEARCH_CHAT_ENABLED = booleanPreferencesKey("ai_search_chat_enabled")
 
     // Offline Mode
     private val OFFLINE_MODE_ENABLED = booleanPreferencesKey("offline_mode_enabled")
@@ -464,6 +465,11 @@ class SettingsRepository @Inject constructor(
 
     val aiSearchEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
+
+    val aiSearchChatEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[AI_SEARCH_CHAT_ENABLED] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
@@ -681,6 +687,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiSearchEnabled(enabled: Boolean) {
         dataStore.edit { it[AI_SEARCH_ENABLED] = enabled }
+    }
+
+    suspend fun setAiSearchChatEnabled(enabled: Boolean) {
+        dataStore.edit { it[AI_SEARCH_CHAT_ENABLED] = enabled }
     }
 
     suspend fun setAiSearchIconVisible(visible: Boolean) {
