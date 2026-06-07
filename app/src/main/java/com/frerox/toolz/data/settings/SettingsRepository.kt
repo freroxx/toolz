@@ -24,6 +24,12 @@ class SettingsRepository @Inject constructor(
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
     
+    // Timer & Stopwatch Settings
+    private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
+    private val STOPWATCH_KEEP_SCREEN_ON = booleanPreferencesKey("stopwatch_keep_screen_on")
+    private val TIMER_GRADUAL_VOLUME = booleanPreferencesKey("timer_gradual_volume")
+    private val POMODORO_GRADUAL_VOLUME = booleanPreferencesKey("pomodoro_gradual_volume")
+    
     // Dashboard View
     private val DASHBOARD_VIEW = stringPreferencesKey("dashboard_view") // "DEFAULT", "LIST"
     private val PINNED_TOOLS = stringSetPreferencesKey("pinned_tools")
@@ -194,7 +200,6 @@ class SettingsRepository @Inject constructor(
     // New Settings
     private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
     private val HAPTIC_INTENSITY = floatPreferencesKey("haptic_intensity")
-    private val UNIT_SYSTEM = stringPreferencesKey("unit_system") // "METRIC", "IMPERIAL"
     private val SHOW_QIBLA = booleanPreferencesKey("show_qibla")
 
     // Music Player Settings
@@ -324,6 +329,11 @@ class SettingsRepository @Inject constructor(
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
     val worldClockZones: Flow<Set<String>> = dataStore.data.map { it[WORLD_CLOCK_ZONES] ?: setOf("UTC", "America/New_York", "Europe/London", "Asia/Tokyo") }
     
+    val timerKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[TIMER_KEEP_SCREEN_ON] ?: true }
+    val stopwatchKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_KEEP_SCREEN_ON] ?: true }
+    val timerGradualVolume: Flow<Boolean> = dataStore.data.map { it[TIMER_GRADUAL_VOLUME] ?: false }
+    val pomodoroGradualVolume: Flow<Boolean> = dataStore.data.map { it[POMODORO_GRADUAL_VOLUME] ?: false }
+
     val dashboardView: Flow<String> = dataStore.data.map { it[DASHBOARD_VIEW] ?: "DEFAULT" }
     val pinnedTools: Flow<Set<String>> = dataStore.data.map { it[PINNED_TOOLS] ?: emptySet() }
     val recentTools: Flow<List<String>> = dataStore.data.map { pref ->
@@ -339,7 +349,7 @@ class SettingsRepository @Inject constructor(
     }
     val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
     val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
-    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: false }
+    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: true }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
@@ -392,7 +402,6 @@ class SettingsRepository @Inject constructor(
     // New Flows
     val hapticFeedback: Flow<Boolean> = dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
     val hapticIntensity: Flow<Float> = dataStore.data.map { it[HAPTIC_INTENSITY] ?: 0.5f }
-    val unitSystem: Flow<String> = dataStore.data.map { it[UNIT_SYSTEM] ?: "METRIC" }
     val showQibla: Flow<Boolean> = dataStore.data.map { it[SHOW_QIBLA] ?: false }
 
     // Music Flows
@@ -428,9 +437,9 @@ class SettingsRepository @Inject constructor(
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
-    val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: true }
+    val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: false }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
-    val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: false }
+    val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: true }
     val backupFrequency: Flow<String> = dataStore.data.map { it[BACKUP_FREQUENCY] ?: "Never" }
     val autoBackupCustomDays: Flow<Int> = dataStore.data.map { it[AUTO_BACKUP_CUSTOM_DAYS] ?: 1 }
 
@@ -510,6 +519,11 @@ class SettingsRepository @Inject constructor(
     suspend fun addWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) + zone } }
     suspend fun removeWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) - zone } }
     
+    suspend fun setTimerKeepScreenOn(enabled: Boolean) { dataStore.edit { it[TIMER_KEEP_SCREEN_ON] = enabled } }
+    suspend fun setStopwatchKeepScreenOn(enabled: Boolean) { dataStore.edit { it[STOPWATCH_KEEP_SCREEN_ON] = enabled } }
+    suspend fun setTimerGradualVolume(enabled: Boolean) { dataStore.edit { it[TIMER_GRADUAL_VOLUME] = enabled } }
+    suspend fun setPomodoroGradualVolume(enabled: Boolean) { dataStore.edit { it[POMODORO_GRADUAL_VOLUME] = enabled } }
+
     suspend fun setDashboardView(view: String) { dataStore.edit { it[DASHBOARD_VIEW] = view } }
     suspend fun togglePinnedTool(route: String) {
         dataStore.edit { pref ->
@@ -599,7 +613,6 @@ class SettingsRepository @Inject constructor(
     // New Setters
     suspend fun setHapticFeedback(enabled: Boolean) { dataStore.edit { it[HAPTIC_FEEDBACK] = enabled } }
     suspend fun setHapticIntensity(intensity: Float) { dataStore.edit { it[HAPTIC_INTENSITY] = intensity } }
-    suspend fun setUnitSystem(unit: String) { dataStore.edit { it[UNIT_SYSTEM] = unit } }
     suspend fun setShowQibla(enabled: Boolean) { dataStore.edit { it[SHOW_QIBLA] = enabled } }
 
     // Music Setters

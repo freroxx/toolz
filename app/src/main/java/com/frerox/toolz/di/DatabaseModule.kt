@@ -2,8 +2,6 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import androidx.room.Room
-import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
@@ -29,6 +27,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import net.zetetic.database.sqlcipher.SQLiteNotADatabaseException
 import javax.inject.Singleton
 
 @Module
@@ -44,14 +43,29 @@ object DatabaseModule {
         val passphrase = KeyManager.getOrCreateMasterKey(context)
         val factory = SupportOpenHelperFactory(passphrase)
         
-        return Room.databaseBuilder(
+        val builder = Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             dbName
         )
         .openHelperFactory(factory)
-        .fallbackToDestructiveMigration() // Changed to true to resolve the schema mismatch crash
-        .build()
+        .fallbackToDestructiveMigration(true)
+
+        val db = builder.build()
+        
+        // Verify database is openable. SQLiteNotADatabaseException occurs when 
+        // the file exists but isn't a SQLCipher database or the key is wrong.
+        try {
+            db.openHelper.writableDatabase
+        } catch (e: Exception) {
+            if (e is SQLiteNotADatabaseException || (e.message?.contains("file is not a database") == true)) {
+                context.deleteDatabase(dbName)
+                return builder.build()
+            }
+            throw e
+        }
+        
+        return db
     }
 
     @Provides

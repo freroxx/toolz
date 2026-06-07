@@ -68,7 +68,6 @@ class SettingsViewModel @Inject constructor(
 
     val hapticFeedback = repository.hapticFeedback
     val hapticIntensity = repository.hapticIntensity
-    val unitSystem = repository.unitSystem
     val showQibla = repository.showQibla
     val stepCounterEnabled = repository.stepCounterEnabled
     val showToolzPill = repository.showToolzPill
@@ -140,7 +139,6 @@ class SettingsViewModel @Inject constructor(
 
     fun setHapticFeedback(enabled: Boolean) = viewModelScope.launch { repository.setHapticFeedback(enabled) }
     fun setHapticIntensity(intensity: Float) = viewModelScope.launch { repository.setHapticIntensity(intensity) }
-    fun setUnitSystem(unit: String) = viewModelScope.launch { repository.setUnitSystem(unit) }
     fun setShowQibla(enabled: Boolean) = viewModelScope.launch { repository.setShowQibla(enabled) }
     fun setStepCounterEnabled(enabled: Boolean) = viewModelScope.launch { repository.setStepCounterEnabled(enabled) }
     fun setShowToolzPill(enabled: Boolean) = viewModelScope.launch { repository.setShowToolzPill(enabled) }
