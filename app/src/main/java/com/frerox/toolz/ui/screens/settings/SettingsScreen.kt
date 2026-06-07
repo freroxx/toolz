@@ -26,11 +26,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -40,6 +44,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.compose.ui.tooling.preview.Preview
 import com.frerox.toolz.BuildConfig
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -83,7 +88,6 @@ fun SettingsScreen(
 
     val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
     val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
-    val unitSystem by viewModel.unitSystem.collectAsState(initial = "METRIC")
     val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState(initial = true)
     val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
     val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
@@ -491,39 +495,7 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "widget", "opacity", "background", "styling", "home screen")) {
-                                SettingsItem(
-                                    title = "Widget Styling",
-                                    subtitle = "Customize home screen widgets",
-                                    icon = Icons.Rounded.SettingsSuggest
-                                ) {
-                                    Column(modifier = Modifier.padding(top = 12.dp)) {
-                                        ColorPickerRow(
-                                            selectedColor = widgetBgColor,
-                                            onColorSelected = {
-                                                vibrationManager?.vibrateClick()
-                                                viewModel.setWidgetBackgroundColor(it)
-                                            }
-                                        )
-                                        Spacer(modifier = Modifier.height(20.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Rounded.Opacity, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                                            Spacer(Modifier.width(16.dp))
-                                            @Suppress("DEPRECATION")
-                                            Slider(
-                                                value = widgetOpacity,
-                                                onValueChange = { viewModel.setWidgetOpacity(it) },
-                                                valueRange = 0.1f..1f,
-                                                modifier = Modifier.weight(1f),
-                                                colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
-                                            )
-                                            Spacer(Modifier.width(16.dp))
-                                            @Suppress("DEPRECATION")
-                                            Text("${(widgetOpacity * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, modifier = Modifier.width(40.dp))
-                                        }
-                                    }
-                                }
-                            }
+                            // Removed Widget Styling section as requested
                         }
                     }
 
@@ -689,37 +661,6 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "unit", "system", "metric", "imperial", "measure")) {
-                                SettingsItem(
-                                    title = "Measurement Units",
-                                    subtitle = "System: ${unitSystem.lowercase()}",
-                                    icon = Icons.Rounded.SquareFoot
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        listOf("METRIC", "IMPERIAL").forEach { unit ->
-                                            val isSelected = unitSystem == unit
-                                            Surface(
-                                                onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setUnitSystem(unit)
-                                                },
-                                                modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                                shape = RoundedCornerShape(16.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    @Suppress("DEPRECATION")
-                                                    Text(unit, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
 
@@ -1341,11 +1282,11 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                 shadowElevation = 12.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Bolt,
+                    Image(
+                        painter = painterResource(id = R.drawable.app_logo),
                         contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary
+                        modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
+                        contentScale = ContentScale.Crop
                     )
                 }
             }
@@ -1411,43 +1352,47 @@ fun HapticTuner(
     onIntensityChange: (Float) -> Unit
 ) {
     val haptic = rememberToolzHapticFeedback()
-    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(intensity.coerceIn(0.1f, 1f))
-                    .height(8.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
+            @Suppress("DEPRECATION")
+            Text(
+                "INTENSITY",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 1.sp
             )
-            Box(
-                modifier = Modifier
-                    .weight((1f - intensity).coerceIn(0.1f, 1f))
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            Text(
+                "${(intensity * 100).toInt()}%",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary
             )
         }
 
         ExpressiveSlider(
             value = intensity,
-            onValueChange = onIntensityChange,
+            onValueChange = { 
+                onIntensityChange(it)
+            },
             onValueChangeFinished = { haptic.click() },
             valueRange = 0.1f..1f,
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             listOf("SOFT", "CRISP", "STRONG").forEachIndexed { i, label ->
                 val target = when(i) {
@@ -1460,18 +1405,20 @@ fun HapticTuner(
                 Surface(
                     onClick = { 
                         onIntensityChange(target)
-                        haptic.tick()
+                        haptic.click()
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
-                    modifier = Modifier.height(32.dp).bouncyClick {}
+                    modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)) else null
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        @Suppress("DEPRECATION")
                         Text(
                             label,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
