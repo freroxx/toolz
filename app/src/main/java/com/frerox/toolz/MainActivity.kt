@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -24,12 +25,15 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -116,6 +120,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         const val EXTRA_SHOW_UPDATE = "show_update"
         const val EXTRA_SHOW_UPDATE_DIALOG = "show_update_dialog"
         const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
+        
+        val LocalFlashlightRepository = staticCompositionLocalOf<FlashlightRepository?> { null }
     }
     @Inject
     lateinit var settingsRepository: SettingsRepository
@@ -200,7 +206,10 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 hapticIntensity = hapticIntensity,
                 vibrationManager = vibrationManager
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
+                CompositionLocalProvider(
+                    LocalFlashlightRepository provides flashlightRepository
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -244,6 +253,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                         isReady = offlineOverlayReady,
                         performanceMode = performanceMode
                     )
+                }
                 }
             }
         }
@@ -401,11 +411,11 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            Icons.Rounded.Update,
+                        Image(
+                            painter = painterResource(id = R.drawable.app_logo),
                             contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            modifier = Modifier.size(120.dp).clip(RoundedCornerShape(32.dp)),
+                            contentScale = ContentScale.Crop
                         )
                     }
 
@@ -569,10 +579,10 @@ fun ToolzNavHost(
         startDestination = Screen.Loading.route,
         enterTransition = {
             if (targetState.destination.route == Screen.Dashboard.route && initialState.destination.route == Screen.Loading.route) {
-                fadeIn(animationSpec = tween(400)) + scaleIn(
-                    initialScale = 1.05f, // Zoom out from center for instant feel
+                fadeIn(animationSpec = tween(300)) + scaleIn(
+                    initialScale = 1.02f, // Subtle scale down for "landing" effect
                     animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
                         stiffness = Spring.StiffnessMediumLow
                     )
                 )
@@ -596,9 +606,9 @@ fun ToolzNavHost(
         },
         exitTransition = {
             if (initialState.destination.route == Screen.Loading.route) {
-                fadeOut(animationSpec = tween(300)) + scaleOut(
-                    targetScale = 0.95f,
-                    animationSpec = tween(300)
+                fadeOut(animationSpec = tween(200)) + scaleOut(
+                    targetScale = 0.98f,
+                    animationSpec = tween(200)
                 )
             } else if (performanceMode) {
                 fadeOut(animationSpec = tween(100))
@@ -704,7 +714,10 @@ fun ToolzNavHost(
             )
         }
 
-        composable(Screen.AiAssistant.route) {
+        composable(
+            route = Screen.AiAssistant.route + "?chatId={chatId}",
+            arguments = listOf(navArgument("chatId") { type = NavType.IntType; defaultValue = -1 })
+        ) {
             AiAssistantScreen(
                 onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
                 onBack = { navController.popBackStack() }
