@@ -66,6 +66,9 @@ class SettingsRepository @Inject constructor(
     private val POMODORO_SHOW_QUOTES = booleanPreferencesKey("pomodoro_show_quotes")
     private val POMODORO_QUOTES = stringPreferencesKey("pomodoro_quotes")
 
+    private val CUSTOM_RINGTONE_ENABLED = booleanPreferencesKey("custom_ringtone_enabled")
+    private val CUSTOM_RINGTONE_URI = stringPreferencesKey("custom_ringtone_uri")
+
     private val SEARCH_FIRST_TIME = booleanPreferencesKey("search_first_time")
     private val SEARCH_ADBLOCK_ENABLED = booleanPreferencesKey("search_adblock_enabled")
     private val SEARCH_DNS_PROVIDER = stringPreferencesKey("search_dns_provider") // "DEFAULT", "ADGUARD", "CLOUDFLARE", "GOOGLE", "CUSTOM"
@@ -231,6 +234,18 @@ class SettingsRepository @Inject constructor(
 
     // Step Counter Toggle
     private val STEP_COUNTER_ENABLED = booleanPreferencesKey("step_counter_enabled")
+    private val STEP_HISTORY_RETENTION = stringPreferencesKey("step_history_retention")
+    private val AI_FITNESS_AGENT_ENABLED = booleanPreferencesKey("ai_fitness_agent_enabled")
+    private val AI_FITNESS_AGENT_PROVIDER = stringPreferencesKey("ai_fitness_agent_provider")
+    private val AI_FITNESS_AGENT_MODEL = stringPreferencesKey("ai_fitness_agent_model")
+    private val AI_FITNESS_AGENT_TONE = stringPreferencesKey("ai_fitness_agent_tone")
+    private val AI_FITNESS_AGENT_MOOD = stringPreferencesKey("ai_fitness_agent_mood")
+    private val AI_FITNESS_AGENT_STYLE = stringPreferencesKey("ai_fitness_agent_style")
+    private val STEP_LENGTH_CM = intPreferencesKey("step_length_cm")
+    private val CALORIES_PER_1000_STEPS = intPreferencesKey("calories_per_1000_steps")
+    private val MEASUREMENT_SYSTEM = stringPreferencesKey("measurement_system")
+    private val STEP_USE_GPS = booleanPreferencesKey("step_use_gps")
+    private val STEP_BATTERY_SAVE = booleanPreferencesKey("step_battery_save")
 
     // Universal Pill
     private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
@@ -363,7 +378,7 @@ class SettingsRepository @Inject constructor(
     val taskReminderNotifications: Flow<Boolean> = dataStore.data.map { it[TASK_REMINDER_NOTIFICATIONS] ?: true }
     val eventReminderNotifications: Flow<Boolean> = dataStore.data.map { it[EVENT_REMINDER_NOTIFICATIONS] ?: true }
     val pomodoroNotifications: Flow<Boolean> = dataStore.data.map { it[POMODORO_NOTIFICATIONS] ?: true }
-    val flashlightNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[FLASHLIGHT_NOTIFICATIONS] ?: false }
+    val flashlightNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[FLASHLIGHT_NOTIFICATIONS] ?: true }
     val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
     
@@ -378,6 +393,9 @@ class SettingsRepository @Inject constructor(
     val pomodoroRingtoneUri: Flow<String?> = dataStore.data.map { it[POMODORO_RINGTONE_URI] ?: defaultAlarmUri }
     val pomodoroShowQuotes: Flow<Boolean> = dataStore.data.map { it[POMODORO_SHOW_QUOTES] ?: true }
     val pomodoroQuotes: Flow<String> = dataStore.data.map { it[POMODORO_QUOTES] ?: DEFAULT_POMODORO_QUOTES }
+
+    val customRingtoneEnabled: Flow<Boolean> = dataStore.data.map { it[CUSTOM_RINGTONE_ENABLED] ?: false }
+    val customRingtoneUri: Flow<String?> = dataStore.data.map { it[CUSTOM_RINGTONE_URI] }
 
     val hiddenNotificationApps: Flow<Set<String>> = dataStore.data.map { it[HIDDEN_NOTIFICATION_APPS] ?: emptySet() }
     val customNotificationCategories: Flow<Set<String>> = dataStore.data.map { it[CUSTOM_NOTIFICATION_CATEGORIES] ?: setOf("Social", "Finance", "Work", "General") }
@@ -435,6 +453,18 @@ class SettingsRepository @Inject constructor(
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
 
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
+    val stepHistoryRetention: Flow<String> = dataStore.data.map { it[STEP_HISTORY_RETENTION] ?: "30d" }
+    val aiFitnessAgentEnabled: Flow<Boolean> = dataStore.data.map { it[AI_FITNESS_AGENT_ENABLED] ?: false }
+    val aiFitnessAgentProvider: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_PROVIDER] ?: "Gemini" }
+    val aiFitnessAgentModel: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_MODEL] ?: "gemini-3.0-flash" }
+    val aiFitnessAgentTone: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_TONE] ?: "Professional" }
+    val aiFitnessAgentMood: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_MOOD] ?: "Encouraging" }
+    val aiFitnessAgentStyle: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_STYLE] ?: "Concise" }
+    val stepLengthCm: Flow<Int> = dataStore.data.map { it[STEP_LENGTH_CM] ?: 75 }
+    val caloriesPer1000Steps: Flow<Int> = dataStore.data.map { it[CALORIES_PER_1000_STEPS] ?: 40 }
+    val measurementSystem: Flow<String> = dataStore.data.map { it[MEASUREMENT_SYSTEM] ?: "Metric" }
+    val stepUseGps: Flow<Boolean> = dataStore.data.map { it[STEP_USE_GPS] ?: false }
+    val stepBatterySave: Flow<Boolean> = dataStore.data.map { it[STEP_BATTERY_SAVE] ?: true }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
     val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: false }
@@ -605,6 +635,13 @@ class SettingsRepository @Inject constructor(
     suspend fun setPomodoroShowQuotes(enabled: Boolean) { dataStore.edit { it[POMODORO_SHOW_QUOTES] = enabled } }
     suspend fun setPomodoroQuotes(quotes: String) { dataStore.edit { it[POMODORO_QUOTES] = quotes } }
 
+    suspend fun setCustomRingtoneEnabled(enabled: Boolean) { dataStore.edit { it[CUSTOM_RINGTONE_ENABLED] = enabled } }
+    suspend fun setCustomRingtoneUri(uri: String?) {
+        dataStore.edit { 
+            if (uri == null) it.remove(CUSTOM_RINGTONE_URI) else it[CUSTOM_RINGTONE_URI] = uri
+        }
+    }
+
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
     suspend fun setWidgetAccentColor(color: Int) { dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }
@@ -642,6 +679,18 @@ class SettingsRepository @Inject constructor(
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
 
     suspend fun setStepCounterEnabled(enabled: Boolean) { dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
+    suspend fun setStepHistoryRetention(retention: String) { dataStore.edit { it[STEP_HISTORY_RETENTION] = retention } }
+    suspend fun setAiFitnessAgentEnabled(enabled: Boolean) { dataStore.edit { it[AI_FITNESS_AGENT_ENABLED] = enabled } }
+    suspend fun setAiFitnessAgentProvider(provider: String) { dataStore.edit { it[AI_FITNESS_AGENT_PROVIDER] = provider } }
+    suspend fun setAiFitnessAgentModel(model: String) { dataStore.edit { it[AI_FITNESS_AGENT_MODEL] = model } }
+    suspend fun setAiFitnessAgentTone(tone: String) { dataStore.edit { it[AI_FITNESS_AGENT_TONE] = tone } }
+    suspend fun setAiFitnessAgentMood(mood: String) { dataStore.edit { it[AI_FITNESS_AGENT_MOOD] = mood } }
+    suspend fun setAiFitnessAgentStyle(style: String) { dataStore.edit { it[AI_FITNESS_AGENT_STYLE] = style } }
+    suspend fun setStepLengthCm(length: Int) { dataStore.edit { it[STEP_LENGTH_CM] = length } }
+    suspend fun setCaloriesPer1000Steps(calories: Int) { dataStore.edit { it[CALORIES_PER_1000_STEPS] = calories } }
+    suspend fun setMeasurementSystem(system: String) { dataStore.edit { it[MEASUREMENT_SYSTEM] = system } }
+    suspend fun setStepUseGps(enabled: Boolean) { dataStore.edit { it[STEP_USE_GPS] = enabled } }
+    suspend fun setStepBatterySave(enabled: Boolean) { dataStore.edit { it[STEP_BATTERY_SAVE] = enabled } }
 
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
     suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }
