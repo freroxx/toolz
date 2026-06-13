@@ -1,11 +1,10 @@
 package com.frerox.toolz.ui.components
 
 import android.content.res.Configuration
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -24,13 +23,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
@@ -79,7 +81,7 @@ fun RowScope.ExpressiveNavigationBarItem(
     val currentOnClick by rememberUpdatedState(onClick)
     val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
     val isPressed by resolvedInteractionSource.collectIsPressedAsState()
-    
+
     val scale by animateFloatAsState(
         targetValue = when {
             performanceMode -> 1f
@@ -156,7 +158,7 @@ fun ToolzWideNavigationRail(
                     },
                 ) {
                     Icon(
-                        if (state.targetValue == WideNavigationRailValue.Expanded) 
+                        if (state.targetValue == WideNavigationRailValue.Expanded)
                             Icons.Rounded.KeyboardDoubleArrowLeft else Icons.Rounded.Menu,
                         contentDescription = "Toggle Rail"
                     )
@@ -227,26 +229,139 @@ fun ToolzModalWideNavigationRail(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ToolzFloatingToolbar(
-    expanded: Boolean,
     selectedTab: com.frerox.toolz.ui.screens.dashboard.DashboardTab,
     onTabSelected: (com.frerox.toolz.ui.screens.dashboard.DashboardTab) -> Unit,
     modifier: Modifier = Modifier,
+    // Universal Pill Props
+    musicState: com.frerox.toolz.ui.screens.media.MusicUiState? = null,
+    musicViewModel: com.frerox.toolz.ui.screens.media.MusicPlayerViewModel? = null,
+    timerState: com.frerox.toolz.ui.screens.time.TimerState? = null,
+    timerViewModel: com.frerox.toolz.ui.screens.time.TimerViewModel? = null,
+    stopwatchState: com.frerox.toolz.ui.screens.time.StopwatchState? = null,
+    stopwatchViewModel: com.frerox.toolz.ui.screens.time.StopwatchViewModel? = null,
+    pomodoroState: com.frerox.toolz.ui.screens.time.PomodoroState? = null,
+    pomodoroViewModel: com.frerox.toolz.ui.screens.time.PomodoroViewModel? = null,
+    stepsState: com.frerox.toolz.ui.screens.sensors.StepState? = null,
+    stepsViewModel: com.frerox.toolz.ui.screens.sensors.StepCounterViewModel? = null,
+    recordingState: com.frerox.toolz.ui.screens.sensors.RecordingState? = null,
+    recorderViewModel: com.frerox.toolz.ui.screens.sensors.VoiceRecorderViewModel? = null,
+    catalogState: com.frerox.toolz.ui.screens.media.catalog.CatalogUiState? = null,
+    todoViewModel: com.frerox.toolz.ui.screens.todo.TodoViewModel? = null,
+    caffeinateViewModel: com.frerox.toolz.ui.screens.focus.CaffeinateViewModel? = null,
+    focusViewModel: com.frerox.toolz.ui.screens.focus.FocusFlowViewModel? = null,
+    fillThePill: Boolean = false,
+    onNavigate: (String) -> Unit = {},
+    offlineState: com.frerox.toolz.util.OfflineState = com.frerox.toolz.util.OfflineState.ONLINE,
+    settingsRepository: com.frerox.toolz.data.settings.SettingsRepository? = null,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    val performanceMode = LocalPerformanceMode.current
 
-    HorizontalFloatingToolbar(
+    // Determine if pill content should be shown
+    val isCaffeinated by caffeinateViewModel?.isServiceRunning?.collectAsState(false) ?: remember { mutableStateOf(false) }
+    
+    val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
+    val isFlashlightOn by flashlightRepository?.isOn?.collectAsState(false) ?: remember { mutableStateOf(false) }
+
+    val hasActiveService = musicState?.isPlaying == true || 
+                          timerState?.isRunning == true || 
+                          stopwatchState?.isRunning == true || 
+                          pomodoroState?.isRunning == true || 
+                          recordingState?.isRecording == true || 
+                          isCaffeinated || isFlashlightOn ||
+                          stepsState?.isEnabledInSettings == true
+
+    val showPillContent = hasActiveService || fillThePill
+
+    val toolbarWidth by animateDpAsState(
+        targetValue = if (showPillContent) 340.dp else 260.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "toolbarWidth"
+    )
+
+    val toolbarHeight by animateDpAsState(
+        targetValue = if (showPillContent) 148.dp else 80.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "toolbarHeight"
+    )
+
+    Box(
         modifier = modifier
             .padding(bottom = 24.dp)
-            .navigationBarsPadding(),
-        expanded = expanded,
-        shape = ExtraLargeExpressiveShape,
-        content = {
+            .navigationBarsPadding()
+            .width(toolbarWidth)
+            .height(toolbarHeight)
+            .clip(ExtraLargeExpressiveShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f))
+            .border(
+                width = if (hasActiveService) 2.dp else 0.dp,
+                brush = if (hasActiveService) Brush.sweepGradient(listOf(
+                    MaterialTheme.colorScheme.primary,
+                    MaterialTheme.colorScheme.secondary,
+                    MaterialTheme.colorScheme.primary
+                )) else SolidColor(Color.Transparent),
+                shape = ExtraLargeExpressiveShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Pill Content (Top part when expanded)
+            AnimatedVisibility(
+                visible = showPillContent,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Box(modifier = Modifier.height(72.dp).fillMaxWidth()) {
+                    if (musicState != null && musicViewModel != null && 
+                        timerState != null && timerViewModel != null && 
+                        stopwatchState != null && stopwatchViewModel != null && 
+                        pomodoroState != null && pomodoroViewModel != null && 
+                        stepsState != null && stepsViewModel != null && 
+                        recordingState != null && recorderViewModel != null && 
+                        catalogState != null && todoViewModel != null && 
+                        caffeinateViewModel != null) {
+                        
+                        if (settingsRepository != null) {
+                            com.frerox.toolz.ui.screens.dashboard.UniversalPill(
+                                musicState = musicState,
+                                musicViewModel = musicViewModel,
+                                timerState = timerState,
+                                timerViewModel = timerViewModel,
+                                stopwatchState = stopwatchState,
+                                stopwatchViewModel = stopwatchViewModel,
+                                pomodoroState = pomodoroState,
+                                pomodoroViewModel = pomodoroViewModel,
+                                stepsState = stepsState,
+                                stepsViewModel = stepsViewModel,
+                                recordingState = recordingState,
+                                recorderViewModel = recorderViewModel,
+                                catalogState = catalogState,
+                                todoViewModel = todoViewModel,
+                                caffeinateViewModel = caffeinateViewModel,
+                                focusViewModel = focusViewModel ?: hiltViewModel(),
+                                fillThePill = fillThePill,
+                                onNavigate = onNavigate,
+                                offlineState = offlineState,
+                                settingsRepository = settingsRepository,
+                                modifier = Modifier.fillMaxSize(),
+                                isEmbedded = true
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Navigation Tabs (Bottom part)
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 com.frerox.toolz.ui.screens.dashboard.DashboardTab.entries.forEach { tab ->
@@ -258,7 +373,7 @@ fun ToolzFloatingToolbar(
                     )
                     
                     val scale by animateFloatAsState(
-                        targetValue = if (selected) 1.15f else 1f,
+                        targetValue = if (selected) 1.1f else 1f,
                         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
                         label = "tabScale"
                     )
@@ -270,7 +385,7 @@ fun ToolzFloatingToolbar(
                                 haptic.tick()
                                 onTabSelected(tab)
                             }
-                            .padding(12.dp),
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -278,7 +393,7 @@ fun ToolzFloatingToolbar(
                             contentDescription = tab.title,
                             tint = color,
                             modifier = Modifier
-                                .size(24.dp)
+                                .size(22.dp)
                                 .graphicsLayer {
                                     scaleX = scale
                                     scaleY = scale
@@ -288,7 +403,7 @@ fun ToolzFloatingToolbar(
                 }
             }
         }
-    )
+    }
 }
 
 /**
@@ -303,7 +418,7 @@ fun ToolzNavigationSuiteScaffold(
 ) {
     val layoutType = NavigationSuiteScaffoldDefaults
         .calculateFromAdaptiveInfo(windowAdaptiveInfo)
-    
+
     NavigationSuiteScaffold(
         navigationSuiteItems = navigationSuiteItems,
         layoutType = layoutType,
@@ -336,9 +451,9 @@ fun ExpressiveFabMenu(
         button = {
             ToggleFloatingActionButton(
                 checked = expanded,
-                onCheckedChange = { 
+                onCheckedChange = {
                     haptic.tick()
-                    expanded = it 
+                    expanded = it
                 },
             ) {
                 val imageVector by remember {
@@ -356,17 +471,17 @@ fun ExpressiveFabMenu(
     ) {
         items.forEach { item ->
             FloatingActionButtonMenuItem(
-                onClick = { 
+                onClick = {
                     haptic.click()
                     expanded = false
                     item.third()
                 },
                 icon = { Icon(item.second, contentDescription = null) },
-                text = { 
+                text = {
                     Text(
                         text = item.first,
                         color = MaterialTheme.colorScheme.onSurface
-                    ) 
+                    )
                 },
             )
         }
@@ -409,7 +524,7 @@ private fun ExpressiveNavigationPreview() {
                 items = listOf("Dashboard" to Icons.Rounded.Dashboard, "Settings" to Icons.Rounded.Settings),
                 header = { Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(32.dp)) }
             )
-            
+
             Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.BottomCenter) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     ExpressiveFabMenu(

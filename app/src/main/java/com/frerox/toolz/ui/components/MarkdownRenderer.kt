@@ -116,9 +116,24 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
             continue
         }
 
-        // Normal paragraph
-        segments += MdSegment.Paragraph(inlineMarkdownNoCompose(line))
-        i++
+        // Normal paragraph (group consecutive text lines)
+        val paragraphLines = mutableListOf<String>()
+        while (i < lines.size) {
+            val curr = lines[i]
+            if (curr.isBlank() || 
+                curr.trimStart().startsWith("#") || 
+                curr.trimStart().startsWith("```") || 
+                curr.trim().startsWith("|") ||
+                curr.matches(Regex("^(\\s*)[\\-\\*\\+] .+")) ||
+                curr.matches(Regex("^(\\d+)[\\.\\)] .+")) ||
+                curr.trim().matches(Regex("^[-*_]{3,}$"))
+            ) break
+            paragraphLines.add(curr)
+            i++
+        }
+        if (paragraphLines.isNotEmpty()) {
+            segments += MdSegment.Paragraph(inlineMarkdownNoCompose(paragraphLines.joinToString(" ")))
+        }
     }
     return segments
 }
@@ -139,8 +154,8 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
         }
     }
 
-    scan("""\*\*(.+?)\*\*""", "bold")
-    scan("""\*(.+?)\*""", "italic")
+    scan("""\*\*([\s\S]+?)\*\*""", "bold")
+    scan("""\*([\s\S]+?)\*""", "italic")
     scan("""`(.+?)`""", "code")
     scan("""~~(.+?)~~""", "strike")
 
