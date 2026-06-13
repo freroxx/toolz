@@ -8,7 +8,10 @@ sealed class Screen(val route: String) {
     object BackupRestore : Screen("backup_restore")
     
     // AI
-    object AiAssistant : Screen("ai_assistant")
+    object AiAssistant : Screen("ai_assistant?chatId={chatId}&isCoachMode={isCoachMode}") {
+        fun createRoute(chatId: Int = -1, isCoachMode: Boolean = false) =
+            "ai_assistant?chatId=$chatId&isCoachMode=$isCoachMode"
+    }
     object SmartSearch : Screen("smart_search")
     
     // Time & Productivity
@@ -35,6 +38,7 @@ sealed class Screen(val route: String) {
     object Speedometer : Screen("speedometer")
     object Altimeter : Screen("altimeter")
     object StepCounter : Screen("step_counter")
+    object StepTrends : Screen("step_trends")
     
     // Math & Conversion
     object Calculator : Screen("calculator")
