@@ -15,7 +15,14 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -26,7 +33,10 @@ data class TimerState(
     val isFinished: Boolean = false,
     val isPaused: Boolean = false,
     val selectedMinutes: Int = 0,
-    val selectedSeconds: Int = 0
+    val selectedSeconds: Int = 0,
+    val repeatLastDuration: Boolean = false,
+    val keepScreenOn: Boolean = true,
+    val gradualVolume: Boolean = false,
 )
 
 @HiltViewModel
@@ -44,33 +54,14 @@ class TimerViewModel @Inject constructor(
     private var toolService: ToolService? = null
     private var isBound = false
     private var mediaPlayer: MediaPlayer? = null
+    private var lastFinishCount = 0
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as ToolService.LocalBinder
             toolService = binder.getService()
             isBound = true
-            
-            viewModelScope.launch {
-                toolService?.timerRemaining?.collect { remaining ->
-                    _uiState.update { it.copy(remainingTime = remaining) }
-                    if (remaining == 0L && _uiState.value.isRunning) {
-                        onTimerFinished()
-                    }
-                }
-            }
-
-            viewModelScope.launch {
-                toolService?.timerInitial?.collect { initial ->
-                    _uiState.update { it.copy(initialTime = initial) }
-                }
-            }
-            
-            viewModelScope.launch {
-                toolService?.isTimerRunning?.collect { running ->
-                    _uiState.update { it.copy(isRunning = running, isPaused = !running && it.remainingTime > 0) }
-                }
-            }
+            bindTimerFlows(binder.getService())
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -83,49 +74,165 @@ class TimerViewModel @Inject constructor(
         Intent(context, ToolService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        
-        // Load last used duration from repository
+
         viewModelScope.launch {
-            val lastMin = settingsRepository.lastTimerMinutes.first()
-            val lastSec = settingsRepository.lastTimerSeconds.first()
-            _uiState.update { it.copy(selectedMinutes = lastMin, selectedSeconds = lastSec) }
+            combine(
+                settingsRepository.lastTimerMinutes,
+                settingsRepository.lastTimerSeconds,
+                settingsRepository.timerKeepScreenOn,
+                settingsRepository.timerGradualVolume
+            ) { min, sec, kso, gv -> 
+                Triple(min to sec, kso, gv)
+            }.collect { (dur, kso, gv) ->
+                _uiState.update { it.copy(
+                    selectedMinutes = dur.first,
+                    selectedSeconds = dur.second,
+                    keepScreenOn = kso,
+                    gradualVolume = gv
+                ) }
+            }
+        }
+    }
+
+    private fun bindTimerFlows(service: ToolService) {
+        viewModelScope.launch {
+            service.timerRemaining.collect { remaining ->
+                _uiState.update {
+                    it.copy(
+                        remainingTime = remaining.coerceAtLeast(0L),
+                        isPaused = !it.isRunning && remaining > 0L && !it.isFinished,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            service.timerInitial.collect { initial ->
+                _uiState.update { it.copy(initialTime = initial.coerceAtLeast(0L)) }
+            }
+        }
+        viewModelScope.launch {
+            service.isTimerRunning.collect { running ->
+                _uiState.update {
+                    it.copy(
+                        isRunning = running,
+                        isPaused = !running && it.remainingTime > 0L && !it.isFinished,
+                        isFinished = if (running) false else it.isFinished,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            service.timerFinishedCount.collect { count ->
+                if (count > lastFinishCount) {
+                    lastFinishCount = count
+                    _uiState.update { it.copy(isRunning = false, isFinished = true, isPaused = false) }
+                    playRingtone()
+                } else {
+                    lastFinishCount = count
+                }
+            }
         }
     }
 
     fun onTimeSelectedChange(min: Int, sec: Int) {
-        _uiState.update { it.copy(selectedMinutes = min, selectedSeconds = sec) }
+        val safeMinutes = min.coerceIn(0, 999)
+        val safeSeconds = sec.coerceIn(0, 59)
+        val duration = durationMillis(safeMinutes, safeSeconds)
+        val shouldStageDuration = !_uiState.value.isRunning
+        _uiState.update {
+            it.copy(
+                selectedMinutes = safeMinutes,
+                selectedSeconds = safeSeconds,
+                remainingTime = if (shouldStageDuration) duration else it.remainingTime,
+                initialTime = if (shouldStageDuration) duration else it.initialTime,
+                isFinished = if (shouldStageDuration) false else it.isFinished,
+                isPaused = shouldStageDuration && duration > 0L,
+            )
+        }
+        if (shouldStageDuration) {
+            toolService?.setTimerInitial(duration)
+        }
         viewModelScope.launch {
-            settingsRepository.setLastTimerDuration(min, sec)
+            settingsRepository.setLastTimerDuration(safeMinutes, safeSeconds)
         }
     }
 
     fun setTimer(minutes: Int, seconds: Int) {
-        val totalMillis = (minutes * 60 + seconds) * 1000L
-        _uiState.update { it.copy(remainingTime = totalMillis, initialTime = totalMillis, isFinished = false, isPaused = false) }
+        if (_uiState.value.isRunning) return
+        val totalMillis = durationMillis(minutes, seconds)
+        stopRingtone()
+        _uiState.update {
+            it.copy(
+                remainingTime = totalMillis,
+                initialTime = totalMillis,
+                isFinished = false,
+                isPaused = totalMillis > 0L,
+            )
+        }
         toolService?.setTimerInitial(totalMillis)
     }
 
     fun addTime(millis: Long) {
-        val current = _uiState.value.remainingTime
-        val newTotal = current + millis
-        _uiState.update { it.copy(remainingTime = newTotal) }
-        if (_uiState.value.isRunning) {
-            toolService?.startTimer(newTotal)
+        val state = _uiState.value
+        val base = if (state.remainingTime > 0L) state.remainingTime else durationMillis(state.selectedMinutes, state.selectedSeconds)
+        val newRemaining = (base + millis).coerceIn(0L, MAX_TIMER_MILLIS)
+        val newInitial = maxOf(state.initialTime, newRemaining)
+        stopRingtone()
+        _uiState.update {
+            it.copy(
+                remainingTime = newRemaining,
+                initialTime = newInitial,
+                isFinished = false,
+                isPaused = !it.isRunning && newRemaining > 0L,
+            )
+        }
+        if (state.isRunning) {
+            toolService?.startTimer(newRemaining, newInitial)
         } else {
-            toolService?.setTimerInitial(newTotal)
+            toolService?.setTimerInitial(newRemaining)
         }
     }
 
     fun toggleStartStop() {
-        val currentlyRunning = _uiState.value.isRunning
-        if (currentlyRunning) {
+        val state = _uiState.value
+        if (state.isRunning) {
             toolService?.pauseTimer()
-        } else {
-            if (_uiState.value.remainingTime > 0) {
-                toolService?.startTimer(_uiState.value.remainingTime, _uiState.value.initialTime)
-                _uiState.update { it.copy(isFinished = false) }
-            }
+            return
         }
+
+        val duration = when {
+            state.remainingTime > 0L -> state.remainingTime
+            else -> durationMillis(state.selectedMinutes, state.selectedSeconds)
+        }
+        if (duration <= 0L) return
+
+        val initial = when {
+            state.initialTime > 0L -> state.initialTime
+            else -> duration
+        }
+        stopRingtone()
+        toolService?.startTimer(duration, initial)
+        _uiState.update {
+            it.copy(
+                remainingTime = duration,
+                initialTime = initial,
+                isRunning = true,
+                isPaused = false,
+                isFinished = false,
+            )
+        }
+    }
+
+    fun setRepeatLastDuration(enabled: Boolean) {
+        _uiState.update { it.copy(repeatLastDuration = enabled) }
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setTimerKeepScreenOn(enabled) }
+    }
+
+    fun setGradualVolume(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setTimerGradualVolume(enabled) }
     }
 
     fun toggleHaptic() {
@@ -134,49 +241,45 @@ class TimerViewModel @Inject constructor(
         }
     }
 
-    private fun onTimerFinished() {
-        _uiState.update { it.copy(isRunning = false, isFinished = true, isPaused = false) }
-        playRingtone()
-    }
-
-    private fun playRingtone() {
-        viewModelScope.launch {
-            val ringtoneUriStr = settingsRepository.ringtoneUri.first()
-            val uri = if (!ringtoneUriStr.isNullOrEmpty()) {
-                Uri.parse(ringtoneUriStr)
-            } else {
-                Settings.System.DEFAULT_NOTIFICATION_URI
-            }
-            
-            try {
-                mediaPlayer?.release()
-                mediaPlayer = MediaPlayer().apply {
-                    setDataSource(context, uri)
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .build()
-                    )
-                    prepare()
-                    start()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+    fun playRingtone() {
+        // Handled by ToolService
     }
 
     fun stopRingtone() {
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
-        mediaPlayer = null
+        toolService?.stopAlarm()
+        _uiState.update { it.copy(isFinished = false) }
     }
 
     fun reset() {
         toolService?.resetTimer()
         stopRingtone()
-        _uiState.update { it.copy(remainingTime = 0, initialTime = 0, isRunning = false, isFinished = false, isPaused = false) }
+        _uiState.update {
+            it.copy(
+                remainingTime = 0L,
+                initialTime = 0L,
+                isRunning = false,
+                isFinished = false,
+                isPaused = false,
+            )
+        }
+    }
+
+    fun resetToInitial() {
+        val initial = _uiState.value.initialTime
+        if (initial <= 0L) {
+            reset()
+            return
+        }
+        toolService?.setTimerInitial(initial)
+        stopRingtone()
+        _uiState.update {
+            it.copy(
+                remainingTime = initial,
+                isRunning = false,
+                isFinished = false,
+                isPaused = true,
+            )
+        }
     }
 
     override fun onCleared() {
@@ -185,5 +288,14 @@ class TimerViewModel @Inject constructor(
             context.unbindService(connection)
         }
         mediaPlayer?.release()
+    }
+
+    private fun durationMillis(minutes: Int, seconds: Int): Long {
+        val totalSeconds = minutes.coerceIn(0, 999) * 60L + seconds.coerceIn(0, 59)
+        return (totalSeconds * 1000L).coerceIn(0L, MAX_TIMER_MILLIS)
+    }
+
+    private companion object {
+        const val MAX_TIMER_MILLIS = 999L * 60L * 1000L + 59L * 1000L
     }
 }
