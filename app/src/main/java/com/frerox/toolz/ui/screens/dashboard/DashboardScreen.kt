@@ -1,10 +1,13 @@
 package com.frerox.toolz.ui.screens.dashboard
 
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,14 +28,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,9 +51,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.navigation.Screen
+import androidx.core.net.toUri
 import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
+import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
+import com.frerox.toolz.ui.screens.pdf.PdfViewModel
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.catalog.CatalogUiState
@@ -89,6 +99,8 @@ sealed class PillPage {
     data object Recorder   : PillPage()
     data object Todo       : PillPage()
     data object Caffeinate : PillPage()
+    data object Flashlight : PillPage()
+    data object Focus      : PillPage()
     data class  CatalogDownload(val progress: Float, val count: Int) : PillPage()
     data class  Tip(val tip: AppTip) : PillPage()
 }
@@ -121,6 +133,8 @@ fun DashboardScreen(
     todoViewModel: TodoViewModel             = hiltViewModel(),
     caffeinateViewModel: CaffeinateViewModel = hiltViewModel(),
     catalogViewModel: CatalogViewModel       = hiltViewModel(),
+    pdfViewModel: PdfViewModel               = hiltViewModel(),
+    focusViewModel: FocusFlowViewModel       = hiltViewModel(),
     settingsRepository: SettingsRepository,
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -191,6 +205,8 @@ fun DashboardScreen(
             recorderViewModel   = recorderViewModel,
             todoViewModel       = todoViewModel,
             caffeinateViewModel = caffeinateViewModel,
+            pdfViewModel        = pdfViewModel,
+            focusViewModel      = focusViewModel,
             catalogState        = catalogState,
             showPill            = showPill,
             fillThePill         = fillThePill,
@@ -216,10 +232,29 @@ fun DashboardScreen(
         )
 
         ToolzFloatingToolbar(
-            expanded = true,
             selectedTab = selectedTab,
             onTabSelected = { viewModel.setSelectedTab(it) },
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter),
+            musicState = musicState,
+            musicViewModel = musicViewModel,
+            timerState = timerState,
+            timerViewModel = timerViewModel,
+            stopwatchState = stopwatchState,
+            stopwatchViewModel = stopwatchViewModel,
+            pomodoroState = pomodoroState,
+            pomodoroViewModel = pomodoroViewModel,
+            stepsState = stepsState,
+            stepsViewModel = stepsViewModel,
+            recordingState = recordingState,
+            recorderViewModel = recorderViewModel,
+            catalogState = catalogState,
+            todoViewModel = todoViewModel,
+            caffeinateViewModel = caffeinateViewModel,
+            focusViewModel = focusViewModel,
+            fillThePill = fillThePill,
+            onNavigate = navigate,
+            offlineState = offlineState,
+            settingsRepository = settingsRepository
         )
     }
 }
@@ -255,6 +290,8 @@ fun DashboardContent(
     recorderViewModel: VoiceRecorderViewModel,
     todoViewModel: TodoViewModel,
     caffeinateViewModel: CaffeinateViewModel,
+    pdfViewModel: PdfViewModel,
+    focusViewModel: FocusFlowViewModel,
     catalogState: CatalogUiState,
     showPill: Boolean,
     fillThePill: Boolean,
@@ -338,9 +375,12 @@ fun DashboardContent(
                             tabCategories = tabCategories,
                             updateVersion = updateVersion,
                             onDismissUpdate = onDismissUpdate,
+                            onToggleOffline = onToggleOffline,
                             onTogglePerformance = onTogglePerformance,
                             offlineState = offlineState,
-                            searchQuery = searchQuery
+                            searchQuery = searchQuery,
+                            musicViewModel = musicViewModel,
+                            pdfViewModel = pdfViewModel
                         )
                     }
                     else -> {
@@ -361,32 +401,7 @@ fun DashboardContent(
         }
 
         // ── Universal pill ────────────────────────────────────────────────────
-        if (showPill) {
-            UniversalPill(
-                modifier            = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 120.dp) // Lifted higher to avoid floating toolbar
-                    .navigationBarsPadding(),
-                musicState          = musicState,
-                musicViewModel      = musicViewModel,
-                timerState          = timerState,
-                timerViewModel      = timerViewModel,
-                stopwatchState      = stopwatchState,
-                stopwatchViewModel  = stopwatchViewModel,
-                pomodoroState       = pomodoroState,
-                pomodoroViewModel   = pomodoroViewModel,
-                stepsState          = stepsState,
-                stepsViewModel      = stepsViewModel,
-                recordingState      = recordingState,
-                recorderViewModel   = recorderViewModel,
-                catalogState        = catalogState,
-                todoViewModel       = todoViewModel,
-                caffeinateViewModel = caffeinateViewModel,
-                fillThePill         = fillThePill,
-                onNavigate          = onNavigate,
-                offlineState        = offlineState,
-            )
-        }
+        // Removed standalone pill, now integrated into ToolzFloatingToolbar
     }
 
     if (showOfflineSheet) {
@@ -426,9 +441,12 @@ fun HomeTabContent(
     tabCategories: List<ToolCategory>,
     updateVersion: String?,
     onDismissUpdate: () -> Unit,
+    onToggleOffline: (Boolean) -> Unit,
     onTogglePerformance: (Boolean) -> Unit,
     offlineState: OfflineState,
     searchQuery: String,
+    musicViewModel: MusicPlayerViewModel,
+    pdfViewModel: PdfViewModel
 ) {
     val performanceMode = LocalPerformanceMode.current
     val allTools = remember(categories) { categories.flatMap { it.items } }
@@ -449,16 +467,18 @@ fun HomeTabContent(
         }
 
         item(key = "dashboard_header") {
-            DashboardHeader(userName, offlineState, onTogglePerformance) 
+            DashboardHeader(userName, offlineState, onToggleOffline, onTogglePerformance) 
         }
 
         if (pinnedTools.isNotEmpty()) {
+            item(key = "pinned_section_header") {
+                SectionHeader("PINNED")
+            }
             item(key = "pinned_grid") {
                 val pinnedItems = remember(pinnedTools, allTools) {
                     pinnedTools.mapNotNull { route -> allTools.find { it.route == route } }
                 }
                 Column(modifier = Modifier.padding(bottom = 12.dp)) {
-                    SectionHeader("PINNED")
                     ToolGridSection(pinnedItems, onNavigate, { onTogglePin(it.route) })
                 }
             }
@@ -478,16 +498,16 @@ fun HomeTabContent(
 
         if (showQuickNotes && notes.isNotEmpty()) {
             item(key = "notes_section") {
-                NotesSection(notes, onNavigate)
+                NotesSection(notes, onNavigate, musicViewModel, pdfViewModel)
             }
         }
 
         // Smart Flow tools in Home
         tabCategories.forEachIndexed { ci, cat ->
-            item(key = "cat_header_${cat.title}") {
+            item(key = "cat_header_${cat.title}_home") {
                 SectionHeader("ESSENTIALS")
             }
-            item(key = "cat_body_${cat.title}") {
+            item(key = "cat_body_${cat.title}_home") {
                 ToolGridSection(cat.items, onNavigate)
                 Spacer(Modifier.height(4.dp))
             }
@@ -743,48 +763,100 @@ fun SmartSearchBar(
         }
     }
 
+    val isAiActive = isAiSearching || isAiThinking || aiResponse != null || aiRoutes.isNotEmpty()
+
+    val infiniteTransition = rememberInfiniteTransition(label = "aiGlow")
+    val glowIntensity by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowIntensity"
+    )
+
+    val glowColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f * glowIntensity)
+
     Column(modifier = modifier) {
-        ExpressiveSearchField(
-            query = query,
-            onQueryChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            onSearch = { 
-                if (isUrl) {
-                    val url = if (query.startsWith("http")) query else "https://$query"
-                    onNavigate(Screen.Browser.createRoute(url))
-                }
-            },
-            placeholder = {
-                Text(
-                    text = if (offlineState == OfflineState.OFFLINE) "Search tools…" else "Search or ask AI…",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    fontWeight = FontWeight.Medium,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isAiActive && !performanceMode) {
+                        Modifier.shadow(
+                            elevation = 12.dp * glowIntensity,
+                            shape = RoundedCornerShape(28.dp),
+                            spotColor = MaterialTheme.colorScheme.primary,
+                            ambientColor = MaterialTheme.colorScheme.primary
+                        )
+                    } else Modifier
                 )
-            },
-            leadingIcon = {
-                if (isAiSearching || isAiThinking) {
-                    ExpressiveCircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color.Transparent,
+        ) {
+            ExpressiveSearchField(
+                query = query,
+                onQueryChange = onQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isAiActive && !performanceMode) {
+                            Modifier.background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(glowColor, Color.Transparent),
+                                    radius = 500f
+                                ),
+                                shape = RoundedCornerShape(28.dp)
+                            ).border(
+                                width = 1.5.dp,
+                                brush = Brush.sweepGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f),
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(28.dp)
+                            )
+                        } else Modifier
+                    ),
+                onSearch = { 
+                    if (isUrl) {
+                        val url = if (query.startsWith("http")) query else "https://$query"
+                        onNavigate(Screen.Browser.createRoute(url))
+                    }
+                },
+                placeholder = {
+                    Text(
+                        text = if (offlineState == OfflineState.OFFLINE) "Search tools…" else "Search or ask AI…",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                        fontWeight = FontWeight.Medium,
                     )
-                } else {
-                    Icon(
-                        Icons.Rounded.Search, null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
+                },
+                leadingIcon = {
+                    if (isAiSearching || isAiThinking) {
+                        ExpressiveCircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = Color.Transparent,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.Search, null,
+                            tint = if (isAiActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
 
         // Local dropdown
         AnimatedVisibility(
@@ -817,7 +889,8 @@ fun SmartSearchBar(
                 AiSearchResponseDropdown(
                     response = response,
                     isThinking = isAiThinking,
-                    onTransfer = onTransferToAi
+                    onTransfer = onTransferToAi,
+                    onNavigate = onNavigate
                 )
             }
         }
@@ -875,10 +948,26 @@ private fun UrlSuggestionRow(query: String, onNavigate: (String) -> Unit) {
 fun AiSearchResponseDropdown(
     response: String,
     isThinking: Boolean,
-    onTransfer: () -> Unit
+    onTransfer: () -> Unit,
+    onNavigate: (String) -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
     
+    // Typewriter effect (simplified for markdown)
+    var displayedText by remember { mutableStateOf("") }
+    LaunchedEffect(response) {
+        if (response.length > displayedText.length) {
+            response.forEachIndexed { index, _ ->
+                if (index >= displayedText.length) {
+                    displayedText = response.take(index + 1)
+                    kotlinx.coroutines.delay(10) // Speed of typewriter
+                }
+            }
+        } else {
+            displayedText = response
+        }
+    }
+
     Surface(
         modifier       = Modifier.fillMaxWidth().padding(top = 6.dp),
         shape          = SquircleShape,
@@ -889,49 +978,72 @@ fun AiSearchResponseDropdown(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
             ) {
-                Icon(Icons.Rounded.AutoAwesome, null,
-                    tint     = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp))
-                Text(
-                    "AI RESPONSE",
-                    style         = MaterialTheme.typography.labelSmall,
-                    fontWeight    = FontWeight.Black,
-                    color         = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 1.sp,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, null,
+                        tint     = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp))
+                    Text(
+                        "AI ASSISTANT",
+                        style         = MaterialTheme.typography.labelSmall,
+                        fontWeight    = FontWeight.Black,
+                        color         = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 1.sp,
+                    )
+                }
+                
+                if (!isThinking) {
+                    IconButton(
+                        onClick = onTransfer,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.OpenInNew,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
-            Text(
-                text = response,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth()
-            )
+            val segments = remember(displayedText) { parseMarkdownToSegments(displayedText) }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                segments.forEach { seg ->
+                    MarkdownSegment(
+                        seg = seg,
+                        baseFontSize = 14.sp,
+                        onLinkClick = { url -> onNavigate(Screen.Browser.createRoute(url)) }
+                    )
+                }
+            }
 
             if (isThinking) {
                 ExpressiveTypingDots(color = MaterialTheme.colorScheme.primary)
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
             ToolzExpressiveButton(
                 onClick = { 
                     vibrationManager?.vibrateClick()
                     onTransfer()
                 },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                     contentColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
+                Text("CONTINUE CONVERSATION", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                Text("CONTINUE IN AI ASSISTANT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -1023,9 +1135,11 @@ private fun SearchRow(tool: ToolItem, onClick: () -> Unit) {
 fun DashboardHeader(
     userName: String, 
     offlineState: OfflineState,
+    onToggleOffline: (Boolean) -> Unit,
     onTogglePerformance: (Boolean) -> Unit
 ) {
     val performanceMode = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
 
     val greeting = remember {
         val calendar = java.util.Calendar.getInstance()
@@ -1059,19 +1173,46 @@ fun DashboardHeader(
                 )
             }
 
-            // Discreet Performance Toggle
-            Surface(
-                onClick = { onTogglePerformance(!performanceMode) },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
-            ) {
-                Icon(
-                    if (performanceMode) Icons.Rounded.Bolt else Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.padding(8.dp).size(16.dp),
-                    tint = if (performanceMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Offline Toggle
+                Surface(
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        onToggleOffline(offlineState != OfflineState.OFFLINE) 
+                    },
+                    shape = CircleShape,
+                    color = if (offlineState == OfflineState.OFFLINE) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) 
+                           else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                ) {
+                    Icon(
+                        if (offlineState == OfflineState.OFFLINE) Icons.Rounded.CloudOff else Icons.Rounded.Cloud,
+                        contentDescription = "Offline Mode",
+                        modifier = Modifier.padding(8.dp).size(16.dp),
+                        tint = if (offlineState == OfflineState.OFFLINE) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    )
+                }
+
+                // Discreet Performance Toggle
+                Surface(
+                    onClick = { 
+                        vibrationManager?.vibrateTick()
+                        onTogglePerformance(!performanceMode) 
+                    },
+                    shape = CircleShape,
+                    color = if (performanceMode) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) 
+                           else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                ) {
+                    Icon(
+                        if (performanceMode) Icons.Rounded.Bolt else Icons.Rounded.AutoAwesome,
+                        contentDescription = "Performance Mode",
+                        modifier = Modifier.padding(8.dp).size(16.dp),
+                        tint = if (performanceMode) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    )
+                }
             }
         }
     }
@@ -1316,7 +1457,12 @@ private fun PinnedItem(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun NotesSection(notes: List<Note>, onNavigate: (String) -> Unit) {
+fun NotesSection(
+    notes: List<Note>, 
+    onNavigate: (String) -> Unit,
+    musicViewModel: MusicPlayerViewModel,
+    pdfViewModel: PdfViewModel
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
         SectionHeader("SMART NOTES")
         LazyRow(
@@ -1324,7 +1470,7 @@ fun NotesSection(notes: List<Note>, onNavigate: (String) -> Unit) {
             contentPadding        = PaddingValues(horizontal = 2.dp),
         ) {
             items(notes.take(6)) { note ->
-                QuickNoteCard(note, onNavigate)
+                QuickNoteCard(note, onNavigate, musicViewModel, pdfViewModel)
             }
             item {
                 Surface(
@@ -1365,11 +1511,18 @@ fun NotesSection(notes: List<Note>, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun QuickNoteCard(note: Note, onNavigate: (String) -> Unit) {
+private fun QuickNoteCard(
+    note: Note, 
+    onNavigate: (String) -> Unit,
+    musicViewModel: MusicPlayerViewModel,
+    pdfViewModel: PdfViewModel
+) {
     val vibrationManager = LocalVibrationManager.current
     val noteColor = Color(note.color)
     val isDark    = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val cardAlpha = if (isDark) 0.22f else 0.1f
+    
+    val dateFormatter = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
 
     val cardW = when {
         note.attachedAudioUri != null -> 280.dp
@@ -1445,13 +1598,113 @@ private fun QuickNoteCard(note: Note, onNavigate: (String) -> Unit) {
                         modifier = Modifier.size(12.dp), tint = noteColor)
                 }
                 Text(
-                    SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(note.timestamp)).uppercase(),
+                    dateFormatter.format(Date(note.timestamp)).uppercase(),
                     style         = MaterialTheme.typography.labelSmall,
                     color         = noteColor.copy(alpha = 0.6f),
                     fontWeight    = FontWeight.Black,
                     letterSpacing = 0.7.sp,
                 )
             }
+
+            // Audio & PDF Attachments (Dashboard)
+            if (note.attachedAudioUri != null || note.attachedPdfUri != null) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    note.attachedAudioUri?.let { uri ->
+                        AudioAttachmentPill(
+                            name = note.attachedAudioName ?: "Audio Note",
+                            uri = uri,
+                            color = noteColor,
+                            musicViewModel = musicViewModel
+                        )
+                    }
+                    note.attachedPdfUri?.let { uri ->
+                        PdfAttachmentPill(
+                            uri = uri,
+                            title = note.title.ifBlank { "Document" },
+                            color = noteColor,
+                            onNavigate = onNavigate,
+                            pdfViewModel = pdfViewModel
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioAttachmentPill(
+    name: String,
+    uri: String,
+    color: Color,
+    musicViewModel: MusicPlayerViewModel
+) {
+    val vibrationManager = LocalVibrationManager.current
+    Surface(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            musicViewModel.playUri(uri.toUri())
+        },
+        shape = CircleShape,
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
+        modifier = Modifier.height(44.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(Icons.Rounded.PlayArrow, null, tint = color, modifier = Modifier.size(20.dp))
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 140.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PdfAttachmentPill(
+    uri: String,
+    title: String,
+    color: Color,
+    onNavigate: (String) -> Unit,
+    pdfViewModel: PdfViewModel
+) {
+    val vibrationManager = LocalVibrationManager.current
+    Surface(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            pdfViewModel.openPdf(uri.toUri(), title)
+            onNavigate(Screen.PdfReader.route)
+        },
+        shape = CircleShape,
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
+        modifier = Modifier.height(44.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(Icons.Rounded.PictureAsPdf, null, tint = color, modifier = Modifier.size(20.dp))
+            Text(
+                text = "VIEW PDF",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = color
+            )
         }
     }
 }
@@ -1682,9 +1935,12 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
             ) {
                 Surface(Modifier.size(48.dp), SmallExpressiveShape, color = MaterialTheme.colorScheme.primary) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.AutoAwesome, null,
-                            modifier = Modifier.size(24.dp),
-                            tint     = MaterialTheme.colorScheme.onPrimary)
+                        Image(
+                            painter = painterResource(id = R.drawable.app_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp).clip(SmallExpressiveShape),
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
                 Column {
@@ -1736,14 +1992,28 @@ fun UniversalPill(
     catalogState: CatalogUiState,
     todoViewModel: TodoViewModel,
     caffeinateViewModel: CaffeinateViewModel,
+    focusViewModel: FocusFlowViewModel,
     fillThePill: Boolean,
     onNavigate: (String) -> Unit,
     offlineState: OfflineState,
+    settingsRepository: SettingsRepository,
+    isEmbedded: Boolean = false,
 ) {
     val performanceMode  = LocalPerformanceMode.current
+    val vibrationManager = LocalVibrationManager.current
     val todoState        by todoViewModel.uiState.collectAsStateWithLifecycle()
     val isCaffeinated    by caffeinateViewModel.isServiceRunning.collectAsStateWithLifecycle()
     val caffeinateMs     by caffeinateViewModel.elapsedTime.collectAsStateWithLifecycle()
+
+    val focusScore by focusViewModel.productivityScore.collectAsStateWithLifecycle()
+    
+    val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
+    val isFlashlightOn by flashlightRepository?.isOn?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val flashlightMode by flashlightRepository?.mode?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(com.frerox.toolz.ui.screens.light.FlashlightMode.STEADY) }
+    val flashlightBrightness by flashlightRepository?.brightness?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(1.0f) }
+
+    val pillFocusEnabled by settingsRepository.pillFocusEnabled.collectAsState(false)
+    val pillTodoEnabled by settingsRepository.pillTodoEnabled.collectAsState(true)
 
     val appTips = remember(offlineState) {
         listOfNotNull(
@@ -1765,6 +2035,8 @@ fun UniversalPill(
         musicState, timerState, stopwatchState, pomodoroState, stepsState,
         recordingState, todoState.tasks, isCaffeinated,
         catalogState.downloadingTracks, fillThePill,
+        isFlashlightOn, focusScore, pillFocusEnabled, pillTodoEnabled,
+        offlineState, appTips
     ) {
         buildList {
             if (catalogState.downloadingTracks.isNotEmpty())
@@ -1776,24 +2048,66 @@ fun UniversalPill(
             if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) add(PillPage.Stopwatch)
             if (pomodoroState.isRunning)                                add(PillPage.Pomodoro)
             if (recordingState.isRecording || recordingState.isPaused)  add(PillPage.Recorder)
-            if (todoState.tasks.isNotEmpty())                           add(PillPage.Todo)
+            if (pillTodoEnabled && todoState.tasks.isNotEmpty())        add(PillPage.Todo)
             if (isCaffeinated)                                          add(PillPage.Caffeinate)
-            if (stepsState.isEnabledInSettings)                         add(PillPage.Steps)
-            if (isEmpty() && fillThePill)
-                appTips.shuffled().take(3).forEach { add(PillPage.Tip(it)) }
+            if (isFlashlightOn)                                         add(PillPage.Flashlight)
+            if (pillFocusEnabled && focusScore > 0)                     add(PillPage.Focus)
+            if (stepsState.isSensorPresent)                             add(PillPage.Steps)
+            if (isEmpty() && fillThePill) {
+                appTips.forEach { add(PillPage.Tip(it)) }
+            }
         }
     }
 
     if (pages.isEmpty()) return
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
+    
+    // Auto-scroll to active tools when they start
+    LaunchedEffect(pages) {
+        val importantIndex = pages.indexOfFirst { 
+            when(it) {
+                is PillPage.Music -> musicState.isPlaying
+                is PillPage.Timer -> timerState.isRunning
+                is PillPage.Stopwatch -> stopwatchState.isRunning
+                is PillPage.Pomodoro -> pomodoroState.isRunning
+                is PillPage.Recorder -> recordingState.isRecording
+                is PillPage.Flashlight -> true
+                else -> false
+            }
+        }
+        if (importantIndex != -1 && pagerState.currentPage != importantIndex) {
+            pagerState.animateScrollToPage(importantIndex)
+        }
+    }
+
     val isActive   = musicState.isPlaying || timerState.isRunning ||
             stopwatchState.isRunning || pomodoroState.isRunning ||
-            recordingState.isRecording || isCaffeinated
+            recordingState.isRecording || isCaffeinated || isFlashlightOn ||
+            stepsState.isEnabledInSettings
 
-    val primary   = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val tertiary  = MaterialTheme.colorScheme.tertiary
+    val activeColor = remember(pagerState.currentPage, pages, musicState) {
+        val page = pages.getOrNull(pagerState.currentPage)
+        when(page) {
+            is PillPage.Music -> musicState.currentTrack?.let { Color(0xFF2196F3) } ?: Color(0xFF2196F3)
+            is PillPage.Timer -> Color(0xFF4CAF50)
+            is PillPage.Stopwatch -> Color(0xFF00BCD4)
+            is PillPage.Pomodoro -> Color(0xFFF44336)
+            is PillPage.Steps -> Color(0xFF9C27B0)
+            is PillPage.Recorder -> Color(0xFFE91E63)
+            is PillPage.Todo -> Color(0xFF673AB7)
+            is PillPage.Caffeinate -> Color(0xFF795548)
+            is PillPage.Flashlight -> Color(0xFFFFC107)
+            is PillPage.Focus -> Color(0xFF4CAF50)
+            is PillPage.CatalogDownload -> Color(0xFF2196F3)
+            is PillPage.Tip -> page.tip.color
+            null -> Color(0xFF2196F3)
+        }
+    }
+
+    val primary   = activeColor
+    val secondary = activeColor.copy(alpha = 0.7f)
+    val tertiary  = activeColor.copy(alpha = 0.5f)
 
     val pulseTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by pulseTransition.animateFloat(
@@ -1807,93 +2121,119 @@ fun UniversalPill(
         label = "glowAlpha"
     )
 
-    Surface(
-        modifier        = modifier
-            .padding(horizontal = 18.dp)
-            .fillMaxWidth()
-            .height(92.dp)
-            .graphicsLayer {
-                if (isActive && !performanceMode) {
-                    scaleX = pulseScale
-                    scaleY = pulseScale
-                }
-            },
-        shape           = ExtraLargeExpressiveShape,
-        color           = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-        tonalElevation  = 12.dp,
-        shadowElevation = if (performanceMode) 0.dp else 32.dp,
-        border          = BorderStroke(
-            width = if (isActive) 2.2.dp else 1.8.dp,
-            brush = if (isActive && !performanceMode)
-                Brush.sweepGradient(listOf(
-                    primary.copy(alpha = 0.9f),
-                    secondary.copy(alpha = 0.55f),
-                    tertiary.copy(alpha = 0.5f),
-                    primary.copy(alpha = 0.9f),
-                ))
-            else SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)),
-        ),
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (isActive && !performanceMode) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(primary.copy(alpha = glowAlpha * 0.2f), Color.Transparent),
-                                radius = 400f
-                            )
-                        )
-                )
-            }
-
+    if (isEmbedded) {
+        Box(modifier = modifier) {
             HorizontalPager(
                 state    = pagerState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = if (pages.size > 1) 14.dp else 0.dp),
+                modifier = Modifier.fillMaxSize(),
             ) { pi ->
-                when (val page = pages[pi]) {
-                    is PillPage.Music           -> MusicPillContent(musicState, musicViewModel, onNavigate)
-                    is PillPage.Timer           -> TimerPillContent(timerState, timerViewModel, onNavigate)
-                    is PillPage.Stopwatch       -> StopwatchPillContent(stopwatchState, stopwatchViewModel, onNavigate)
-                    is PillPage.Pomodoro        -> PomodoroPillContent(pomodoroState, pomodoroViewModel, onNavigate)
-                    is PillPage.Steps           -> StepsPillContent(stepsState, stepsViewModel, onNavigate)
-                    is PillPage.Recorder        -> RecorderPillContent(recordingState, recorderViewModel, onNavigate)
-                    is PillPage.Todo            -> TodoPillContent(todoState.tasks.firstOrNull(), onNavigate)
-                    is PillPage.CatalogDownload -> CatalogDownloadPillContent(page.progress, page.count, onNavigate)
-                    is PillPage.Caffeinate      -> CaffeinatePillContent(caffeinateMs, onNavigate)
-                    is PillPage.Tip             -> TipPillContent(page.tip, onNavigate)
-                }
+                        when (val page = pages[pi]) {
+                            is PillPage.Music           -> MusicPillContent(musicState, musicViewModel, onNavigate)
+                            is PillPage.Timer           -> TimerPillContent(timerState, timerViewModel, onNavigate)
+                            is PillPage.Stopwatch       -> StopwatchPillContent(stopwatchState, stopwatchViewModel, onNavigate)
+                            is PillPage.Pomodoro        -> PomodoroPillContent(pomodoroState, pomodoroViewModel, onNavigate)
+                            is PillPage.Steps           -> StepsPillContent(stepsState, stepsViewModel, onNavigate)
+                            is PillPage.Recorder        -> RecorderPillContent(recordingState, recorderViewModel, onNavigate)
+                            is PillPage.Todo            -> TodoPillContent(todoState.tasks.firstOrNull(), onNavigate)
+                            is PillPage.CatalogDownload -> CatalogDownloadPillContent(page.progress, page.count, onNavigate)
+                            is PillPage.Caffeinate      -> CaffeinatePillContent(caffeinateMs, onNavigate)
+                            is PillPage.Tip             -> TipPillContent(page.tip, onNavigate)
+                            is PillPage.Flashlight      -> FlashlightPillContent(flashlightMode, flashlightBrightness, onNavigate)
+                            is PillPage.Focus           -> FocusPillContent(focusScore, onNavigate)
+                        }
             }
+        }
+    } else {
+        Surface(
+            modifier        = modifier
+                .padding(horizontal = 18.dp)
+                .fillMaxWidth()
+                .height(92.dp)
+                .graphicsLayer {
+                    if (isActive && !performanceMode) {
+                        scaleX = pulseScale
+                        scaleY = pulseScale
+                    }
+                },
+            shape           = ExtraLargeExpressiveShape,
+            color           = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
+            tonalElevation  = 12.dp,
+            shadowElevation = if (performanceMode) 0.dp else 32.dp,
+            border          = BorderStroke(
+                width = if (isActive) 2.2.dp else 1.8.dp,
+                brush = if (isActive && !performanceMode)
+                    Brush.sweepGradient(listOf(
+                        primary.copy(alpha = 0.9f),
+                        secondary.copy(alpha = 0.55f),
+                        tertiary.copy(alpha = 0.5f),
+                        primary.copy(alpha = 0.9f),
+                    ))
+                else SolidColor(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)),
+            ),
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (isActive && !performanceMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(primary.copy(alpha = glowAlpha * 0.2f), Color.Transparent),
+                                    radius = 400f
+                                )
+                            )
+                    )
+                }
 
-            // Spring-animated dot indicator
-            if (pages.size > 1) {
-                Row(
-                    modifier              = Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    repeat(pages.size) { i ->
-                        val active = pagerState.currentPage == i
-                        val dotWidth by animateDpAsState(
-                            targetValue   = if (active) 20.dp else 5.dp,
-                            animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
-                            label         = "dotW$i",
-                        )
-                        val dotColor by animateColorAsState(
-                            targetValue   = if (active) primary
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                            animationSpec = tween(260),
-                            label         = "dotC$i",
-                        )
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 2.dp)
-                                .clip(CircleShape)
-                                .background(dotColor)
-                                .size(width = dotWidth, height = 4.dp)
-                        )
+                HorizontalPager(
+                    state    = pagerState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = if (pages.size > 1) 14.dp else 0.dp),
+                ) { pi ->
+                        when (val page = pages[pi]) {
+                            is PillPage.Music           -> MusicPillContent(musicState, musicViewModel, onNavigate)
+                            is PillPage.Timer           -> TimerPillContent(timerState, timerViewModel, onNavigate)
+                            is PillPage.Stopwatch       -> StopwatchPillContent(stopwatchState, stopwatchViewModel, onNavigate)
+                            is PillPage.Pomodoro        -> PomodoroPillContent(pomodoroState, pomodoroViewModel, onNavigate)
+                            is PillPage.Steps           -> StepsPillContent(stepsState, stepsViewModel, onNavigate)
+                            is PillPage.Recorder        -> RecorderPillContent(recordingState, recorderViewModel, onNavigate)
+                            is PillPage.Todo            -> TodoPillContent(todoState.tasks.firstOrNull(), onNavigate)
+                            is PillPage.CatalogDownload -> CatalogDownloadPillContent(page.progress, page.count, onNavigate)
+                            is PillPage.Caffeinate      -> CaffeinatePillContent(caffeinateMs, onNavigate)
+                            is PillPage.Tip             -> TipPillContent(page.tip, onNavigate)
+                            is PillPage.Flashlight      -> FlashlightPillContent(flashlightMode, flashlightBrightness, onNavigate)
+                            is PillPage.Focus           -> FocusPillContent(focusScore, onNavigate)
+                        }
+                }
+
+                // Spring-animated dot indicator
+                if (pages.size > 1) {
+                    Row(
+                        modifier              = Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        repeat(pages.size) { i ->
+                            val active = pagerState.currentPage == i
+                            val dotWidth by animateDpAsState(
+                                targetValue   = if (active) 20.dp else 5.dp,
+                                animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
+                                label         = "dotW$i",
+                            )
+                            val dotColor by animateColorAsState(
+                                targetValue   = if (active) primary
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                                animationSpec = tween(260),
+                                label         = "dotC$i",
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 2.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                                    .size(width = dotWidth, height = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1905,7 +2245,144 @@ fun UniversalPill(
 // PILL PAGE CONTENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Shared icon container used by each pill page
+@Composable
+fun FlashlightPillContent(
+    mode: com.frerox.toolz.ui.screens.light.FlashlightMode,
+    brightness: Float,
+    onNavigate: (String) -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+    val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    Row(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+            .bouncyClick { onNavigate(Screen.Flashlight.route) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.FlashlightOn, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                }
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Flashlight Active",
+                style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val modeLabel = remember(mode) {
+                    mode.name.lowercase().replaceFirstChar { it.uppercase() }
+                }
+                Text(modeLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    fontWeight = FontWeight.SemiBold)
+                
+                when (mode) {
+                    com.frerox.toolz.ui.screens.light.FlashlightMode.STEADY -> {
+                        ToolzWavyLinearProgressIndicator(
+                            progress = { brightness },
+                            modifier = Modifier.width(48.dp).height(6.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        )
+                    }
+                    com.frerox.toolz.ui.screens.light.FlashlightMode.STROBE -> {
+                        ExpressiveTypingDots(
+                            modifier = Modifier.height(12.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    com.frerox.toolz.ui.screens.light.FlashlightMode.SOS -> {
+                        ExpressivePulseIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    com.frerox.toolz.ui.screens.light.FlashlightMode.DISCO -> {
+                        ExpressiveLoadingIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color(0xFFBA68C8) // Vivid purple
+                        )
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalIconButton(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    val entries = com.frerox.toolz.ui.screens.light.FlashlightMode.entries
+                    val index = entries.indexOf(mode)
+                    val intent = Intent(context, com.frerox.toolz.service.FlashlightService::class.java).apply {
+                        action = "com.frerox.toolz.FLASHLIGHT_CYCLE_MODE"
+                    }
+                    context.startService(intent)
+                },
+                modifier = Modifier.size(46.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            ) {
+                Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+            }
+            FilledTonalIconButton(
+                onClick = {
+                    vibrationManager?.vibrateClick()
+                    val intent = Intent(context, com.frerox.toolz.service.FlashlightService::class.java).apply {
+                        action = com.frerox.toolz.service.FlashlightService.ACTION_STOP
+                    }
+                    context.startService(intent)
+                },
+                modifier = Modifier.size(46.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            ) {
+                Icon(Icons.Rounded.PowerSettingsNew, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun FocusPillContent(score: Int, onNavigate: (String) -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    Row(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+            .bouncyClick { vibrationManager?.vibrateTick(); onNavigate(Screen.FocusFlow.route) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { score / 100f },
+                modifier = Modifier.size(52.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 4.dp,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                strokeCap = StrokeCap.Round
+            )
+            Icon(Icons.Rounded.Toll, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Productivity",
+                style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
+            Text("Flow Score: $score%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                fontWeight = FontWeight.SemiBold)
+        }
+        Icon(Icons.Rounded.ArrowOutward, null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+    }
+}
 @Composable
 private fun PillIcon(color: Color, icon: ImageVector) {
     Surface(
@@ -2077,9 +2554,17 @@ fun StepsPillContent(state: StepState, vm: StepCounterViewModel, onNavigate: (St
         PillIcon(c.primaryContainer, Icons.AutoMirrored.Rounded.DirectionsRun)
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("${state.steps}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${state.steps}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(
+                    String.format(Locale.US, "%.1f %s", state.distanceDisplay, state.distanceUnit),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = c.outline
+                )
+            }
+            val progress = if (state.goal > 0) (state.steps.toFloat() / state.goal.toFloat()) else 0f
             ExpressiveLinearProgressIndicator(
-                { (state.steps / 10_000f).coerceIn(0f, 1f) },
+                { progress.coerceIn(0f, 1f) },
                 Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                 color = c.primary, trackColor = c.primary.copy(alpha = 0.13f))
         }
@@ -2437,7 +2922,7 @@ private fun _PreviewScaffold() {
                 modifier       = Modifier.weight(1f).fadingEdges(bottom = 100.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
             ) {
-                item { DashboardHeader("Explorer", OfflineState.ONLINE, {}) }
+                item { DashboardHeader("Explorer", OfflineState.ONLINE, {}, {}) }
                 item {
                     StatsRow(DashboardStats(
                         batteryLevel         = 72,

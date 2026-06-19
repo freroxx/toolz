@@ -218,12 +218,21 @@ class DashboardViewModel @Inject constructor(
             _searchQuery
                 .debounce(280)
                 .collect { query ->
+                    if (query.isBlank()) {
+                        _aiSuggestedRoutes.value = emptyList()
+                        _aiResponse.value = null
+                        _isAiSearching.value = false
+                        _isAiThinking.value = false
+                        return@collect
+                    }
+                    
                     performLocalSearch(query)
                     if (query.length > 2 && offlineState.value != OfflineState.OFFLINE) {
                         performPowerfulSmartSearch(query)
                     } else {
                         _aiSuggestedRoutes.value = emptyList()
                         _isAiSearching.value = false
+                        _isAiThinking.value = false
                     }
                 }
         }
@@ -238,7 +247,11 @@ class DashboardViewModel @Inject constructor(
     }
 
     private fun performPowerfulSmartSearch(query: String) {
-        if (offlineState.value == OfflineState.OFFLINE) return
+        if (offlineState.value == OfflineState.OFFLINE || query.isBlank()) {
+            _isAiSearching.value = false
+            _isAiThinking.value = false
+            return
+        }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             _isAiSearching.value = true
@@ -246,7 +259,14 @@ class DashboardViewModel @Inject constructor(
             _aiResponse.value = null
             
             try {
-                val toolContext = categories.value.flatMap { it.items }
+                val currentCategories = categories.value
+                if (currentCategories.isEmpty()) {
+                    _isAiSearching.value = false
+                    _isAiThinking.value = false
+                    return@launch
+                }
+
+                val toolContext = currentCategories.flatMap { it.items }
                     .joinToString("\n") { "[TOOL] ${it.title}: ${it.description} (Route: ${it.route})" }
 
                 val notes = noteDao.getAllNotes().first().take(10)
@@ -274,40 +294,56 @@ class DashboardViewModel @Inject constructor(
                     If no tool is relevant, respond with "NONE".
                 """.trimIndent()
 
+                var fullResponse = ""
                 aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
                     result.onSuccess { chunk ->
-                        val response = chunk.text.trim().removeSurrounding("\"").removeSurrounding("'")
-                        if (response != "NONE" && response.isNotBlank()) {
-                            val routes = response.split(",")
-                                .map { it.trim() }
-                                .filter { it.isNotBlank() && (it.contains("_") || it.contains("/")) }
-                            _aiSuggestedRoutes.value = routes
-                        } else {
-                            _aiSuggestedRoutes.value = emptyList()
-                            
-                            // Phase 2: Conversational Fallback
-                            if (settingsRepository.aiSearchChatEnabled.first()) {
-                                performConversationalSearch(query)
-                            }
-                        }
+                        fullResponse += chunk.text
+                    }.onFailure {
+                        triggerConversationalFallback(query)
                     }
+                }
+
+                val response = fullResponse.trim().removeSurrounding("\"").removeSurrounding("'")
+                if (response != "NONE" && response.isNotBlank()) {
+                    val routes = response.split(",")
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() && (it.contains("_") || it.contains("/")) }
+                    
+                    if (routes.isNotEmpty()) {
+                        _aiSuggestedRoutes.value = routes
+                    } else {
+                        triggerConversationalFallback(query)
+                    }
+                } else {
+                    triggerConversationalFallback(query)
                 }
             } catch (_: Exception) {
                 _aiSuggestedRoutes.value = emptyList()
             } finally {
-                _isAiSearching.value = false
                 _isAiThinking.value = false
+                _isAiSearching.value = false
             }
         }
     }
 
+    private suspend fun triggerConversationalFallback(query: String) {
+        _aiSuggestedRoutes.value = emptyList()
+        if (settingsRepository.aiSearchChatEnabled.first()) {
+            performConversationalSearch(query)
+        }
+    }
+
     private suspend fun performConversationalSearch(query: String) {
-        val prompt = "The user is searching for something that doesn't directly match a tool. Answer their question concisely: \"$query\""
+        val prompt = "You are Toolz Assistant. The user is searching for something that doesn't match a tool. Answer VERY BRIEFLY (max 2 sentences), stay concise, and use Markdown for formatting: \"$query\""
         
-        aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
-            result.onSuccess { chunk ->
-                _aiResponse.value = (_aiResponse.value ?: "") + chunk.text
+        try {
+            aiRepository.getChatResponse(prompt, emptyList(), null).collect { result ->
+                result.onSuccess { chunk ->
+                    _aiResponse.value = (_aiResponse.value ?: "") + chunk.text
+                }
             }
+        } catch (_: Exception) {
+            // Error handled by finally in caller or just ignored
         }
     }
 
@@ -378,7 +414,7 @@ class DashboardViewModel @Inject constructor(
         val stat = StatFs(Environment.getDataDirectory().path)
         val total = stat.totalBytes
         val available = stat.availableBytes
-        val usedPct = ((total - available).toFloat() / total.toFloat())
+        val usedPct = if (total > 0) ((total - available).toFloat() / total.toFloat()) else 0f
         val availGb = available.toDouble() / (1024.0 * 1024.0 * 1024.0)
 
         _dashboardStats.value = DashboardStats(
