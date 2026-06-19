@@ -1,21 +1,16 @@
 package com.frerox.toolz.util
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.pdf.PdfRenderer
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
-import android.os.ParcelFileDescriptor
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.ReturnCode
-import com.arthenica.ffmpegkit.Statistics
-import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.converters.ConversionHandler
+import com.frerox.toolz.util.converters.DocumentHandler
+import com.frerox.toolz.util.converters.ImageDocumentHandler
+import com.frerox.toolz.util.converters.MediaHandler
+import com.frerox.toolz.util.converters.VectorHandler
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,91 +18,104 @@ import javax.inject.Singleton
 @Singleton
 class ConversionEngine @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
+    private val mediaHandler: MediaHandler,
+    private val vectorHandler: VectorHandler,
+    private val documentHandler: DocumentHandler,
+    private val imageDocumentHandler: ImageDocumentHandler,
 ) {
 
     enum class ConversionType(
         val extension: String,
         val category: String,
-        val isPopular: Boolean = false
+        val label: String,
+        val isPopular: Boolean = false,
+        /** MIME type prefixes that can be used as input for this conversion. */
+        val inputMimes: List<String> = emptyList(),
     ) {
-        // Video
-        VIDEO_TO_MP4("mp4", "Videos", true),
-        VIDEO_TO_MKV("mkv", "Videos", true),
-        VIDEO_TO_MOV("mov", "Videos", true),
-        VIDEO_TO_AVI("avi", "Videos", true),
-        VIDEO_TO_WEBM("webm", "Videos", true),
-        VIDEO_TO_GIF("gif", "Animations", true),
-        VIDEO_TO_WEBP("webp", "Animations", true),
-        VIDEO_TO_FLV("flv", "Videos"),
-        VIDEO_TO_WMV("wmv", "Videos", true),
-        VIDEO_TO_3GP("3gp", "Videos"),
-        VIDEO_TO_MPEG("mpeg", "Videos"),
-        VIDEO_TO_VOB("vob", "Videos"),
-        VIDEO_TO_OGV("ogv", "Videos"),
-        VIDEO_TO_M4V("m4v", "Videos"),
-        VIDEO_TO_TS("ts", "Videos"),
-        VIDEO_TO_MXF("mxf", "Videos"),
-        VIDEO_TO_SWF("swf", "Videos"),
-        VIDEO_TO_M2TS("m2ts", "Videos"),
-        VIDEO_TO_DV("dv", "Videos"),
-        VIDEO_TO_F4V("f4v", "Videos"),
-        
-        // Video to Audio
-        VIDEO_TO_MP3("mp3", "Audio", true),
-        VIDEO_TO_WAV("wav", "Audio", true),
-        VIDEO_TO_AAC("aac", "Audio", true),
-        VIDEO_TO_FLAC("flac", "Audio", true),
-        VIDEO_TO_M4A("m4a", "Audio", true),
-        VIDEO_TO_OGG("ogg", "Audio"),
-        VIDEO_TO_AIFF("aiff", "Audio"),
-        VIDEO_TO_OPUS("opus", "Audio"),
-        VIDEO_TO_WMA("wma", "Audio"),
+        // ── Video → Video ─────────────────────────────────────────────────────
+        VIDEO_TO_MP4("mp4", "Videos", "Video → MP4", true, listOf("video")),
+        VIDEO_TO_MKV("mkv", "Videos", "Video → MKV", true, listOf("video")),
+        VIDEO_TO_MOV("mov", "Videos", "Video → MOV", true, listOf("video")),
+        VIDEO_TO_AVI("avi", "Videos", "Video → AVI", true, listOf("video")),
+        VIDEO_TO_WEBM("webm", "Videos", "Video → WebM", true, listOf("video")),
+        VIDEO_TO_FLV("flv", "Videos", "Video → FLV", false, listOf("video")),
+        VIDEO_TO_WMV("wmv", "Videos", "Video → WMV", true, listOf("video")),
+        VIDEO_TO_3GP("3gp", "Videos", "Video → 3GP", false, listOf("video")),
+        VIDEO_TO_MPEG("mpeg", "Videos", "Video → MPEG", false, listOf("video")),
+        VIDEO_TO_OGV("ogv", "Videos", "Video → OGV", false, listOf("video")),
+        VIDEO_TO_M4V("m4v", "Videos", "Video → M4V", false, listOf("video")),
+        VIDEO_TO_TS("ts", "Videos", "Video → TS", false, listOf("video")),
+        VIDEO_TO_M2TS("m2ts", "Videos", "Video → M2TS", false, listOf("video")),
+        VIDEO_TO_DV("dv", "Videos", "Video → DV", false, listOf("video")),
 
-        // Audio
-        AUDIO_TO_MP3("mp3", "Audio", true),
-        AUDIO_TO_WAV("wav", "Audio", true),
-        AUDIO_TO_AAC("aac", "Audio", true),
-        AUDIO_TO_M4A("m4a", "Audio", true),
-        AUDIO_TO_FLAC("flac", "Audio", true),
-        AUDIO_TO_OGG("ogg", "Audio", true),
-        AUDIO_TO_OPUS("opus", "Audio"),
-        AUDIO_TO_AMR("amr", "Audio"),
-        AUDIO_TO_WMA("wma", "Audio"),
-        AUDIO_TO_AIFF("aiff", "Audio"),
-        AUDIO_TO_MKA("mka", "Audio"),
-        AUDIO_TO_AC3("ac3", "Audio"),
-        AUDIO_TO_MP2("mp2", "Audio"),
-        AUDIO_TO_AU("au", "Audio"),
-        AUDIO_TO_CAF("caf", "Audio"),
-        AUDIO_TO_VOC("voc", "Audio"),
+        // ── Video → Animated ──────────────────────────────────────────────────
+        VIDEO_TO_GIF("gif", "Animations", "Video → GIF", true, listOf("video")),
+        VIDEO_TO_WEBP("webp", "Animations", "Video → WebP", true, listOf("video")),
 
-        // Image
-        IMAGE_TO_JPG("jpg", "Images", true),
-        IMAGE_TO_PNG("png", "Images", true),
-        IMAGE_TO_WEBP("webp", "Images", true),
-        IMAGE_TO_GIF("gif", "Animations", true),
-        IMAGE_TO_BMP("bmp", "Images", true),
-        IMAGE_TO_TIFF("tiff", "Images"),
-        IMAGE_TO_ICO("ico", "Images", true),
-        IMAGE_TO_HEIF("heif", "Images", true),
-        IMAGE_TO_AVIF("avif", "Images", true),
-        IMAGE_TO_TGA("tga", "Images"),
-        IMAGE_TO_PPM("ppm", "Images"),
-        IMAGE_TO_PGM("pgm", "Images"),
-        IMAGE_TO_PCX("pcx", "Images"),
-        IMAGE_TO_PSD("psd", "Images"),
-        
-        // PDF / Documents
-        IMAGE_TO_PDF("pdf", "Documents", true),
-        VIDEO_TO_PDF("pdf", "Documents"),
-        PDF_TO_PNG("png", "Images", true),
-        PDF_TO_JPG("jpg", "Images", true),
+        // ── Video → Audio ─────────────────────────────────────────────────────
+        VIDEO_TO_MP3("mp3", "Audio", "Video → MP3", true, listOf("video")),
+        VIDEO_TO_WAV("wav", "Audio", "Video → WAV", true, listOf("video")),
+        VIDEO_TO_AAC("aac", "Audio", "Video → AAC", true, listOf("video")),
+        VIDEO_TO_FLAC("flac", "Audio", "Video → FLAC", true, listOf("video")),
+        VIDEO_TO_M4A("m4a", "Audio", "Video → M4A", true, listOf("video")),
+        VIDEO_TO_OGG("ogg", "Audio", "Video → OGG", false, listOf("video")),
+        VIDEO_TO_AIFF("aiff", "Audio", "Video → AIFF", false, listOf("video")),
+        VIDEO_TO_OPUS("opus", "Audio", "Video → Opus", false, listOf("video")),
 
-        // Vector
-        SVG_TO_PNG("png", "Images", true),
-        SVG_TO_JPG("jpg", "Images", true),
-        SVG_TO_PDF("pdf", "Documents", true)
+        // ── Audio → Audio ─────────────────────────────────────────────────────
+        AUDIO_TO_MP3("mp3", "Audio", "Audio → MP3", true, listOf("audio")),
+        AUDIO_TO_WAV("wav", "Audio", "Audio → WAV", true, listOf("audio")),
+        AUDIO_TO_AAC("aac", "Audio", "Audio → AAC", true, listOf("audio")),
+        AUDIO_TO_M4A("m4a", "Audio", "Audio → M4A", true, listOf("audio")),
+        AUDIO_TO_FLAC("flac", "Audio", "Audio → FLAC", true, listOf("audio")),
+        AUDIO_TO_OGG("ogg", "Audio", "Audio → OGG", true, listOf("audio")),
+        AUDIO_TO_OPUS("opus", "Audio", "Audio → Opus", false, listOf("audio")),
+        AUDIO_TO_AMR("amr", "Audio", "Audio → AMR", false, listOf("audio")),
+        AUDIO_TO_AIFF("aiff", "Audio", "Audio → AIFF", false, listOf("audio")),
+        AUDIO_TO_MKA("mka", "Audio", "Audio → MKA", false, listOf("audio")),
+        AUDIO_TO_AC3("ac3", "Audio", "Audio → AC3", false, listOf("audio")),
+        AUDIO_TO_MP2("mp2", "Audio", "Audio → MP2", false, listOf("audio")),
+
+        // ── Image → Image ─────────────────────────────────────────────────────
+        IMAGE_TO_JPG("jpg", "Images", "Image → JPG", true, listOf("image")),
+        IMAGE_TO_PNG("png", "Images", "Image → PNG", true, listOf("image")),
+        IMAGE_TO_WEBP("webp", "Images", "Image → WebP", true, listOf("image")),
+        IMAGE_TO_GIF("gif", "Animations", "Image → GIF", true, listOf("image")),
+        IMAGE_TO_BMP("bmp", "Images", "Image → BMP", true, listOf("image")),
+        IMAGE_TO_TIFF("tiff", "Images", "Image → TIFF", false, listOf("image")),
+        IMAGE_TO_ICO("ico", "Images", "Image → ICO", true, listOf("image")),
+        IMAGE_TO_HEIF("heif", "Images", "Image → HEIF", true, listOf("image")),
+        IMAGE_TO_AVIF("avif", "Images", "Image → AVIF", true, listOf("image")),
+        IMAGE_TO_TGA("tga", "Images", "Image → TGA", false, listOf("image")),
+        IMAGE_TO_PPM("ppm", "Images", "Image → PPM", false, listOf("image")),
+        IMAGE_TO_J2K("j2k", "Images", "Image → J2K", false, listOf("image")),
+        IMAGE_TO_PCX("pcx", "Images", "Image → PCX", false, listOf("image")),
+        IMAGE_TO_SGI("sgi", "Images", "Image → SGI", false, listOf("image")),
+        IMAGE_TO_EXR("exr", "Images", "Image → EXR", false, listOf("image")),
+        IMAGE_TO_XBM("xbm", "Images", "Image → XBM", false, listOf("image")),
+        IMAGE_TO_HDR("hdr", "Images", "Image → HDR", false, listOf("image")),
+
+        // ── Image / PDF ───────────────────────────────────────────────────────
+        IMAGE_TO_PDF("pdf", "Documents", "Image → PDF", true, listOf("image")),
+        PDF_TO_PNG("png", "Images", "PDF → PNG", true, listOf("application/pdf")),
+        PDF_TO_JPG("jpg", "Images", "PDF → JPG", true, listOf("application/pdf")),
+        PDF_TO_WEBP("webp", "Images", "PDF → WebP", false, listOf("application/pdf")),
+
+        // ── Text / Document → PDF ─────────────────────────────────────────────
+        TEXT_TO_PDF("pdf", "Documents", "Text → PDF", true, listOf("text/plain")),
+        MD_TO_PDF("pdf", "Documents", "Markdown → PDF", true, listOf("text/markdown", "text/plain", "text/x-markdown")),
+        MD_TO_HTML("html", "Documents", "Markdown → HTML", true, listOf("text/markdown", "text/plain", "text/x-markdown")),
+        MD_TO_TXT("txt", "Documents", "Markdown → TXT", false, listOf("text/markdown", "text/plain", "text/x-markdown")),
+        HTML_TO_PDF("pdf", "Documents", "HTML → PDF", false, listOf("text/html")),
+
+        // ── Archives ──────────────────────────────────────────────────────────
+        XAPK_TO_APK("apk", "Archives", "XAPK → APK", true, listOf("application/x-xapk", "application/xapk", "application/zip", "application/vnd.android.package-archive")),
+
+        // ── Vector ────────────────────────────────────────────────────────────
+        SVG_TO_PNG("png", "Images", "SVG → PNG", true, listOf("image/svg+xml")),
+        SVG_TO_JPG("jpg", "Images", "SVG → JPG", true, listOf("image/svg+xml")),
+        SVG_TO_WEBP("webp", "Images", "SVG → WebP", false, listOf("image/svg+xml")),
+        SVG_TO_PDF("pdf", "Documents", "SVG → PDF", true, listOf("image/svg+xml")),
     }
 
     sealed class ConversionStatus {
@@ -116,200 +124,142 @@ class ConversionEngine @Inject constructor(
         data class Error(val message: String) : ConversionStatus()
     }
 
-    fun convertFile(
+    /**
+     * Routes the conversion to the correct handler based on the [ConversionType],
+     * creates a properly named output file in the public Downloads/Toolz directory,
+     * and ensures the temp input file is cleaned up after conversion.
+     */
+    fun routeConversion(
         inputUri: Uri,
         type: ConversionType,
-        highQuality: Boolean = true
-    ): Flow<ConversionStatus> = callbackFlow {
-        val inputPath = getFilePathFromUri(inputUri) ?: run {
-            trySend(ConversionStatus.Error("Invalid input file"))
-            close()
-            return@callbackFlow
-        }
+        highQuality: Boolean = true,
+    ): Flow<ConversionStatus> {
+        // Copy content:// URI to a temp file with proper extension so FFmpeg/libraries can open it
+        val inputMime = context.contentResolver.getType(inputUri) ?: ""
+        val tempExt = mimeToExtension(inputMime)
+        val tempFile = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}.$tempExt")
 
-        val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val toolzMainDir = File(baseDir, "Toolz")
-        val categoryDir = File(toolzMainDir, type.category).apply { mkdirs() }
-        
-        val outputFile = File(categoryDir, "TOOLZ_${System.currentTimeMillis()}.${type.extension}")
-        val outputPath = outputFile.absolutePath
-
-        // Native PDF to Image conversion to avoid FFmpeg libswresample/ghostscript issues
-        if (type == ConversionType.PDF_TO_PNG || type == ConversionType.PDF_TO_JPG) {
+        return flow {
             try {
-                val file = File(inputPath)
-                val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-                val renderer = PdfRenderer(fd)
-                val pageCount = renderer.pageCount
-                
-                val baseName = outputFile.nameWithoutExtension
-                
-                for (i in 0 until pageCount) {
-                    val page = renderer.openPage(i)
-                    val scale = if (highQuality) 3f else 1.5f
-                    val bitmap = Bitmap.createBitmap(
-                        (page.width * scale).toInt(),
-                        (page.height * scale).toInt(),
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val canvas = Canvas(bitmap)
-                    canvas.drawColor(android.graphics.Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    
-                    val pageFile = if (pageCount == 1) {
-                        outputFile
-                    } else {
-                        File(categoryDir, "${baseName}_page_${i + 1}.${type.extension}")
+                // Copy to temp
+                val copied = try {
+                    context.contentResolver.openInputStream(inputUri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
                     }
-                    
-                    val format = if (type.extension == "png") Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-                    val quality = if (highQuality) 100 else 80
-                    
-                    pageFile.outputStream().use { out ->
-                        bitmap.compress(format, quality, out)
-                    }
-                    
-                    page.close()
-                    bitmap.recycle()
-                    
-                    trySend(ConversionStatus.Progress(((i + 1).toFloat() / pageCount * 100).toInt()))
+                    true
+                } catch (e: Exception) {
+                    emit(ConversionStatus.Error("Could not read input file: ${e.localizedMessage}"))
+                    return@flow
                 }
-                
-                renderer.close()
-                fd.close()
-                trySend(ConversionStatus.Success(outputPath))
-                close()
-            } catch (e: Exception) {
-                trySend(ConversionStatus.Error("PDF conversion failed: ${e.localizedMessage}"))
-                close()
-            }
-            return@callbackFlow
-        }
-
-        var totalDurationMs = 0L
-        if (type.category != "Images" && type.extension != "pdf") {
-            totalDurationMs = getVideoDuration(inputPath)
-        }
-
-        val command = when (type) {
-            ConversionType.VIDEO_TO_GIF -> {
-                val filter = if (highQuality) {
-                    "fps=15,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
-                } else {
-                    "fps=10,scale=320:-1:flags=lanczos"
+                if (!copied) {
+                    emit(ConversionStatus.Error("Could not read input file"))
+                    return@flow
                 }
-                "-i \"$inputPath\" -vf \"$filter\" -y \"$outputPath\""
-            }
-            ConversionType.VIDEO_TO_WEBP -> {
-                val quality = if (highQuality) "75" else "50"
-                "-i \"$inputPath\" -vcodec libwebp -lossless 0 -compression_level 6 -q:v $quality -loop 0 -an -y \"$outputPath\""
-            }
-            ConversionType.VIDEO_TO_MP3, ConversionType.VIDEO_TO_WAV, 
-            ConversionType.VIDEO_TO_AAC, ConversionType.VIDEO_TO_FLAC,
-            ConversionType.VIDEO_TO_M4A, ConversionType.VIDEO_TO_OGG,
-            ConversionType.VIDEO_TO_AIFF, ConversionType.VIDEO_TO_OPUS -> {
-                val bitrate = if (highQuality) "320k" else "128k"
-                "-i \"$inputPath\" -vn -ab $bitrate -ar 44100 -y \"$outputPath\""
-            }
-            ConversionType.IMAGE_TO_WEBP -> {
-                val quality = if (highQuality) "85" else "60"
-                "-i \"$inputPath\" -vcodec libwebp -lossless 0 -q:v $quality -y \"$outputPath\""
-            }
-            ConversionType.IMAGE_TO_JPG -> {
-                val quality = if (highQuality) "2" else "5"
-                "-i \"$inputPath\" -q:v $quality -y \"$outputPath\""
-            }
-            ConversionType.IMAGE_TO_PDF -> {
-                "-i \"$inputPath\" \"$outputPath\""
-            }
-            ConversionType.VIDEO_TO_PDF -> {
-                "-i \"$inputPath\" -frames:v 1 \"$outputPath\""
-            }
-            ConversionType.AUDIO_TO_MP3, ConversionType.AUDIO_TO_WAV, 
-            ConversionType.AUDIO_TO_AAC, ConversionType.AUDIO_TO_OGG, 
-            ConversionType.AUDIO_TO_FLAC, ConversionType.AUDIO_TO_M4A,
-            ConversionType.AUDIO_TO_OPUS, ConversionType.AUDIO_TO_AMR,
-            ConversionType.AUDIO_TO_WMA, ConversionType.AUDIO_TO_AIFF,
-            ConversionType.AUDIO_TO_MKA, ConversionType.AUDIO_TO_AC3,
-            ConversionType.AUDIO_TO_MP2, ConversionType.AUDIO_TO_AU,
-            ConversionType.AUDIO_TO_CAF, ConversionType.AUDIO_TO_VOC -> {
-                val bitrate = if (highQuality) "320k" else "128k"
-                "-i \"$inputPath\" -ab $bitrate -y \"$outputPath\""
-            }
-            else -> {
-                if (type.category == "Videos") {
-                    if (highQuality) {
-                        "-i \"$inputPath\" -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -c:a aac -b:a 192k -y \"$outputPath\""
-                    } else {
-                        "-i \"$inputPath\" -c:v libx264 -crf 28 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -y \"$outputPath\""
-                    }
-                } else if (type.category == "Images") {
-                    "-i \"$inputPath\" -y \"$outputPath\""
-                } else {
-                    "-i \"$inputPath\" -y \"$outputPath\""
+
+                val outputFile = buildOutputFile(type)
+                val handler: ConversionHandler = pickHandler(type)
+
+                handler.convert(
+                    inputUris = listOf(Uri.fromFile(tempFile)),
+                    type = type,
+                    outputPath = outputFile.absolutePath,
+                    highQuality = highQuality,
+                ).collect { status ->
+                    emit(status)
                 }
-            }
-        }
-
-        val session = FFmpegKit.executeAsync(command, { session ->
-            val returnCode = session.returnCode
-            if (ReturnCode.isSuccess(returnCode)) {
-                trySend(ConversionStatus.Success(outputPath))
-            } else if (ReturnCode.isCancel(returnCode)) {
-                trySend(ConversionStatus.Error("Conversion cancelled"))
-            } else {
-                val logs = session.logs
-                val errorLogs = logs.filter { it.level.name == "ERROR" || it.level.name == "FATAL" }
-                val lastError = errorLogs.lastOrNull()?.message 
-                    ?: logs.lastOrNull { !it.message.contains("libswresample") && !it.message.contains("ffmpeg version") }?.message
-                    ?: session.failStackTrace 
-                    ?: "Unknown FFmpeg error"
-                trySend(ConversionStatus.Error("Conversion failed: $lastError"))
-            }
-            close()
-        }, { _ ->
-        }) { statistics: Statistics ->
-            if (totalDurationMs > 0) {
-                val progress = (statistics.time.toDouble() / totalDurationMs.toDouble() * 100).toInt()
-                trySend(ConversionStatus.Progress(progress.coerceIn(0, 100)))
-            } else {
-                trySend(ConversionStatus.Progress(-1))
-            }
-        }
-
-        awaitClose {
-            FFmpegKit.cancel(session.sessionId)
-            if (inputPath.contains("input_temp_")) {
-                File(inputPath).delete()
+            } finally {
+                if (tempFile.exists()) tempFile.delete()
             }
         }
     }
 
-    private fun getVideoDuration(path: String): Long {
-        return try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(path)
-            val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            retriever.release()
-            time?.toLong() ?: 0L
-        } catch (e: Exception) {
-            0L
+    /** Same as [routeConversion] but accepts multiple input URIs (batch merge where supported). */
+    fun routeBatchConversion(
+        inputUris: List<Uri>,
+        type: ConversionType,
+        highQuality: Boolean = true,
+    ): Flow<ConversionStatus> {
+        if (inputUris.size == 1) return routeConversion(inputUris.first(), type, highQuality)
+
+        val tempFiles = mutableListOf<File>()
+        return flow {
+            try {
+                val inputMime = context.contentResolver.getType(inputUris.first()) ?: ""
+                val tempExt = mimeToExtension(inputMime)
+
+                for ((i, uri) in inputUris.withIndex()) {
+                    val tempFile = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}_$i.$tempExt")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    tempFiles.add(tempFile)
+                }
+
+                val outputFile = buildOutputFile(type)
+                val handler: ConversionHandler = pickHandler(type)
+
+                handler.convert(
+                    inputUris = tempFiles.map { Uri.fromFile(it) },
+                    type = type,
+                    outputPath = outputFile.absolutePath,
+                    highQuality = highQuality,
+                ).collect { status ->
+                    emit(status)
+                }
+            } finally {
+                tempFiles.forEach { if (it.exists()) it.delete() }
+            }
         }
     }
 
-    private fun getFilePathFromUri(uri: Uri): String? {
-        if (uri.scheme == "file") return uri.path
-        
-        return try {
-            val file = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                file.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            file.absolutePath
-        } catch (e: Exception) {
-            null
-        }
+    private fun pickHandler(type: ConversionType): ConversionHandler = when {
+        type.name.startsWith("SVG_") -> vectorHandler
+        type == ConversionType.IMAGE_TO_PDF ||
+        type == ConversionType.PDF_TO_PNG ||
+        type == ConversionType.PDF_TO_JPG ||
+        type == ConversionType.PDF_TO_WEBP -> imageDocumentHandler
+        type == ConversionType.TEXT_TO_PDF ||
+        type == ConversionType.MD_TO_PDF ||
+        type == ConversionType.MD_TO_HTML ||
+        type == ConversionType.MD_TO_TXT ||
+        type == ConversionType.HTML_TO_PDF -> documentHandler
+        type == ConversionType.XAPK_TO_APK -> com.frerox.toolz.util.converters.ArchiveHandler(context)
+        else -> mediaHandler
+    }
+
+    private fun buildOutputFile(type: ConversionType): File {
+        val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val dir = File(File(base, "Toolz"), type.category).also { it.mkdirs() }
+        return File(dir, "TOOLZ_${System.currentTimeMillis()}.${type.extension}")
+    }
+
+    private fun mimeToExtension(mime: String): String = when {
+        mime.startsWith("video/mp4") -> "mp4"
+        mime.startsWith("video/x-matroska") -> "mkv"
+        mime.startsWith("video/quicktime") -> "mov"
+        mime.startsWith("video/x-msvideo") -> "avi"
+        mime.startsWith("video/webm") -> "webm"
+        mime.startsWith("video/") -> "mp4"
+        mime.startsWith("audio/mpeg") -> "mp3"
+        mime.startsWith("audio/wav") || mime == "audio/x-wav" -> "wav"
+        mime.startsWith("audio/aac") -> "aac"
+        mime.startsWith("audio/flac") -> "flac"
+        mime.startsWith("audio/ogg") -> "ogg"
+        mime.startsWith("audio/") -> "mp3"
+        mime == "image/jpeg" || mime == "image/jpg" -> "jpg"
+        mime == "image/png" -> "png"
+        mime == "image/webp" -> "webp"
+        mime == "image/gif" -> "gif"
+        mime == "image/bmp" -> "bmp"
+        mime == "image/heif" || mime == "image/heic" -> "heif"
+        mime == "image/svg+xml" -> "svg"
+        mime == "image/avif" -> "avif"
+        mime == "image/" -> "jpg"
+        mime == "application/pdf" -> "pdf"
+        mime == "application/xapk" || mime == "application/x-xapk" -> "xapk"
+        mime == "text/html" -> "html"
+        mime.startsWith("text/markdown") || mime == "text/x-markdown" -> "md"
+        mime.startsWith("text/") -> "txt"
+        else -> "bin"
     }
 }

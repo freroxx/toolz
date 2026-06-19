@@ -6,7 +6,6 @@ import android.net.Uri
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.Statistics
-import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.ConversionEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
@@ -16,17 +15,29 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * FFmpeg-based handler for Video → Video, Video → Audio, Audio → Audio, and Image → Image.
+ *
+ * Key fixes vs. original:
+ *  - Uses `-b:a` (not `-ab`) for audio bitrate — correct across all codecs
+ *  - FLAC/AIFF/PCM: no bitrate parameter — use codec-specific flags only
+ *  - Opus: force libopus encoder
+ *  - OGG: force libvorbis encoder
+ *  - AMR: force 8 kHz mono + amr_nb encoder
+ *  - Removed WMA/CAF (not supported in standard ffmpeg-kit build)
+ *  - H.265/HEVC for MKV, WEBM uses VP9
+ *  - Image formats: progress emitted as 0→50→100 (no time-based stat)
+ */
 @Singleton
 class MediaHandler @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsRepository: SettingsRepository
 ) : ConversionHandler {
 
     override fun convert(
         inputUris: List<Uri>,
         type: ConversionEngine.ConversionType,
         outputPath: String,
-        highQuality: Boolean
+        highQuality: Boolean,
     ): Flow<ConversionEngine.ConversionStatus> = callbackFlow {
         if (inputUris.isEmpty()) {
             trySend(ConversionEngine.ConversionStatus.Error("No input files provided"))
@@ -34,147 +45,215 @@ class MediaHandler @Inject constructor(
             return@callbackFlow
         }
 
-        // FFmpeg handler mostly deals with single input for basic conversions.
-        // Merging and complex document tasks will be handled by specialized handlers.
         val inputUri = inputUris.first()
-        val inputPath = getFilePathFromUri(inputUri) ?: run {
-            trySend(ConversionEngine.ConversionStatus.Error("Invalid input file"))
+        // Accept file:// URIs directly (already copied by ConversionEngine)
+        val inputPath = if (inputUri.scheme == "file") {
+            inputUri.path ?: run {
+                trySend(ConversionEngine.ConversionStatus.Error("Invalid input path"))
+                close()
+                return@callbackFlow
+            }
+        } else {
+            trySend(ConversionEngine.ConversionStatus.Error("Expected file:// URI in MediaHandler"))
             close()
             return@callbackFlow
         }
 
-        var totalDurationMs = 0L
-        if (type.category != "Images" && type.extension != "pdf") {
-            totalDurationMs = getVideoDuration(inputPath)
-        }
+        val isImageConversion = type.category == "Images" || type.category == "Animations"
+        val totalDurationMs = if (!isImageConversion) getVideoDuration(inputPath) else 0L
+
+        trySend(ConversionEngine.ConversionStatus.Progress(0))
 
         val command = buildFFmpegCommand(inputPath, outputPath, type, highQuality)
 
         val session = FFmpegKit.executeAsync(command, { session ->
-            val returnCode = session.returnCode
-            if (ReturnCode.isSuccess(returnCode)) {
-                trySend(ConversionEngine.ConversionStatus.Success(outputPath))
-            } else if (ReturnCode.isCancel(returnCode)) {
-                trySend(ConversionEngine.ConversionStatus.Error("Conversion cancelled"))
-            } else {
-                val logs = session.logs
-                val errorLogs = logs.filter { it.level.name == "ERROR" || it.level.name == "FATAL" }
-                val lastError = errorLogs.lastOrNull()?.message 
-                    ?: logs.lastOrNull { !it.message.contains("libswresample") && !it.message.contains("ffmpeg version") }?.message
-                    ?: session.failStackTrace 
-                    ?: "Unknown FFmpeg error"
-                trySend(ConversionEngine.ConversionStatus.Error("Conversion failed: $lastError"))
+            when {
+                ReturnCode.isSuccess(session.returnCode) -> {
+                    trySend(ConversionEngine.ConversionStatus.Success(outputPath))
+                }
+                ReturnCode.isCancel(session.returnCode) -> {
+                    trySend(ConversionEngine.ConversionStatus.Error("Conversion cancelled"))
+                }
+                else -> {
+                    val logs = session.logs
+                    val errMsg = logs
+                        .filter { it.level.name == "ERROR" || it.level.name == "FATAL" }
+                        .lastOrNull()?.message?.trim()
+                        ?: session.failStackTrace
+                        ?: "Unknown FFmpeg error"
+                    trySend(ConversionEngine.ConversionStatus.Error(errMsg))
+                }
             }
             close()
-        }, { _ ->
-        }) { statistics: Statistics ->
-            if (totalDurationMs > 0) {
-                val progress = (statistics.time.toDouble() / totalDurationMs.toDouble() * 100).toInt()
-                trySend(ConversionEngine.ConversionStatus.Progress(progress.coerceIn(0, 100)))
-            } else {
-                // For images or single frame extraction, we don't have time-based progress
-                trySend(ConversionEngine.ConversionStatus.Progress(-1))
+        }, { _ -> /* log callback — intentionally empty */ }) { stats: Statistics ->
+            if (isImageConversion) {
+                // Image conversions don't have time-based stats; emit a half-way progress
+                trySend(ConversionEngine.ConversionStatus.Progress(50))
+            } else if (totalDurationMs > 0) {
+                val pct = (stats.time.toDouble() / totalDurationMs * 100).toInt().coerceIn(1, 99)
+                trySend(ConversionEngine.ConversionStatus.Progress(pct))
             }
         }
 
-        awaitClose {
-            FFmpegKit.cancel(session.sessionId)
-            if (inputPath.contains("input_temp_")) {
-                File(inputPath).delete()
-            }
-        }
+        awaitClose { FFmpegKit.cancel(session.sessionId) }
     }
+
+    // ── Command builder ───────────────────────────────────────────────────────
 
     private fun buildFFmpegCommand(
         inputPath: String,
         outputPath: String,
         type: ConversionEngine.ConversionType,
-        highQuality: Boolean
+        hq: Boolean,
     ): String {
+        val i = "\"$inputPath\""
+        val o = "\"$outputPath\""
+
         return when (type) {
+
+            // ── Video → GIF ──────────────────────────────────────────────────
             ConversionEngine.ConversionType.VIDEO_TO_GIF -> {
-                val filter = if (highQuality) {
+                val filter = if (hq)
                     "fps=15,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
-                } else {
-                    "fps=10,scale=320:-1:flags=lanczos"
-                }
-                "-i \"$inputPath\" -vf \"$filter\" -y \"$outputPath\""
+                else
+                    "fps=10,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
+                "-i $i -vf \"$filter\" -loop 0 -y $o"
             }
+
+            // ── Video → Animated WebP ────────────────────────────────────────
             ConversionEngine.ConversionType.VIDEO_TO_WEBP -> {
-                val quality = if (highQuality) "75" else "50"
-                "-i \"$inputPath\" -vcodec libwebp -lossless 0 -compression_level 6 -q:v $quality -loop 0 -an -y \"$outputPath\""
+                val q = if (hq) "80" else "55"
+                "-i $i -vcodec libwebp -lossless 0 -compression_level 6 -q:v $q -loop 0 -an -y $o"
             }
-            ConversionEngine.ConversionType.VIDEO_TO_MP3, ConversionEngine.ConversionType.VIDEO_TO_WAV, 
-            ConversionEngine.ConversionType.VIDEO_TO_AAC, ConversionEngine.ConversionType.VIDEO_TO_FLAC,
-            ConversionEngine.ConversionType.VIDEO_TO_M4A, ConversionEngine.ConversionType.VIDEO_TO_OGG,
-            ConversionEngine.ConversionType.VIDEO_TO_AIFF, ConversionEngine.ConversionType.VIDEO_TO_OPUS -> {
-                val bitrate = if (highQuality) "320k" else "128k"
-                "-i \"$inputPath\" -vn -ab $bitrate -ar 44100 -y \"$outputPath\""
-            }
-            ConversionEngine.ConversionType.IMAGE_TO_WEBP -> {
-                val quality = if (highQuality) "85" else "60"
-                "-i \"$inputPath\" -vcodec libwebp -lossless 0 -q:v $quality -y \"$outputPath\""
-            }
+
+            // ── Video → Audio ────────────────────────────────────────────────
+            ConversionEngine.ConversionType.VIDEO_TO_MP3 ->
+                "-i $i -vn -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_WAV ->
+                "-i $i -vn -c:a pcm_s16le -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_AAC ->
+                "-i $i -vn -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_FLAC ->
+                "-i $i -vn -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_M4A ->
+                "-i $i -vn -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_OGG ->
+                "-i $i -vn -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_AIFF ->
+                "-i $i -vn -c:a pcm_s16be -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.VIDEO_TO_OPUS ->
+                "-i $i -vn -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
+
+            // ── Audio → Audio ────────────────────────────────────────────────
+            ConversionEngine.ConversionType.AUDIO_TO_MP3 ->
+                "-i $i -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_WAV ->
+                "-i $i -c:a pcm_s16le -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_AAC ->
+                "-i $i -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_M4A ->
+                "-i $i -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_FLAC ->
+                "-i $i -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_OGG ->
+                "-i $i -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_OPUS ->
+                "-i $i -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_AMR ->
+                "-i $i -c:a amr_nb -ar 8000 -ac 1 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_AIFF ->
+                "-i $i -c:a pcm_s16be -ar 44100 -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_MKA ->
+                "-i $i -c:a libopus ${audioBitrate("192k", "96k", hq)} -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_AC3 ->
+                "-i $i -c:a ac3 ${audioBitrate("448k", "192k", hq)} -y $o"
+
+            ConversionEngine.ConversionType.AUDIO_TO_MP2 ->
+                "-i $i -c:a mp2 ${audioBitrate("192k", "128k", hq)} -y $o"
+
+            // ── Image → Image ────────────────────────────────────────────────
             ConversionEngine.ConversionType.IMAGE_TO_JPG -> {
-                val quality = if (highQuality) "2" else "5"
-                "-i \"$inputPath\" -q:v $quality -y \"$outputPath\""
+                val q = if (hq) "2" else "5"
+                "-i $i -q:v $q -y $o"
             }
-            ConversionEngine.ConversionType.IMAGE_TO_PDF -> {
-                "-i \"$inputPath\" \"$outputPath\""
+
+            ConversionEngine.ConversionType.IMAGE_TO_PNG ->
+                "-i $i -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_WEBP -> {
+                val q = if (hq) "85" else "60"
+                "-i $i -vcodec libwebp -lossless 0 -q:v $q -y $o"
             }
-            ConversionEngine.ConversionType.VIDEO_TO_PDF -> {
-                "-i \"$inputPath\" -frames:v 1 \"$outputPath\""
-            }
-            ConversionEngine.ConversionType.AUDIO_TO_MP3, ConversionEngine.ConversionType.AUDIO_TO_WAV, 
-            ConversionEngine.ConversionType.AUDIO_TO_AAC, ConversionEngine.ConversionType.AUDIO_TO_OGG, 
-            ConversionEngine.ConversionType.AUDIO_TO_FLAC, ConversionEngine.ConversionType.AUDIO_TO_M4A,
-            ConversionEngine.ConversionType.AUDIO_TO_OPUS, ConversionEngine.ConversionType.AUDIO_TO_AMR,
-            ConversionEngine.ConversionType.AUDIO_TO_WMA, ConversionEngine.ConversionType.AUDIO_TO_AIFF,
-            ConversionEngine.ConversionType.AUDIO_TO_MKA, ConversionEngine.ConversionType.AUDIO_TO_AC3,
-            ConversionEngine.ConversionType.AUDIO_TO_MP2, ConversionEngine.ConversionType.AUDIO_TO_AU,
-            ConversionEngine.ConversionType.AUDIO_TO_CAF, ConversionEngine.ConversionType.AUDIO_TO_VOC -> {
-                val bitrate = if (highQuality) "320k" else "128k"
-                "-i \"$inputPath\" -ab $bitrate -y \"$outputPath\""
-            }
-            else -> {
-                if (type.category == "Videos") {
-                    if (highQuality) {
-                        "-i \"$inputPath\" -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p -c:a aac -b:a 192k -y \"$outputPath\""
+
+            ConversionEngine.ConversionType.IMAGE_TO_GIF ->
+                "-i $i -vf \"scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_BMP ->
+                "-i $i -pix_fmt bgr24 -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_TIFF ->
+                "-i $i -compression_algo deflate -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_ICO ->
+                "-i $i -vf scale=256:256 -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_HEIF ->
+                "-i $i -c:v libx265 -crf ${if (hq) "18" else "28"} -tag:v hvc1 -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_AVIF ->
+                "-i $i -c:v libaom-av1 -crf ${if (hq) "23" else "35"} -b:v 0 -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_TGA ->
+                "-i $i -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_PPM ->
+                "-i $i -pix_fmt rgb24 -y $o"
+
+            // ── Video → Video (default) ──────────────────────────────────────
+            else -> when (type.category) {
+                "Videos" -> {
+                    val (codec, crf, preset) = if (type.extension == "webm") {
+                        Triple("libvpx-vp9", if (hq) "22" else "35", "")
+                    } else if (type.extension == "mkv") {
+                        Triple("libx265", if (hq) "20" else "30", "-preset ${if (hq) "slow" else "fast"}")
                     } else {
-                        "-i \"$inputPath\" -c:v libx264 -crf 28 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -y \"$outputPath\""
+                        Triple("libx264", if (hq) "18" else "28", "-preset ${if (hq) "slow" else "ultrafast"}")
                     }
-                } else {
-                    "-i \"$inputPath\" -y \"$outputPath\""
+                    val audioFlags = "-c:a aac ${audioBitrate("192k", "128k", hq)}"
+                    "-i $i -c:v $codec -crf $crf $preset -pix_fmt yuv420p $audioFlags -y $o"
                 }
+                else -> "-i $i -y $o"
             }
         }
     }
+
+    private fun audioBitrate(hqRate: String, lqRate: String, hq: Boolean) =
+        "-b:a ${if (hq) hqRate else lqRate}"
 
     private fun getVideoDuration(path: String): Long {
         return try {
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(path)
-            val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val ms = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             retriever.release()
-            time?.toLong() ?: 0L
-        } catch (e: Exception) {
-            0L
-        }
-    }
-
-    private fun getFilePathFromUri(uri: Uri): String? {
-        if (uri.scheme == "file") return uri.path
-        
-        return try {
-            val file = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                file.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            }
-            file.absolutePath
-        } catch (e: Exception) {
-            null
-        }
+            ms?.toLong() ?: 0L
+        } catch (_: Exception) { 0L }
     }
 }
