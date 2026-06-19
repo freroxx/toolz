@@ -33,11 +33,7 @@ class FlashlightTileService : TileService() {
         }
 
         try {
-            if (!currentlyOn) {
-                startForegroundService(i)
-            } else {
-                startService(i)
-            }
+            startService(i)
         } catch (e: Exception) {
             // Fallback for older Android or restricted states
             startService(i)

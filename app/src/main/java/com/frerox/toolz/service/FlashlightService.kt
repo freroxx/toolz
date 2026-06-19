@@ -40,8 +40,10 @@ private const val NOTIF_ID   = 1001
 //     for in-process access (ViewModel, TileService).
 //  5. nudgeBrightness replaces discrete step logic; clamps to [0.10, 1.00].
 //  6. Notification channel upgraded: setSilent + FOREGROUND_SERVICE_IMMEDIATE.
-//  7. modeColor / modeLabel / modeIcon helpers centralise mode-specific theming
+//  7. modeColor / modeLabel / modeIcon helpers centralize mode-specific theming
 //     and are reused by both compact and expanded RemoteViews.
+//
+// I stopped at 7 so y'all can see the 67, yes this is childish, I know...
 // ─────────────────────────────────────────────────────────────────────────────
 
 @AndroidEntryPoint
@@ -82,12 +84,33 @@ class FlashlightService : Service() {
 
     private var persistentNotif = false
 
+    private val torchCallback = object : CameraManager.TorchCallback() {
+        override fun onTorchModeChanged(id: String, enabled: Boolean) {
+            if (id == cameraId) {
+                repository.setOn(enabled)
+                if (enabled) {
+                    runAsForeground()
+                } else {
+                    // Stop foreground but keep notification if persistent
+                    if (persistentNotif) {
+                        runAsForeground()
+                    } else {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
+                }
+                broadcastStateChange()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         _inst = this
         try {
             cam = getSystemService(CAMERA_SERVICE) as CameraManager
             findFlashCamera()
+            cam.registerTorchCallback(torchCallback, null)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize CameraManager", e)
         }
@@ -95,27 +118,16 @@ class FlashlightService : Service() {
         scope.launch { loadSettings() }
 
         scope.launch {
-            dataStore.data.map { it[booleanPreferencesKey("flashlight_notifications")] ?: false }
-                .collect { 
-                    persistentNotif = it
-                    if (it) {
-                        val notif = buildNotification()
-                        val type = if (isOn.value) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                            try {
-                                startForeground(NOTIF_ID, notif, type)
-                            } catch (e: Exception) {
-                                // Fallback to specialUse if camera fails (e.g. no permission)
-                                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-                            }
-                        } else {
-                            startForeground(NOTIF_ID, notif)
-                        }
-                    } else if (!isOn.value) {
+            dataStore.data.map { it[booleanPreferencesKey("flashlight_notifications")] ?: true }
+                .collect { enabled ->
+                    persistentNotif = enabled
+                    if (enabled || isOn.value) {
+                        runAsForeground()
+                    } else {
                         stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
+                        // Only stopSelf if we're not in the middle of an operation
+                        if (!isOn.value) stopSelf()
                     }
-                    updateNotification()
                 }
         }
     }
@@ -125,49 +137,31 @@ class FlashlightService : Service() {
         
         // Handle incoming data if any
         when (action) {
-            ACTION_BRIGHTNESS_UP, ACTION_BRIGHTNESS_DN, ACTION_CYCLE_MODE -> {
-                // Actions handled below in scope.launch
-            }
-            else -> {
-                // If it's a specific set action, we might have extras
-                intent?.let { handleExtras(it) }
-            }
+            ACTION_BRIGHTNESS_UP, ACTION_BRIGHTNESS_DN, ACTION_CYCLE_MODE -> {}
+            else -> intent?.let { handleExtras(it) }
         }
 
-        // Android 14+ requirement: startForeground must be called early.
-        val willStop = action == ACTION_STOP || (action == ACTION_TOGGLE && isOn.value)
-
-        if (!willStop) {
-            val notif = buildNotification()
-            val type = if (isOn.value || action == ACTION_TOGGLE) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                try {
-                    startForeground(NOTIF_ID, notif, type)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start foreground service with type $type, falling back to SPECIAL_USE", e)
-                    try {
-                        startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-                    } catch (e2: Exception) {
-                        Log.e(TAG, "Failed to start foreground service even with SPECIAL_USE", e2)
-                        stopSelf()
-                        return START_NOT_STICKY
-                    }
-                }
-            } else {
-                startForeground(NOTIF_ID, notif)
-            }
+        // CRITICAL: If started via startForegroundService, we MUST call startForeground 
+        // within 5 seconds. We do it immediately unless it's an explicit stop action.
+        if (action != ACTION_STOP) {
+            runAsForeground()
         }
 
         scope.launch {
             when (action) {
-                ACTION_TOGGLE        -> if (isOn.value) doStop() else doStart()
-                ACTION_STOP          -> doStop()
+                ACTION_TOGGLE        -> if (isOn.value) doStop(hard = false) else doStart()
+                ACTION_STOP          -> doStop(hard = true)
                 ACTION_BRIGHTNESS_UP -> nudge(+0.15f)
                 ACTION_BRIGHTNESS_DN -> nudge(-0.15f)
                 ACTION_CYCLE_MODE    -> cycleMode()
                 else                 -> {
                     if (!isOn.value && action != null) doStart() 
-                    else updateNotification()
+                    else if (isOn.value || persistentNotif) runAsForeground()
+                    else {
+                        // Not on, not persistent, no specific action -> don't stay alive
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
                 }
             }
         }
@@ -178,11 +172,15 @@ class FlashlightService : Service() {
         if (intent.hasExtra("brightness")) {
             val b = intent.getFloatExtra("brightness", _brightness.value)
             _brightness.value = b.coerceIn(0.1f, 1.0f)
+            repository.setBrightness(_brightness.value)
         }
         if (intent.hasExtra("mode")) {
             val mName = intent.getStringExtra("mode")
             try {
-                mName?.let { _mode.value = FlashlightMode.valueOf(it) }
+                mName?.let { 
+                    _mode.value = FlashlightMode.valueOf(it)
+                    repository.setMode(_mode.value)
+                }
             } catch (_: Exception) {}
         }
     }
@@ -191,6 +189,9 @@ class FlashlightService : Service() {
 
     override fun onDestroy() {
         _inst = null
+        try {
+            cam.unregisterTorchCallback(torchCallback)
+        } catch (_: Exception) {}
         scope.cancel()
         rawTorch(false)
         super.onDestroy()
@@ -204,8 +205,20 @@ class FlashlightService : Service() {
         }
     }
 
-    fun setBrightness(v: Float)       { _brightness.value = v.coerceIn(0.1f, 1.0f); if (isOn.value && _mode.value == FlashlightMode.STEADY) applyBrightness(); updateNotification(); broadcastStateChange() }
-    fun setMode(m: FlashlightMode)    { _mode.value = m; if (isOn.value) restartMode(); updateNotification(); broadcastStateChange() }
+    fun setBrightness(v: Float)       { 
+        _brightness.value = v.coerceIn(0.1f, 1.0f)
+        repository.setBrightness(_brightness.value)
+        if (isOn.value && _mode.value == FlashlightMode.STEADY) applyBrightness()
+        updateNotification()
+        broadcastStateChange() 
+    }
+    fun setMode(m: FlashlightMode)    { 
+        _mode.value = m
+        repository.setMode(m)
+        if (isOn.value) restartMode()
+        updateNotification()
+        broadcastStateChange() 
+    }
     fun setStrobeMs(ms: Long)         { _strobeMs.value = ms.coerceIn(40L, 500L); if (isOn.value && _mode.value == FlashlightMode.STROBE) restartMode(); broadcastStateChange() }
     fun setDiscoRange(min: Long, max: Long) { _discoRange.value = min.coerceAtMost(max) to max.coerceAtLeast(min); broadcastStateChange() }
     fun setTimer(minutes: Int) {
@@ -224,22 +237,36 @@ class FlashlightService : Service() {
 
     private fun doStart() {
         repository.setOn(true)
-        // startForeground is now handled in onStartCommand for immediate execution
+        repository.setMode(_mode.value)
+        repository.setBrightness(_brightness.value)
+        
+        runAsForeground()
         restartMode()
+        
         if (_timerMinutes.value > 0) scheduleTimer(_timerMinutes.value)
         broadcastStateChange()
     }
 
-    private fun doStop() {
+    private fun doStop(hard: Boolean = false) {
         repository.setOn(false)
         modeJob?.cancel()
         timerJob?.cancel()
         rawTorch(false)
-        if (persistentNotif) {
-            updateNotification()
-        } else {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+        
+        val stopFlag = if (hard) STOP_FOREGROUND_REMOVE else STOP_FOREGROUND_DETACH
+        
+        if (hard) {
+            stopForeground(stopFlag)
             stopSelf()
+        } else {
+            if (persistentNotif) {
+                // "Soft" stop: keep notification but make it dismissible
+                stopForeground(stopFlag)
+                updateNotification()
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
         broadcastStateChange()
     }
@@ -294,6 +321,7 @@ class FlashlightService : Service() {
 
     private fun nudge(delta: Float) {
         _brightness.value = (_brightness.value + delta).coerceIn(0.1f, 1.0f)
+        repository.setBrightness(_brightness.value)
         if (isOn.value && _mode.value == FlashlightMode.STEADY) applyBrightness()
         updateNotification()
     }
@@ -463,7 +491,7 @@ class FlashlightService : Service() {
             .setStyle(NotificationCompat.DecoratedCustomViewStyle())
             .setContentIntent(tapIntent)
             .setDeleteIntent(pi(ACTION_STOP, 99))
-            .setOngoing(true)
+            .setOngoing(on || persistentNotif)
             .setSilent(true)
             .setColorized(true)
             .setColor(modeColor())
@@ -474,9 +502,37 @@ class FlashlightService : Service() {
     }
 
     private fun updateNotification() {
-        if (!isOn.value && !persistentNotif) return
+        if (!isOn.value && !persistentNotif) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID, buildNotification())
+    }
+
+    private fun runAsForeground() {
+        val notif = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+ requires a specific type. 
+            // We use CAMERA if the torch is active, otherwise SPECIAL_USE for the persistent notification.
+            val type = if (isOn.value) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            }
+            try {
+                startForeground(NOTIF_ID, notif, type)
+            } catch (e: Exception) {
+                Log.e(TAG, "startForeground failed with type $type, falling back", e)
+                try {
+                    startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } catch (e2: Exception) {
+                    startForeground(NOTIF_ID, notif)
+                }
+            }
+        } else {
+            startForeground(NOTIF_ID, notif)
+        }
     }
 
     private fun createNotificationChannel() {

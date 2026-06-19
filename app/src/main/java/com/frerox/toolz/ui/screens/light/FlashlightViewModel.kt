@@ -125,13 +125,23 @@ class FlashlightViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             dataStore.data.first().let { prefs ->
+                val mode = FlashlightMode.valueOf(prefs[stringPreferencesKey("flashlight_mode")] ?: FlashlightMode.STEADY.name)
+                val brightness = prefs[floatPreferencesKey("flashlight_brightness")] ?: 1.0f
+                val strobeInterval = prefs[longPreferencesKey("flashlight_strobe_interval")] ?: 80L
+                val discoMin = prefs[longPreferencesKey("flashlight_disco_min")] ?: 40L
+                val discoMax = prefs[longPreferencesKey("flashlight_disco_max")] ?: 300L
+                val timer = prefs[intPreferencesKey("flashlight_timer")] ?: 0
+
                 _uiState.update { it.copy(
-                    mode = FlashlightMode.valueOf(prefs[stringPreferencesKey("flashlight_mode")] ?: FlashlightMode.STEADY.name),
-                    brightness = prefs[floatPreferencesKey("flashlight_brightness")] ?: 1.0f,
-                    strobeIntervalMs = prefs[longPreferencesKey("flashlight_strobe_interval")] ?: 80L,
-                    discoIntervalRange = (prefs[longPreferencesKey("flashlight_disco_min")] ?: 40L) to (prefs[longPreferencesKey("flashlight_disco_max")] ?: 300L),
-                    timerMinutes = prefs[intPreferencesKey("flashlight_timer")] ?: 0
+                    mode = mode,
+                    brightness = brightness,
+                    strobeIntervalMs = strobeInterval,
+                    discoIntervalRange = discoMin to discoMax,
+                    timerMinutes = timer
                 ) }
+                
+                repository.setMode(mode)
+                repository.setBrightness(brightness)
             }
         }
     }
@@ -212,7 +222,7 @@ class FlashlightViewModel @Inject constructor(
             }
         }
         if (newOn) {
-            context.startForegroundService(intent)
+            context.startService(intent)
         } else {
             context.startService(intent)
         }
@@ -221,6 +231,7 @@ class FlashlightViewModel @Inject constructor(
     fun setMode(mode: FlashlightMode) {
         _uiState.update { it.copy(mode = mode) }
         saveSetting("flashlight_mode", mode.name)
+        repository.setMode(mode)
         
         // Sync with service if it's running
         FlashlightService.getInstance()?.setMode(mode)
@@ -234,6 +245,7 @@ class FlashlightViewModel @Inject constructor(
         val valClamped = normalised.coerceIn(0.1f, 1.0f)
         _uiState.update { it.copy(brightness = valClamped) }
         saveSetting("flashlight_brightness", valClamped)
+        repository.setBrightness(valClamped)
         
         // Sync with service if it's running
         FlashlightService.getInstance()?.setBrightness(valClamped)
