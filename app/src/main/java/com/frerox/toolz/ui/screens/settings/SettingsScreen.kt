@@ -186,6 +186,20 @@ fun SettingsScreen(
         }
     }
 
+    val ringtoneLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {}
+            viewModel.setCustomRingtoneUri(it.toString())
+        }
+    }
+
 
     if (showResetDialog) {
         AlertDialog(
@@ -727,6 +741,67 @@ fun SettingsScreen(
                                     onCheckedChange = { viewModel.setKaraokeEnabled(it) }
                                 )
                             }
+
+                            if (matches(searchQuery, "ringtone", "sound", "custom", "audio", "timer", "pomodoro")) {
+                                val customRingtoneEnabled by viewModel.customRingtoneEnabled.collectAsState(initial = false)
+                                val customRingtoneUri by viewModel.customRingtoneUri.collectAsState(initial = null)
+                                
+                                SettingsToggleItem(
+                                    title = "Custom Ringtone",
+                                    subtitle = "Choose a ringtone for timer and pomodoro tools",
+                                    icon = Icons.Rounded.MusicNote,
+                                    checked = customRingtoneEnabled,
+                                    onCheckedChange = { viewModel.setCustomRingtoneEnabled(it) }
+                                )
+
+                                AnimatedVisibility(
+                                    visible = customRingtoneEnabled,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                                        ToolzExpressiveButton(
+                                            onClick = { 
+                                                vibrationManager?.vibrateClick()
+                                                ringtoneLauncher.launch(arrayOf("audio/*"))
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                                            shape = ExtraLargeExpressiveShape,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                                contentColor = MaterialTheme.colorScheme.primary
+                                            )
+                                        ) {
+                                            Icon(Icons.Rounded.AudioFile, null, modifier = Modifier.size(20.dp))
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(
+                                                if (customRingtoneUri != null) "Change Ringtone" else "Choose Audio File",
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                        
+                                        if (customRingtoneUri != null) {
+                                            Row(
+                                                modifier = Modifier.padding(top = 8.dp, start = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                Text(
+                                                    "Custom audio active",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(Modifier.weight(1f))
+                                                TextButton(onClick = { viewModel.setCustomRingtoneUri(null) }) {
+                                                    Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -777,12 +852,20 @@ fun SettingsScreen(
                         ) {
                             if (matches(searchQuery, "notification", "master", "switch", "alerts")) {
                                 SettingsToggleItem(
-                                    title = "Master Switch",
-                                    subtitle = "Enable all app alerts",
-                                    icon = Icons.Rounded.NotificationsActive,
-                                    checked = notificationsEnabled,
-                                    onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                                )
+                    title = "Master Switch",
+                    subtitle = "Enable all app alerts",
+                    icon = Icons.Rounded.NotificationsActive,
+                    checked = notificationsEnabled,
+                    onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                )
+                
+                SettingsToggleItem(
+                    title = "Step Tracker",
+                    subtitle = "Activity progress and goal alerts",
+                    icon = Icons.Rounded.DirectionsRun,
+                    checked = stepNotifications,
+                    onCheckedChange = { viewModel.setStepNotifications(it) }
+                )
 
                                 if (notificationsEnabled) {
                                     if (matches(searchQuery, "vault", "history", "save")) {
