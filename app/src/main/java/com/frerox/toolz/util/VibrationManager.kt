@@ -44,7 +44,7 @@ class VibrationManager @Inject constructor(
     private val amplitude: Int
         get() {
             val intensity = hapticIntensity.value.coerceIn(0.1f, 1f)
-            return (Math.sqrt(intensity.toDouble()) * 255).toInt().coerceIn(1, 255)
+            return (intensity * 255).toInt().coerceIn(1, 255)
         }
 
     private val isFullStrength: Boolean
