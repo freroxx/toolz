@@ -104,6 +104,9 @@ class SettingsViewModel @Inject constructor(
 
     val performanceMode = repository.performanceMode
 
+    val customRingtoneEnabled = repository.customRingtoneEnabled
+    val customRingtoneUri = repository.customRingtoneUri
+
     val converterCustomOutputPath = repository.converterCustomOutputPath
     val pdfAiOcrEnhance = repository.pdfAiOcrEnhance
 
@@ -163,6 +166,9 @@ class SettingsViewModel @Inject constructor(
     fun setKaraokeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setKaraokeEnabled(enabled) }
 
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
+
+    fun setCustomRingtoneEnabled(enabled: Boolean) = viewModelScope.launch { repository.setCustomRingtoneEnabled(enabled) }
+    fun setCustomRingtoneUri(uri: String?) = viewModelScope.launch { repository.setCustomRingtoneUri(uri) }
 
     fun setConverterCustomOutputPath(path: String?) = viewModelScope.launch { repository.setConverterCustomOutputPath(path) }
     fun setAiSearchChatEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiSearchChatEnabled(enabled) }
