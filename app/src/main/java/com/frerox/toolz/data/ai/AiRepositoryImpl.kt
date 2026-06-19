@@ -173,12 +173,14 @@ class AiRepositoryImpl @Inject constructor(
         history: List<AiMessage>,
         image: Bitmap?,
         modelOverride: String?,
+        providerOverride: String?,
+        systemPromptOverride: String?
     ): Flow<Result<ChatRepository.ChatResponseChunk>> = flow {
         if (settingsRepository.offlineModeEnabled.first()) {
             emit(Result.failure(Exception("AI Assistant is unavailable in offline mode.")))
             return@flow
         }
-        val provider = settingsManager.getAiProvider()
+        val provider = providerOverride ?: settingsManager.getAiProvider()
         val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
         val searchEnabled = settingsRepository.aiSearchEnabled.first()
@@ -206,7 +208,7 @@ class AiRepositoryImpl @Inject constructor(
                             "3. Use inline citations [Title](URL).\n" +
                             "4. List all URLs in a 'Sources' section at the end."
                             
-                        emit(callProvider(provider, keyState, modelName, enrichedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, true).let {
+                        emit(callProvider(provider, keyState, modelName, enrichedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, true, systemPromptOverride).let {
                             if (it.isSuccess) Result.success(it.getOrThrow().copy(sources = searchSources)) else it
                         })
                         return@flow
@@ -215,13 +217,13 @@ class AiRepositoryImpl @Inject constructor(
                         val failedPrompt = "User Prompt: $prompt\n\n" +
                             "(Note: A web search for '$searchQuery' was attempted but returned no results. " +
                             "Answer based on your training data, but mention that live search failed to find results.)"
-                        emit(callProvider(provider, keyState, modelName, failedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, false))
+                        emit(callProvider(provider, keyState, modelName, failedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, false, systemPromptOverride))
                         return@flow
                     }
                 }
             }
         }
-        emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image, false))
+        emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image, false, systemPromptOverride))
     }
 
     private suspend fun extractSearchQuery(apiKey: String, prompt: String): String? {
@@ -301,7 +303,7 @@ class AiRepositoryImpl @Inject constructor(
             // Filter history to avoid consecutive assistant messages (important for Claude/OpenAI)
             val filteredHistory = history.filter { !it.text.contains("dig deeper", ignoreCase = true) }
 
-            emit(callProvider(provider, keyState, modelName, finalPrompt, filteredHistory.takeLast(MAX_HISTORY_MESSAGES), null, false))
+            emit(callProvider(provider, keyState, modelName, finalPrompt, filteredHistory.takeLast(MAX_HISTORY_MESSAGES), null, false, null))
         } catch (e: Exception) {
             emit(Result.failure(e))
         }
@@ -340,7 +342,8 @@ class AiRepositoryImpl @Inject constructor(
                     prompt = "Reply with exactly: OK",
                     history = emptyList(),
                     image = null,
-                    searchEnabled = false
+                    searchEnabled = false,
+                    systemPromptOverride = null
                 )
                 result.map { it.text }
             } catch (e: Exception) {
@@ -394,18 +397,19 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> = try {
         if (keyState.value.isBlank()) {
             Result.failure(Exception("No API key available for $provider"))
         } else if (image != null && !AiSettingsHelper.supportsVision(provider, modelName)) {
             Result.failure(Exception("$provider model '$modelName' does not support vision."))
         } else {
-            executeProviderCall(provider, keyState.value, modelName, prompt, history, image, searchEnabled)
+            executeProviderCall(provider, keyState.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         }
     } catch (e: HttpException) {
         if (e.code() == 401 && (keyState.source == ApiKeySource.REMOTE || keyState.source == ApiKeySource.DEFAULT)) {
-            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image, searchEnabled)
+            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         } else {
             Result.failure(Exception(httpErrorMessage(e, provider, keyState.source)))
         }
@@ -420,14 +424,15 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> = when (provider) {
-        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image, searchEnabled)
+        "Gemini" -> callGemini(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         "ChatGPT",
         "Groq",
         "DeepSeek",
-        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled)
-        "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled)
+        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
+        "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         else -> Result.failure(Exception("Unknown provider: $provider"))
     }
 
@@ -438,7 +443,8 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
         settingsManager.invalidateRemoteKey(provider, failedKey)
         settingsManager.syncRemoteKeys(force = true)
@@ -449,7 +455,7 @@ class AiRepositoryImpl @Inject constructor(
         }
 
         return try {
-            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image, searchEnabled)
+            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -461,9 +467,14 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
-        val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey)
+        // Gemini handles system prompt separately, but for now we just use it in the context if we have to, 
+        // wait actually the java GenerativeModel might support systemInstruction, but if not we can prepend it.
+        // Actually, let's just prepend systemPromptOverride to the user prompt if it's the first message
+        // since Gemini client here doesn't have a direct system prompt in the old version.
+        val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey, systemInstruction = systemPromptOverride?.let { content { text(it) } } ?: content { text(systemPrompt) })
         val effectivePrompt = if (searchEnabled) {
             "Toolz AI. Web search context provided. Prompt: $prompt"
         } else prompt.ifBlank { if (image != null) "Describe image" else "Help me" }
@@ -472,7 +483,17 @@ class AiRepositoryImpl @Inject constructor(
             val text = generativeModel.generateContent(content { image(image); text(effectivePrompt) }).text ?: "No response"
             Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
         } else {
-            val chat = generativeModel.startChat(history.map { content(role = if (it.isUser) "user" else "model") { text(it.text) } })
+            // Merge consecutive messages of same role for Gemini
+            val mergedHistory = mutableListOf<AiMessage>()
+            history.forEach { msg ->
+                val last = mergedHistory.lastOrNull()
+                if (last != null && last.isUser == msg.isUser) {
+                    mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
+                } else {
+                    mergedHistory += msg
+                }
+            }
+            val chat = generativeModel.startChat(mergedHistory.map { content(role = if (it.isUser) "user" else "model") { text(it.text) } })
             val text = chat.sendMessage(effectivePrompt).text ?: "No response"
             Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
         }
@@ -485,13 +506,25 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
         val url = AiSettingsHelper.getChatCompletionUrl(provider) ?: return Result.failure(Exception("No URL for $provider"))
         val messages = mutableListOf<OpenAiMessage>()
-        messages += OpenAiMessage("system", MessageContent.Text(systemPrompt))
+        messages += OpenAiMessage("system", MessageContent.Text(systemPromptOverride ?: systemPrompt))
 
+        // Merge consecutive messages of same role for OpenAI compatible
+        val mergedHistory = mutableListOf<AiMessage>()
         history.forEach { msg ->
+            val last = mergedHistory.lastOrNull()
+            if (last != null && last.isUser == msg.isUser) {
+                mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
+            } else {
+                mergedHistory += msg
+            }
+        }
+
+        mergedHistory.forEach { msg ->
             messages += OpenAiMessage(role = if (msg.isUser) "user" else "assistant", content = MessageContent.Text(msg.text))
         }
 
@@ -511,7 +544,8 @@ class AiRepositoryImpl @Inject constructor(
         prompt: String,
         history: List<AiMessage>,
         image: Bitmap?,
-        searchEnabled: Boolean
+        searchEnabled: Boolean,
+        systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
         val messages = mutableListOf<ClaudeMessage>()
         history.filter { it.text.isNotBlank() }.forEach { msg ->
@@ -534,7 +568,7 @@ class AiRepositoryImpl @Inject constructor(
         }
         if (messages.firstOrNull()?.role != "user") messages.add(0, ClaudeMessage("user", "."))
 
-        val response = openAiService.getClaudeCompletion("https://api.anthropic.com/v1/messages", apiKey, "2023-06-01", ClaudeRequest(model, messages, system = systemPrompt))
+        val response = openAiService.getClaudeCompletion("https://api.anthropic.com/v1/messages", apiKey, "2023-06-01", ClaudeRequest(model, messages, system = systemPromptOverride ?: systemPrompt))
         val text = response.content.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
         return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
     }

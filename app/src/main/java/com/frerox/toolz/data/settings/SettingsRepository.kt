@@ -246,6 +246,9 @@ class SettingsRepository @Inject constructor(
     private val MEASUREMENT_SYSTEM = stringPreferencesKey("measurement_system")
     private val STEP_USE_GPS = booleanPreferencesKey("step_use_gps")
     private val STEP_BATTERY_SAVE = booleanPreferencesKey("step_battery_save")
+    private val STEP_SENSITIVITY = intPreferencesKey("step_sensitivity")
+    private val STEP_ENGINE_MODE = stringPreferencesKey("step_engine_mode")
+    private val LAST_OS_STEP_COUNT = longPreferencesKey("last_os_step_count")
 
     // Universal Pill
     private val SHOW_TOOLZ_PILL = booleanPreferencesKey("show_toolz_pill")
@@ -333,12 +336,30 @@ class SettingsRepository @Inject constructor(
 
     val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
 
-    val stepGoal: Flow<Int> = dataStore.data.map { it[STEP_GOAL] ?: 10000 }
+    val stepGoal: Flow<Int> = dataStore.data.map { 
+        try {
+            it[STEP_GOAL] ?: 10000
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("step_goal")]?.toIntOrNull()) ?: 10000
+        }
+    }
     val ringtoneUri: Flow<String?> = dataStore.data.map { it[RINGTONE_URI] ?: defaultAlarmUri }
     val themeMode: Flow<String> = dataStore.data.map { it[THEME_MODE] ?: "SYSTEM" }
     val dynamicColor: Flow<Boolean> = dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
-    val customPrimaryColor: Flow<Int?> = dataStore.data.map { it[CUSTOM_PRIMARY_COLOR] }
-    val customSecondaryColor: Flow<Int?> = dataStore.data.map { it[CUSTOM_SECONDARY_COLOR] }
+    val customPrimaryColor: Flow<Int?> = dataStore.data.map { 
+        try {
+            it[CUSTOM_PRIMARY_COLOR]
+        } catch (e: ClassCastException) {
+            it[stringPreferencesKey("custom_primary_color")]?.toIntOrNull()
+        }
+    }
+    val customSecondaryColor: Flow<Int?> = dataStore.data.map { 
+        try {
+            it[CUSTOM_SECONDARY_COLOR]
+        } catch (e: ClassCastException) {
+            it[stringPreferencesKey("custom_secondary_color")]?.toIntOrNull()
+        }
+    }
     val backgroundGradientEnabled: Flow<Boolean> = dataStore.data.map { it[BACKGROUND_GRADIENT_ENABLED] ?: true }
     val shutterSoundEnabled: Flow<Boolean> = dataStore.data.map { it[SHUTTER_SOUND_ENABLED] ?: true }
     val shutterSoundUri: Flow<String?> = dataStore.data.map { it[SHUTTER_SOUND_URI] ?: defaultShutterUri }
@@ -380,16 +401,52 @@ class SettingsRepository @Inject constructor(
     val pomodoroNotifications: Flow<Boolean> = dataStore.data.map { it[POMODORO_NOTIFICATIONS] ?: true }
     val flashlightNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[FLASHLIGHT_NOTIFICATIONS] ?: true }
     val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
-    val notificationRetentionDays: Flow<Int> = dataStore.data.map { it[NOTIFICATION_RETENTION_DAYS] ?: 30 }
+    val notificationRetentionDays: Flow<Int> = dataStore.data.map { 
+        try {
+            it[NOTIFICATION_RETENTION_DAYS] ?: 30
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("notification_retention_days")]?.toIntOrNull()) ?: 30
+        }
+    }
     
     // Pomodoro Flows
-    val pomodoroWorkMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_WORK_MINUTES] ?: 25 }
-    val pomodoroShortBreakMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_SHORT_BREAK_MINUTES] ?: 5 }
-    val pomodoroLongBreakMinutes: Flow<Int> = dataStore.data.map { it[POMODORO_LONG_BREAK_MINUTES] ?: 15 }
+    val pomodoroWorkMinutes: Flow<Int> = dataStore.data.map { 
+        try {
+            it[POMODORO_WORK_MINUTES] ?: 25
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("pomodoro_work_minutes")]?.toIntOrNull()) ?: 25
+        }
+    }
+    val pomodoroShortBreakMinutes: Flow<Int> = dataStore.data.map { 
+        try {
+            it[POMODORO_SHORT_BREAK_MINUTES] ?: 5
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("pomodoro_short_break_minutes")]?.toIntOrNull()) ?: 5
+        }
+    }
+    val pomodoroLongBreakMinutes: Flow<Int> = dataStore.data.map { 
+        try {
+            it[POMODORO_LONG_BREAK_MINUTES] ?: 15
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("pomodoro_long_break_minutes")]?.toIntOrNull()) ?: 15
+        }
+    }
     val pomodoroAutoStart: Flow<Boolean> = dataStore.data.map { it[POMODORO_AUTO_START] ?: false }
     val pomodoroKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[POMODORO_KEEP_SCREEN_ON] ?: true }
-    val pomodoroSessionsGoal: Flow<Int> = dataStore.data.map { it[POMODORO_SESSIONS_GOAL] ?: 8 }
-    val pomodoroSessionsCompleted: Flow<Int> = dataStore.data.map { it[POMODORO_SESSIONS_COMPLETED] ?: 0 }
+    val pomodoroSessionsGoal: Flow<Int> = dataStore.data.map { 
+        try {
+            it[POMODORO_SESSIONS_GOAL] ?: 8
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("pomodoro_sessions_goal")]?.toIntOrNull()) ?: 8
+        }
+    }
+    val pomodoroSessionsCompleted: Flow<Int> = dataStore.data.map { 
+        try {
+            it[POMODORO_SESSIONS_COMPLETED] ?: 0
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("pomodoro_sessions_completed")]?.toIntOrNull()) ?: 0
+        }
+    }
     val pomodoroRingtoneUri: Flow<String?> = dataStore.data.map { it[POMODORO_RINGTONE_URI] ?: defaultAlarmUri }
     val pomodoroShowQuotes: Flow<Boolean> = dataStore.data.map { it[POMODORO_SHOW_QUOTES] ?: true }
     val pomodoroQuotes: Flow<String> = dataStore.data.map { it[POMODORO_QUOTES] ?: DEFAULT_POMODORO_QUOTES }
@@ -413,8 +470,20 @@ class SettingsRepository @Inject constructor(
     }
 
     // Widget Flows
-    val widgetBackgroundColor: Flow<Int> = dataStore.data.map { it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt() }
-    val widgetAccentColor: Flow<Int> = dataStore.data.map { it[WIDGET_ACCENT_COLOR] ?: 0xFF4CAF50.toInt() }
+    val widgetBackgroundColor: Flow<Int> = dataStore.data.map { 
+        try {
+            it[WIDGET_BACKGROUND_COLOR] ?: 0xFFFFFFFF.toInt()
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("widget_background_color")]?.toIntOrNull()) ?: 0xFFFFFFFF.toInt()
+        }
+    }
+    val widgetAccentColor: Flow<Int> = dataStore.data.map { 
+        try {
+            it[WIDGET_ACCENT_COLOR] ?: 0xFF4CAF50.toInt()
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("widget_accent_color")]?.toIntOrNull()) ?: 0xFF4CAF50.toInt()
+        }
+    }
     val widgetOpacity: Flow<Float> = dataStore.data.map { it[WIDGET_OPACITY] ?: 0.9f }
 
     // New Flows
@@ -453,25 +522,53 @@ class SettingsRepository @Inject constructor(
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
 
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
-    val stepHistoryRetention: Flow<String> = dataStore.data.map { it[STEP_HISTORY_RETENTION] ?: "30d" }
+    val stepHistoryRetention: Flow<String> = dataStore.data.map { it[STEP_HISTORY_RETENTION] ?: "Forever" }
     val aiFitnessAgentEnabled: Flow<Boolean> = dataStore.data.map { it[AI_FITNESS_AGENT_ENABLED] ?: false }
     val aiFitnessAgentProvider: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_PROVIDER] ?: "Gemini" }
     val aiFitnessAgentModel: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_MODEL] ?: "gemini-3.0-flash" }
     val aiFitnessAgentTone: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_TONE] ?: "Professional" }
     val aiFitnessAgentMood: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_MOOD] ?: "Encouraging" }
     val aiFitnessAgentStyle: Flow<String> = dataStore.data.map { it[AI_FITNESS_AGENT_STYLE] ?: "Concise" }
-    val stepLengthCm: Flow<Int> = dataStore.data.map { it[STEP_LENGTH_CM] ?: 75 }
-    val caloriesPer1000Steps: Flow<Int> = dataStore.data.map { it[CALORIES_PER_1000_STEPS] ?: 40 }
+    val stepLengthCm: Flow<Int> = dataStore.data.map { 
+        try {
+            it[STEP_LENGTH_CM] ?: 75
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("step_length_cm")]?.toIntOrNull()) ?: 75
+        }
+    }
+    val caloriesPer1000Steps: Flow<Int> = dataStore.data.map { 
+        try {
+            it[CALORIES_PER_1000_STEPS] ?: 40
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("calories_per_1000_steps")]?.toIntOrNull()) ?: 40
+        }
+    }
     val measurementSystem: Flow<String> = dataStore.data.map { it[MEASUREMENT_SYSTEM] ?: "Metric" }
     val stepUseGps: Flow<Boolean> = dataStore.data.map { it[STEP_USE_GPS] ?: false }
     val stepBatterySave: Flow<Boolean> = dataStore.data.map { it[STEP_BATTERY_SAVE] ?: true }
+    val stepSensitivity: Flow<Int> = dataStore.data.map { 
+        try {
+            it[STEP_SENSITIVITY] ?: 50
+        } catch (e: ClassCastException) {
+            // Migration: handle old string value if exists
+            (it[stringPreferencesKey("step_sensitivity")]?.toIntOrNull()) ?: 50
+        }
+    }
+    val stepEngineMode: Flow<String> = dataStore.data.map { it[STEP_ENGINE_MODE] ?: "SIMPLE" }
+    val lastOsStepCount: Flow<Long> = dataStore.data.map { it[LAST_OS_STEP_COUNT] ?: -1L }
 
     val showToolzPill: Flow<Boolean> = dataStore.data.map { it[SHOW_TOOLZ_PILL] ?: true }
     val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: false }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
     val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: true }
     val backupFrequency: Flow<String> = dataStore.data.map { it[BACKUP_FREQUENCY] ?: "Never" }
-    val autoBackupCustomDays: Flow<Int> = dataStore.data.map { it[AUTO_BACKUP_CUSTOM_DAYS] ?: 1 }
+    val autoBackupCustomDays: Flow<Int> = dataStore.data.map { 
+        try {
+            it[AUTO_BACKUP_CUSTOM_DAYS] ?: 1
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("auto_backup_custom_days")]?.toIntOrNull()) ?: 1
+        }
+    }
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
@@ -482,8 +579,20 @@ class SettingsRepository @Inject constructor(
     val downloadQuality: Flow<String> = dataStore.data.map { it[DOWNLOAD_QUALITY] ?: "HIGH" }
     val catalogStreamQuality: Flow<String> = dataStore.data.map { it[CATALOG_STREAM_QUALITY] ?: "AUTO" }
 
-    val lastTimerMinutes: Flow<Int> = dataStore.data.map { it[LAST_TIMER_MINUTES] ?: 0 }
-    val lastTimerSeconds: Flow<Int> = dataStore.data.map { it[LAST_TIMER_SECONDS] ?: 0 }
+    val lastTimerMinutes: Flow<Int> = dataStore.data.map { 
+        try {
+            it[LAST_TIMER_MINUTES] ?: 0
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("last_timer_minutes")]?.toIntOrNull()) ?: 0
+        }
+    }
+    val lastTimerSeconds: Flow<Int> = dataStore.data.map { 
+        try {
+            it[LAST_TIMER_SECONDS] ?: 0
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("last_timer_seconds")]?.toIntOrNull()) ?: 0
+        }
+    }
 
     val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
     val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
@@ -691,6 +800,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setMeasurementSystem(system: String) { dataStore.edit { it[MEASUREMENT_SYSTEM] = system } }
     suspend fun setStepUseGps(enabled: Boolean) { dataStore.edit { it[STEP_USE_GPS] = enabled } }
     suspend fun setStepBatterySave(enabled: Boolean) { dataStore.edit { it[STEP_BATTERY_SAVE] = enabled } }
+    suspend fun setStepSensitivity(sensitivity: Int) { dataStore.edit { it[STEP_SENSITIVITY] = sensitivity } }
+    suspend fun setStepEngineMode(mode: String) { dataStore.edit { it[STEP_ENGINE_MODE] = mode } }
+    suspend fun setLastOsStepCount(count: Long) { dataStore.edit { it[LAST_OS_STEP_COUNT] = count } }
 
     suspend fun setShowToolzPill(enabled: Boolean) { dataStore.edit { it[SHOW_TOOLZ_PILL] = enabled } }
     suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }

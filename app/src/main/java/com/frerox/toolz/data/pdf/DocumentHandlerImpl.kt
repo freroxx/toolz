@@ -35,8 +35,70 @@ class DocumentHandlerImpl @Inject constructor(
         outputPath: String,
         highQuality: Boolean
     ): Flow<ConversionEngine.ConversionStatus> = flow {
-        // Implementation for conversion if needed, or stub for now
-        emit(ConversionEngine.ConversionStatus.Success(outputPath))
+        emit(ConversionEngine.ConversionStatus.Progress(0))
+        try {
+            if (type == ConversionEngine.ConversionType.MD_TO_HTML || type == ConversionEngine.ConversionType.MD_TO_TXT) {
+                // Combine documents
+                val combinedText = StringBuilder()
+                for (uri in inputUris) {
+                    combinedText.append(readContent(uri)).append("\n\n")
+                }
+
+                if (type == ConversionEngine.ConversionType.MD_TO_HTML) {
+                    val parser = org.commonmark.parser.Parser.builder().build()
+                    val document = parser.parse(combinedText.toString())
+                    val renderer = org.commonmark.renderer.html.HtmlRenderer.builder().build()
+                    val html = renderer.render(document)
+                    java.io.FileOutputStream(java.io.File(outputPath)).use { out ->
+                        out.write(html.toByteArray())
+                    }
+                } else {
+                    // MD to TXT: just save as text
+                    java.io.FileOutputStream(java.io.File(outputPath)).use { out ->
+                        out.write(combinedText.toString().toByteArray())
+                    }
+                }
+            } else {
+                val a4Width = 595   // A4 in points at 72dpi
+                val a4Height = 842
+                val margin = 48
+                val usableHeight = a4Height - 2 * margin
+
+                val pages = processDocuments(inputUris, usableHeight)
+                val pdfDocument = android.graphics.pdf.PdfDocument()
+
+                for ((index, pageSpanned) in pages.withIndex()) {
+                    val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(a4Width, a4Height, index + 1).create()
+                    val page = pdfDocument.startPage(pageInfo)
+                    val canvas = page.canvas
+
+                    canvas.drawColor(android.graphics.Color.WHITE)
+                    
+                    val textPaint = android.text.TextPaint().apply { textSize = 16f }
+                    val layout = android.text.StaticLayout.Builder.obtain(pageSpanned, 0, pageSpanned.length, textPaint, a4Width - 2 * margin)
+                        .setLineSpacing(0f, 1f)
+                        .build()
+
+                    canvas.save()
+                    canvas.translate(margin.toFloat(), margin.toFloat())
+                    layout.draw(canvas)
+                    canvas.restore()
+
+                    pdfDocument.finishPage(page)
+                    emit(ConversionEngine.ConversionStatus.Progress(((index + 1).toFloat() / pages.size * 100).toInt()))
+                }
+
+                java.io.FileOutputStream(java.io.File(outputPath)).use { out ->
+                    pdfDocument.writeTo(out)
+                }
+                pdfDocument.close()
+            }
+            
+            emit(ConversionEngine.ConversionStatus.Progress(100))
+            emit(ConversionEngine.ConversionStatus.Success(outputPath))
+        } catch (e: Exception) {
+            emit(ConversionEngine.ConversionStatus.Error("Document conversion failed: ${e.localizedMessage}"))
+        }
     }
 
     private fun readContent(uri: Uri): String {
