@@ -7,22 +7,30 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class StopwatchState(
     val elapsedTime: Long = 0L,
     val isRunning: Boolean = false,
-    val laps: List<Long> = emptyList()
+    val laps: List<Long> = emptyList(),
+    val keepScreenOn: Boolean = true,
+    val showMilliseconds: Boolean = true,
+    val lastLapAt: Long = 0L,
 )
 
 @HiltViewModel
 class StopwatchViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(StopwatchState())
@@ -36,18 +44,7 @@ class StopwatchViewModel @Inject constructor(
             val binder = service as ToolService.LocalBinder
             toolService = binder.getService()
             isBound = true
-            
-            viewModelScope.launch {
-                toolService?.stopwatchTime?.collect { time ->
-                    _uiState.update { it.copy(elapsedTime = time) }
-                }
-            }
-
-            viewModelScope.launch {
-                toolService?.isStopwatchRunning?.collect { running ->
-                    _uiState.update { it.copy(isRunning = running) }
-                }
-            }
+            bindStopwatchFlows(binder.getService())
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -60,11 +57,29 @@ class StopwatchViewModel @Inject constructor(
         Intent(context, ToolService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
+
+        viewModelScope.launch {
+            settingsRepository.stopwatchKeepScreenOn.collect { enabled ->
+                _uiState.update { it.copy(keepScreenOn = enabled) }
+            }
+        }
+    }
+
+    private fun bindStopwatchFlows(service: ToolService) {
+        viewModelScope.launch {
+            service.stopwatchTime.collect { time ->
+                _uiState.update { it.copy(elapsedTime = time.coerceAtLeast(0L)) }
+            }
+        }
+        viewModelScope.launch {
+            service.isStopwatchRunning.collect { running ->
+                _uiState.update { it.copy(isRunning = running) }
+            }
+        }
     }
 
     fun toggleStartStop() {
-        val currentlyRunning = _uiState.value.isRunning
-        if (currentlyRunning) {
+        if (_uiState.value.isRunning) {
             toolService?.pauseStopwatch()
         } else {
             toolService?.startStopwatch()
@@ -73,14 +88,34 @@ class StopwatchViewModel @Inject constructor(
 
     fun reset() {
         toolService?.resetStopwatch()
-        _uiState.update { it.copy(elapsedTime = 0L, isRunning = false, laps = emptyList()) }
+        _uiState.update {
+            it.copy(
+                elapsedTime = 0L,
+                isRunning = false,
+                laps = emptyList(),
+                lastLapAt = 0L,
+            )
+        }
     }
 
     fun lap() {
         val currentTotal = _uiState.value.elapsedTime
-        if (currentTotal > 0) {
-            _uiState.update { it.copy(laps = listOf(currentTotal) + it.laps) }
+        if (currentTotal <= 0L) return
+        _uiState.update {
+            if (it.laps.firstOrNull() == currentTotal) {
+                it
+            } else {
+                it.copy(laps = listOf(currentTotal) + it.laps, lastLapAt = currentTotal)
+            }
         }
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setStopwatchKeepScreenOn(enabled) }
+    }
+
+    fun setShowMilliseconds(enabled: Boolean) {
+        _uiState.update { it.copy(showMilliseconds = enabled) }
     }
 
     override fun onCleared() {
