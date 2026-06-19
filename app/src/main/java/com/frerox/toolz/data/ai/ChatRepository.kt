@@ -21,6 +21,8 @@ interface ChatRepository {
         history: List<AiMessage>,
         image: Bitmap? = null,
         modelOverride: String? = null,
+        providerOverride: String? = null,
+        systemPromptOverride: String? = null
     ): Flow<Result<ChatResponseChunk>>
 
     data class ChatResponseChunk(

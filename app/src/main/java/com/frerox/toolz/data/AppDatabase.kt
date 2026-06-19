@@ -69,7 +69,7 @@ import com.frerox.toolz.data.device.cache.DeviceSpecConverters
         CryptoHistoryEntry::class,
         DeviceSpecCacheEntity::class
     ], 
-    version = 42,
+    version = 43,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
