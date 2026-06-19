@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Binder
 import android.os.Build
@@ -90,6 +91,16 @@ class ToolService : Service() {
     private var pomodoroShortBreakMinutes = 5
     private var pomodoroLongBreakMinutes = 15
 
+    // Alarm State
+    private var mediaPlayer: MediaPlayer? = null
+    private var volumeJob: Job? = null
+    private var isTimerGradualVolume = false
+    private var isPomodoroGradualVolume = false
+    private var timerRingtoneUri: String? = null
+    private var pomodoroRingtoneUri: String? = null
+    private var isCustomRingtoneEnabled = false
+    private var customRingtoneUri: String? = null
+
     // Todo Session State
     private val _todoSessionTime = MutableStateFlow(0L)
     val todoSessionTime: StateFlow<Long> = _todoSessionTime
@@ -124,7 +135,9 @@ class ToolService : Service() {
             ACTION_POMODORO_STOP, ACTION_POMODORO_RESET -> resetPomodoro()
             ACTION_POMODORO_SKIP -> skipPomodoro()
             ACTION_TODO_STOP -> stopTodoSession()
+            ACTION_STOP_ALARM -> stopAlarm()
             ACTION_DISMISS_ALARM -> {
+                stopAlarm()
                 val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
                 if (notificationId != -1) {
                     val manager = getSystemService(NotificationManager::class.java)
@@ -139,6 +152,29 @@ class ToolService : Service() {
         super.onCreate()
         NotificationHelper.createAllChannels(this)
         
+        serviceScope.launch {
+            combine(
+                settingsRepository.timerGradualVolume,
+                settingsRepository.pomodoroGradualVolume,
+                settingsRepository.ringtoneUri,
+                settingsRepository.pomodoroRingtoneUri,
+                combine(settingsRepository.customRingtoneEnabled, settingsRepository.customRingtoneUri) { a, b -> a to b }
+            ) { values -> 
+                val tg = values[0] as Boolean
+                val pg = values[1] as Boolean
+                val tr = values[2] as String?
+                val pr = values[3] as String?
+                val custom = values[4] as Pair<Boolean, String?>
+                
+                isTimerGradualVolume = tg
+                isPomodoroGradualVolume = pg
+                timerRingtoneUri = tr
+                pomodoroRingtoneUri = pr
+                isCustomRingtoneEnabled = custom.first
+                customRingtoneUri = custom.second
+            }.collect {}
+        }
+
         serviceScope.launch {
             combine(
                 settingsRepository.notificationsEnabled,
@@ -159,13 +195,8 @@ class ToolService : Service() {
                 _pomodoroSessionsDone,
                 _pomodoroRemaining
             ) { running, mode, done, remaining ->
-                // Use debounce or similar if needed, but here we just want to ensure 
-                // the widget is synced whenever these change.
-                // However, we don't want to push every millisecond when running.
                 running to Triple(mode, done, remaining)
-            }.collect { (running, state) ->
-                // If running, we only push if mode or done changed, or if it just started.
-                // If not running, we push on any change.
+            }.collect { _ ->
                 pushPomodoroWidgetState()
             }
         }
@@ -310,6 +341,7 @@ class ToolService : Service() {
     private fun onTimerFinished() {
         _isTimerRunning.value = false
         _timerFinishedCount.value++
+        startAlarm(timerRingtoneUri, isTimerGradualVolume)
         showAlarmNotification("Timer", "Time is up!", NotificationHelper.ID_TIMER_ALARM, Screen.Timer.route)
         updateTimerNotification("Time is up!")
     }
@@ -352,6 +384,7 @@ class ToolService : Service() {
         
         val title   = if (completedMode == "WORK") "Work Session Finished" else "Break Finished"
         val message = if (completedMode == "WORK") "Time to take a break! 🌱" else "Ready to focus? 🔥"
+        startAlarm(pomodoroRingtoneUri, isPomodoroGradualVolume)
         showAlarmNotification(title, message, NotificationHelper.ID_POMODORO_ALARM, Screen.Pomodoro.route)
         vibrateFinish()
         _pomodoroFinishedCount.value++
@@ -456,6 +489,53 @@ class ToolService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
+    // --- Alarm Logic ---
+    private fun startAlarm(uriString: String?, gradual: Boolean) {
+        stopAlarm()
+        
+        val finalUriString = if (isCustomRingtoneEnabled && !customRingtoneUri.isNullOrBlank()) {
+            customRingtoneUri
+        } else {
+            uriString
+        }
+
+        val uri = finalUriString?.let { android.net.Uri.parse(it) } ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        
+        mediaPlayer = MediaPlayer().apply {
+            setDataSource(this@ToolService, uri)
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            isLooping = true
+            prepare()
+            if (gradual) {
+                setVolume(0f, 0f)
+                start()
+                volumeJob = serviceScope.launch {
+                    var volume = 0f
+                    while (volume < 1f) {
+                        delay(500)
+                        volume += 0.05f
+                        setVolume(volume, volume)
+                    }
+                }
+            } else {
+                start()
+            }
+        }
+    }
+
+    fun stopAlarm() {
+        volumeJob?.cancel()
+        volumeJob = null
+        mediaPlayer?.stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
+    }
+
     private fun showAlarmNotification(title: String, message: String, notificationId: Int, route: String) {
         val intent = Intent(this, MainActivity::class.java).apply { 
             putExtra(MainActivity.EXTRA_NAVIGATE_TO, route)
@@ -475,10 +555,11 @@ class ToolService : Service() {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(pendingIntent, true)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissPI)
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+            .setSound(null) // Handled by MediaPlayer
 
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(notificationId, builder.build())
@@ -672,6 +753,7 @@ class ToolService : Service() {
         const val ACTION_POMODORO_RESET  = "com.frerox.toolz.POMO_RESET"
         const val ACTION_TODO_STOP       = "com.frerox.toolz.TODO_STOP"
         const val ACTION_DISMISS_ALARM   = "com.frerox.toolz.DISMISS_ALARM"
+        const val ACTION_STOP_ALARM      = "com.frerox.toolz.STOP_ALARM"
         
         const val EXTRA_NOTIFICATION_ID = "notification_id"
     }
