@@ -34,6 +34,7 @@ fun PomodoroSettingsBottomSheet(
     onAiFormat: () -> Unit,
     onResetQuotes: () -> Unit,
     onResetGoal: () -> Unit,
+    onGradualVolumeChanged: (Boolean) -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -62,7 +63,7 @@ fun PomodoroSettingsBottomSheet(
             )
 
             // Durations
-            SettingsSection(title = "Durations", icon = Icons.Rounded.Timer, activeColor = activeColor) {
+            PomodoroSettingsSection(title = "Durations", icon = Icons.Rounded.Timer, activeColor = activeColor) {
                 DurationSlider(
                     label = "Focus",
                     value = state.workMinutes,
@@ -87,7 +88,7 @@ fun PomodoroSettingsBottomSheet(
             }
 
             // Options
-            SettingsSection(title = "Options", icon = Icons.Rounded.Settings, activeColor = activeColor) {
+            PomodoroSettingsSection(title = "Options", icon = Icons.Rounded.Settings, activeColor = activeColor) {
                 PreferenceRow(
                     title = "Sessions Goal",
                     subtitle = "${state.sessionsGoal} focus sessions",
@@ -121,6 +122,12 @@ fun PomodoroSettingsBottomSheet(
                     onCheckedChange = onKeepScreenOnChanged
                 )
 
+                ToggleRow(
+                    title = "Gradual Volume",
+                    checked = state.gradualVolume,
+                    onCheckedChange = onGradualVolumeChanged
+                )
+
                 ToolzOutlinedExpressiveButton(
                     onClick = onResetGoal,
                     modifier = Modifier.fillMaxWidth(),
@@ -132,7 +139,7 @@ fun PomodoroSettingsBottomSheet(
             }
 
             // Quotes
-            SettingsSection(title = "Focus Insights", icon = Icons.Rounded.FormatQuote, activeColor = activeColor) {
+            PomodoroSettingsSection(title = "Focus Insights", icon = Icons.Rounded.FormatQuote, activeColor = activeColor) {
                 ToggleRow(
                     title = "Show Quotes",
                     checked = state.showQuotes,
@@ -194,7 +201,7 @@ fun PomodoroSettingsBottomSheet(
 }
 
 @Composable
-private fun SettingsSection(
+private fun PomodoroSettingsSection(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     activeColor: Color,

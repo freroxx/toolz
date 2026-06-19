@@ -70,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +82,7 @@ import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveSlider
+import com.frerox.toolz.ui.components.ExpressiveStatePill
 import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
@@ -213,7 +215,8 @@ fun PomodoroScreen(
                 onQuotesChanged = viewModel::setQuotes,
                 onAiFormat = viewModel::formatQuotesWithAi,
                 onResetQuotes = viewModel::resetQuotes,
-                onResetGoal = viewModel::resetGoal
+                onResetGoal = viewModel::resetGoal,
+                onGradualVolumeChanged = viewModel::setGradualVolume
             )
         }
     }
@@ -240,12 +243,9 @@ private fun PomodoroContent(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         StaggeredEntrance(index = 0) {
-            PomodoroPhaseHeader(state = state, activeColor = activeColor)
-        }
-        StaggeredEntrance(index = 1) {
             PomodoroTimerDial(state = state, activeColor = activeColor)
         }
-        StaggeredEntrance(index = 2) {
+        StaggeredEntrance(index = 1) {
             PomodoroModeSelector(
                 selectedMode = state.mode,
                 enabled = !state.isRunning,
@@ -253,7 +253,7 @@ private fun PomodoroContent(
             )
         }
         if (state.showQuotes) {
-            StaggeredEntrance(index = 3) {
+            StaggeredEntrance(index = 2) {
                 PomodoroQuoteMarquee(quotesText = state.quotes, activeColor = activeColor)
             }
         }
@@ -264,67 +264,12 @@ private fun PomodoroContent(
         ) {
             CompletionBanner(mode = state.mode, onSilence = onSilence)
         }
-        StaggeredEntrance(index = 4) {
+        StaggeredEntrance(index = 3) {
             PomodoroStatsRow(state = state, activeColor = activeColor)
         }
     }
 }
 
-@Composable
-private fun PomodoroPhaseHeader(state: PomodoroState, activeColor: Color) {
-    ExpressiveCard(
-        onClick = {},
-        modifier = Modifier.fillMaxWidth(),
-        shape = LargeExpressiveShape,
-        containerColor = activeColor.copy(alpha = 0.14f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, activeColor.copy(alpha = 0.26f)),
-        elevation = 0.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(56.dp),
-                shape = BouncyShape,
-                color = activeColor,
-                contentColor = if (state.mode == PomodoroMode.WORK) {
-                    MaterialTheme.colorScheme.onPrimary
-                } else {
-                    MaterialTheme.colorScheme.onTertiary
-                },
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
-                        contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.mode.label,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = phaseMessage(state),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
     val rawProgress = 1f - (state.remainingTime.toFloat() / state.totalTime.toFloat())
@@ -356,8 +301,9 @@ private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
+                    val locale = LocalConfiguration.current.locales[0]
                     AnimatedContent(
-                        targetState = formatPomodoroTime(state.remainingTime),
+                        targetState = formatPomodoroTime(state.remainingTime, locale),
                         transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)).togetherWith(fadeOut()) },
                         label = "PomodoroTime",
                     ) { time ->
@@ -373,11 +319,10 @@ private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = if (state.isRunning) "In session" else "Ready",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ExpressiveStatePill(
+                        text = if (state.isRunning) state.mode.label else "Ready",
+                        icon = if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
+                        color = activeColor,
                     )
                 }
             }
@@ -586,9 +531,9 @@ private fun nextPhaseLabel(state: PomodoroState): String = when {
     else -> "Short break"
 }
 
-private fun formatPomodoroTime(timeMillis: Long): String {
+private fun formatPomodoroTime(timeMillis: Long, locale: Locale): String {
     val totalSeconds = ((timeMillis + 999) / 1000).coerceAtLeast(0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+    return String.format(locale, "%02d:%02d", minutes, seconds)
 }

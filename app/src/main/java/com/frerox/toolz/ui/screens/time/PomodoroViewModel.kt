@@ -58,6 +58,7 @@ data class PomodoroState(
     val quotes: String = "",
     val isFormattingQuotes: Boolean = false,
     val offlineMode: Boolean = false,
+    val gradualVolume: Boolean = false,
 )
 
 @HiltViewModel
@@ -109,7 +110,8 @@ class PomodoroViewModel @Inject constructor(
                 settingsRepository.pomodoroRingtoneUri,
                 settingsRepository.pomodoroShowQuotes,
                 settingsRepository.pomodoroQuotes,
-                settingsRepository.offlineModeEnabled
+                settingsRepository.offlineModeEnabled,
+                settingsRepository.pomodoroGradualVolume
             ) { values ->
                 PomodoroSettings(
                     workMinutes = values[0] as Int,
@@ -121,7 +123,8 @@ class PomodoroViewModel @Inject constructor(
                     ringtoneUri = values[6] as String?,
                     showQuotes = values[7] as Boolean,
                     quotes = values[8] as String,
-                    offlineMode = values[9] as Boolean
+                    offlineMode = values[9] as Boolean,
+                    gradualVolume = values[10] as Boolean
                 )
             }.collect { settings ->
                 _uiState.update { it.copy(
@@ -135,6 +138,7 @@ class PomodoroViewModel @Inject constructor(
                     showQuotes = settings.showQuotes,
                     quotes = settings.quotes,
                     offlineMode = settings.offlineMode,
+                    gradualVolume = settings.gradualVolume,
                 ) }
             }
         }
@@ -150,7 +154,8 @@ class PomodoroViewModel @Inject constructor(
         val ringtoneUri: String?,
         val showQuotes: Boolean,
         val quotes: String,
-        val offlineMode: Boolean
+        val offlineMode: Boolean,
+        val gradualVolume: Boolean
     )
 
     private fun bindPomodoroFlows(service: ToolService) {
@@ -254,6 +259,10 @@ class PomodoroViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setPomodoroKeepScreenOn(enabled) }
     }
 
+    fun setGradualVolume(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setPomodoroGradualVolume(enabled) }
+    }
+
     fun setRingtoneUri(uri: String) {
         viewModelScope.launch { settingsRepository.setPomodoroRingtoneUri(uri) }
     }
@@ -318,38 +327,12 @@ class PomodoroViewModel @Inject constructor(
         }
     }
 
-    private fun playRingtone() {
-        viewModelScope.launch {
-            val ringtoneUriStr = _uiState.value.ringtoneUri
-            val uri = if (!ringtoneUriStr.isNullOrEmpty()) {
-                Uri.parse(ringtoneUriStr)
-            } else {
-                Settings.System.DEFAULT_NOTIFICATION_URI
-            }
-
-            try {
-                mediaPlayer?.release()
-                mediaPlayer = MediaPlayer().apply {
-                    setDataSource(context, uri)
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .build()
-                    )
-                    prepare()
-                    start()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+    fun playRingtone() {
+        // Handled by ToolService
     }
 
     fun stopRingtone() {
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
-        mediaPlayer = null
+        toolService?.stopAlarm()
         _uiState.update { it.copy(isFinished = false) }
     }
 
