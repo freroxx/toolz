@@ -41,6 +41,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import java.util.*
+import kotlin.math.abs
 import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -92,19 +93,18 @@ fun AltimeterScreen(
                     }
                 },
                 actions = {
-                    ExpressiveFabMenu(
-                        items = listOf(
-                            Triple("Reset Peak", Icons.Rounded.History, { 
-                                vibrationManager?.vibrateSuccess()
-                                viewModel.resetStats() 
-                            }),
-                            Triple("Pressure Unit", Icons.Rounded.Compress, {
-                                vibrationManager?.vibrateClick()
-                                viewModel.togglePressureUnit()
-                            })
-                        ),
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateSuccess()
+                            viewModel.resetStats()
+                        },
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.History, contentDescription = "Reset Peak")
+                    }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
@@ -119,12 +119,20 @@ fun AltimeterScreen(
                     FilledIconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
-                            viewModel.toggleUnit()
+                            if (state.referenceAltitudeMeters == null) viewModel.setReferenceAltitude() else viewModel.clearReferenceAltitude()
                         },
                         modifier = Modifier.size(48.dp),
-                        shape = SmallExpressiveShape
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (state.referenceAltitudeMeters != null) 
+                                MaterialTheme.colorScheme.tertiary 
+                            else MaterialTheme.colorScheme.primaryContainer
+                        )
                     ) {
-                        Icon(Icons.Rounded.Height, contentDescription = "Toggle Units")
+                        Icon(
+                            if (state.referenceAltitudeMeters == null) Icons.Rounded.AddLocationAlt else Icons.Rounded.LocationDisabled, 
+                            contentDescription = "Toggle Reference"
+                        )
                     }
                 },
                 trailingContent = {
@@ -141,8 +149,16 @@ fun AltimeterScreen(
                             vibrationManager?.vibrateClick()
                             viewModel.togglePressureUnit()
                         },
-                        icon = { Icon(Icons.Rounded.FilterHdr, null) },
+                        icon = { Icon(Icons.Rounded.Compress, null) },
                         label = state.pressureUnit.label
+                    )
+                    clickableItem(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.resetStats()
+                        },
+                        icon = { Icon(Icons.Rounded.Refresh, null) },
+                        label = "RESET"
                     )
                 }
             )
@@ -168,9 +184,8 @@ fun AltimeterScreen(
                         onClick = { vibrationManager?.vibrateTick() },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(340.dp)
+                            .height(380.dp)
                             .graphicsLayer {
-                                // Subtle vertical bounce
                                 translationY = sin(animatedAltitude * 0.1f) * 2f
                             },
                         shape = SquircleShape,
@@ -186,25 +201,25 @@ fun AltimeterScreen(
                                     initialValue = 0f,
                                     targetValue = 100f,
                                     animationSpec = infiniteRepeatable(
-                                        animation = tween(10000, easing = LinearEasing),
+                                        animation = tween(15000, easing = LinearEasing),
                                         repeatMode = RepeatMode.Restart
                                     ),
                                     label = "Offset"
                                 )
                                 
                                 val primaryColor = MaterialTheme.colorScheme.primary
-                                Canvas(modifier = Modifier.fillMaxSize().alpha(0.12f)) {
+                                Canvas(modifier = Modifier.fillMaxSize().alpha(0.15f)) {
                                     val path = Path()
                                     val width = size.width
                                     val height = size.height
-                                    val spacing = 40.dp.toPx()
+                                    val spacing = 32.dp.toPx()
                                     
                                     for (i in -2..(height / spacing).toInt() + 2) {
                                         val y = i * spacing + (offset % spacing)
                                         path.reset()
                                         path.moveTo(0f, y)
                                         for (x in 0..width.toInt() step 20) {
-                                            val dy = sin((x + offset) * 0.02f) * 10f
+                                            val dy = sin((x + offset) * 0.015f) * 15f
                                             path.lineTo(x.toFloat(), y + dy)
                                         }
                                         drawPath(
@@ -217,121 +232,132 @@ fun AltimeterScreen(
                             }
 
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                                    shape = BouncyShape
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            if (state.source == "Barometer") Icons.Rounded.Compress else Icons.Rounded.GpsFixed,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                        Spacer(Modifier.width(8.dp))
+                                ExpressiveStatePill(
+                                    text = state.source,
+                                    icon = if (state.source == "Barometer") Icons.Rounded.Compress else Icons.Rounded.GpsFixed,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                Spacer(Modifier.height(32.dp))
+
+                                Box(contentAlignment = Alignment.Center) {
+                                    val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
+                                    val pulseScale by infiniteTransition.animateFloat(
+                                        initialValue = 1f,
+                                        targetValue = 1.05f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(2000, easing = FastOutSlowInEasing),
+                                            repeatMode = RepeatMode.Reverse
+                                        ),
+                                        label = "PulseScale"
+                                    )
+
+                                    ToolzWavyCircularProgressIndicator(
+                                        progress = { 
+                                            // Visualize climb rate activity
+                                            (abs(state.climbRateMps) / 2.0).toFloat().coerceIn(0.1f, 1f)
+                                        },
+                                        modifier = Modifier.size(260.dp).graphicsLayer {
+                                            scaleX = pulseScale
+                                            scaleY = pulseScale
+                                        },
+                                        color = if (state.climbRateMps >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.3f)
+                                    )
+
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
-                                            text = state.source.uppercase(),
-                                            style = MaterialTheme.typography.labelMedium,
+                                            text = String.format(Locale.getDefault(), "%.1f", animatedAltitude),
+                                            style = MaterialTheme.typography.displayLarge.copy(
+                                                fontSize = 80.sp, 
+                                                fontWeight = FontWeight.Black,
+                                                fontFamily = FontFamily.Monospace,
+                                                letterSpacing = (-4).sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "${state.unit.label} ASL",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.secondary,
                                             fontWeight = FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            letterSpacing = 1.sp
+                                            letterSpacing = 2.sp
                                         )
                                     }
                                 }
                                 
-                                Spacer(Modifier.height(32.dp))
-                                
-                                Text(
-                                    text = String.format(Locale.getDefault(), "%.1f", animatedAltitude),
-                                    style = MaterialTheme.typography.displayLarge.copy(
-                                        fontSize = 96.sp, 
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.Monospace,
-                                        letterSpacing = (-4).sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "${state.unit.label} ASL",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 2.sp
-                                )
+                                state.relativeAltitudeDisplay?.let { relative ->
+                                    Spacer(Modifier.height(16.dp))
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                                        shape = BouncyShape
+                                    ) {
+                                        Text(
+                                            text = "REL: ${if (relative >= 0) "+" else ""}${String.format("%.1f", relative)} ${state.unit.label}",
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
 
                     Spacer(Modifier.height(32.dp))
 
-                    // Wavy Elevation Consistency Indicator
-                    ToolzWavyLinearProgressIndicator(
-                        progress = { 
-                            if (state.maxAltitudeMeters != state.minAltitudeMeters) {
-                                ((state.altitudeMeters - state.minAltitudeMeters) / (state.maxAltitudeMeters - state.minAltitudeMeters)).toFloat().coerceIn(0f, 1f)
-                            } else 0.5f
-                        },
-                        modifier = Modifier.fillMaxWidth().height(16.dp).clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
-                    )
-
-                    Spacer(Modifier.height(40.dp))
-
-                    // Peak Stats with Bouncy Containers
+                    // Secondary Data Hub - Staggered Grid
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        StaggeredEntrance(index = 0) {
+                        StaggeredEntrance(index = 0, modifier = Modifier.weight(1f)) {
                             AltimeterStatCard(
-                                modifier = Modifier.weight(1f),
-                                label = "MAX ALTITUDE",
-                                value = String.format(Locale.getDefault(), "%.0f", state.maxAltitudeDisplay),
-                                unit = state.unit.label,
-                                icon = Icons.Rounded.Landscape,
-                                color = MaterialTheme.colorScheme.primary
+                                label = "CLIMB RATE",
+                                value = String.format(Locale.getDefault(), "%.2f", state.climbRateDisplay),
+                                unit = "${state.unit.label[0]}/s",
+                                icon = if (state.climbRateMps >= 0) Icons.Rounded.TrendingUp else Icons.Rounded.TrendingDown,
+                                color = if (state.climbRateMps >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                             )
                         }
-                        StaggeredEntrance(index = 1) {
+                        StaggeredEntrance(index = 1, modifier = Modifier.weight(1f)) {
                             AltimeterStatCard(
-                                modifier = Modifier.weight(1f),
-                                label = "MIN ALTITUDE",
-                                value = String.format(Locale.getDefault(), "%.0f", state.minAltitudeDisplay),
-                                unit = state.unit.label,
-                                icon = Icons.Rounded.Terrain,
-                                color = MaterialTheme.colorScheme.tertiary
+                                label = "PRESSURE",
+                                value = String.format(Locale.getDefault(), "%.1f", state.pressureDisplay),
+                                unit = state.pressureUnit.label,
+                                icon = Icons.Rounded.Compress,
+                                color = MaterialTheme.colorScheme.secondary
                             )
                         }
                     }
 
                     Spacer(Modifier.height(16.dp))
 
-                    // Secondary Data Hub
-                    StaggeredEntrance(index = 2) {
-                        ExpressiveCard(
-                            onClick = { vibrationManager?.vibrateTick() },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = SquircleShape,
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-                            elevation = 0.dp
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                InfoItemInternal("PRESSURE", "${String.format("%.1f", state.pressureDisplay)} ${state.pressureUnit.label}", Icons.Rounded.FilterHdr)
-                                VerticalDivider(modifier = Modifier.height(40.dp).width(1.5.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                InfoItemInternal("PRECISION", "±${state.accuracy.toInt()}m", Icons.Rounded.GpsFixed)
-                            }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        StaggeredEntrance(index = 2, modifier = Modifier.weight(1f)) {
+                            AltimeterStatCard(
+                                label = "MAX ALT",
+                                value = String.format(Locale.getDefault(), "%.0f", state.maxAltitudeDisplay),
+                                unit = state.unit.label,
+                                icon = Icons.Rounded.Landscape,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                        StaggeredEntrance(index = 3, modifier = Modifier.weight(1f)) {
+                            AltimeterStatCard(
+                                label = "MIN ALT",
+                                value = String.format(Locale.getDefault(), "%.0f", state.minAltitudeDisplay),
+                                unit = state.unit.label,
+                                icon = Icons.Rounded.Terrain,
+                                color = MaterialTheme.colorScheme.outline
+                            )
                         }
                     }
-                    
+
                     Spacer(Modifier.height(120.dp))
                 }
             } else {
@@ -345,41 +371,39 @@ fun AltimeterScreen(
 }
 
 @Composable
-fun AltimeterStatCard(modifier: Modifier, label: String, value: String, unit: String, icon: ImageVector, color: Color) {
+fun AltimeterStatCard(
+    modifier: Modifier = Modifier, 
+    label: String, 
+    value: String, 
+    unit: String, 
+    icon: ImageVector, 
+    color: Color
+) {
     val vibrationManager = LocalVibrationManager.current
     ExpressiveCard(
         onClick = { vibrationManager?.vibrateTick() },
         modifier = modifier,
         shape = BouncyShape,
-        containerColor = color.copy(alpha = 0.1f),
-        border = BorderStroke(1.5.dp, color.copy(alpha = 0.2f)),
+        containerColor = color.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.15f)),
         elevation = 0.dp
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Surface(
-                modifier = Modifier.size(48.dp), 
-                shape = SmallExpressiveShape, 
-                color = color.copy(alpha = 0.15f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null, modifier = Modifier.size(28.dp), tint = color)
-                }
-            }
-            Spacer(Modifier.height(24.dp))
+        Column(modifier = Modifier.padding(20.dp)) {
+            Icon(icon, null, modifier = Modifier.size(24.dp), tint = color)
+            Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     value, 
-                    style = MaterialTheme.typography.displaySmall, 
+                    style = MaterialTheme.typography.titleLarge, 
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
                     unit, 
-                    style = MaterialTheme.typography.labelMedium, 
-                    modifier = Modifier.padding(bottom = 6.dp, start = 4.dp), 
+                    style = MaterialTheme.typography.labelSmall, 
+                    modifier = Modifier.padding(bottom = 3.dp, start = 4.dp), 
                     fontWeight = FontWeight.Black, 
-                    color = color,
-                    letterSpacing = 1.sp
+                    color = color
                 )
             }
             Text(
@@ -389,26 +413,6 @@ fun AltimeterStatCard(modifier: Modifier, label: String, value: String, unit: St
                 color = color.copy(alpha = 0.7f), 
                 letterSpacing = 1.sp
             )
-        }
-    }
-}
-
-@Composable
-private fun InfoItemInternal(label: String, value: String, icon: ImageVector) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Surface(
-            modifier = Modifier.size(36.dp), 
-            shape = CircleShape, 
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Spacer(Modifier.width(16.dp))
-        Column {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
-            Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -467,7 +471,10 @@ private fun PermissionViewInternal(onClick: () -> Unit) {
 fun AltimeterPreview() {
     ToolzTheme {
         Box(Modifier.fillMaxSize().toolzBackground()) {
-            // Preview logic
+            AltimeterScreen(
+                viewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+                onBack = {}
+            )
         }
     }
 }
