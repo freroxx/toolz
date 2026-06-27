@@ -45,12 +45,17 @@ data class AltimeterState(
     val accuracy: Float = 0f,
     val unit: AltitudeUnit = AltitudeUnit.METERS,
     val pressureUnit: PressureUnit = PressureUnit.HPA,
-    val isTracking: Boolean = false
+    val isTracking: Boolean = false,
+    val referenceAltitudeMeters: Double? = null,
+    val climbRateMps: Double = 0.0,
+    val lastUpdateTime: Long = 0L
 ) {
     val altitudeDisplay: Double get() = altitudeMeters * unit.factor
     val maxAltitudeDisplay: Double get() = maxAltitudeMeters * unit.factor
     val minAltitudeDisplay: Double get() = if (minAltitudeMeters == Double.MAX_VALUE) 0.0 else minAltitudeMeters * unit.factor
     val pressureDisplay: Float get() = pressureHpa * pressureUnit.factor
+    val relativeAltitudeDisplay: Double? get() = referenceAltitudeMeters?.let { (altitudeMeters - it) * unit.factor }
+    val climbRateDisplay: Double get() = climbRateMps * unit.factor
 }
 
 @HiltViewModel
@@ -76,13 +81,23 @@ class AltimeterViewModel @Inject constructor(
     }
 
     private fun updateAltitude(altitude: Double, source: String, accuracy: Float = 0f) {
-        _uiState.update { 
-            it.copy(
+        val currentTime = System.currentTimeMillis()
+        _uiState.update { state ->
+            val timeDelta = if (state.lastUpdateTime > 0) (currentTime - state.lastUpdateTime) / 1000.0 else 0.0
+            val altitudeDelta = altitude - state.altitudeMeters
+            val rawClimbRate = if (timeDelta > 0.1) altitudeDelta / timeDelta else state.climbRateMps
+            
+            // Apply simple low-pass filter to smooth climb rate
+            val smoothedClimbRate = state.climbRateMps * 0.8 + rawClimbRate * 0.2
+
+            state.copy(
                 altitudeMeters = altitude,
                 source = source,
-                maxAltitudeMeters = maxOf(it.maxAltitudeMeters, altitude),
-                minAltitudeMeters = if (it.minAltitudeMeters == Double.MAX_VALUE) altitude else minOf(it.minAltitudeMeters, altitude),
-                accuracy = accuracy
+                maxAltitudeMeters = maxOf(state.maxAltitudeMeters, altitude),
+                minAltitudeMeters = if (state.minAltitudeMeters == Double.MAX_VALUE) altitude else minOf(state.minAltitudeMeters, altitude),
+                accuracy = accuracy,
+                climbRateMps = if (timeDelta > 0) smoothedClimbRate else 0.0,
+                lastUpdateTime = currentTime
             )
         }
     }
@@ -121,7 +136,15 @@ class AltimeterViewModel @Inject constructor(
     }
 
     fun resetStats() {
-        _uiState.update { it.copy(maxAltitudeMeters = it.altitudeMeters, minAltitudeMeters = it.altitudeMeters) }
+        _uiState.update { it.copy(maxAltitudeMeters = it.altitudeMeters, minAltitudeMeters = it.altitudeMeters, climbRateMps = 0.0) }
+    }
+
+    fun setReferenceAltitude() {
+        _uiState.update { it.copy(referenceAltitudeMeters = it.altitudeMeters) }
+    }
+
+    fun clearReferenceAltitude() {
+        _uiState.update { it.copy(referenceAltitudeMeters = null) }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
