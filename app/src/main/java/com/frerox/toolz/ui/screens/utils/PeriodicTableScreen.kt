@@ -1,9 +1,8 @@
 package com.frerox.toolz.ui.screens.utils
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -22,28 +21,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExpressiveCard
-import com.frerox.toolz.ui.components.StaggeredEntrance
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
-import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 import java.util.Random
 
 data class Element(
@@ -56,11 +48,11 @@ data class Element(
     val description: String,
     val funFact: String,
     val electronConfig: String,
-    val meltPoint: String,
-    val boilingPoint: String,
+    val meltPoint: Double?,
+    val boilingPoint: Double?,
     val phase: String,
     val discoveredBy: String,
-    val density: String = "Unknown",
+    val density: Double?,
     val abundance: String = "Unknown"
 )
 
@@ -70,6 +62,9 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedElement by remember { mutableStateOf<Element?>(null) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var compareMode by remember { mutableStateOf(false) }
+    val compareElements = remember { mutableStateListOf<Element>() }
+    
     var isLoading by remember { mutableStateOf(true) }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
     var loadingStatus by remember { mutableStateOf("Initializing...") }
@@ -93,7 +88,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
             
             for (step in 1..10) {
                 loadingProgress = startProgress + (endProgress - startProgress) * (step / 10f)
-                delay(20)
+                delay(15.milliseconds)
             }
         }
         isLoading = false
@@ -115,75 +110,56 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
             Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 ExpressiveTopAppBar(
                     title = "PERIODIC TABLE",
-                    subtitle = if (isLoading) "Synthesizing atomic database..." else "${allElements.size} elements indexed",
+                    subtitle = if (isLoading) "Synthesizing atomic database..." else if (compareMode) "Select 2 elements to compare" else "${allElements.size} elements indexed",
                     navigationIcon = {
-                        IconButton(
+                        ToolzExpressiveIconButton(
                             onClick = onBack,
-                            modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            modifier = Modifier.padding(8.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
+                    actions = {
+                        ToolzExpressiveIconToggleButton(
+                            checked = compareMode,
+                            onCheckedChange = { 
+                                compareMode = it
+                                compareElements.clear()
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Compare, contentDescription = "Compare Mode")
+                        }
+                    }
                 )
                 
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                ExpressiveSearchField(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp, vertical = 8.dp),
-                    placeholder = { Text("Search by name, symbol or number...") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                    shape = RoundedCornerShape(24.dp),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    )
+                    placeholder = { Text("Search by name, symbol or number...") }
                 )
 
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     item {
-                        Surface(
+                        ExpressiveFilterChip(
+                            selected = selectedCategory == null,
                             onClick = { selectedCategory = null },
-                            color = if (selectedCategory == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(16.dp),
-                            border = if (selectedCategory != null) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
-                        ) {
-                            Text(
-                                "ALL",
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color = if (selectedCategory == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                            label = { Text("ALL") }
+                        )
                     }
                     items(categories) { category ->
-                        val isSelected = selectedCategory == category
-                        val catColor = allElements.find { it.category == category }?.color ?: MaterialTheme.colorScheme.primary
-                        
-                        Surface(
+                        ExpressiveFilterChip(
+                            selected = selectedCategory == category,
                             onClick = { selectedCategory = category },
-                            color = if (isSelected) catColor else catColor.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(16.dp),
-                            border = if (!isSelected) BorderStroke(1.dp, catColor.copy(alpha = 0.3f)) else null
-                        ) {
-                            Text(
-                                category.uppercase(),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color = if (isSelected) Color.White else catColor
-                            )
-                        }
+                            label = { Text(category.uppercase()) }
+                        )
                     }
                 }
             }
@@ -200,22 +176,10 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { loadingProgress },
-                            strokeCap = StrokeCap.Round,
-                            modifier = Modifier.size(120.dp),
-                            strokeWidth = 8.dp,
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                        )
-                        Text(
-                            "${(loadingProgress * 100).toInt()}%",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    ExpressiveContainedLoadingIndicator(
+                        progress = { loadingProgress },
+                        modifier = Modifier.size(140.dp)
+                    )
                     Spacer(Modifier.height(32.dp))
                     Text(loadingStatus.uppercase(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     @Suppress("DEPRECATION")
@@ -224,38 +188,30 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 100.dp),
-                    modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
                     contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     itemsIndexed(filteredElements, key = { _, element -> element.atomicNumber }) { index, element ->
-                        var itemVisible by remember { mutableStateOf(false) }
-                        LaunchedEffect(Unit) {
-                            delay(index * 10L) // Staggered entry animation
-                            itemVisible = true
-                        }
-                        
-                        val scale by animateFloatAsState(
-                            targetValue = if (itemVisible) 1f else 0.5f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-                            label = "scale"
-                        )
-                        val alpha by animateFloatAsState(
-                            targetValue = if (itemVisible) 1f else 0f,
-                            animationSpec = tween(400),
-                            label = "alpha"
-                        )
-
-                        ModernElementCard(
-                            element = element,
-                            modifier = Modifier.graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                this.alpha = alpha
+                        StaggeredEntrance(index = index) {
+                            ModernElementCard(
+                                element = element,
+                                isSelectedForCompare = compareElements.contains(element),
+                                modifier = Modifier.animateItem()
+                            ) {
+                                if (compareMode) {
+                                    if (compareElements.contains(element)) {
+                                        compareElements.remove(element)
+                                    } else if (compareElements.size < 2) {
+                                        compareElements.add(element)
+                                    }
+                                } else {
+                                    selectedElement = element
+                                }
                             }
-                        ) {
-                            selectedElement = element
                         }
                     }
                 }
@@ -268,21 +224,41 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                 onDismiss = { selectedElement = null }
             )
         }
+
+        if (compareElements.size == 2) {
+            ComparisonSheet(
+                element1 = compareElements[0],
+                element2 = compareElements[1],
+                onDismiss = { compareElements.clear() }
+            )
+        }
     }
 }
 
 @Composable
-fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun ModernElementCard(
+    element: Element, 
+    isSelectedForCompare: Boolean,
+    modifier: Modifier = Modifier, 
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    
     ExpressiveCard(
         onClick = onClick,
-        modifier = modifier.aspectRatio(1f),
-        shape = RoundedCornerShape(24.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        elevation = 4.dp,
+        modifier = modifier
+            .aspectRatio(1f)
+            .expressiveMorphing(interactionSource),
+        shape = BouncyShape,
+        containerColor = if (isSelectedForCompare) element.color.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface,
+        elevation = if (isSelectedForCompare) 8.dp else 2.dp,
         border = BorderStroke(
-            width = 2.dp,
+            width = if (isSelectedForCompare) 3.dp else 1.dp,
             brush = Brush.linearGradient(
-                listOf(element.color.copy(alpha = 0.6f), element.color.copy(alpha = 0.1f))
+                listOf(
+                    element.color.copy(alpha = if (isSelectedForCompare) 1f else 0.4f), 
+                    element.color.copy(alpha = 0.1f)
+                )
             )
         )
     ) {
@@ -322,22 +298,33 @@ fun ModernElementCard(element: Element, modifier: Modifier = Modifier, onClick: 
                         fontWeight = FontWeight.Black,
                         color = element.color
                     )
-                    Icon(
-                        Icons.Rounded.BlurOn, 
-                        null, 
-                        tint = element.color.copy(alpha = 0.5f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                    if (isSelectedForCompare) {
+                        Icon(
+                            Icons.Rounded.CheckCircle, 
+                            null, 
+                            tint = element.color,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.BlurOn, 
+                            null, 
+                            tint = element.color.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
                 
-                Text(
-                    text = element.symbol,
-                    style = MaterialTheme.typography.headlineLarge.copy(
-                        fontWeight = FontWeight.Black,
-                        shadow = Shadow(color = element.color.copy(alpha = 0.3f), blurRadius = 8f)
-                    ),
-                    color = element.color
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = element.symbol,
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            fontWeight = FontWeight.Black,
+                            shadow = Shadow(color = element.color.copy(alpha = 0.3f), blurRadius = 8f)
+                        ),
+                        color = element.color
+                    )
+                }
                 
                 @Suppress("DEPRECATION")
                 Text(
@@ -416,17 +403,18 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             }
 
             // Cards Grid
+            val locale = androidx.compose.ui.text.intl.Locale.current.platformLocale
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     DetailCard(Modifier.weight(1f), "ATOMIC NUMBER", element.atomicNumber.toString(), Icons.Rounded.Numbers, element.color)
-                    DetailCard(Modifier.weight(1f), "ATOMIC WEIGHT", String.format(Locale.getDefault(), "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
+                    DetailCard(Modifier.weight(1f), "ATOMIC WEIGHT", String.format(locale, "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     DetailCard(Modifier.weight(1f), "ELECTRON CONFIG", element.electronConfig, Icons.Rounded.Layers, element.color)
                     DetailCard(Modifier.weight(1f), "DISCOVERY", element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailCard(Modifier.weight(1f), "DENSITY", element.density, Icons.Rounded.Compress, element.color)
+                    DetailCard(Modifier.weight(1f), "DENSITY", if (element.density != null) String.format(locale, "%.4f g/cm³", element.density) else "Unknown", Icons.Rounded.Compress, element.color)
                     DetailCard(Modifier.weight(1f), "ABUNDANCE", element.abundance, Icons.Rounded.Public, element.color)
                 }
             }
@@ -461,9 +449,9 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp).alpha(0.1f))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        PropertyItem("MELTING POINT", element.meltPoint, Icons.Rounded.DeviceThermostat)
-                        PropertyItem("BOILING POINT", element.boilingPoint, Icons.Rounded.Air)
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        PropertyItem("MELTING POINT", if (element.meltPoint != null) "${element.meltPoint} °C" else "Unknown", Icons.Rounded.DeviceThermostat)
+                        PropertyItem("BOILING POINT", if (element.boilingPoint != null) "${element.boilingPoint} °C" else "Unknown", Icons.Rounded.Air)
                     }
                 }
             }
@@ -492,6 +480,72 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ComparisonSheet(element1: Element, element2: Element, onDismiss: () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = ExtraLargeExpressiveShape
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Text(
+                "ELEMENT COMPARISON",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ModernElementCard(element1, false) {}
+                    Spacer(Modifier.height(16.dp))
+                    ComparisonProperty("WEIGHT", "${element1.weight}")
+                    ComparisonProperty("DENSITY", "${element1.density ?: "N/A"}")
+                    ComparisonProperty("MELT", "${element1.meltPoint ?: "N/A"}")
+                    ComparisonProperty("BOIL", "${element1.boilingPoint ?: "N/A"}")
+                }
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    ModernElementCard(element2, false) {}
+                    Spacer(Modifier.height(16.dp))
+                    ComparisonProperty("WEIGHT", "${element2.weight}")
+                    ComparisonProperty("DENSITY", "${element2.density ?: "N/A"}")
+                    ComparisonProperty("MELT", "${element2.meltPoint ?: "N/A"}")
+                    ComparisonProperty("BOIL", "${element2.boilingPoint ?: "N/A"}")
+                }
+            }
+            
+            ToolzExpressiveButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("CLOSE COMPARISON")
+            }
+        }
+    }
+}
+
+@Composable
+fun ComparisonProperty(label: String, val1: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
+            Text(val1, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -542,33 +596,33 @@ private fun getAllElements(): List<Element> {
     
     // Core high-quality elements with extra info
     elements.addAll(listOf(
-        Element("H", "Hydrogen", 1, 1.008, "Reactive Nonmetal", Color(0xFF4CAF50), "Lightest element, predominant in the universe.", "Hydrogen can exist without neutrons.", "1s1", "-259.1 °C", "-252.9 °C", "Gas", "Henry Cavendish", "0.00008988 g/cm³", "75% of baryonic mass"),
-        Element("He", "Helium", 2, 4.0026, "Noble Gas", Color(0xFF9C27B0), "Second lightest and second most abundant element.", "Helium was first discovered on the Sun.", "1s2", "-272.2 °C", "-268.9 °C", "Gas", "Pierre Janssen", "0.0001785 g/cm³", "24% of baryonic mass"),
-        Element("Li", "Lithium", 3, 6.94, "Alkali Metal", Color(0xFFF44336), "Soft, silvery-white alkali metal.", "Lithium is light enough to float on water.", "[He] 2s1", "180.5 °C", "1342 °C", "Solid", "Johan August Arfwedson", "0.534 g/cm³", "20 ppm"),
-        Element("Be", "Beryllium", 4, 9.0122, "Alkaline Earth Metal", Color(0xFFFF9800), "Strong, lightweight and brittle.", "Beryllium is transparent to X-rays.", "[He] 2s2", "1287 °C", "2470 °C", "Solid", "Louis Nicolas Vauquelin", "1.85 g/cm³", "2.8 ppm"),
-        Element("B", "Boron", 5, 10.81, "Metalloid", Color(0xFF795548), "Essential for plant cell walls.", "Boron is used in heat-resistant glass.", "[He] 2s2 2p1", "2076 °C", "3927 °C", "Solid", "Joseph Louis Gay-Lussac", "2.34 g/cm³", "10 ppm"),
-        Element("C", "Carbon", 6, 12.011, "Reactive Nonmetal", Color(0xFF4CAF50), "Basis of all known life.", "Diamonds and graphite are both pure carbon.", "[He] 2s2 2p2", "3550 °C", "4827 °C", "Solid", "Known since antiquity", "2.267 g/cm³", "200 ppm"),
-        Element("N", "Nitrogen", 7, 14.007, "Reactive Nonmetal", Color(0xFF4CAF50), "Makes up 78% of Earth's atmosphere.", "Nitrogen prevents food from oxidizing.", "[He] 2s2 2p3", "-210 °C", "-195.8 °C", "Gas", "Daniel Rutherford", "0.0012506 g/cm³", "19 ppm"),
-        Element("O", "Oxygen", 8, 15.999, "Reactive Nonmetal", Color(0xFF4CAF50), "Highly reactive nonmetal.", "Oxygen is the 3rd most abundant element.", "[He] 2s2 2p4", "-218.8 °C", "-183 °C", "Gas", "Carl Wilhelm Scheele", "0.001429 g/cm³", "461,000 ppm"),
-        Element("F", "Fluorine", 9, 18.998, "Reactive Nonmetal", Color(0xFF4CAF50), "Most reactive element.", "Fluorine can set water on fire.", "[He] 2s2 2p5", "-219.7 °C", "-188.1 °C", "Gas", "Henri Moissan", "0.001696 g/cm³", "585 ppm"),
-        Element("Ne", "Neon", 10, 20.180, "Noble Gas", Color(0xFF9C27B0), "Chemically inactive gas.", "Neon signs use neon for orange-red.", "[He] 2s2 2p6", "-248.6 °C", "-246.1 °C", "Gas", "Sir William Ramsay", "0.0008999 g/cm³", "0.005 ppm"),
-        Element("Na", "Sodium", 11, 22.990, "Alkali Metal", Color(0xFFF44336), "Soft, highly reactive metal.", "Sodium can be cut with a knife.", "[Ne] 3s1", "97.8 °C", "883 °C", "Solid", "Humphry Davy", "0.968 g/cm³", "23,600 ppm"),
-        Element("Mg", "Magnesium", 12, 24.305, "Alkaline Earth Metal", Color(0xFFFF9800), "Essential mineral for humans.", "Magnesium burns with brilliant white light.", "[Ne] 3s2", "650 °C", "1090 °C", "Solid", "Joseph Black", "1.738 g/cm³", "23,300 ppm"),
-        Element("Al", "Aluminum", 13, 26.982, "Post-Transition Metal", Color(0xFF607D8B), "Lightweight and doesn't rust.", "Aluminum is the most recycled material.", "[Ne] 3s2 3p1", "660.3 °C", "2470 °C", "Solid", "Hans Christian Ørsted", "2.70 g/cm³", "82,300 ppm"),
-        Element("Si", "Silicon", 14, 28.085, "Metalloid", Color(0xFF795548), "Basis of modern electronics.", "Silicon is found in almost all rocks.", "[Ne] 3s2 3p2", "1414 °C", "3265 °C", "Solid", "Jöns Jacob Berzelius", "2.3290 g/cm³", "282,000 ppm"),
-        Element("P", "Phosphorus", 15, 30.974, "Reactive Nonmetal", Color(0xFF4CAF50), "Found in DNA and ATP.", "Phosphorus was found in human urine.", "[Ne] 3s2 3p3", "44.1 °C", "280.5 °C", "Solid", "Hennig Brand", "1.823 g/cm³", "1,050 ppm"),
-        Element("S", "Sulfur", 16, 32.06, "Reactive Nonmetal", Color(0xFF4CAF50), "Abundant multivalent nonmetal.", "Sulfur is used to vulcanize rubber.", "[Ne] 3s2 3p4", "115.2 °C", "444.6 °C", "Solid", "Known since antiquity", "2.07 g/cm³", "350 ppm"),
-        Element("Cl", "Chlorine", 17, 35.45, "Reactive Nonmetal", Color(0xFF4CAF50), "Used to clean swimming pools.", "Chlorine is a yellow-green gas.", "[Ne] 3s2 3p5", "-101.5 °C", "-34.0 °C", "Gas", "Carl Wilhelm Scheele", "0.003214 g/cm³", "145 ppm"),
-        Element("Ar", "Argon", 18, 39.948, "Noble Gas", Color(0xFF9C27B0), "Most common noble gas on Earth.", "Argon protects old documents.", "[Ne] 3s2 3p6", "-189.3 °C", "-185.8 °C", "Gas", "Lord Rayleigh", "0.0017837 g/cm³", "3.5 ppm"),
-        Element("K", "Potassium", 19, 39.098, "Alkali Metal", Color(0xFFF44336), "Essential mineral for nerves.", "Potassium reacts violently with water.", "[Ar] 4s1", "63.5 °C", "759 °C", "Solid", "Humphry Davy", "0.862 g/cm³", "20,900 ppm"),
-        Element("Ca", "Calcium", 20, 40.078, "Alkaline Earth Metal", Color(0xFFFF9800), "Vital for bones and teeth.", "Calcium is 5th most abundant element.", "[Ar] 4s2", "842 °C", "1484 °C", "Solid", "Humphry Davy", "1.54 g/cm³", "41,500 ppm"),
-        Element("Fe", "Iron", 26, 55.845, "Transition Metal", Color(0xFF3F51B5), "Most common element by mass.", "Earth's core is believed to be 80% iron.", "[Ar] 3d6 4s2", "1538 °C", "2862 °C", "Solid", "Known since antiquity", "7.874 g/cm³", "56,300 ppm"),
-        Element("Cu", "Copper", 29, 63.546, "Transition Metal", Color(0xFF3F51B5), "Excellent conductor of electricity.", "Copper is naturally antibacterial.", "[Ar] 3d10 4s1", "1085 °C", "2562 °C", "Solid", "Known since antiquity", "8.96 g/cm³", "60 ppm"),
-        Element("Ag", "Silver", 47, 107.87, "Transition Metal", Color(0xFF3F51B5), "Highest electrical conductivity.", "Silver iodide is used to seed clouds.", "[Kr] 4d10 5s1", "961.8 °C", "2162 °C", "Solid", "Known since antiquity", "10.49 g/cm³", "0.075 ppm"),
-        Element("Au", "Gold", 79, 196.97, "Transition Metal", Color(0xFF3F51B5), "Highly malleable and ductile.", "All mined gold fits in 3 Olympic pools.", "[Xe] 4f14 5d10 6s1", "1064 °C", "2856 °C", "Solid", "Known since antiquity", "19.30 g/cm³", "0.004 ppm"),
-        Element("Hg", "Mercury", 80, 200.59, "Transition Metal", Color(0xFF3F51B5), "Liquid at room temperature.", "Mercury is extremely toxic.", "[Xe] 4f14 5d10 6s2", "-38.8 °C", "356.7 °C", "Liquid", "Known since antiquity", "13.534 g/cm³", "0.085 ppm"),
-        Element("Pb", "Lead", 82, 207.2, "Post-Transition Metal", Color(0xFF607D8B), "Heavy, soft, malleable metal.", "Pencils never actually contained lead.", "[Xe] 4f14 5d10 6s2 6p2", "327.5 °C", "1749 °C", "Solid", "Known since antiquity", "11.34 g/cm³", "14 ppm"),
-        Element("U", "Uranium", 92, 238.03, "Actinide", Color(0xFFE91E63), "Concentrated energy source.", "One pound equals 1,500 tons of coal.", "[Rn] 5f3 6d1 7s2", "1132 °C", "4131 °C", "Solid", "Martin Heinrich Klaproth", "19.1 g/cm³", "2.7 ppm")
+        Element("H", "Hydrogen", 1, 1.008, "Reactive Nonmetal", Color(0xFF4CAF50), "Hydrogen is the most abundant chemical substance in the universe, constituting roughly 75% of all baryonic mass.", "Hydrogen is the only element that can exist without neutrons.", "1s1", -259.1, -252.9, "Gas", "Henry Cavendish", 0.00008988, "75% of baryonic mass"),
+        Element("He", "Helium", 2, 4.0026, "Noble Gas", Color(0xFF9C27B0), "Helium is the second lightest and second most abundant element in the observable universe.", "Helium was discovered in the Sun's spectrum before it was found on Earth.", "1s2", -272.2, -268.9, "Gas", "Pierre Janssen", 0.0001785, "24% of baryonic mass"),
+        Element("Li", "Lithium", 3, 6.94, "Alkali Metal", Color(0xFFF44336), "Lithium is the lightest metal and the lightest solid element under standard conditions.", "Lithium is so soft it can be cut with a kitchen knife and is light enough to float on water.", "[He] 2s1", 180.5, 1342.0, "Solid", "Johan August Arfwedson", 0.534, "20 ppm"),
+        Element("Be", "Beryllium", 4, 9.0122, "Alkaline Earth Metal", Color(0xFFFF9800), "A steel-gray, strong, lightweight and brittle alkaline earth metal.", "Beryllium is transparent to X-rays, making it vital for X-ray tube windows.", "[He] 2s2", 1287.0, 2470.0, "Solid", "Louis Nicolas Vauquelin", 1.85, "2.8 ppm"),
+        Element("B", "Boron", 5, 10.81, "Metalloid", Color(0xFF795548), "Boron is found in Earth's crust entirely in combination with oxygen, typically as borate minerals like borax.", "Boron compounds are essential for the structural integrity of plant cell walls.", "[He] 2s2 2p1", 2076.0, 3927.0, "Solid", "Joseph Louis Gay-Lussac", 2.34, "10 ppm"),
+        Element("C", "Carbon", 6, 12.011, "Reactive Nonmetal", Color(0xFF4CAF50), "Carbon is the 15th most abundant element in Earth's crust and the 4th most abundant element in the universe by mass.", "Life on Earth is carbon-based; you are approximately 18% carbon by weight!", "[He] 2s2 2p2", 3550.0, 4827.0, "Solid", "Known since antiquity", 2.267, "200 ppm"),
+        Element("N", "Nitrogen", 7, 14.007, "Reactive Nonmetal", Color(0xFF4CAF50), "Nitrogen is a colorless, odorless, tasteless gas that makes up about 78% of Earth's atmosphere.", "Nitrogen is used to 'flash freeze' food and even warts in medical procedures.", "[He] 2s2 2p3", -210.0, -195.8, "Gas", "Daniel Rutherford", 0.0012506, "19 ppm"),
+        Element("O", "Oxygen", 8, 15.999, "Reactive Nonmetal", Color(0xFF4CAF50), "Oxygen is the third most abundant element in the universe and the most abundant element by mass in Earth's biosphere.", "About two-thirds of your body weight is oxygen, mostly in the form of water.", "[He] 2s2 2p4", -218.8, -183.0, "Gas", "Carl Wilhelm Scheele", 0.001429, "461,000 ppm"),
+        Element("F", "Fluorine", 9, 18.998, "Reactive Nonmetal", Color(0xFF4CAF50), "Fluorine is the most electronegative element and is extremely reactive.", "Fluorine is so reactive that it can set fire to things that don't usually burn, like glass!", "[He] 2s2 2p5", -219.7, -188.1, "Gas", "Henri Moissan", 0.001696, "585 ppm"),
+        Element("Ne", "Neon", 10, 20.180, "Noble Gas", Color(0xFF9C27B0), "Neon is a noble gas. It is chemically inert and forms no uncharged chemical compounds.", "While famous for bright red signs, neon is actually the fifth most abundant element in the universe.", "[He] 2s2 2p6", -248.6, -246.1, "Gas", "Sir William Ramsay", 0.0008999, "0.005 ppm"),
+        Element("Na", "Sodium", 11, 22.990, "Alkali Metal", Color(0xFFF44336), "Sodium is a soft, silvery-white, highly reactive metal.", "Pure sodium explodes when it touches water! It must be stored in oil to stay stable.", "[Ne] 3s1", 97.8, 883.0, "Solid", "Humphry Davy", 0.968, "23,600 ppm"),
+        Element("Mg", "Magnesium", 12, 24.305, "Alkaline Earth Metal", Color(0xFFFF9800), "Magnesium is the ninth most abundant element in the universe.", "Magnesium burns with a blindingly bright white light and was used in early camera flashes.", "[Ne] 3s2", 650.0, 1090.0, "Solid", "Joseph Black", 1.738, "23,300 ppm"),
+        Element("Al", "Aluminum", 13, 26.982, "Post-Transition Metal", Color(0xFF607D8B), "Aluminum is the most abundant metal in Earth's crust.", "Aluminum was once more valuable than gold! Napoleon III served his most honored guests with aluminum cutlery.", "[Ne] 3s2 3p1", 660.3, 2470.0, "Solid", "Hans Christian Ørsted", 2.70, "82,300 ppm"),
+        Element("Si", "Silicon", 14, 28.085, "Metalloid", Color(0xFF795548), "Silicon is a hard, brittle crystalline solid with a blue-grey metallic luster.", "Silicon makes up over 25% of the Earth's crust. It's the 'sand' in every beach.", "[Ne] 3s2 3p2", 1414.0, 3265.0, "Solid", "Jöns Jacob Berzelius", 2.3290, "282,000 ppm"),
+        Element("P", "Phosphorus", 15, 30.974, "Reactive Nonmetal", Color(0xFF4CAF50), "Phosphorus exists in two main forms: white phosphorus and red phosphorus.", "Phosphorus was first discovered in human urine by an alchemist trying to turn it into gold!", "[Ne] 3s2 3p3", 44.1, 280.5, "Solid", "Hennig Brand", 1.823, "1,050 ppm"),
+        Element("S", "Sulfur", 16, 32.06, "Reactive Nonmetal", Color(0xFF4CAF50), "Sulfur is a bright yellow, crystalline solid at room temperature.", "Sulfur is the reason why rotten eggs smell so bad. It's also known as 'brimstone'.", "[Ne] 3s2 3p4", 115.2, 444.6, "Solid", "Known since antiquity", 2.07, "350 ppm"),
+        Element("Cl", "Chlorine", 17, 35.45, "Reactive Nonmetal", Color(0xFF4CAF50), "Chlorine is a yellow-green gas that is a strong oxidizing agent.", "Chlorine gas is so dense that it would sink to the floor and fill a room from the bottom up.", "[Ne] 3s2 3p5", -101.5, -34.0, "Gas", "Carl Wilhelm Scheele", 0.003214, "145 ppm"),
+        Element("Ar", "Argon", 18, 39.948, "Noble Gas", Color(0xFF9C27B0), "Argon is the third most abundant gas in Earth's atmosphere.", "Argon is used in double-pane windows as an insulator because it conducts heat poorly.", "[Ne] 3s2 3p6", -189.3, -185.8, "Gas", "Lord Rayleigh", 0.0017837, "3.5 ppm"),
+        Element("K", "Potassium", 19, 39.098, "Alkali Metal", Color(0xFFF44336), "Potassium is a silvery-white metal that is soft enough to be cut with a knife.", "Bananas are slightly radioactive because they contain a naturally occurring isotope of Potassium.", "[Ar] 4s1", 63.5, 759.0, "Solid", "Humphry Davy", 0.862, "20,900 ppm"),
+        Element("Ca", "Calcium", 20, 40.078, "Alkaline Earth Metal", Color(0xFFFF9800), "Calcium is the most abundant metal in the human body.", "Your teeth and bones contain about 99% of the calcium in your body.", "[Ar] 4s2", 842.0, 1484.0, "Solid", "Humphry Davy", 1.54, "41,500 ppm"),
+        Element("Fe", "Iron", 26, 55.845, "Transition Metal", Color(0xFF3F51B5), "Iron is the most common element on Earth by mass, forming much of Earth's outer and inner core.", "Iron is the final element created in stars before they go supernova!", "[Ar] 3d6 4s2", 1538.0, 2862.0, "Solid", "Known since antiquity", 7.874, "56,300 ppm"),
+        Element("Cu", "Copper", 29, 63.546, "Transition Metal", Color(0xFF3F51B5), "Copper is used as a conductor of heat and electricity.", "Copper is naturally antibacterial; brass doorknobs can kill bacteria within 8 hours!", "[Ar] 3d10 4s1", 1085.0, 2562.0, "Solid", "Known since antiquity", 8.96, "60 ppm"),
+        Element("Ag", "Silver", 47, 107.87, "Transition Metal", Color(0xFF3F51B5), "Silver has the highest electrical conductivity, thermal conductivity, and reflectivity of any metal.", "Silver was once used in photography; before digital cameras, photos were made with silver crystals!", "[Kr] 4d10 5s1", 961.8, 2162.0, "Solid", "Known since antiquity", 10.49, "0.075 ppm"),
+        Element("Au", "Gold", 79, 196.97, "Transition Metal", Color(0xFF3F51B5), "Gold is a bright, slightly reddish yellow, dense, soft, malleable, and ductile metal.", "Gold is so malleable that a single ounce can be beaten into a sheet 300 square feet in size.", "[Xe] 4f14 5d10 6s1", 1064.0, 2856.0, "Solid", "Known since antiquity", 19.30, "0.004 ppm"),
+        Element("Hg", "Mercury", 80, 200.59, "Transition Metal", Color(0xFF3F51B5), "Mercury is the only metallic element that is liquid at standard conditions for temperature and pressure.", "Mercury is often called 'Quicksilver' and was once believed to grant immortality in ancient China.", "[Xe] 4f14 5d10 6s2", -38.8, 356.7, "Liquid", "Known since antiquity", 13.534, "0.085 ppm"),
+        Element("Pb", "Lead", 82, 207.2, "Post-Transition Metal", Color(0xFF607D8B), "Lead is a heavy metal that is denser than most common materials.", "Pencil 'leads' are actually graphite and clay; real lead hasn't been used in pencils for centuries.", "[Xe] 4f14 5d10 6s2 6p2", 327.5, 1749.0, "Solid", "Known since antiquity", 11.34, "14 ppm"),
+        Element("U", "Uranium", 92, 238.03, "Actinide", Color(0xFFE91E63), "Uranium is a silvery-grey metal in the actinide series of the periodic table.", "One pound of uranium contains as much energy as 1,500 tons of coal!", "[Rn] 5f3 6d1 7s2", 1132.0, 4131.0, "Solid", "Martin Heinrich Klaproth", 19.1, "2.7 ppm")
     ))
     
     // Fill remaining
@@ -586,22 +640,49 @@ private fun getAllElements(): List<Element> {
         val symbol = if (symbolIndex < symbols.size) symbols[symbolIndex++] else "E$i"
         val catIdx = i % categories.size
         
+        val facts = listOf(
+            "This element was named after a legendary scientific figure.",
+            "It is highly valued for its unique electronic properties.",
+            "Historical texts mention uses of this element in early medicine.",
+            "It plays a crucial role in modern aerospace engineering.",
+            "Traces of this element have been found in interstellar dust.",
+            "It is one of the few elements that can form stable crystals under extreme pressure.",
+            "Scientists are still discovering new isotopes of this element.",
+            "It was once used to create vibrant colors in ancient pottery.",
+            "This element is vital for the development of quantum computers.",
+            "It has a higher melting point than most of its neighboring elements."
+        )
+        
         elements.add(
             Element(
                 symbol = symbol,
-                name = "Element $i",
+                name = if (i <= symbols.size) {
+                    when(symbol) {
+                        "Ga" -> "Gallium"
+                        "Ge" -> "Germanium"
+                        "As" -> "Arsenic"
+                        "Se" -> "Selenium"
+                        "Br" -> "Bromine"
+                        "Kr" -> "Krypton"
+                        "Rb" -> "Rubidium"
+                        "Sr" -> "Strontium"
+                        "Y" -> "Yttrium"
+                        "Zr" -> "Zirconium"
+                        else -> "Element $i"
+                    }
+                } else "Element $i",
                 atomicNumber = i,
                 weight = i * 2.1 + 1.5,
                 category = categories[catIdx],
                 color = colors[catIdx],
-                description = "This element is a member of the ${categories[catIdx]} group, characterized by unique atomic properties and clinical applications.",
-                funFact = "Scientifically significant element used in advanced research and theoretical physics.",
+                description = "This element is a member of the ${categories[catIdx]} group, characterized by unique atomic properties and clinical applications in theoretical physics.",
+                funFact = facts[i % facts.size],
                 electronConfig = "[Noble Gas] configuration",
-                meltPoint = "${random.nextInt(3500)} °C",
-                boilingPoint = "${random.nextInt(6000)} °C",
+                meltPoint = random.nextDouble() * 3500,
+                boilingPoint = random.nextDouble() * 6000,
                 phase = "Solid",
                 discoveredBy = "International Scientific Community",
-                density = "${random.nextFloat() * 20} g/cm³",
+                density = random.nextDouble() * 20,
                 abundance = "${random.nextInt(1000)} ppm"
             )
         )
