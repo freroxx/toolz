@@ -31,12 +31,14 @@ data class TimerState(
     val initialTime: Long = 0L,
     val isRunning: Boolean = false,
     val isFinished: Boolean = false,
+    val isRinging: Boolean = false,
     val isPaused: Boolean = false,
     val selectedMinutes: Int = 0,
     val selectedSeconds: Int = 0,
     val repeatLastDuration: Boolean = false,
     val keepScreenOn: Boolean = true,
     val gradualVolume: Boolean = false,
+    val alarmsEnabled: Boolean = true,
 )
 
 @HiltViewModel
@@ -50,6 +52,9 @@ class TimerViewModel @Inject constructor(
 
     val hapticEnabled: StateFlow<Boolean> = settingsRepository.hapticFeedback
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    private val _timerHistory = MutableStateFlow<List<Pair<Int, Int>>>(emptyList())
+    val timerHistory: StateFlow<List<Pair<Int, Int>>> = _timerHistory.asStateFlow()
 
     private var toolService: ToolService? = null
     private var isBound = false
@@ -80,17 +85,85 @@ class TimerViewModel @Inject constructor(
                 settingsRepository.lastTimerMinutes,
                 settingsRepository.lastTimerSeconds,
                 settingsRepository.timerKeepScreenOn,
-                settingsRepository.timerGradualVolume
-            ) { min, sec, kso, gv -> 
-                Triple(min to sec, kso, gv)
-            }.collect { (dur, kso, gv) ->
-                _uiState.update { it.copy(
-                    selectedMinutes = dur.first,
-                    selectedSeconds = dur.second,
-                    keepScreenOn = kso,
-                    gradualVolume = gv
-                ) }
+                settingsRepository.timerGradualVolume,
+                settingsRepository.timerNotifications
+            ) { min, sec, kso, gv, alarms ->
+                Triple(min to sec, kso, gv) to alarms
+            }.collect { (params, alarms) ->
+                val (dur, kso, gv) = params
+                _uiState.update {
+                    it.copy(
+                        selectedMinutes = dur.first.coerceIn(0, 999),
+                        selectedSeconds = dur.second.coerceIn(0, 59),
+                        keepScreenOn = kso,
+                        gradualVolume = gv,
+                        alarmsEnabled = alarms
+                    )
+                }
             }
+        }
+
+        viewModelScope.launch {
+            combine(
+                settingsRepository.timerHistory,
+                settingsRepository.lockedTimerPresets
+            ) { historyMap, lockedList ->
+                val historyParsed = historyMap.entries.mapNotNull { (k, count) ->
+                    val parts = k.split(":", limit = 2)
+                    if (parts.size != 2) return@mapNotNull null
+                    val m = parts[0].toIntOrNull() ?: return@mapNotNull null
+                    val s = parts[1].toIntOrNull() ?: return@mapNotNull null
+                    Pair(m.coerceIn(0, 999), s.coerceIn(0, 59)) to count
+                }
+
+                val lockedParsed = lockedList.mapNotNull { k ->
+                    if (k.isBlank()) return@mapNotNull null
+                    val parts = k.split(":", limit = 2)
+                    if (parts.size != 2) return@mapNotNull null
+                    val m = parts[0].toIntOrNull() ?: return@mapNotNull null
+                    val s = parts[1].toIntOrNull() ?: return@mapNotNull null
+                    Pair(m.coerceIn(0, 999), s.coerceIn(0, 59))
+                }
+
+                // Construct top 3: prioritize locked, then history
+                val finalPresets = mutableListOf<Pair<Int, Int>>()
+                
+                // Add locked ones first
+                for (i in 0 until 3) {
+                    if (i < lockedParsed.size) {
+                        finalPresets.add(lockedParsed[i])
+                    } else {
+                        // Fill with history
+                        val historyTop = historyParsed
+                            .sortedByDescending { it.second }
+                            .map { it.first }
+                            .filter { !finalPresets.contains(it) }
+                            .firstOrNull()
+                        
+                        if (historyTop != null) {
+                            finalPresets.add(historyTop)
+                        } else {
+                            // Defaults
+                            val default = when(finalPresets.size) {
+                                0 -> 5 to 0
+                                1 -> 15 to 0
+                                else -> 30 to 0
+                            }
+                            if (!finalPresets.contains(default)) finalPresets.add(default)
+                        }
+                    }
+                }
+                
+                finalPresets.take(3)
+            }.collect { top3 ->
+                _timerHistory.value = top3
+            }
+        }
+    }
+
+    fun lockPreset(index: Int, minutes: Int, seconds: Int) {
+        viewModelScope.launch {
+            settingsRepository.updateLockedTimerPreset(index, minutes, seconds)
         }
     }
 
@@ -122,13 +195,23 @@ class TimerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            service.timerFinishedCount.collect { count ->
-                if (count > lastFinishCount) {
-                    lastFinishCount = count
-                    _uiState.update { it.copy(isRunning = false, isFinished = true, isPaused = false) }
-                    playRingtone()
+            service.isTimerRinging.collect { ringing ->
+                if (ringing) {
+                    _uiState.update {
+                        it.copy(
+                            isRunning = false,
+                            isFinished = true,
+                            isRinging = true,
+                            isPaused = false
+                        )
+                    }
                 } else {
-                    lastFinishCount = count
+                    _uiState.update {
+                        it.copy(
+                            isFinished = false,
+                            isRinging = false
+                        )
+                    }
                 }
             }
         }
@@ -139,6 +222,11 @@ class TimerViewModel @Inject constructor(
         val safeSeconds = sec.coerceIn(0, 59)
         val duration = durationMillis(safeMinutes, safeSeconds)
         val shouldStageDuration = !_uiState.value.isRunning
+
+        if (shouldStageDuration) {
+            stopRingtone()
+        }
+
         _uiState.update {
             it.copy(
                 selectedMinutes = safeMinutes,
@@ -146,12 +234,15 @@ class TimerViewModel @Inject constructor(
                 remainingTime = if (shouldStageDuration) duration else it.remainingTime,
                 initialTime = if (shouldStageDuration) duration else it.initialTime,
                 isFinished = if (shouldStageDuration) false else it.isFinished,
+                isRinging = false,
                 isPaused = shouldStageDuration && duration > 0L,
             )
         }
+
         if (shouldStageDuration) {
             toolService?.setTimerInitial(duration)
         }
+
         viewModelScope.launch {
             settingsRepository.setLastTimerDuration(safeMinutes, safeSeconds)
         }
@@ -159,17 +250,26 @@ class TimerViewModel @Inject constructor(
 
     fun setTimer(minutes: Int, seconds: Int) {
         if (_uiState.value.isRunning) return
-        val totalMillis = durationMillis(minutes, seconds)
+        val safeMin = minutes.coerceIn(0, 999)
+        val safeSec = seconds.coerceIn(0, 59)
+        val totalMillis = durationMillis(safeMin, safeSec)
         stopRingtone()
         _uiState.update {
             it.copy(
+                selectedMinutes = safeMin,
+                selectedSeconds = safeSec,
                 remainingTime = totalMillis,
                 initialTime = totalMillis,
                 isFinished = false,
+                isRinging = false,
                 isPaused = totalMillis > 0L,
             )
         }
         toolService?.setTimerInitial(totalMillis)
+        
+        viewModelScope.launch {
+            settingsRepository.setLastTimerDuration(safeMin, safeSec)
+        }
     }
 
     fun addTime(millis: Long) {
@@ -210,6 +310,7 @@ class TimerViewModel @Inject constructor(
             state.initialTime > 0L -> state.initialTime
             else -> duration
         }
+
         stopRingtone()
         toolService?.startTimer(duration, initial)
         _uiState.update {
@@ -219,7 +320,11 @@ class TimerViewModel @Inject constructor(
                 isRunning = true,
                 isPaused = false,
                 isFinished = false,
+                isRinging = false,
             )
+        }
+        viewModelScope.launch {
+            settingsRepository.recordTimerUsage(state.selectedMinutes, state.selectedSeconds)
         }
     }
 
@@ -235,6 +340,12 @@ class TimerViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setTimerGradualVolume(enabled) }
     }
 
+    fun toggleAlarms() {
+        viewModelScope.launch {
+            settingsRepository.setTimerNotifications(!_uiState.value.alarmsEnabled)
+        }
+    }
+
     fun toggleHaptic() {
         viewModelScope.launch {
             settingsRepository.setHapticFeedback(!hapticEnabled.value)
@@ -247,7 +358,7 @@ class TimerViewModel @Inject constructor(
 
     fun stopRingtone() {
         toolService?.stopAlarm()
-        _uiState.update { it.copy(isFinished = false) }
+        _uiState.update { it.copy(isFinished = false, isRinging = false) }
     }
 
     fun reset() {
@@ -259,6 +370,7 @@ class TimerViewModel @Inject constructor(
                 initialTime = 0L,
                 isRunning = false,
                 isFinished = false,
+                isRinging = false,
                 isPaused = false,
             )
         }
@@ -277,6 +389,7 @@ class TimerViewModel @Inject constructor(
                 remainingTime = initial,
                 isRunning = false,
                 isFinished = false,
+                isRinging = false,
                 isPaused = true,
             )
         }
