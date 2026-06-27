@@ -1,16 +1,11 @@
 package com.frerox.toolz.ui.screens.utils
 
-import android.content.Context
-import android.os.BatteryManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,29 +15,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExpressiveCard
-import com.frerox.toolz.ui.components.StaggeredEntrance
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BatteryInfoScreen(
     viewModel: BatteryInfoViewModel,
@@ -50,12 +38,6 @@ fun BatteryInfoScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
-
-    val animatedLevel by animateIntAsState(
-        targetValue = state.level,
-        animationSpec = tween(1500, easing = EaseOutExpo),
-        label = "BatteryLevel"
-    )
 
     DisposableEffect(Unit) {
         viewModel.startListening()
@@ -65,14 +47,32 @@ fun BatteryInfoScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "ENERGY ANALYTICS",
-                subtitle = "Hardware power distribution",
+                title = "POWER ANALYTICS",
+                subtitle = "Hardware energy distribution",
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .bouncyClick(onClick = onBack)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (state.remoteError != null) {
+                        IconButton(
+                            onClick = { viewModel.loadRemoteSpecs(forceRefresh = true) },
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
+                                .bouncyClick(onClick = { viewModel.loadRemoteSpecs(forceRefresh = true) })
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Retry", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -81,7 +81,12 @@ fun BatteryInfoScreen(
         },
         containerColor = Color.Transparent
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = padding.calculateTopPadding())
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -92,68 +97,132 @@ fun BatteryInfoScreen(
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 // Main Level Gauge
-                BatteryLevelGauge(
-                    level = animatedLevel, 
-                    isCharging = state.isCharging,
-                    performanceMode = performanceMode
-                )
+                StaggeredEntrance(index = 0) {
+                    ExpressiveBatteryGauge(
+                        level = state.level,
+                        isCharging = state.isCharging
+                    )
+                }
 
-                // Status Strip
-                ExpressiveCard(
-                    onClick = {},
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(24.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-                    elevation = 0.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
+                // Primary Status Card - FIXED SPACING
+                StaggeredEntrance(index = 1) {
+                    ExpressiveCard(
+                        onClick = {},
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+                        modifier = Modifier.fillMaxWidth(),
+                        elevation = 0.dp
                     ) {
-                        BatteryMetricShort("STATUS", if (state.isCharging) "CHARGING" else "DISCHARGING", Icons.Rounded.Power)
-                        VerticalDivider(modifier = Modifier.height(32.dp).alpha(0.2f))
-                        BatteryMetricShort("HEALTH", state.health.uppercase(), Icons.Rounded.HealthAndSafety)
-                        VerticalDivider(modifier = Modifier.height(32.dp).alpha(0.2f))
-                        BatteryMetricShort("TEMP", "${state.temperature}°C", Icons.Rounded.Thermostat)
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 20.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StatusItem(Modifier.weight(1f), "STATUS", state.status.uppercase(), if (state.isCharging) Icons.Rounded.Bolt else Icons.Rounded.Power)
+                            VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            StatusItem(Modifier.weight(1f), "HEALTH", state.health.uppercase(), Icons.Rounded.HealthAndSafety)
+                            VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            StatusItem(Modifier.weight(1f), "TEMP", "${state.temperature}°C", Icons.Rounded.Thermostat)
+                        }
+                    }
+                }
+
+                // Hardware Specifications Card - FIXED WITH LISTITEM
+                if (state.remoteSpec != null) {
+                    val batterySpecs = state.remoteSpec?.categories?.find { it.name.contains("Battery", ignoreCase = true) }
+                    if (batterySpecs != null) {
+                        StaggeredEntrance(index = 2) {
+                            ExpressiveCard(
+                                onClick = {},
+                                shape = RoundedCornerShape(32.dp),
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                                modifier = Modifier.fillMaxWidth(),
+                                elevation = 0.dp
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                                    ListItem(
+                                        headlineContent = { Text("HARDWARE SPECS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp) },
+                                        supportingContent = { Text(state.remoteSpec?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        leadingContent = {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.size(40.dp),
+                                                tonalElevation = 0.dp,
+                                                shadowElevation = 0.dp
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
+                                                }
+                                            }
+                                        },
+                                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                                    )
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    batterySpecs.items.take(4).forEach { detail ->
+                                        ListItem(
+                                            overlineContent = { Text(detail.name.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)) },
+                                            headlineContent = { Text(detail.value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.ExtraBold) },
+                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 // Grid of detailed metrics
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        BatteryDetailCard(Modifier.weight(1f), "VOLTAGE", "${state.voltage}mV", Icons.Rounded.ElectricBolt)
-                        BatteryDetailCard(Modifier.weight(1f), "CAPACITY", "${state.capacityAh.toInt()}mAh", Icons.Rounded.BatteryChargingFull)
+                        StaggeredEntrance(index = 3, modifier = Modifier.weight(1f)) {
+                            MetricCard("VOLTAGE", "${state.voltage}mV", Icons.Rounded.ElectricBolt)
+                        }
+                        StaggeredEntrance(index = 4, modifier = Modifier.weight(1f)) {
+                            MetricCard("CAPACITY", "${state.capacityMah}mAh", Icons.Rounded.BatteryChargingFull)
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        BatteryDetailCard(Modifier.weight(1f), "TECHNOLOGY", state.technology, Icons.Rounded.Memory)
-                        BatteryDetailCard(Modifier.weight(1f), "POWER SOURCE", state.powerSource, Icons.Rounded.Usb)
+                        StaggeredEntrance(index = 5, modifier = Modifier.weight(1f)) {
+                            MetricCard("TECHNOLOGY", state.technology, Icons.Rounded.Memory)
+                        }
+                        StaggeredEntrance(index = 6, modifier = Modifier.weight(1f)) {
+                            MetricCard("SOURCE", state.powerSource, Icons.Rounded.Usb)
+                        }
                     }
                 }
 
-                // Advanced Info Card
-                ExpressiveCard(
-                    onClick = {},
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                    shape = RoundedCornerShape(32.dp),
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = 0.dp
-                ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Analytics, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            @Suppress("DEPRECATION")
-                            Text("ENGINE DIAGNOSTICS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+                // Engine Diagnostics
+                StaggeredEntrance(index = 7) {
+                    ExpressiveCard(
+                        onClick = {},
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        modifier = Modifier.fillMaxWidth(),
+                        elevation = 0.dp
+                    ) {
+                        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                            ListItem(
+                                headlineContent = { Text("SYSTEM DIAGNOSTICS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp) },
+                                leadingContent = { Icon(Icons.Rounded.Analytics, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ListItem(
+                                headlineContent = { Text("Real-time Current", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                trailingContent = { Text("${state.currentNowMa} mA", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.ExtraBold) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                            )
+                            ListItem(
+                                headlineContent = { Text("Charge Counter", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                trailingContent = { Text("${state.chargeCounterUah} uAh", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.ExtraBold) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                            )
                         }
-                        Spacer(Modifier.height(16.dp))
-                        DiagnosticRow("Battery Current", "${state.currentNowMa} mA")
-                        DiagnosticRow("Charge Counter", "${state.chargeCounterUah} uAh")
-                        DiagnosticRow("Optimization", "Hardware Level")
                     }
                 }
-                
+
                 Spacer(Modifier.height(40.dp))
             }
         }
@@ -161,49 +230,59 @@ fun BatteryInfoScreen(
 }
 
 @Composable
-fun BatteryLevelGauge(level: Int, isCharging: Boolean, performanceMode: Boolean) {
-    val levelColor = when {
-        level < 20 -> Color(0xFFEF5350)
-        level < 50 -> Color(0xFFFFA726)
-        else -> Color(0xFF66BB6A)
-    }
+fun ExpressiveBatteryGauge(level: Int, isCharging: Boolean) {
+    val performanceMode = LocalPerformanceMode.current
+
+    val batteryColor by animateColorAsState(
+        targetValue = when {
+            isCharging -> Color(0xFF00E5FF) // Vivid Cyan for charging
+            level < 20 -> MaterialTheme.colorScheme.error
+            level < 45 -> Color(0xFFFFA726) // Amber/Orange
+            else -> Color(0xFF66BB6A) // Green
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "BatteryColor"
+    )
+
+    val animatedProgress by animateFloatAsState(
+        targetValue = level / 100f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "BatteryProgress"
+    )
 
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
-        // Outer Glow
         if (!performanceMode) {
-            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val glowAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.05f,
-                targetValue = 0.15f,
+            val infiniteTransition = rememberInfiniteTransition(label = "aura")
+            val auraAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.08f,
+                targetValue = 0.25f,
                 animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
-                label = "glow"
+                label = "auraAlpha"
             )
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            val auraScale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.15f,
+                animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                label = "auraScale"
+            )
+            Canvas(modifier = Modifier.fillMaxSize().graphicsLayer {
+                scaleX = if (isCharging) auraScale else 1f
+                scaleY = if (isCharging) auraScale else 1f
+            }) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(levelColor.copy(alpha = glowAlpha), Color.Transparent),
-                        radius = size.width / 1.1f
+                        colors = listOf(batteryColor.copy(alpha = if (isCharging) auraAlpha else auraAlpha / 2), Color.Transparent),
+                        radius = size.width / 1.5f
                     )
                 )
             }
         }
 
-        // Circular Gauge
-        CircularProgressIndicator(
-            progress = { 1f },
-            modifier = Modifier.fillMaxSize(0.85f),
-            strokeWidth = 16.dp,
-            strokeCap = StrokeCap.Round,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        )
-        
-        CircularProgressIndicator(
-            progress = { level / 100f },
-            modifier = Modifier.fillMaxSize(0.85f),
-            strokeWidth = 16.dp,
-            strokeCap = StrokeCap.Round,
-            color = levelColor,
-            trackColor = Color.Transparent,
+        ToolzWavyCircularProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxSize(0.88f),
+            color = batteryColor,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
         )
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -211,7 +290,7 @@ fun BatteryLevelGauge(level: Int, isCharging: Boolean, performanceMode: Boolean)
                 Text(
                     text = "$level",
                     style = MaterialTheme.typography.displayLarge.copy(
-                        fontSize = 86.sp,
+                        fontSize = 92.sp,
                         fontWeight = FontWeight.Black,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = (-4).sp
@@ -219,27 +298,21 @@ fun BatteryLevelGauge(level: Int, isCharging: Boolean, performanceMode: Boolean)
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    "%", 
-                    style = MaterialTheme.typography.headlineMedium, 
+                    "%",
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
-                    color = levelColor,
+                    color = batteryColor,
                     modifier = Modifier.padding(top = 24.dp)
                 )
             }
-            
+
             if (isCharging) {
-                val chargingTransition = rememberInfiniteTransition(label = "charging")
-                val iconScale by chargingTransition.animateFloat(
-                    initialValue = 1f,
-                    targetValue = 1.2f,
-                    animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
-                    label = "scale"
-                )
-                Icon(
-                    Icons.Rounded.Bolt,
-                    contentDescription = null,
-                    tint = Color(0xFFFBC02D),
-                    modifier = Modifier.size(32.dp).scale(if (performanceMode) 1f else iconScale)
+                Spacer(Modifier.height(4.dp))
+                ExpressiveStatePill(
+                    text = if (level >= 100) "Full" else "Charging",
+                    icon = if (level >= 100) Icons.Rounded.BatteryFull else Icons.Rounded.Bolt,
+                    color = if (level >= 100) Color(0xFF66BB6A) else Color(0xFF00E5FF),
+                    modifier = Modifier.bouncyClick(onClick = {})
                 )
             }
         }
@@ -247,51 +320,58 @@ fun BatteryLevelGauge(level: Int, isCharging: Boolean, performanceMode: Boolean)
 }
 
 @Composable
-fun BatteryMetricShort(label: String, value: String, icon: ImageVector) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
-        Spacer(Modifier.height(4.dp))
-        Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
-        @Suppress("DEPRECATION")
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+fun StatusItem(modifier: Modifier, label: String, value: String, icon: ImageVector) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = modifier.padding(vertical = 4.dp)
+    ) {
+        Icon(icon, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium.copy(lineHeight = 18.sp),
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
 @Composable
-fun BatteryDetailCard(modifier: Modifier, label: String, value: String, icon: ImageVector) {
+fun MetricCard(label: String, value: String, icon: ImageVector) {
     ExpressiveCard(
         onClick = {},
-        modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
-        elevation = 2.dp
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 0.dp
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                }
-            }
+            Icon(icon, null, modifier = Modifier.size(26.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(16.dp))
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            @Suppress("DEPRECATION")
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold
+            )
         }
-    }
-}
-
-@Composable
-fun DiagnosticRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
-        Text(value, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
