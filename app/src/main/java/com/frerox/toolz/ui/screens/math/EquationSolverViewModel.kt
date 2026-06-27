@@ -30,6 +30,8 @@ data class SolverState(
     val result: String = "",
     val steps: List<String> = emptyList(),
     val error: String? = null,
+    val isSolving: Boolean = false,
+    val selectedCoefficient: String? = null,
     val constants: List<ConstantItem> = listOf(
         ConstantItem("Pi", "pi", "π", "3.14159"),
         ConstantItem("Euler", "e", "e", "2.71828"),
@@ -55,7 +57,11 @@ class EquationSolverViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun onTypeChange(type: EquationType) {
-        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""), result = "", steps = emptyList(), error = null) }
+        _uiState.update { it.copy(selectedType = type, coefficients = mapOf("a" to "", "b" to "", "c" to "", "d" to "", "e" to "", "f" to ""), result = "", steps = emptyList(), error = null, selectedCoefficient = null) }
+    }
+
+    fun onCoefficientSelected(key: String?) {
+        _uiState.update { it.copy(selectedCoefficient = key) }
     }
 
     fun onCoefficientChange(key: String, value: String) {
@@ -66,18 +72,40 @@ class EquationSolverViewModel @Inject constructor(
         }
     }
 
+    fun onKeyInput(input: String) {
+        val state = _uiState.value
+        val currentKey = state.selectedCoefficient ?: return
+        val currentValue = state.coefficients[currentKey] ?: ""
+
+        val newValue = when (input) {
+            "BS" -> if (currentValue.isNotEmpty()) currentValue.dropLast(1) else ""
+            "AC" -> ""
+            "+/-" -> if (currentValue.startsWith("-")) currentValue.drop(1) else "-$currentValue"
+            "." -> if (currentValue.contains(".")) currentValue else if (currentValue.isEmpty()) "0." else "$currentValue."
+            else -> currentValue + input
+        }
+
+        onCoefficientChange(currentKey, newValue)
+    }
+
     fun solve() {
         val state = _uiState.value
-        try {
-            when (state.selectedType) {
-                EquationType.LINEAR -> solveLinear(state)
-                EquationType.QUADRATIC -> solveQuadratic(state)
-                EquationType.CUBIC -> solveCubic(state)
-                EquationType.QUARTIC -> solveQuartic(state)
-                EquationType.SYSTEM2 -> solveSystem2(state)
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSolving = true, error = null, result = "", selectedCoefficient = null) }
+            kotlinx.coroutines.delay(1200) // Polished delay for visual feedback
+            try {
+                when (state.selectedType) {
+                    EquationType.LINEAR -> solveLinear(state)
+                    EquationType.QUADRATIC -> solveQuadratic(state)
+                    EquationType.CUBIC -> solveCubic(state)
+                    EquationType.QUARTIC -> solveQuartic(state)
+                    EquationType.SYSTEM2 -> solveSystem2(state)
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "Calculation error. check inputs.") }
+            } finally {
+                _uiState.update { it.copy(isSolving = false) }
             }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(error = "Calculation error. check inputs.") }
         }
     }
 
