@@ -1,16 +1,24 @@
 package com.frerox.toolz.ui.screens.time
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.systemBarsPadding
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -18,39 +26,79 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.launch
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WorldClockScreen(
     viewModel: WorldClockViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
-    val clocks by viewModel.clocks.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
-    val performanceMode = LocalPerformanceMode.current
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    @Suppress("DEPRECATION")
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+
+    // ── GPS permission launcher ───────────────────────────────────────────────
+    @SuppressLint("MissingPermission")
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.setLocationGranted(granted)
+        if (granted) {
+            val fused = LocationServices.getFusedLocationProviderClient(context)
+            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    loc?.let { viewModel.updateUserLocation(it.latitude, it.longitude) }
+                }
+        }
+    }
+
+    /** Trigger a location fetch, requesting permission if needed. */
+    @SuppressLint("MissingPermission")
+    fun locateMe() {
+        vibrationManager?.vibrateTick()
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
+            viewModel.setLocationGranted(true)
+            val fused = LocationServices.getFusedLocationProviderClient(context)
+            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    loc?.let { viewModel.updateUserLocation(it.latitude, it.longitude) }
+                }
+        } else {
+            locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
 
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
                 title = "WORLD CLOCK",
-                subtitle = "Global Temporal Distribution",
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -58,266 +106,906 @@ fun WorldClockScreen(
                             onBack()
                         },
                         modifier = Modifier
-                            .padding(8.dp)
-                            .clip(SmallExpressiveShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                            .padding(start = 8.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
+                                SmallExpressiveShape,
+                            ),
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = {
-                    ExpressiveFabMenu(
-                        items = listOf(
-                            Triple("Add City", Icons.Rounded.Language, { showAddDialog = true }),
-                            Triple("Settings", Icons.Rounded.Settings, { vibrationManager?.vibrateClick() })
-                        ),
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                modifier = Modifier.statusBarsPadding(),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            WorldClockFloatingActions(
+                selected = uiState.selected,
+                onSave = {
+                    vibrationManager?.vibrateClick()
+                    viewModel.addSelectedZone()
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Saved ${uiState.selected?.location?.city}")
+                    }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
+                onCopy = {
+                    vibrationManager?.vibrateClick()
+                    val s = uiState.selected ?: return@WorldClockFloatingActions
+                    clipboard.setText(AnnotatedString("${s.location.label} – ${s.time}:${s.seconds} ${s.utcOffset}"))
+                    scope.launch { snackbarHostState.showSnackbar("Copied ${s.location.city}") }
+                },
+                onLocate = { locateMe() },
             )
         },
         containerColor = Color.Transparent,
-        floatingActionButton = {
-            ToolzHorizontalFloatingToolbar(
-                expanded = true,
-                modifier = Modifier.padding(bottom = 16.dp),
-                content = {
-                    FilledIconButton(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            showAddDialog = true 
-                        },
-                        modifier = Modifier.size(48.dp),
-                        shape = SmallExpressiveShape
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Add City")
-                    }
-                },
-                trailingContent = {
-                    clickableItem(
-                        onClick = { vibrationManager?.vibrateClick() },
-                        icon = { Icon(Icons.Rounded.Sort, null) },
-                        label = "SORT"
-                    )
-                }
-            )
-        },
-        floatingActionButtonPosition = FabPosition.Center
+        contentWindowInsets = WindowInsets(0.dp),
     ) { padding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = padding.calculateTopPadding())
         ) {
-            if (clocks.isEmpty()) {
-                EmptyClocksStateExpressive { showAddDialog = true }
+            val isLandscape = maxWidth > maxHeight
+            if (isLandscape) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 16.dp, end = 16.dp)
+                        .navigationBarsPadding(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Left side: Search field + MapSection
+                    Column(
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = LargeExpressiveShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            ExpressiveSearchField(
+                                query = uiState.searchQuery,
+                                onQueryChange = viewModel::setSearchQuery,
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Search city, country or zone…") },
+                                leadingIcon = {
+                                    Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
+                                },
+                                trailingIcon = {
+                                    if (uiState.searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                            Icon(Icons.Rounded.Close, null)
+                                        }
+                                    }
+                                },
+                                onSearch = {
+                                    uiState.searchResults.firstOrNull()?.let(viewModel::selectLocation)
+                                },
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = uiState.searchQuery.isNotEmpty() && uiState.searchResults.isNotEmpty(),
+                            enter = fadeIn() + slideInVertically(),
+                            exit = fadeOut() + slideOutVertically()
+                        ) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(horizontal = 2.dp),
+                            ) {
+                                items(uiState.searchResults, key = { it.city + it.zoneId }) { location ->
+                                    ExpressiveFilterChip(
+                                        selected = uiState.selected?.location == location,
+                                        onClick = { viewModel.selectLocation(location) },
+                                        label = {
+                                            Text(location.city, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        },
+                                        leadingIcon = {
+                                            if (uiState.selected?.location == location) {
+                                                Icon(Icons.Rounded.LocationOn, null, modifier = Modifier.size(16.dp))
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        MapSection(
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onLocate = { locateMe() },
+                            onCopySelection = { selection ->
+                                vibrationManager?.vibrateClick()
+                                clipboard.setText(AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}"))
+                                scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                            },
+                            modifier = Modifier.weight(1f),
+                            mapModifier = Modifier.fillMaxWidth().weight(1f)
+                        )
+                    }
+
+                    // Right side: selected timezone detail card + saved clocks
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .fadingEdges(top = 8.dp, bottom = 80.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Selected timezone detail card
+                        item {
+                            AnimatedVisibility(
+                                visible = uiState.selected != null,
+                                enter = fadeIn() + slideInVertically { it / 4 } + scaleIn(initialScale = 0.94f),
+                                exit = fadeOut() + scaleOut(targetScale = 0.96f),
+                            ) {
+                                uiState.selected?.let { selection ->
+                                    SelectedTimePanel(
+                                        selected = selection,
+                                        onSave = viewModel::addSelectedZone,
+                                        onCopy = {
+                                            vibrationManager?.vibrateClick()
+                                            clipboard.setText(
+                                                AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}")
+                                            )
+                                            scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        // Section header
+                        item {
+                            Text(
+                                text = "MY WORLD CLOCKS",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp,
+                                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                            )
+                        }
+
+                        // Saved clocks list
+                        if (uiState.clocks.isEmpty()) {
+                            item {
+                                EmptyClockDeck(onPick = { viewModel.selectLocation(viewModel.locations.first()) })
+                            }
+                        } else {
+                            items(uiState.clocks, key = { "${it.zoneId}-${it.isLocal}" }) { clock ->
+                                StaggeredEntrance(index = uiState.clocks.indexOf(clock)) {
+                                    SavedClockCard(
+                                        clock = clock,
+                                        onDelete = { viewModel.removeZone(clock.zoneId) },
+                                        onCopy = {
+                                            vibrationManager?.vibrateClick()
+                                            clipboard.setText(
+                                                AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
+                                            )
+                                            scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 24.dp, bottom = 120.dp)),
-                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 140.dp, top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .fadingEdges(top = 8.dp, bottom = 112.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 130.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    items(clocks.size, key = { i -> clocks[i].zoneId }) { index ->
-                        val clock = clocks[index]
-                        StaggeredEntrance(index = index) {
-                            WorldClockCardExpressive(
-                                clock = clock,
-                                onDelete = { 
-                                    vibrationManager?.vibrateClick()
-                                    viewModel.removeZone(clock.zoneId) 
+                    // Search bar
+                    item {
+                        Surface(
+                            shape = LargeExpressiveShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            ExpressiveSearchField(
+                                query = uiState.searchQuery,
+                                onQueryChange = viewModel::setSearchQuery,
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Search city, country or zone…") },
+                                leadingIcon = {
+                                    Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
+                                },
+                                trailingIcon = {
+                                    if (uiState.searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                            Icon(Icons.Rounded.Close, null)
+                                        }
+                                    }
+                                },
+                                onSearch = {
+                                    uiState.searchResults.firstOrNull()?.let(viewModel::selectLocation)
+                                },
+                            )
+                        }
+                    }
+
+                    // Result chips (if any search query)
+                    if (uiState.searchQuery.isNotEmpty() && uiState.searchResults.isNotEmpty()) {
+                        item {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(horizontal = 2.dp),
+                            ) {
+                                items(uiState.searchResults, key = { it.city + it.zoneId }) { location ->
+                                    ExpressiveFilterChip(
+                                        selected = uiState.selected?.location == location,
+                                        onClick = { viewModel.selectLocation(location) },
+                                        label = {
+                                            Text(location.city, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        },
+                                        leadingIcon = {
+                                            if (uiState.selected?.location == location) {
+                                                Icon(Icons.Rounded.LocationOn, null, modifier = Modifier.size(16.dp))
+                                            }
+                                        },
+                                    )
                                 }
+                            }
+                        }
+                    }
+
+                    // ── Interactive 2D Map ───────────────────────────────────────────
+                    item {
+                        MapSection(
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onLocate = { locateMe() },
+                            onCopySelection = { selection ->
+                                vibrationManager?.vibrateClick()
+                                clipboard.setText(AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}"))
+                                scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+
+                    // ── Selected timezone detail card ───────────────────────────────
+                    item {
+                        AnimatedVisibility(
+                            visible = uiState.selected != null,
+                            enter = fadeIn() + slideInVertically { it / 4 } + scaleIn(initialScale = 0.94f),
+                            exit = fadeOut() + scaleOut(targetScale = 0.96f),
+                        ) {
+                            uiState.selected?.let { selection ->
+                                SelectedTimePanel(
+                                    selected = selection,
+                                    onSave = viewModel::addSelectedZone,
+                                    onCopy = {
+                                        vibrationManager?.vibrateClick()
+                                        clipboard.setText(
+                                            AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}")
+                                        )
+                                        scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    // ── Section header ───────────────────────────────────────────────
+                    item {
+                        Text(
+                            text = "MY WORLD CLOCKS",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp,
+                            modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                        )
+                    }
+
+                    // ── Saved clocks list ────────────────────────────────────────────
+                    if (uiState.clocks.isEmpty()) {
+                        item {
+                            EmptyClockDeck(onPick = { viewModel.selectLocation(viewModel.locations.first()) })
+                        }
+                    } else {
+                        items(uiState.clocks, key = { "${it.zoneId}-${it.isLocal}" }) { clock ->
+                            StaggeredEntrance(index = uiState.clocks.indexOf(clock)) {
+                                SavedClockCard(
+                                    clock = clock,
+                                    onDelete = { viewModel.removeZone(clock.zoneId) },
+                                    onCopy = {
+                                        vibrationManager?.vibrateClick()
+                                        clipboard.setText(
+                                            AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
+                                        )
+                                        scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Map section ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun MapSection(
+    uiState: WorldClockUiState,
+    viewModel: WorldClockViewModel,
+    onLocate: () -> Unit,
+    onCopySelection: (WorldClockSelection) -> Unit,
+    modifier: Modifier = Modifier,
+    mapModifier: Modifier = Modifier.fillMaxWidth().aspectRatio(1.72f),
+) {
+    val primary   = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val isDark    = isSystemInDarkTheme()
+    val mapColors = remember(primary, secondary, isDark) {
+        WorldMapColors.fromTheme(primary, secondary, isDark)
+    }
+
+    var isFullScreen by rememberSaveable { mutableStateOf(false) }
+
+    if (isFullScreen) {
+        Dialog(
+            onDismissRequest = { isFullScreen = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color.Black
+            ) {
+                var fsSearchVisible by remember { mutableStateOf(false) }
+                var fsInfoVisible by remember { mutableStateOf(false) }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Map fills entire screen
+                    WorldMap2D(
+                        locations         = viewModel.locations,
+                        selectedLocation  = uiState.selected?.location,
+                        highlightedZones  = uiState.highlightedZones,
+                        userLatLon        = uiState.userLatLon,
+                        mapMode           = uiState.mapMode,
+                        mapColors         = mapColors,
+                        modifier          = Modifier.fillMaxSize(),
+                        onLocationSelected = viewModel::selectLocation,
+                    )
+
+                    // Search bar overlay — slides down from top
+                    AnimatedVisibility(
+                        visible = fsSearchVisible,
+                        enter = fadeIn() + slideInVertically { -it },
+                        exit = fadeOut() + slideOutVertically { -it },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        Surface(
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f),
+                            tonalElevation = 4.dp,
+                        ) {
+                            Column {
+                                ExpressiveSearchField(
+                                    query = uiState.searchQuery,
+                                    onQueryChange = viewModel::setSearchQuery,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("Search city, country or zone…") },
+                                    leadingIcon = {
+                                        Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
+                                    },
+                                    trailingIcon = {
+                                        if (uiState.searchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                                Icon(Icons.Rounded.Close, null)
+                                            }
+                                        }
+                                    },
+                                    onSearch = {
+                                        uiState.searchResults.firstOrNull()?.let(viewModel::selectLocation)
+                                    },
+                                )
+                                AnimatedVisibility(
+                                    visible = uiState.searchResults.isNotEmpty() && uiState.searchQuery.isNotEmpty(),
+                                ) {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        items(uiState.searchResults, key = { it.city + it.zoneId }) { location ->
+                                            ExpressiveFilterChip(
+                                                selected = uiState.selected?.location == location,
+                                                onClick = {
+                                                    viewModel.selectLocation(location)
+                                                    fsSearchVisible = false
+                                                },
+                                                label = { Text(location.city, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                                leadingIcon = {
+                                                    if (uiState.selected?.location == location)
+                                                        Icon(Icons.Rounded.LocationOn, null, modifier = Modifier.size(16.dp))
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Info card overlay — slides up from bottom above the pill
+                    AnimatedVisibility(
+                        visible = fsInfoVisible && uiState.selected != null,
+                        enter = fadeIn() + slideInVertically { it / 2 } + scaleIn(initialScale = 0.94f),
+                        exit = fadeOut() + slideOutVertically { it / 2 } + scaleOut(targetScale = 0.96f),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 104.dp),
+                    ) {
+                        uiState.selected?.let { selection ->
+                            SelectedTimePanel(
+                                selected = selection,
+                                onSave = viewModel::addSelectedZone,
+                                onCopy = {
+                                    onCopySelection(selection)
+                                },
+                            )
+                        }
+                    }
+
+                    // Controls pill at the bottom
+                    MapControlsPill(
+                        uiState = uiState,
+                        viewModel = viewModel,
+                        onLocate = onLocate,
+                        isFullScreen = true,
+                        onToggleFullScreen = { isFullScreen = false },
+                        showSearchButton = true,
+                        onToggleSearch = { fsSearchVisible = !fsSearchVisible },
+                        isSearchVisible = fsSearchVisible,
+                        showInfoButton = uiState.selected != null,
+                        onToggleInfo = { fsInfoVisible = !fsInfoVisible },
+                        isInfoVisible = fsInfoVisible,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(bottom = 24.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Surface(
+            shape = SquircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)),
+            modifier = mapModifier,
+        ) {
+            WorldMap2D(
+                locations         = viewModel.locations,
+                selectedLocation  = uiState.selected?.location,
+                highlightedZones  = uiState.highlightedZones,
+                userLatLon        = uiState.userLatLon,
+                mapMode           = uiState.mapMode,
+                mapColors         = mapColors,
+                modifier          = Modifier.fillMaxSize(),
+                onLocationSelected= viewModel::selectLocation,
+            )
+        }
+
+        MapControlsPill(
+            uiState = uiState,
+            viewModel = viewModel,
+            onLocate = onLocate,
+            isFullScreen = false,
+            onToggleFullScreen = { isFullScreen = true }
+        )
+    }
+}
+
+@Composable
+private fun MapControlsPill(
+    uiState: WorldClockUiState,
+    viewModel: WorldClockViewModel,
+    onLocate: () -> Unit,
+    isFullScreen: Boolean,
+    onToggleFullScreen: () -> Unit,
+    showSearchButton: Boolean = false,
+    onToggleSearch: () -> Unit = {},
+    isSearchVisible: Boolean = false,
+    showInfoButton: Boolean = false,
+    onToggleInfo: () -> Unit = {},
+    isInfoVisible: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+        tonalElevation = 2.dp,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // GPS locate button
+            IconButton(onClick = onLocate, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = if (uiState.userLatLon != null) Icons.Rounded.MyLocation else Icons.Rounded.LocationOn,
+                    contentDescription = "My Location",
+                    tint = if (uiState.userLatLon != null) Color(0xFF00E676) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            val normalSelected = uiState.mapMode == MapMode.NORMAL
+            val normalBgColor by animateColorAsState(
+                if (normalSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                label = "normalBg"
+            )
+            val normalContentColor by animateColorAsState(
+                if (normalSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                label = "normalContent"
+            )
+
+            Surface(
+                onClick = { if (!normalSelected) viewModel.toggleMapMode() },
+                shape = MaterialTheme.shapes.extraLarge,
+                color = normalBgColor,
+                modifier = Modifier.height(32.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Icon(Icons.Rounded.Map, null, modifier = Modifier.size(15.dp), tint = normalContentColor)
+                    Text("Normal", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = normalContentColor)
+                }
+            }
+
+            val satSelected = uiState.mapMode == MapMode.SATELLITE
+            val satBgColor by animateColorAsState(
+                if (satSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                label = "satBg"
+            )
+            val satContentColor by animateColorAsState(
+                if (satSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                label = "satContent"
+            )
+
+            Surface(
+                onClick = { if (!satSelected) viewModel.toggleMapMode() },
+                shape = MaterialTheme.shapes.extraLarge,
+                color = satBgColor,
+                modifier = Modifier.height(32.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Icon(Icons.Rounded.Satellite, null, modifier = Modifier.size(15.dp), tint = satContentColor)
+                    Text("Satellite", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = satContentColor)
+                }
+            }
+
+            // Search button (fullscreen only)
+            if (showSearchButton) {
+                val searchTint by animateColorAsState(
+                    if (isSearchVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "searchTint"
+                )
+                IconButton(onClick = onToggleSearch, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = if (isSearchVisible) Icons.Rounded.SearchOff else Icons.Rounded.Search,
+                        contentDescription = "Search",
+                        tint = searchTint,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            // Info button (fullscreen only, only if timezone is selected)
+            if (showInfoButton) {
+                val infoTint by animateColorAsState(
+                    if (isInfoVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "infoTint"
+                )
+                IconButton(onClick = onToggleInfo, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = "Info",
+                        tint = infoTint,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            // Fullscreen toggle
+            IconButton(onClick = onToggleFullScreen, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = if (isFullScreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                    contentDescription = "Toggle Fullscreen",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+
+// ─── Selected time detail panel ───────────────────────────────────────────────
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun SelectedTimePanel(
+    selected: WorldClockSelection,
+    onSave: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Row 1: Header (City, Country & Date, Offset info)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selected.location.city,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "${selected.location.country.uppercase()} • ${selected.date}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (selected.isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
+                        contentDescription = null,
+                        tint = if (selected.isNight) MaterialTheme.colorScheme.primary else Color(0xFFFFB300),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = selected.offset,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            
+            // Row 2: Large live clock & action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = selected.time,
+                        style = MaterialTheme.typography.displaySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-2).sp
+                        )
+                    )
+                    AnimatedContent(
+                        targetState = selected.seconds,
+                        transitionSpec = {
+                            (fadeIn(tween(120)) + slideInVertically { -it })
+                                .togetherWith(fadeOut(tween(80)) + slideOutVertically { it })
+                                .using(SizeTransform(clip = false))
+                        },
+                        label = "seconds"
+                    ) { sec ->
+                        Text(
+                            text = ":$sec",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 6.dp, start = 2.dp),
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = onCopy,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                            .size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.ContentCopy, 
+                            contentDescription = "Copy",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    if (!selected.saved) {
+                        IconButton(
+                            onClick = onSave,
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Add, 
+                                contentDescription = "Add",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
             }
         }
-
-        if (showAddDialog) {
-            TimeZonePickerDialogExpressive(
-                availableZones = viewModel.availableZones,
-                onDismiss = { showAddDialog = false },
-                onZoneSelected = { zoneId ->
-                    vibrationManager?.vibrateSuccess()
-                    viewModel.addZone(zoneId)
-                    showAddDialog = false
-                }
-            )
-        }
     }
 }
 
-@Composable
-fun EmptyClocksStateExpressive(onAdd: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Surface(
-            modifier = Modifier.size(160.dp),
-            shape = SquircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.Language,
-                    contentDescription = null,
-                    modifier = Modifier.size(80.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(Modifier.height(48.dp))
-        Text(
-            "TEMPORAL HUB EMPTY", 
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp
-        )
-        Text(
-            "Add cities from around the globe to synchronize your workflow across multiple time zones.", 
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 16.dp, bottom = 48.dp),
-            textAlign = TextAlign.Center,
-            fontWeight = FontWeight.Bold
-        )
-        ToolzExpressiveButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(72.dp), shape = BouncyShape) {
-            Text("INITIALIZE TRACKER", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-        }
-    }
-}
+// ─── Saved clock card ─────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun WorldClockCardExpressive(
+private fun SavedClockCard(
     clock: WorldClockItem,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onCopy: () -> Unit,
 ) {
-    val vibrationManager = LocalVibrationManager.current
-    val backgroundColor = if (clock.isNight) {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f)
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-    }
-
-    val icon = if (clock.isNight) Icons.Rounded.NightlightRound else Icons.Rounded.WbSunny
-    val iconColor = if (clock.isNight) Color(0xFF9FA8DA) else Color(0xFFFFA000)
-
     ExpressiveCard(
-        onClick = { vibrationManager?.vibrateTick() },
+        onClick = onCopy,
+        onLongClick = if (!clock.isLocal) onDelete else null,
         modifier = Modifier.fillMaxWidth(),
         shape = SquircleShape,
-        containerColor = backgroundColor,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = BorderStroke(
-            1.5.dp, 
-            if (clock.isLocal) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) 
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            1.dp,
+            if (clock.isLocal) MaterialTheme.colorScheme.primary.copy(0.4f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
         ),
-        elevation = 0.dp
+        elevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier
-                .padding(24.dp)
-                .fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        modifier = Modifier.size(32.dp),
-                        shape = CircleShape,
-                        color = iconColor.copy(alpha = 0.15f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(icon, null, tint = iconColor, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    Spacer(Modifier.width(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        text = clock.cityName.uppercase(),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = clock.cityName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        letterSpacing = (-0.5).sp
                     )
-                }
-                
-                Spacer(Modifier.height(12.dp))
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = BouncyShape
-                    ) {
-                        Text(
-                            text = clock.offset,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = clock.date.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-                
-                if (clock.isLocal) {
-                    Spacer(Modifier.height(16.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = SmallExpressiveShape
-                    ) {
-                        Text(
-                            "CURRENT LOCATION",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            letterSpacing = 1.sp
-                        )
+                    if (clock.isLocal) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = "Local",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
-            }
-            
-            Column(horizontalAlignment = Alignment.End) {
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = clock.currentTime,
-                    style = MaterialTheme.typography.displaySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 44.sp,
-                        letterSpacing = (-2).sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
+                    text = "${clock.country.uppercase()} • ${clock.offset} • ${clock.date}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = clock.currentTime,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-1).sp,
+                        ),
+                    )
+                    AnimatedContent(
+                        targetState = clock.seconds,
+                        transitionSpec = {
+                            (fadeIn(tween(100)) + slideInVertically { -it })
+                                .togetherWith(fadeOut(tween(80)) + slideOutVertically { it })
+                                .using(SizeTransform(clip = false))
+                        },
+                        label = "clockSeconds",
+                    ) { sec ->
+                        Text(
+                            text = sec,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 2.dp, start = 2.dp),
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = if (clock.isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
+                    contentDescription = null,
+                    tint = if (clock.isNight) MaterialTheme.colorScheme.primary else Color(0xFFFFB300),
+                    modifier = Modifier.size(18.dp),
+                )
+
                 if (!clock.isLocal) {
-                    Spacer(Modifier.height(16.dp))
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(40.dp).clip(BouncyShape).background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
+                        modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
                             Icons.Rounded.Close,
                             contentDescription = "Remove",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.error
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
@@ -326,89 +1014,75 @@ fun WorldClockCardExpressive(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TimeZonePickerDialogExpressive(
-    availableZones: List<String>,
-    onDismiss: () -> Unit,
-    onZoneSelected: (String) -> Unit
-) {
-    var searchQuery by remember { mutableStateOf("") }
-    val filteredZones = availableZones.filter { it.contains(searchQuery, ignoreCase = true) }
-    val performanceMode = LocalPerformanceMode.current
+// ─── Empty clock placeholder ──────────────────────────────────────────────────
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = SquircleShape
+@Composable
+private fun EmptyClockDeck(onPick: () -> Unit) {
+    ExpressiveCard(
+        onClick = onPick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
+        elevation = 0.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxHeight(0.85f)
-                .padding(horizontal = 24.dp)
+            modifier = Modifier.padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            Icon(
+                Icons.Rounded.Public,
+                null,
+                modifier = Modifier.size(52.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+            )
             Text(
-                "GLOBAL DIRECTORY", 
-                style = MaterialTheme.typography.labelSmall, 
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary,
-                letterSpacing = 2.sp,
-                modifier = Modifier.padding(vertical = 16.dp)
+                "Explore the world map",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
             )
-            
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search location ID...") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                singleLine = true,
-                shape = SquircleShape,
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary
-                )
+            Text(
+                "Tap any dot on the map to see its local time, then track it here.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
-
-            LazyColumn(
-                modifier = Modifier.weight(1f).then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)),
-                contentPadding = PaddingValues(bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(filteredZones) { zoneId ->
-                    val cityName = zoneId.substringAfter("/").replace("_", " ")
-                    val region = zoneId.substringBefore("/", "")
-                    
-                    Surface(
-                        onClick = { onZoneSelected(zoneId) },
-                        shape = BouncyShape,
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
-                    ) {
-                        ListItem(
-                            headlineContent = { 
-                                Text(
-                                    cityName,
-                                    fontWeight = FontWeight.Black,
-                                    style = MaterialTheme.typography.bodyLarge
-                                ) 
-                            },
-                            supportingContent = { 
-                                if (region.isNotEmpty()) {
-                                    Text(region.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp) 
-                                }
-                            },
-                            trailingContent = {
-                                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
-            }
         }
     }
+}
+
+// ─── Floating Toolbar ────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun WorldClockFloatingActions(
+    selected: WorldClockSelection?,
+    onSave: () -> Unit,
+    onCopy: () -> Unit,
+    onLocate: () -> Unit,
+) {
+    ToolzHorizontalFloatingToolbar(
+        expanded = true,
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(bottom = 20.dp),
+        content = {
+            ToolzExpressiveIconButton(
+                onClick = onSave,
+                enabled = selected != null && !selected.saved,
+            ) {
+                Icon(Icons.Rounded.Add, "Track City")
+            }
+            ToolzExpressiveIconButton(
+                onClick = onCopy,
+                enabled = selected != null,
+            ) {
+                Icon(Icons.Rounded.ContentCopy, "Copy Time")
+            }
+            ToolzExpressiveIconButton(onClick = onLocate) {
+                Icon(Icons.Rounded.MyLocation, "My Location")
+            }
+        },
+    )
 }
