@@ -57,6 +57,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -95,7 +102,23 @@ import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzHorizontalFloatingToolbar
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material3.TextButton
+import com.frerox.toolz.ui.components.BouncyShape
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.SquircleShape
+import com.frerox.toolz.ui.components.VerticalSmoothDurationPicker
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.FinishedOverlay
 import com.frerox.toolz.ui.screens.time.components.PomodoroSuccessConfetti
 import com.frerox.toolz.ui.screens.time.components.PreferenceRow
 import com.frerox.toolz.ui.screens.time.components.SettingsSection
@@ -104,14 +127,14 @@ import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TimerScreen(
     viewModel: TimerViewModel,
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    val rawAccent = if (state.isFinished) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val timerHistory by viewModel.timerHistory.collectAsState()
+    val rawAccent = if (state.isFinished || state.isRinging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val accent by animateColorAsState(
         targetValue = rawAccent,
         animationSpec = tween(durationMillis = 500),
@@ -120,6 +143,7 @@ fun TimerScreen(
     val view = LocalView.current
     var showConfetti by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var presetToEdit by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(state.isFinished) {
         if (state.isFinished) showConfetti = true
@@ -128,7 +152,9 @@ fun TimerScreen(
     DisposableEffect(state.keepScreenOn) {
         val previous = view.keepScreenOn
         view.keepScreenOn = state.keepScreenOn
-        onDispose { view.keepScreenOn = previous }
+        onDispose { 
+            view.keepScreenOn = previous
+        }
     }
 
     Scaffold(
@@ -172,11 +198,14 @@ fun TimerScreen(
                 state = state,
                 accent = accent,
                 onToggle = {
-                    if (state.isFinished) viewModel.stopRingtone()
-                    viewModel.toggleStartStop()
+                    if (state.isRinging) {
+                        viewModel.stopRingtone()
+                    } else {
+                        viewModel.toggleStartStop()
+                    }
                 },
                 onReset = viewModel::reset,
-                onResetToInitial = viewModel::resetToInitial,
+                onToggleAlarms = viewModel::toggleAlarms,
             )
         },
         floatingActionButtonPosition = FabPosition.Center,
@@ -188,16 +217,31 @@ fun TimerScreen(
                 accent = accent,
                 contentPadding = padding,
                 onTimeSelected = viewModel::onTimeSelectedChange,
-                onPresetSelected = { minutes -> viewModel.setTimer(minutes, 0) },
+                onPresetSelected = { mins, secs -> viewModel.setTimer(mins, secs) },
+                onPresetLongClick = { index -> presetToEdit = index },
                 onAddTime = viewModel::addTime,
                 onDismissAlarm = {
                     viewModel.stopRingtone()
                     if (state.repeatLastDuration) viewModel.resetToInitial() else viewModel.reset()
                 },
+                timerHistory = timerHistory,
             )
 
             if (showConfetti) {
                 PomodoroSuccessConfetti(onFinished = { showConfetti = false })
+            }
+            
+            presetToEdit?.let { index ->
+                LockPresetDialog(
+                    initialMinutes = timerHistory.getOrNull(index)?.first ?: 0,
+                    initialSeconds = timerHistory.getOrNull(index)?.second ?: 0,
+                    onDismiss = { presetToEdit = null },
+                    onConfirm = { m, s ->
+                        viewModel.lockPreset(index, m, s)
+                        presetToEdit = null
+                    },
+                    accent = accent
+                )
             }
         }
 
@@ -240,11 +284,27 @@ private fun TimerContent(
     accent: Color,
     contentPadding: PaddingValues,
     onTimeSelected: (Int, Int) -> Unit,
-    onPresetSelected: (Int) -> Unit,
+    onPresetSelected: (Int, Int) -> Unit,
+    onPresetLongClick: (Int) -> Unit,
     onAddTime: (Long) -> Unit,
     onDismissAlarm: () -> Unit,
+    timerHistory: List<Pair<Int, Int>> = emptyList(),
 ) {
     val performanceMode = LocalPerformanceMode.current
+
+    // Finished overlay (ringing)
+    if (state.isRinging) {
+        FinishedOverlay(
+            totalDurationMillis = state.initialTime,
+            onDismiss = onDismissAlarm,
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = contentPadding.calculateTopPadding()),
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -263,7 +323,13 @@ private fun TimerContent(
             TimerWheelPicker(state = state, accent = accent, onTimeSelected = onTimeSelected)
         }
         StaggeredEntrance(index = 2) {
-            TimerPresets(enabled = !state.isRunning, onPresetSelected = onPresetSelected)
+            TimerPresets(
+                enabled = !state.isRunning,
+                onPresetSelected = onPresetSelected,
+                onPresetLongClick = onPresetLongClick,
+                timerHistory = timerHistory,
+                accent = accent,
+            )
         }
         AnimatedVisibility(
             visible = state.remainingTime > 0L || state.initialTime > 0L,
@@ -273,7 +339,7 @@ private fun TimerContent(
             TimerQuickAddRow(onAddTime = onAddTime)
         }
         AnimatedVisibility(
-            visible = state.isFinished,
+            visible = state.isRinging,
             enter = fadeIn() + scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
             exit = fadeOut() + scaleOut(),
         ) {
@@ -294,7 +360,7 @@ private fun TimerDial(state: TimerState, accent: Color) {
     }
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = tween(100, easing = androidx.compose.animation.core.LinearEasing),
         label = "TimerProgress",
     )
 
@@ -333,7 +399,7 @@ private fun TimerDial(state: TimerState, accent: Color) {
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
-                        text = if (state.isRunning) "Counting down" else if (state.isFinished) "Finished" else "Ready",
+                        text = if (state.isRunning) "Counting down" else if (state.isRinging) "Ringing" else "Ready",
                         icon = timerStatusIcon(state),
                         color = accent,
                     )
@@ -356,42 +422,83 @@ private fun TimerWheelPicker(
     accent: Color,
     onTimeSelected: (Int, Int) -> Unit,
 ) {
+    var showCustomDurationDialog by remember { mutableStateOf(false) }
+
+    if (showCustomDurationDialog) {
+        CustomDurationDialog(
+            currentMinutes = state.selectedMinutes,
+            accent = accent,
+            onDismiss = { showCustomDurationDialog = false },
+            onConfirm = { mins ->
+                onTimeSelected(mins, state.selectedSeconds)
+                showCustomDurationDialog = false
+            }
+        )
+    }
+
     ExpressiveCard(
         onClick = {},
+        onLongClick = {
+            if (!state.isRunning && !state.isRinging) {
+                showCustomDurationDialog = true
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
-        shape = LargeExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+        shape = SquircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
         elevation = 0.dp,
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Set duration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                InfiniteTimeWheel(
-                    value = state.selectedMinutes,
-                    valueRange = 0..999,
-                    label = "Minutes",
-                    accent = accent,
-                    enabled = !state.isRunning,
-                    onValueChange = { onTimeSelected(it, state.selectedSeconds) },
-                )
                 Text(
-                    text = ":",
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Black,
-                    color = accent,
+                    "Set Duration",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black
                 )
-                InfiniteTimeWheel(
-                    value = state.selectedSeconds,
-                    valueRange = 0..59,
-                    label = "Seconds",
+                Icon(
+                    Icons.Rounded.HourglassEmpty,
+                    null,
+                    tint = accent.copy(alpha = 0.4f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            if (state.selectedMinutes > 59) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "${state.selectedMinutes}m : ${String.format(Locale.getDefault(), "%02d", state.selectedSeconds)}s",
+                        style = MaterialTheme.typography.displayLarge,
+                        fontWeight = FontWeight.Black,
+                        color = accent
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TextButton(
+                        onClick = { onTimeSelected(0, state.selectedSeconds) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ) {
+                        Text("Reset to wheels", fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                VerticalSmoothDurationPicker(
+                    minutes = state.selectedMinutes,
+                    seconds = state.selectedSeconds,
                     accent = accent,
-                    enabled = !state.isRunning,
-                    onValueChange = { onTimeSelected(state.selectedMinutes, it) },
+                    enabled = !state.isRunning && !state.isRinging,
+                    onChange = onTimeSelected,
                 )
             }
         }
@@ -399,167 +506,221 @@ private fun TimerWheelPicker(
 }
 
 @Composable
-private fun InfiniteTimeWheel(
-    value: Int,
-    valueRange: IntRange,
-    label: String,
-    accent: Color,
+private fun TimerPresets(
     enabled: Boolean,
-    onValueChange: (Int) -> Unit,
+    onPresetSelected: (Int, Int) -> Unit,
+    onPresetLongClick: (Int) -> Unit,
+    timerHistory: List<Pair<Int, Int>>,
+    accent: Color,
 ) {
-    val itemCount = valueRange.last - valueRange.first + 1
-    val initialPage = (Int.MAX_VALUE / 2) - (Int.MAX_VALUE / 2) % itemCount + value
-    val pagerState = rememberPagerState(initialPage = initialPage) { Int.MAX_VALUE }
-
-    LaunchedEffect(enabled) {
-        if (enabled) {
-            snapshotFlow { pagerState.settledPage }
-                .collect { page ->
-                    val newValue = (page % itemCount) + valueRange.first
-                    if (newValue != value) onValueChange(newValue)
-                }
-        }
+    val presets = if (timerHistory.isNotEmpty()) {
+        timerHistory.take(3)
+    } else {
+        listOf(Pair(5, 0), Pair(15, 0), Pair(30, 0))
     }
-
-    LaunchedEffect(value, enabled) {
-        if (!pagerState.isScrollInProgress) {
-            val currentPageValue = (pagerState.currentPage % itemCount) + valueRange.first
-            if (currentPageValue != value) {
-                val targetPage = pagerState.currentPage + (value - currentPageValue)
-                pagerState.scrollToPage(targetPage)
+    
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "History Presets",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                letterSpacing = 1.sp
+            )
+            Icon(
+                Icons.Rounded.RestartAlt,
+                null,
+                tint = accent.copy(alpha = 0.4f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            presets.forEachIndexed { index, (minutes, seconds) ->
+                PresetCard(
+                    minutes = minutes,
+                    seconds = seconds,
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                    onPresetSelected = onPresetSelected,
+                    onLongClick = { onPresetLongClick(index) },
+                    accent = accent,
+                )
             }
         }
     }
+}
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(contentAlignment = Alignment.Center) {
-            Surface(
-                modifier = Modifier
-                    .width(116.dp)
-                    .height(172.dp),
-                shape = MediumExpressiveShape,
-                color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = if (enabled) 0.9f else 0.45f),
-                border = BorderStroke(1.dp, accent.copy(alpha = 0.16f)),
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PresetCard(
+    minutes: Int,
+    seconds: Int,
+    enabled: Boolean,
+    modifier: Modifier,
+    onPresetSelected: (Int, Int) -> Unit,
+    onLongClick: () -> Unit,
+    accent: Color,
+) {
+    val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
+    val durationLabel = if (seconds > 0) {
+        if (minutes > 0) "$minutes:${String.format("%02d", seconds)}" else "${seconds}s"
+    } else {
+        "$minutes"
+    }
+    val unitLabel = if (minutes > 0 && seconds == 0) "MIN" else ""
+
+    ExpressiveCard(
+        onClick = { onPresetSelected(minutes, seconds) },
+        onLongClick = {
+            vibrationManager?.vibrateLongClick()
+            onLongClick()
+        },
+        enabled = enabled,
+        modifier = modifier.height(84.dp),
+        shape = MediumExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (enabled) 0.6f else 0.3f),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.12f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = durationLabel,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            )
+            if (unitLabel.isNotEmpty()) {
+                Text(
+                    text = unitLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = accent.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LockPresetDialog(
+    initialMinutes: Int,
+    initialSeconds: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit,
+    accent: Color
+) {
+    var mins by remember { mutableStateOf(initialMinutes) }
+    var secs by remember { mutableStateOf(initialSeconds) }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        ExpressiveCard(
+            onClick = {},
+            shape = LargeExpressiveShape,
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+            elevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                VerticalPager(
-                    state = pagerState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(if (enabled) 1f else 0.42f),
-                    userScrollEnabled = enabled,
-                    contentPadding = PaddingValues(vertical = 54.dp),
-                ) { index ->
-                    val itemValue = valueRange.first + (index % itemCount)
-                    val isSelected = itemValue == (pagerState.currentPage % itemCount) + valueRange.first
-                    val locale = LocalConfiguration.current.locales[0]
-                    
-                    val scale by animateFloatAsState(
-                        targetValue = if (isSelected) 1.2f else 0.8f,
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                        label = "wheelScale"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .graphicsLayer(
-                                scaleX = scale,
-                                scaleY = scale,
-                                alpha = if (isSelected) 1f else 0.3f
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
                         Text(
-                            text = String.format(locale, "%02d", itemValue),
-                            style = if (isSelected) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineSmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                            color = if (isSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Lock Preset",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
                         )
+                        Text(
+                            "This slot will be locked to this duration",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(Icons.Rounded.Lock, null, tint = accent, modifier = Modifier.size(24.dp))
+                }
+
+                VerticalSmoothDurationPicker(
+                    minutes = mins,
+                    seconds = secs,
+                    accent = accent,
+                    enabled = true,
+                    onChange = { m, s -> mins = m; secs = s },
+                    modifier = Modifier.height(180.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = MediumExpressiveShape
+                    ) {
+                        Text("CANCEL", fontWeight = FontWeight.Bold)
+                    }
+                    ToolzExpressiveButton(
+                        onClick = { onConfirm(mins, secs) },
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = MediumExpressiveShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = accent)
+                    ) {
+                        Text("LOCK", fontWeight = FontWeight.Black)
                     }
                 }
             }
-            Surface(
-                modifier = Modifier
-                    .width(104.dp)
-                    .height(58.dp),
-                shape = BouncyShape,
-                color = accent.copy(alpha = 0.10f),
-                border = BorderStroke(1.dp, accent.copy(alpha = 0.18f)),
-            ) {}
-        }
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            color = accent,
-            letterSpacing = 1.sp,
-        )
-    }
-}
-
-@Composable
-private fun TimerPresets(enabled: Boolean, onPresetSelected: (Int) -> Unit) {
-    val presets = listOf(1, 3, 5, 10, 25, 45)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Quick presets", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            presets.take(3).forEach { minutes ->
-                PresetChip(minutes = minutes, enabled = enabled, modifier = Modifier.weight(1f), onPresetSelected = onPresetSelected)
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            presets.drop(3).forEach { minutes ->
-                PresetChip(minutes = minutes, enabled = enabled, modifier = Modifier.weight(1f), onPresetSelected = onPresetSelected)
-            }
         }
     }
 }
 
-@Composable
-private fun PresetChip(minutes: Int, enabled: Boolean, modifier: Modifier, onPresetSelected: (Int) -> Unit) {
-    ExpressiveFilterChip(
-        selected = false,
-        enabled = enabled,
-        onClick = { onPresetSelected(minutes) },
-        modifier = modifier,
-        label = {
-            Text(
-                text = "${minutes}m",
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Black,
-            )
-        },
-    )
-}
 
 @Composable
 private fun TimerQuickAddRow(onAddTime: (Long) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        QuickAddCard(label = "+30s", millis = 30_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
-        QuickAddCard(label = "+1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
-        QuickAddCard(label = "+5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        QuickAddButton(label = "+10s", millis = 10_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
+        QuickAddButton(label = "+1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
+        QuickAddButton(label = "+5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
     }
 }
 
 @Composable
-private fun QuickAddCard(label: String, millis: Long, modifier: Modifier, onAddTime: (Long) -> Unit) {
+private fun QuickAddButton(label: String, millis: Long, modifier: Modifier, onAddTime: (Long) -> Unit) {
     ExpressiveCard(
         onClick = { onAddTime(millis) },
-        modifier = modifier.height(62.dp),
+        modifier = modifier.height(56.dp),
         shape = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
         elevation = 0.dp,
     ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-            }
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -639,7 +800,7 @@ private fun TimerControlDock(
     accent: Color,
     onToggle: () -> Unit,
     onReset: () -> Unit,
-    onResetToInitial: () -> Unit,
+    onToggleAlarms: () -> Unit,
 ) {
     ToolzHorizontalFloatingToolbar(
         expanded = true,
@@ -649,10 +810,15 @@ private fun TimerControlDock(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         trailingContent = {
             clickableItem(
-                onClick = onResetToInitial,
-                icon = { Icon(Icons.Rounded.RestartAlt, contentDescription = null) },
-                label = "Again",
-                enabled = state.initialTime > 0L,
+                onClick = onToggleAlarms,
+                icon = {
+                    Icon(
+                        if (state.alarmsEnabled) Icons.Rounded.Notifications else Icons.Rounded.NotificationsOff,
+                        contentDescription = null,
+                        tint = if (state.alarmsEnabled) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                },
+                label = if (state.alarmsEnabled) "On" else "Off",
             )
             clickableItem(
                 onClick = onReset,
@@ -663,43 +829,52 @@ private fun TimerControlDock(
     ) {
         ToolzExpressiveButton(
             onClick = onToggle,
-            enabled = state.remainingTime > 0L || selectedDurationMillis(state) > 0L,
+            enabled = state.remainingTime > 0L || state.initialTime > 0L || state.selectedMinutes > 0 || state.selectedSeconds > 0,
             shape = BouncyShape,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else accent,
-                contentColor = if (state.isRunning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+                containerColor = if (state.isRunning || state.isRinging) MaterialTheme.colorScheme.errorContainer else accent,
+                contentColor = if (state.isRunning || state.isRinging) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
             ),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         ) {
             Icon(
-                if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                if (state.isRunning) Icons.Rounded.Pause
+                else if (state.isRinging) Icons.Rounded.NotificationsActive
+                else Icons.Rounded.PlayArrow,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(8.dp))
-            Text(if (state.isRunning) "Pause" else "Start", fontWeight = FontWeight.Black)
+            Text(
+                when {
+                    state.isRunning -> "Pause"
+                    state.isRinging -> "Dismiss"
+                    else -> "Start"
+                },
+                fontWeight = FontWeight.Black
+            )
         }
     }
 }
 
 private fun timerSubtitle(state: TimerState): String = when {
     state.isRunning -> "Counting down"
-    state.isFinished -> "Time is up"
+    state.isRinging -> "Time is up"
     state.isPaused -> "Paused"
     else -> "Precision countdown"
 }
 
 private fun timerStatusIcon(state: TimerState) = when {
-    state.isFinished -> Icons.Rounded.NotificationsActive
+    state.isRinging -> Icons.Rounded.NotificationsActive
     state.isRunning -> Icons.Rounded.Timer
     state.isPaused -> Icons.Rounded.Pause
     else -> Icons.Rounded.HourglassEmpty
 }
 
 private fun displayMillis(state: TimerState): Long = when {
-    state.isFinished -> 0L
+    state.isRinging -> 0L
     state.remainingTime > 0L -> state.remainingTime
-    state.initialTime > 0L && !state.isFinished -> state.initialTime
+    state.initialTime > 0L && !state.isRinging -> state.initialTime
     else -> selectedDurationMillis(state)
 }
 
@@ -717,4 +892,67 @@ private fun formatTimerTime(timeMillis: Long): String {
     } else {
         String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomDurationDialog(
+    currentMinutes: Int,
+    accent: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var text by remember { mutableStateOf(if (currentMinutes > 0) currentMinutes.toString() else "") }
+    val focusRequester = remember { FocusRequester() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Set Duration", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { 
+                    if (it.isEmpty() || (it.all { char -> char.isDigit() } && it.length <= 4)) {
+                        text = it
+                    }
+                },
+                label = { Text("Minutes") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = accent,
+                    focusedLabelColor = accent,
+                    cursorColor = accent
+                )
+            )
+            LaunchedEffect(Unit) {
+                focusRequester.requestFocus()
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { 
+                    val mins = text.toIntOrNull() ?: 0
+                    onConfirm(mins)
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = accent)
+            ) {
+                Text("Confirm", fontWeight = FontWeight.Black)
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+            ) {
+                Text("Cancel")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        titleContentColor = MaterialTheme.colorScheme.onSurface,
+        textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
