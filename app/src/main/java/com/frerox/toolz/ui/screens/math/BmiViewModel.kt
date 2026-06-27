@@ -1,11 +1,11 @@
 package com.frerox.toolz.ui.screens.math
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -20,12 +20,13 @@ enum class ActivityLevel(
     val multiplier: Float,
     val label: String,
     val shortLabel: String,
+    val description: String,
 ) {
-    SEDENTARY (1.20f, "Sedentary",   "SED"),
-    LIGHT     (1.375f,"Light Active", "LGT"),
-    MODERATE  (1.55f, "Moderate",    "MOD"),
-    ACTIVE    (1.725f,"Very Active",  "ACT"),
-    EXTREME   (1.90f, "Extreme",     "EXT"),
+    SEDENTARY (1.20f, "Sedentary",   "SED", "Desk job, little to no exercise"),
+    LIGHT     (1.375f,"Lightly Active", "LGT", "Light exercise 1-3 days/week"),
+    MODERATE  (1.55f, "Moderately Active", "MOD", "Moderate exercise 3-5 days/week"),
+    ACTIVE    (1.725f,"Very Active",  "ACT", "Hard exercise 6-7 days/week"),
+    EXTREME   (1.90f, "Extra Active",     "EXT", "Physical job or training 2x/day"),
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -71,6 +72,16 @@ data class BmiState(
     val fats              : Float? = null,
     /** How far the user's current weight is from IBW. */
     val weightDifference  : Float? = null,
+    /** Personalized insight text. */
+    val insight           : String = "",
+    /** Quiz visibility. */
+    val showQuiz          : Boolean = false,
+    /** Calorie goals. */
+    val lossCalories      : Float? = null,
+    val gainCalories      : Float? = null,
+    /** Bio-Impact offsets for transparency. */
+    val genderBmrOffset   : Float = 0f,
+    val genderBfpOffset   : Float = 0f,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -78,40 +89,110 @@ data class BmiState(
 // ─────────────────────────────────────────────────────────────
 
 @HiltViewModel
-class BmiViewModel @Inject constructor() : ViewModel() {
+class BmiViewModel @Inject constructor(
+    private val repository: SettingsRepository
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BmiState())
     val uiState: StateFlow<BmiState> = _uiState.asStateFlow()
 
+    init {
+        loadData()
+    }
+
+    private fun loadData() {
+        viewModelScope.launch {
+            val h = repository.bmiHeight.first()
+            val w = repository.bmiWeight.first()
+            val a = repository.bmiAge.first()
+            val g = repository.bmiGender.first()
+            val act = repository.bmiActivity.first()
+            val isKg = repository.bmiIsKg.first()
+            val isCm = repository.bmiIsCm.first()
+
+            val initialState = BmiState(
+                height = h,
+                weight = w,
+                age = a,
+                gender = Gender.valueOf(g),
+                activity = ActivityLevel.valueOf(act),
+                isKg = isKg,
+                isCm = isCm
+            )
+            _uiState.update { recalculate(initialState) }
+        }
+    }
+
     fun onWeightChange(weight: String) {
         val cleaned = weight.filter { it.isDigit() || it == '.' }
         _uiState.update { recalculate(it.copy(weight = cleaned)) }
+        viewModelScope.launch { repository.setBmiWeight(cleaned) }
     }
 
     fun onHeightChange(height: String) {
         val cleaned = height.filter { it.isDigit() || it == '.' || it == '\'' || it == '"' || it == ' ' }
         _uiState.update { recalculate(it.copy(height = cleaned)) }
+        viewModelScope.launch { repository.setBmiHeight(cleaned) }
+    }
+
+    fun onHeightSliderChange(inchesOrCm: Float) {
+        _uiState.update { state ->
+            val heightStr = if (state.isCm) {
+                "%.0f".format(inchesOrCm)
+            } else {
+                val feet = (inchesOrCm / 12).toInt()
+                val inches = (inchesOrCm % 12).toInt()
+                "$feet' $inches\""
+            }
+            val newState = recalculate(state.copy(height = heightStr))
+            viewModelScope.launch { repository.setBmiHeight(heightStr) }
+            newState
+        }
     }
 
     fun onAgeChange(age: String) {
         val cleaned = age.filter { it.isDigit() }
         _uiState.update { recalculate(it.copy(age = cleaned)) }
+        viewModelScope.launch { repository.setBmiAge(cleaned) }
     }
 
     fun onGenderChange(gender: Gender) {
         _uiState.update { recalculate(it.copy(gender = gender)) }
+        viewModelScope.launch { repository.setBmiGender(gender.name) }
     }
 
     fun toggleUnit(isHeight: Boolean) {
         _uiState.update { state ->
             val next = if (isHeight) state.copy(isCm = !state.isCm)
             else          state.copy(isKg = !state.isKg)
+            viewModelScope.launch {
+                if (isHeight) repository.setBmiIsCm(next.isCm)
+                else          repository.setBmiIsKg(next.isKg)
+            }
             recalculate(next)
         }
     }
 
     fun onActivityChange(level: ActivityLevel) {
         _uiState.update { recalculate(it.copy(activity = level)) }
+        viewModelScope.launch { repository.setBmiActivity(level.name) }
+    }
+
+    fun toggleQuiz(show: Boolean) {
+        _uiState.update { it.copy(showQuiz = show) }
+    }
+
+    fun applyQuizResult(totalScore: Int) {
+        // Score range: 0 to 12+
+        val level = when {
+            totalScore <= 2 -> ActivityLevel.SEDENTARY
+            totalScore <= 5 -> ActivityLevel.LIGHT
+            totalScore <= 8 -> ActivityLevel.MODERATE
+            totalScore <= 11 -> ActivityLevel.ACTIVE
+            else -> ActivityLevel.EXTREME
+        }
+        _uiState.update { recalculate(it.copy(activity = level, showQuiz = false)) }
+        viewModelScope.launch { repository.setBmiActivity(level.name) }
     }
 
     private fun recalculate(state: BmiState): BmiState {
@@ -140,12 +221,13 @@ class BmiViewModel @Inject constructor() : ViewModel() {
 
         // 2. Age-adjusted range & category
         // Granular age-based ranges for better feedback
+        // Modern geriatric standards suggest 23-30 is healthy for 65+
         val range = when {
-            ageVal >= 65 -> 23.0f to 29.0f
-            ageVal >= 55 -> 22.5f to 28.5f
-            ageVal >= 45 -> 22.0f to 28.0f
-            ageVal >= 35 -> 21.0f to 27.0f
-            ageVal >= 25 -> 20.0f to 26.0f
+            ageVal >= 65 -> 23.0f to 29.9f
+            ageVal >= 55 -> 22.0f to 28.5f
+            ageVal >= 45 -> 21.0f to 27.5f
+            ageVal >= 35 -> 20.0f to 26.5f
+            ageVal >= 25 -> 19.5f to 25.5f
             else         -> 18.5f to 24.9f
         }
         
@@ -171,6 +253,9 @@ class BmiViewModel @Inject constructor() : ViewModel() {
 
         // 4. TDEE
         val tdee = bmr * state.activity.multiplier
+        
+        val lossCalories = (tdee - 500f).coerceAtLeast(1200f)
+        val gainCalories = tdee + 500f
         
         // Macros (30% protein, 40% carbs, 30% fats)
         val protein = (tdee * 0.30f) / 4f
@@ -208,6 +293,13 @@ class BmiViewModel @Inject constructor() : ViewModel() {
         val weightDiff = if (state.isKg) weightInKg - ibwKg
         else            (weightInKg - ibwKg) * KG_TO_LB
 
+        // 11. Insight
+        val insight = generateInsight(category, bmi, ageVal, weightDiff, state.isKg)
+
+        // 12. Bio-Impact exposure
+        val bmrOffset = if (state.gender == Gender.MALE) 5f else -161f
+        val bfpOffset = if (state.gender == Gender.MALE) -10.8f else 0f
+
         return state.copy(
             bmi              = bmi,
             oxfordBmi        = oxfordBmi,
@@ -226,25 +318,47 @@ class BmiViewModel @Inject constructor() : ViewModel() {
             carbs            = carbs,
             fats             = fats,
             weightDifference = weightDiff,
+            insight          = insight,
+            lossCalories     = lossCalories,
+            gainCalories     = gainCalories,
+            genderBmrOffset  = bmrOffset,
+            genderBfpOffset  = bfpOffset,
         )
     }
 
-    private fun parseImperialHeight(height: String): Float = try {
-        when {
-            height.contains('\'') -> {
-                val parts   = height.split('\'')
-                val feet    = parts[0].trim().toFloatOrNull() ?: 0f
-                val inches  = parts.getOrNull(1)
-                    ?.replace("\"", "")?.trim()?.toFloatOrNull() ?: 0f
-                feet * 12f + inches
+    private fun generateInsight(category: String, bmi: Float, age: Int, diff: Float, isKg: Boolean): String {
+        val unit = if (isKg) "kg" else "lb"
+        val absDiff = kotlin.math.abs(diff)
+        
+        return when {
+            bmi < 16 -> "Your BMI is significantly low. Please consult a healthcare provider for personalized guidance."
+            bmi < 18.5 -> "You are in the underweight range. Focusing on nutrient-dense foods may help you reach a healthier weight."
+            bmi <= 24.9 -> "Great job! You are in the healthy weight range. Maintaining a balanced diet and active lifestyle is key."
+            bmi < 30 -> {
+                if (absDiff < 2f) "You're very close to your ideal weight range. Small adjustments could make a big difference!"
+                else "You're in the overweight range. Consider increasing activity levels or adjusting your caloric intake."
             }
-            else -> height.toFloatOrNull() ?: 0f
+            else -> "Your BMI is in the obese range. Aiming for a gradual weight loss of 5-10% can significantly improve your health markers."
         }
-    } catch (_: Exception) { 0f }
+    }
+
 
     companion object {
-        private const val LB_TO_KG  = 0.453592f
-        private const val KG_TO_LB  = 2.204623f
-        private const val IN_TO_CM  = 2.54f
+        const val LB_TO_KG  = 0.453592f
+        const val KG_TO_LB  = 2.204623f
+        const val IN_TO_CM  = 2.54f
+
+        fun parseImperialHeight(height: String): Float = try {
+            when {
+                height.contains('\'') -> {
+                    val parts   = height.split('\'')
+                    val feet    = parts[0].trim().toFloatOrNull() ?: 0f
+                    val inches  = parts.getOrNull(1)
+                        ?.replace("\"", "")?.trim()?.toFloatOrNull() ?: 0f
+                    feet * 12f + inches
+                }
+                else -> height.toFloatOrNull() ?: 0f
+            }
+        } catch (_: Exception) { 0f }
     }
 }
