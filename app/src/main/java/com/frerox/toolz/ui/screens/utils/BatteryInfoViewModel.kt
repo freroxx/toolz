@@ -5,13 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Build
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.device.DeviceSpecMapper
+import com.frerox.toolz.data.device.DeviceSpecUiModel
+import com.frerox.toolz.data.device.DeviceSpecsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class BatteryState(
@@ -22,32 +30,50 @@ data class BatteryState(
     val voltage: Int = 0,
     val technology: String = "",
     val isCharging: Boolean = false,
+    val isFull: Boolean = false,
     val powerSource: String = "None",
     val currentNowMa: Int = 0, // Current in mA
-    val capacityAh: Float = 0f, // Capacity in Ah
-    val chargeCounterUah: Int = 0 // Charge counter in uAh
+    val capacityMah: Int = 0, // Capacity in mAh
+    val chargeCounterUah: Int = 0, // Charge counter in uAh
+    val remoteSpec: DeviceSpecUiModel? = null,
+    val isRemoteLoading: Boolean = false,
+    val remoteError: String? = null
 )
 
 @HiltViewModel
 class BatteryInfoViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val specsRepository: DeviceSpecsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BatteryState())
     val uiState: StateFlow<BatteryState> = _uiState.asStateFlow()
 
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+    private val modelQuery: String by lazy {
+        Build.MODEL.trim().ifBlank { Build.DEVICE.trim() }.ifBlank { "Unknown" }
+    }
+
+    private var cachedCapacityMah: Int = -1
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.let {
                 val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                val batteryPct = level * 100 / scale.toFloat()
+                val batteryPct = if (scale > 0) level * 100 / scale.toFloat() else 0f
 
-                val status = it.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                        status == BatteryManager.BATTERY_STATUS_FULL
+                val statusInt = it.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                val isCharging = statusInt == BatteryManager.BATTERY_STATUS_CHARGING
+                val isFull = statusInt == BatteryManager.BATTERY_STATUS_FULL || (isCharging && batteryPct >= 100f)
+
+                val status = when {
+                    isFull -> "Full"
+                    isCharging -> "Charging"
+                    statusInt == BatteryManager.BATTERY_STATUS_DISCHARGING -> "Discharging"
+                    statusInt == BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "Not Charging"
+                    else -> "Unknown"
+                }
 
                 val chargePlug = it.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
                 val powerSource = when (chargePlug) {
@@ -74,13 +100,17 @@ class BatteryInfoViewModel @Inject constructor(
                 // Get dynamic properties
                 val currentNow = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) / 1000 // to mA
                 val chargeCounter = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) // in uAh
-                val capacity = getBatteryCapacity(context!!)
+                
+                if (cachedCapacityMah == -1) {
+                    cachedCapacityMah = getBatteryCapacity(context!!).toInt()
+                }
 
                 _uiState.update { state ->
                     state.copy(
                         level = batteryPct.toInt(),
-                        status = if (isCharging) "Charging" else "Discharging",
-                        isCharging = isCharging,
+                        status = status,
+                        isCharging = isCharging || isFull,
+                        isFull = isFull,
                         powerSource = powerSource,
                         health = health,
                         temperature = temp,
@@ -88,7 +118,7 @@ class BatteryInfoViewModel @Inject constructor(
                         technology = tech,
                         currentNowMa = currentNow,
                         chargeCounterUah = chargeCounter,
-                        capacityAh = capacity
+                        capacityMah = cachedCapacityMah
                     )
                 }
             }
@@ -118,6 +148,31 @@ class BatteryInfoViewModel @Inject constructor(
     fun startListening() {
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         context.registerReceiver(batteryReceiver, filter)
+        loadRemoteSpecs()
+    }
+
+    fun loadRemoteSpecs(forceRefresh: Boolean = false) {
+        if (_uiState.value.remoteSpec != null && !forceRefresh) return
+        
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRemoteLoading = true, remoteError = null) }
+            
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    specsRepository.getDeviceSpecs(modelQuery, forceRefresh = forceRefresh)
+                }
+                
+                result.map { (response, isCached) -> DeviceSpecMapper.mapResponse(response, isCached) }
+                    .onSuccess { specs ->
+                        _uiState.update { it.copy(remoteSpec = specs, isRemoteLoading = false) }
+                    }
+                    .onFailure { error ->
+                        _uiState.update { it.copy(isRemoteLoading = false, remoteError = error.message) }
+                    }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRemoteLoading = false, remoteError = e.message) }
+            }
+        }
     }
 
     fun stopListening() {
