@@ -21,6 +21,8 @@ import kotlin.math.*
 data class CompassState(
     val azimuth: Float = 0f,
     val displayAzimuth: Float = 0f, // Normalized 0-360 for UI text
+    val targetHeading: Float? = null,
+    val isFullScreen: Boolean = false,
     val qiblaAngle: Float? = null,
     val showQibla: Boolean = false,
     val latitude: Double? = null,
@@ -105,6 +107,14 @@ class CompassViewModel @Inject constructor(
 
     fun stopListening() {
         sensorManager.unregisterListener(this)
+    }
+
+    fun setTargetHeading(heading: Float?) {
+        _uiState.update { it.copy(targetHeading = heading) }
+    }
+
+    fun toggleFullScreen() {
+        _uiState.update { it.copy(isFullScreen = !it.isFullScreen) }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
