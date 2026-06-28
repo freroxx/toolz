@@ -2,11 +2,9 @@ package com.frerox.toolz.ui.components
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AllInclusive
@@ -17,8 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,7 +23,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CaffeinatePopup(
     onDismiss: () -> Unit,
@@ -35,7 +30,7 @@ fun CaffeinatePopup(
     viewModel: CaffeinateViewModel = hiltViewModel()
 ) {
     var isActivating by remember { mutableStateOf(false) }
-    var activationProgress by remember { mutableStateOf(0f) }
+    var activationProgress by remember { mutableFloatStateOf(0f) }
 
     val coffeeFillProgress by animateFloatAsState(
         targetValue = activationProgress,
@@ -60,13 +55,15 @@ fun CaffeinatePopup(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.4f))
-                .clickableEnabled(enabled = !isActivating) { onDismiss() }
+                .clickable(enabled = !isActivating) { onDismiss() }
         )
 
         AnimatedContent(
             targetState = isActivating,
             transitionSpec = {
-                (fadeIn() + scaleIn(initialScale = 0.9f)).togetherWith(fadeOut() + scaleOut(targetScale = 1.1f))
+                (fadeIn(tween(400)) + scaleIn(spring(dampingRatio = Spring.DampingRatioLowBouncy))).togetherWith(
+                    fadeOut(tween(300)) + scaleOut(targetScale = 1.1f)
+                )
             },
             label = "popupContent"
         ) { activating ->
@@ -96,12 +93,12 @@ fun CaffeinateOptionsCard(
     onAuto: () -> Unit,
     onManual: () -> Unit
 ) {
-    ElevatedCard(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier
             .width(320.dp)
             .padding(16.dp),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier.padding(24.dp),
@@ -143,23 +140,37 @@ fun CaffeinateOptionsCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                CaffeinateButton(
+                ToolzExpressiveButton(
                     modifier = Modifier.weight(1f),
-                    title = "Auto",
-                    subtitle = "Infinite",
-                    icon = Icons.Rounded.AllInclusive,
                     onClick = onAuto,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.AllInclusive, null)
+                        Text("Auto", fontWeight = FontWeight.Bold)
+                        Text("Infinite", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 
-                CaffeinateButton(
+                ToolzExpressiveButton(
                     modifier = Modifier.weight(1f),
-                    title = "Manual",
-                    subtitle = "Set Time",
-                    icon = Icons.Rounded.Timer,
                     onClick = onManual,
-                    color = MaterialTheme.colorScheme.secondary
-                )
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Timer, null)
+                        Text("Manual", fontWeight = FontWeight.Bold)
+                        Text("1 Hour", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
@@ -167,17 +178,17 @@ fun CaffeinateOptionsCard(
 
 @Composable
 fun ActivatingCoffeeCard(progress: Float) {
-    ElevatedCard(
+    ExpressiveCard(
+        onClick = {},
         modifier = Modifier
             .width(280.dp)
-            .height(200.dp),
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primary)
+            .height(220.dp),
+        containerColor = MaterialTheme.colorScheme.primary
     ) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.BottomCenter) {
-                    // Empty cup
+                Box(modifier = Modifier.size(100.dp), contentAlignment = Alignment.BottomCenter) {
+                    // Empty cup / Background
                     Icon(
                         Icons.Rounded.Coffee,
                         null,
@@ -185,65 +196,40 @@ fun ActivatingCoffeeCard(progress: Float) {
                         tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
                     )
                     
-                    // Filling cup
+                    // Filling cup - using a clip and another icon
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(progress)
-                            .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)) // Approximate cup bottom
+                            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
                     ) {
                         Icon(
                             Icons.Rounded.Coffee,
                             null,
-                            modifier = Modifier.size(80.dp),
+                            modifier = Modifier.size(100.dp),
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 
                 Text(
-                    text = "Activating...",
+                    text = "Brewing...",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onPrimary
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                ToolzWavyLinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.width(120.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
                 )
             }
         }
     }
 }
-
-@Composable
-fun CaffeinateButton(
-    modifier: Modifier,
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    color: Color
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.height(100.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = color.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
-            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-// Extension to avoid error in the caller
-private fun Modifier.clickableEnabled(enabled: Boolean, onClick: () -> Unit): Modifier = this.then(
-    if (enabled) Modifier.clickable(onClick = onClick) else Modifier
-)
