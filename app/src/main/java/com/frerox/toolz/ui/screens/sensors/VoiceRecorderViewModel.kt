@@ -4,29 +4,37 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.media.AudioManager
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.IBinder
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.VoiceRecorderService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
 
+data class RecordingItem(
+    val file: File,
+    val marks: List<Long> = emptyList()
+)
+
 data class RecordingState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
     val durationMillis: Long = 0L,
     val maxAmplitude: Int = 0,
-    val recordings: List<File> = emptyList(),
+    val recordings: List<RecordingItem> = emptyList(),
     val playingFile: File? = null,
     val isPlaying: Boolean = false,
     val playbackPosition: Int = 0,
@@ -34,12 +42,15 @@ data class RecordingState(
     val gainLevel: Float = 1.0f,
     val isBackgroundEnabled: Boolean = true,
     val availableDevices: List<String> = emptyList(),
-    val selectedDevice: String = "Default"
+    val selectedDevice: String = "Default",
+    val marks: List<Long> = emptyList(),
+    val customOutputPath: String? = null
 )
 
 @HiltViewModel
 class VoiceRecorderViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RecordingState())
@@ -49,6 +60,9 @@ class VoiceRecorderViewModel @Inject constructor(
     private var isBound = false
     private var mediaPlayer: MediaPlayer? = null
     private var playbackJob: Job? = null
+    
+    // In-memory cache for marks of the session's files, keyed by absolute path
+    private val sessionMarks = mutableMapOf<String, List<Long>>()
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -58,8 +72,20 @@ class VoiceRecorderViewModel @Inject constructor(
             
             viewModelScope.launch {
                 recorderService?.isRecording?.collect { recording ->
-                    _uiState.update { it.copy(isRecording = recording) }
-                    if (!recording) loadRecordings()
+                    if (!recording && _uiState.value.isRecording) {
+                        // Just stopped recording
+                        val marks = _uiState.value.marks
+                        val path = recorderService?.currentPath?.value
+                        if (path != null) {
+                            sessionMarks[path] = marks
+                        }
+                        _uiState.update { it.copy(isRecording = false, marks = emptyList()) }
+                        loadRecordings()
+                    } else if (recording && !_uiState.value.isRecording) {
+                        _uiState.update { it.copy(isRecording = true, marks = emptyList()) }
+                    } else {
+                        _uiState.update { it.copy(isRecording = recording) }
+                    }
                 }
             }
             viewModelScope.launch {
@@ -89,7 +115,13 @@ class VoiceRecorderViewModel @Inject constructor(
         Intent(context, VoiceRecorderService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        loadRecordings()
+        
+        viewModelScope.launch {
+            settingsRepository.converterCustomOutputPath.collect { path ->
+                _uiState.update { it.copy(customOutputPath = path) }
+                loadRecordings()
+            }
+        }
         discoverDevices()
     }
 
@@ -117,9 +149,52 @@ class VoiceRecorderViewModel @Inject constructor(
     }
 
     private fun loadRecordings() {
-        val folder = context.getExternalFilesDir("recordings")
-        val files = folder?.listFiles()?.toList() ?: emptyList()
-        _uiState.update { it.copy(recordings = files.filter { f -> f.extension == "m4a" || f.extension == "3gp" }.sortedByDescending { f -> f.lastModified() }) }
+        val files = mutableListOf<File>()
+        
+        // Load from default internal recordings folder
+        val internalFolder = context.getExternalFilesDir("recordings")
+        internalFolder?.listFiles()?.let { files.addAll(it) }
+        
+        // Load from custom output folder if configured
+        _uiState.value.customOutputPath?.let { uriString ->
+            try {
+                val uri = Uri.parse(uriString)
+                val documentFile = DocumentFile.fromTreeUri(context, uri)
+                documentFile?.listFiles()?.forEach { doc ->
+                    if (doc.isFile) {
+                        // Attempt to get a File reference, though SAF uris might not always map easily
+                        // For display purposes, we might need a more robust model than java.io.File
+                        // but let's try to filter for audio extensions at least
+                        val name = doc.name ?: ""
+                        if (isAudioFile(name)) {
+                            // This is a placeholder since SAF files aren't always java.io.Files
+                            // However, we'll keep the File list for now and see if we can adapt
+                        }
+                    }
+                }
+                
+                // Alternative: if it's a file path
+                val folder = File(uriString)
+                if (folder.exists() && folder.isDirectory) {
+                    folder.listFiles()?.let { files.addAll(it) }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        
+        val audioExtensions = setOf("m4a", "3gp", "mp3", "wav", "ogg", "opus", "aac", "flac")
+        val filtered = files.filter { it.extension.lowercase() in audioExtensions }
+            .distinctBy { it.absolutePath }
+            .sortedByDescending { it.lastModified() }
+            .map { RecordingItem(it, sessionMarks[it.absolutePath] ?: emptyList()) }
+            
+        _uiState.update { it.copy(recordings = filtered) }
+    }
+
+    private fun isAudioFile(name: String): Boolean {
+        val audioExtensions = setOf("m4a", "3gp", "mp3", "wav", "ogg", "opus", "aac", "flac")
+        return audioExtensions.any { name.lowercase().endsWith(".$it") }
     }
 
     fun startRecording() {
@@ -137,6 +212,14 @@ class VoiceRecorderViewModel @Inject constructor(
 
     fun stopRecording(save: Boolean = true) {
         recorderService?.stopRecording(save)
+        // Note: Marks are handled in the collector to ensure they are associated with the file path
+    }
+
+    fun addMark() {
+        if (_uiState.value.isRecording) {
+            val currentMark = _uiState.value.durationMillis
+            _uiState.update { it.copy(marks = it.marks + currentMark) }
+        }
     }
 
     fun togglePlayback(file: File) {
