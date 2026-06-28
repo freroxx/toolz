@@ -3,17 +3,18 @@ package com.frerox.toolz.worker
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
-import com.frerox.toolz.R
-import android.widget.Toast
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.frerox.toolz.data.catalog.CatalogRepository
@@ -22,11 +23,15 @@ import com.frerox.toolz.data.music.MusicTrack
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URLDecoder
+import java.util.Locale
 
 @HiltWorker
 class MusicDownloadWorker @AssistedInject constructor(
@@ -65,36 +70,46 @@ class MusicDownloadWorker @AssistedInject constructor(
         val notificationId = NOTIFICATION_ID_BASE + trackId.hashCode()
         createNotificationChannel()
 
-        setForeground(createForegroundInfo(notificationId, "Downloading $title...", 0))
+        publishProgress(notificationId, "Preparing $title...", 0.02f)
 
         try {
             val streamUrl = catalogRepository.resolveAudioStream(sourceUrl, quality)
-                ?: return@withContext Result.failure()
-
-            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS
-            )
-            val toolzDir = File(downloadsDir, "Toolz")
-            if (!toolzDir.exists()) toolzDir.mkdirs()
+                ?: run {
+                    showErrorNotification(notificationId, title, "Could not resolve stream")
+                    return@withContext Result.failure()
+                }
+            publishProgress(notificationId, "Downloading $title...", 0.05f)
 
             val safeTitle = title.replace(Regex("[^a-zA-Z0-9 \\-\\.]"), "_")
             val safeArtist = artist.replace(Regex("[^a-zA-Z0-9 \\-\\.]"), "_")
             
-            // Download as temporary .m4a first
-            val tempFile = File(applicationContext.cacheDir, "temp_download_${trackId}.m4a")
+            val tempFile = File(applicationContext.cacheDir, "temp_download_${trackId}.source")
+            val extension = format.lowercase(Locale.US)
+            val processedFile = File(applicationContext.cacheDir, "toolz_${trackId}_${System.currentTimeMillis()}.$extension")
             val thumbFile = if (!thumbnailUrl.isNullOrEmpty()) {
                 File(applicationContext.cacheDir, "temp_thumb_${trackId}.jpg")
             } else null
             
-            val downloadSuccess = catalogRepository.downloadAudioStream(streamUrl, tempFile) { progress ->
-                val progressInt = (progress * 100).toInt()
-                notificationManager.notify(
-                    notificationId,
-                    createNotification(notificationId, "Downloading $title...", progressInt)
+            val ytdlpFile = downloadWithYtDlp(
+                sourceUrl = sourceUrl,
+                trackId = trackId,
+                requestedFormat = extension,
+                quality = quality,
+                notificationId = notificationId,
+                title = title
+            )
+
+            val downloadSuccess = if (ytdlpFile != null) {
+                ytdlpFile.copyTo(tempFile, overwrite = true)
+                ytdlpFile.delete()
+                publishProgress(notificationId, "Download complete", 0.80f)
+                true
+            } else catalogRepository.downloadAudioStream(streamUrl, tempFile) { progress ->
+                publishProgressBlocking(
+                    notificationId = notificationId,
+                    contentTitle = "Downloading $title...",
+                    progress = 0.05f + (progress.coerceIn(0f, 1f) * 0.75f)
                 )
-                kotlinx.coroutines.runBlocking {
-                    setProgress(workDataOf("progress" to progress))
-                }
             }
 
             if (!downloadSuccess) {
@@ -107,20 +122,23 @@ class MusicDownloadWorker @AssistedInject constructor(
                 downloadThumbnail(thumbnailUrl, thumbFile)
             }
 
-            // Prepare final file
-            val extension = format.lowercase()
-            val finalFile = File(toolzDir, "$safeArtist - $safeTitle.$extension")
-
-            // Convert and embed thumbnail
-            setForeground(createForegroundInfo(notificationId, "Processing $format...", 100))
-            val success = processAudio(tempFile, thumbFile, finalFile, format, quality, title, artist)
+            publishProgress(notificationId, "Processing $format...", 0.84f)
+            var success = processAudio(tempFile, thumbFile, processedFile, format, quality, title, artist)
+            if (!success && thumbFile?.exists() == true) {
+                android.util.Log.w("MusicDownloadWorker", "Conversion with cover failed. Retrying audio-only.")
+                if (processedFile.exists()) processedFile.delete()
+                success = processAudio(tempFile, null, processedFile, format, quality, title, artist)
+            }
 
             if (success) {
-                MediaScannerConnection.scanFile(
-                    applicationContext,
-                    arrayOf(finalFile.absolutePath),
-                    null
-                ) { _, _ -> }
+                publishProgress(notificationId, "Saving $title...", 0.94f)
+                val storedUri = savePlayableFile(
+                    sourceFile = processedFile,
+                    displayName = "$safeArtist - $safeTitle.$extension"
+                ) ?: run {
+                    showErrorNotification(notificationId, title, "Could not save file")
+                    return@withContext Result.failure()
+                }
 
                 // Save thumbnail locally for immediate offline access
                 var localThumbUri = thumbnailUrl
@@ -137,34 +155,109 @@ class MusicDownloadWorker @AssistedInject constructor(
                 }
 
                 if (tempFile.exists()) tempFile.delete()
+                if (processedFile.exists()) processedFile.delete()
                 if (thumbFile?.exists() == true) thumbFile.delete()
 
                 android.util.Log.d("MusicDownloadWorker", "Download successful. Inserting track: $title, thumb: $localThumbUri")
 
                 val musicTrack = MusicTrack(
-                    uri = Uri.fromFile(finalFile).toString(),
+                    uri = storedUri,
                     title = title,
                     artist = artist,
                     album = "Toolz Downloads",
                     duration = duration,
                     thumbnailUri = localThumbUri,
-                    path = finalFile.absolutePath,
+                    path = storedUri,
                     sourceUrl = sourceUrl,
                     dateAdded = System.currentTimeMillis()
                 )
-                musicRepository.insertTrack(musicTrack)
+                musicRepository.upsertDownloadedTrack(musicTrack)
 
+                publishProgress(notificationId, "Download complete", 1f)
                 showCompletedNotification(notificationId, title)
                 Result.success()
             } else {
+                android.util.Log.w("MusicDownloadWorker", "Conversion failed. Saving downloaded stream without conversion.")
+                publishProgress(notificationId, "Saving original audio...", 0.94f)
+                val rawExtension = rawExtensionForStream(streamUrl, extension)
+                val storedUri = savePlayableFile(
+                    sourceFile = tempFile,
+                    displayName = "$safeArtist - $safeTitle.$rawExtension"
+                ) ?: run {
+                    if (tempFile.exists()) tempFile.delete()
+                    if (processedFile.exists()) processedFile.delete()
+                    if (thumbFile?.exists() == true) thumbFile.delete()
+                    showErrorNotification(notificationId, title, "Could not save file")
+                    return@withContext Result.failure()
+                }
+
+                var localThumbUri = thumbnailUrl
+                if (thumbFile?.exists() == true) {
+                    try {
+                        val thumbDir = File(applicationContext.filesDir, "thumbnails")
+                        if (!thumbDir.exists()) thumbDir.mkdirs()
+                        val persistentThumb = File(thumbDir, "${trackId}.jpg")
+                        thumbFile.copyTo(persistentThumb, overwrite = true)
+                        localThumbUri = Uri.fromFile(persistentThumb).toString()
+                    } catch (e: Exception) {
+                        android.util.Log.e("MusicDownloadWorker", "Failed to save local thumb", e)
+                    }
+                }
+
+                val musicTrack = MusicTrack(
+                    uri = storedUri,
+                    title = title,
+                    artist = artist,
+                    album = "Toolz Downloads",
+                    duration = duration,
+                    thumbnailUri = localThumbUri,
+                    path = storedUri,
+                    sourceUrl = sourceUrl,
+                    dateAdded = System.currentTimeMillis()
+                )
+                musicRepository.upsertDownloadedTrack(musicTrack)
+
                 if (tempFile.exists()) tempFile.delete()
+                if (processedFile.exists()) processedFile.delete()
                 if (thumbFile?.exists() == true) thumbFile.delete()
-                showErrorNotification(notificationId, title, "Conversion failed")
-                Result.failure()
+                publishProgress(notificationId, "Download complete", 1f)
+                showCompletedNotification(notificationId, title)
+                Result.success()
             }
         } catch (e: Exception) {
             showErrorNotification(notificationId, title, e.localizedMessage ?: "Download error")
             Result.failure()
+        }
+    }
+
+    private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
+        val clamped = progress.coerceIn(0f, 1f)
+        // Always emit WorkData progress so the WorkInfo observer can read it
+        setProgress(workDataOf("progress" to clamped))
+        // Foreground info updates the notification; wrap so a transient failure doesn't
+        // prevent future setProgress calls from reaching observers.
+        try {
+            val progressInt = (clamped * 100).toInt()
+            setForeground(createForegroundInfo(notificationId, contentTitle, progressInt))
+        } catch (e: Exception) {
+            android.util.Log.w("MusicDownloadWorker", "setForeground failed (non-fatal): ${e.message}")
+        }
+    }
+
+    private fun publishProgressBlocking(notificationId: Int, contentTitle: String, progress: Float) {
+        val clamped = progress.coerceIn(0f, 1f)
+        val progressInt = (clamped * 100).toInt()
+        try {
+            notificationManager.notify(notificationId, createNotification(notificationId, contentTitle, progressInt))
+        } catch (e: Exception) {
+            android.util.Log.w("MusicDownloadWorker", "notification update failed (non-fatal): ${e.message}")
+        }
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                setProgress(workDataOf("progress" to clamped))
+            } catch (e: Exception) {
+                android.util.Log.w("MusicDownloadWorker", "setProgress failed (non-fatal): ${e.message}")
+            }
         }
     }
 
@@ -202,12 +295,14 @@ class MusicDownloadWorker @AssistedInject constructor(
         val extension = format.lowercase()
         
         val command = StringBuilder("-i \"${input.absolutePath}\" ")
-        if (thumb?.exists() == true) {
+        
+        val includeCover = thumb?.exists() == true && extension != "opus"
+        if (includeCover) {
             command.append("-i \"${thumb.absolutePath}\" ")
         }
 
         // Map streams: audio from first input, video (cover) from second input
-        if (thumb?.exists() == true) {
+        if (includeCover) {
             command.append("-map 0:a -map 1:v ")
         } else {
             command.append("-map 0:a ")
@@ -216,16 +311,16 @@ class MusicDownloadWorker @AssistedInject constructor(
         // Codec and bitrate
         when (extension) {
             "mp3" -> command.append("-c:a libmp3lame -b:a $bitrate -id3v2_version 3 ")
-            "opus" -> command.append("-c:a libopus -b:a $bitrate ")
-            "m4a" -> command.append("-c:a copy ") // M4A usually doesn't need re-encoding from YT stream
+            "opus" -> command.append("-vn -c:a libopus -b:a $bitrate ")
+            "m4a" -> command.append("-c:a aac -b:a $bitrate ") // Re-encode WebM streams to AAC for M4A container compatibility
             else -> command.append("-c:a copy ")
         }
 
         // Metadata
-        command.append("-metadata title=\"$title\" -metadata artist=\"$artist\" ")
+        command.append("-metadata title=\"${ffmpegEscape(title)}\" -metadata artist=\"${ffmpegEscape(artist)}\" ")
         
         // Attachment disposition for cover art
-        if (thumb?.exists() == true) {
+        if (includeCover) {
             if (extension == "mp3") {
                 command.append("-metadata:s:v title=\"Album cover\" -metadata:s:v comment=\"Cover (front)\" ")
             } else {
@@ -237,6 +332,177 @@ class MusicDownloadWorker @AssistedInject constructor(
 
         val session = FFmpegKit.execute(command.toString())
         return ReturnCode.isSuccess(session.returnCode)
+    }
+
+    private fun savePlayableFile(sourceFile: File, displayName: String): String? {
+        return try {
+            val extension = displayName.substringAfterLast('.', "m4a")
+            val mimeType = mimeTypeFor(extension)
+            val resolver = applicationContext.contentResolver
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/Toolz Downloads")
+                    put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                    put(MediaStore.Audio.Media.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: return null
+                try {
+                    resolver.openOutputStream(uri)?.use { output ->
+                        sourceFile.inputStream().use { input -> input.copyTo(output) }
+                    } ?: return null
+                    values.clear()
+                    values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    uri.toString()
+                } catch (e: Exception) {
+                    resolver.delete(uri, null, null)
+                    throw e
+                }
+            } else {
+                val musicDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                    "Toolz Downloads"
+                ).apply { mkdirs() }
+                val finalFile = File(musicDir, displayName)
+                sourceFile.copyTo(finalFile, overwrite = true)
+                MediaScannerConnection.scanFile(
+                    applicationContext,
+                    arrayOf(finalFile.absolutePath),
+                    arrayOf(mimeType),
+                    null
+                )
+                Uri.fromFile(finalFile).toString()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MusicDownloadWorker", "Failed to save playable file", e)
+            null
+        }
+    }
+
+    private suspend fun downloadWithYtDlp(
+        sourceUrl: String,
+        trackId: String,
+        requestedFormat: String,
+        quality: String,
+        notificationId: Int,
+        title: String
+    ): File? = withContext(Dispatchers.IO) {
+        val outputDir = File(applicationContext.cacheDir, "yt_dlp_music").apply { mkdirs() }
+        outputDir.listFiles { file -> file.name.startsWith("toolz_${trackId}_") }?.forEach { it.delete() }
+        val outputTemplate = File(outputDir, "toolz_${trackId}_%(title).80B.%(ext)s").absolutePath
+        return@withContext runCatching {
+            val youtubeDlClass = Class.forName("com.yausername.youtubedl_android.YoutubeDL")
+            val requestClass = Class.forName("com.yausername.youtubedl_android.YoutubeDLRequest")
+            val request = requestClass.getConstructor(String::class.java).newInstance(sourceUrl)
+            val addOption = requestClass.methods.firstOrNull {
+                it.name == "addOption" &&
+                    it.parameterTypes.size == 2 &&
+                    it.parameterTypes[0] == String::class.java &&
+                    it.parameterTypes[1] == String::class.java
+            } ?: return@runCatching null
+            val addFlag = requestClass.methods.firstOrNull {
+                it.name == "addOption" &&
+                    it.parameterTypes.size == 1 &&
+                    it.parameterTypes[0] == String::class.java
+            }
+
+            fun option(name: String, value: String) {
+                addOption.invoke(request, name, value)
+            }
+            fun flag(name: String) {
+                addFlag?.invoke(request, name)
+            }
+
+            flag("--no-playlist")
+            flag("--newline")
+            option("-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio")
+            option("-o", outputTemplate)
+            if (requestedFormat in setOf("m4a", "mp3", "opus")) {
+                flag("--extract-audio")
+                option("--audio-format", requestedFormat)
+                option("--audio-quality", when (quality.uppercase(Locale.US)) {
+                    "LOW" -> "96K"
+                    "MEDIUM" -> "160K"
+                    else -> "0"
+                })
+            }
+
+            publishProgress(notificationId, "Downloading with yt-dlp...", 0.08f)
+            val youtubeDl = youtubeDlClass.getMethod("getInstance").invoke(null)
+            runCatching {
+                youtubeDl.javaClass.getMethod("init", Context::class.java).invoke(youtubeDl, applicationContext)
+            }
+
+            val callbackClass = Class.forName("com.yausername.youtubedl_android.DownloadProgressCallback")
+            val callback = java.lang.reflect.Proxy.newProxyInstance(
+                callbackClass.classLoader,
+                arrayOf(callbackClass)
+            ) { _, method, args ->
+                if (method.name == "onProgressUpdate" && args.isNotEmpty()) {
+                    val progressVal = (args[0] as? Float) ?: 0f
+                    // Progress is 0.0 to 100.0. Scale it within our 0.08 to 0.80 window.
+                    val normalized = 0.08f + ((progressVal / 100f) * 0.72f)
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        publishProgress(notificationId, "Downloading...", normalized)
+                    }
+                }
+                null
+            }
+
+            val executeMethod = youtubeDl.javaClass.methods.firstOrNull {
+                it.name == "execute" && 
+                it.parameterTypes.size == 3 && 
+                it.parameterTypes[0].isAssignableFrom(requestClass) &&
+                it.parameterTypes[1] == String::class.java &&
+                it.parameterTypes[2] == callbackClass
+            }
+
+            if (executeMethod != null) {
+                executeMethod.invoke(youtubeDl, request, trackId, callback)
+            } else {
+                // Fallback to 1-arg if 3-arg not found
+                youtubeDl.javaClass.methods.firstOrNull {
+                    it.name == "execute" && it.parameterTypes.size == 1 && it.parameterTypes[0].isAssignableFrom(requestClass)
+                }?.invoke(youtubeDl, request) ?: return@runCatching null
+            }
+
+            publishProgress(notificationId, "yt-dlp finished", 0.80f)
+            outputDir.listFiles { file -> file.name.startsWith("toolz_${trackId}_") && file.length() > 0L }
+                ?.maxByOrNull { it.lastModified() }
+        }.onFailure {
+            android.util.Log.w("MusicDownloadWorker", "yt-dlp download failed; falling back to extractor download", it)
+        }.getOrNull()
+    }
+
+    private fun rawExtensionForStream(streamUrl: String, requestedExtension: String): String {
+        val decoded = runCatching { URLDecoder.decode(streamUrl, "UTF-8") }.getOrDefault(streamUrl)
+        return when {
+            decoded.contains("audio/mp4", ignoreCase = true) ||
+                decoded.contains("mime=audio%2Fmp4", ignoreCase = true) -> "m4a"
+            decoded.contains("audio/webm", ignoreCase = true) ||
+                decoded.contains("mime=audio%2Fwebm", ignoreCase = true) -> "webm"
+            decoded.contains("opus", ignoreCase = true) -> "opus"
+            requestedExtension in setOf("m4a", "mp3", "opus") -> requestedExtension
+            else -> "webm"
+        }
+    }
+
+    private fun mimeTypeFor(extension: String): String = when (extension.lowercase(Locale.US)) {
+        "mp3" -> "audio/mpeg"
+        "m4a" -> "audio/mp4"
+        "opus" -> "audio/ogg"
+        else -> "audio/*"
+    }
+
+    private fun ffmpegEscape(value: String): String {
+        return value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("$", "\\$")
     }
 
     private fun createNotificationChannel() {
