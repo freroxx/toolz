@@ -1,14 +1,20 @@
 package com.frerox.toolz.ui.screens.sensors
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,17 +28,23 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -53,7 +65,12 @@ fun VoiceRecorderScreen(
     val uiState by viewModel.uiState.collectAsState()
     val performanceMode = LocalPerformanceMode.current
     val vibrationManager = LocalVibrationManager.current
+    val context = LocalContext.current
     var showSettingsSheet by remember { mutableStateOf(false) }
+
+    val archiveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { } // We just want to open the picker to the folder, no specific file selection needed
 
     Scaffold(
         topBar = {
@@ -75,15 +92,20 @@ fun VoiceRecorderScreen(
                     }
                 },
                 actions = {
-                    ExpressiveFabMenu(
-                        items = listOf(
-                            Triple("Settings", Icons.Rounded.Tune, { showSettingsSheet = true }),
-                            Triple("Audio Source", Icons.Rounded.Mic, { vibrationManager?.vibrateClick() })
-                        ),
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            showSettingsSheet = true
+                        },
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.Tune, contentDescription = "Settings")
+                    }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 modifier = Modifier.statusBarsPadding()
             )
         },
@@ -99,8 +121,8 @@ fun VoiceRecorderScreen(
                             if (uiState.isRecording) viewModel.stopRecording()
                             else viewModel.startRecording()
                         },
-                        modifier = Modifier.size(56.dp),
-                        shape = SmallExpressiveShape,
+                        modifier = Modifier.size(64.dp),
+                        shape = MediumExpressiveShape,
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                         )
@@ -108,7 +130,7 @@ fun VoiceRecorderScreen(
                         Icon(
                             if (uiState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic, 
                             contentDescription = null,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 },
@@ -123,10 +145,39 @@ fun VoiceRecorderScreen(
                             icon = { Icon(if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null) },
                             label = if (uiState.isPaused) "RESUME" else "PAUSE"
                         )
+                        clickableItem(
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                viewModel.addMark()
+                            },
+                            icon = { Icon(Icons.Rounded.BookmarkBorder, null) },
+                            label = "MARK"
+                        )
                     }
                     clickableItem(
-                        onClick = { vibrationManager?.vibrateClick() },
-                        icon = { Icon(Icons.Rounded.Folder, null) },
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            try {
+                                val uri = uiState.customOutputPath?.toUri() ?: context.getExternalFilesDir("recordings")?.toUri()
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = uri
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Fallback to generic picker if direct view fails
+                                try {
+                                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                                        type = "audio/*"
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e2: Exception) {
+                                    e2.printStackTrace()
+                                }
+                            }
+                        },
+                        icon = { Icon(Icons.Rounded.FolderCopy, null) },
                         label = "ARCHIVE"
                     )
                 }
@@ -144,7 +195,7 @@ fun VoiceRecorderScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(bottomStart = 48.dp, bottomEnd = 48.dp),
+                    shape = ExtraLargeExpressiveShape,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                 ) {
                     Column(
@@ -152,14 +203,14 @@ fun VoiceRecorderScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(320.dp)) {
                             // Dynamic background glow responding to state
                             if (!performanceMode) {
                                 val infiniteTransition = rememberInfiniteTransition(label = "GlowPulse")
                                 val glowScale by infiniteTransition.animateFloat(
-                                    initialValue = 0.9f,
-                                    targetValue = 1.1f,
-                                    animationSpec = infiniteRepeatable(tween(2000), RepeatMode.Reverse),
+                                    initialValue = 0.8f,
+                                    targetValue = 1.2f,
+                                    animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
                                     label = "Scale"
                                 )
                                 Box(
@@ -169,12 +220,20 @@ fun VoiceRecorderScreen(
                                         .background(
                                             Brush.radialGradient(
                                                 listOf(
-                                                    (if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = 0.1f),
+                                                    (if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = 0.15f),
                                                     Color.Transparent
                                                 )
                                             ),
                                             CircleShape
                                         )
+                                )
+                            }
+
+                            // Pulsing Mic Icon for recording feedback
+                            if (uiState.isRecording && !uiState.isPaused) {
+                                LiveMicIcon(
+                                    isRecording = true,
+                                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp)
                                 )
                             }
 
@@ -189,10 +248,10 @@ fun VoiceRecorderScreen(
                                 Text(
                                     text = formatDuration(uiState.durationMillis),
                                     style = MaterialTheme.typography.displayLarge.copy(
-                                        fontSize = 72.sp,
+                                        fontSize = 84.sp,
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace,
-                                        letterSpacing = (-4).sp
+                                        letterSpacing = (-4.5).sp
                                     ),
                                     color = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                                 )
@@ -202,18 +261,31 @@ fun VoiceRecorderScreen(
                                     enter = fadeIn() + scaleIn(),
                                     exit = fadeOut() + scaleOut()
                                 ) {
-                                    Surface(
-                                        color = if (uiState.isPaused) MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                                        shape = BouncyShape,
+                                    ExpressiveStatePill(
+                                        text = if (uiState.isPaused) "SESSION PAUSED" else "LIVE CAPTURE",
+                                        icon = if (uiState.isPaused) Icons.Rounded.Pause else Icons.Rounded.GraphicEq,
+                                        color = if (uiState.isPaused) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                                         modifier = Modifier.padding(top = 16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (uiState.marks.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.padding(top = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                uiState.marks.takeLast(3).forEach { mark ->
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                        shape = CircleShape
                                     ) {
                                         Text(
-                                            if (uiState.isPaused) "SESSION PAUSED" else "LIVE CAPTURE",
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                            formatDuration(mark),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = if (uiState.isPaused) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
-                                            letterSpacing = 1.5.sp
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
@@ -260,25 +332,28 @@ fun VoiceRecorderScreen(
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                             contentPadding = PaddingValues(bottom = 120.dp)
                         ) {
-                            items(uiState.recordings, key = { it.absolutePath }) { recording ->
-                                RecordingCardExpressive(
-                                    file = recording,
-                                    isPlaying = uiState.playingFile == recording && uiState.isPlaying,
-                                    playbackPosition = if (uiState.playingFile == recording) uiState.playbackPosition else 0,
-                                    playbackDuration = if (uiState.playingFile == recording) uiState.playbackDuration else 0,
-                                    onTogglePlay = { 
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.togglePlayback(recording) 
-                                    },
-                                    onDelete = { 
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.deleteRecording(recording) 
-                                    },
-                                    onRename = { 
-                                        vibrationManager?.vibrateSuccess()
-                                        viewModel.renameRecording(recording, it) 
-                                    }
-                                )
+                            itemsIndexed(uiState.recordings, key = { _, it -> it.file.absolutePath }) { index, recordingItem ->
+                                StaggeredEntrance(index = index) {
+                                    RecordingCardExpressive(
+                                        file = recordingItem.file,
+                                        isPlaying = uiState.playingFile == recordingItem.file && uiState.isPlaying,
+                                        playbackPosition = if (uiState.playingFile == recordingItem.file) uiState.playbackPosition else 0,
+                                        playbackDuration = if (uiState.playingFile == recordingItem.file) uiState.playbackDuration else 0,
+                                        marks = recordingItem.marks,
+                                        onTogglePlay = { 
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.togglePlayback(recordingItem.file) 
+                                        },
+                                        onDelete = { 
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.deleteRecording(recordingItem.file) 
+                                        },
+                                        onRename = { 
+                                            vibrationManager?.vibrateSuccess()
+                                            viewModel.renameRecording(recordingItem.file, it) 
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -300,74 +375,166 @@ fun VoiceRecorderScreen(
 
 @Composable
 private fun WaveformAnimationExpressive(amplitude: Int) {
-    val barCount = 12
-    val heights = remember { List(barCount) { mutableStateOf(0.1f) } }
+    val infiniteTransition = rememberInfiniteTransition(label = "LiquidSphere")
     
-    LaunchedEffect(amplitude) {
-        val norm = (amplitude.toFloat() / 32768f).coerceIn(0.1f, 1f)
-        heights.forEach { h ->
-            h.value = norm * (0.2f + Random.nextFloat() * 0.8f)
-        }
-    }
+    val baseRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing)),
+        label = "BaseRotation"
+    )
+    
+    val normAmplitude = (amplitude.toFloat() / 32768f).coerceIn(0f, 1f)
+    val animatedAmplitude by animateFloatAsState(
+        targetValue = normAmplitude,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
+        label = "Amplitude"
+    )
 
-    Row(
-        modifier = Modifier.fillMaxWidth().height(140.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        heights.forEach { h ->
-            val animatedHeight by animateFloatAsState(
-                targetValue = h.value * 140f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-                label = "WaveBar"
-            )
-            Box(
-                modifier = Modifier
-                    .width(10.dp)
-                    .height(animatedHeight.dp.coerceAtLeast(8.dp))
-                    .clip(CircleShape)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = this.center
+            val radius = (size.minDimension / 3f) + (animatedAmplitude * size.minDimension / 6f)
+            
+            // Outer fluid layer
+            rotate(baseRotation) {
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        colors = listOf(
+                            Color.Red.copy(alpha = 0.1f),
+                            Color.Red.copy(alpha = 0.4f),
+                            Color.Red.copy(alpha = 0.1f)
                         )
-                    )
+                    ),
+                    radius = radius * 1.4f,
+                    center = center,
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
+            
+            // Core liquid body
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.Red.copy(alpha = 0.8f),
+                        Color.Red.copy(alpha = 0.2f),
+                        Color.Transparent
+                    ),
+                    center = center,
+                    radius = radius * 1.2f
+                ),
+                radius = radius,
+                center = center
             )
+            
+            // Animated "waves" inside core
+            repeat(3) { i ->
+                val waveRotation = baseRotation * (1f + i * 0.2f) * (if (i % 2 == 0) 1f else -1f)
+                rotate(waveRotation) {
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.3f),
+                        startAngle = 0f,
+                        sweepAngle = 90f + (animatedAmplitude * 40f),
+                        useCenter = false,
+                        style = Stroke(width = (2 + i).dp.toPx(), cap = StrokeCap.Round),
+                        size = Size(radius * 1.8f, radius * 1.8f),
+                        topLeft = Offset(center.x - radius * 0.9f, center.y - radius * 0.9f)
+                    )
+                }
+            }
         }
+        
+        // Inner "breathing" core
+        Box(
+            modifier = Modifier
+                .size((80 + animatedAmplitude * 40).dp)
+                .graphicsLayer {
+                    alpha = 0.4f + animatedAmplitude * 0.6f
+                    scaleX = 0.9f + animatedAmplitude * 0.2f
+                    scaleY = 0.9f + animatedAmplitude * 0.2f
+                }
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color.White, Color.Transparent)
+                    ),
+                    CircleShape
+                )
+        )
     }
 }
 
 @Composable
 private fun RecordingRippleAnimationExpressive(performanceMode: Boolean) {
     if (performanceMode) return
-    val infiniteTransition = rememberInfiniteTransition(label = "Ripple")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.7f,
-        targetValue = 1.8f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
-        label = "Scale"
-    )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
-        label = "Alpha"
-    )
+    val infiniteTransition = rememberInfiniteTransition(label = "OrganicRipple")
+    
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
+        repeat(3) { index ->
+            val duration = 2500 + (index * 600)
+            val delay = index * 800
+            
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 0.6f,
+                targetValue = 2.2f,
+                animationSpec = infiniteRepeatable(
+                    tween(duration, delayMillis = delay, easing = FastOutSlowInEasing),
+                    RepeatMode.Restart
+                ),
+                label = "RippleScale$index"
+            )
+            
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.4f,
+                targetValue = 0f,
+                animationSpec = infiniteRepeatable(
+                    tween(duration, delayMillis = delay, easing = LinearOutSlowInEasing),
+                    RepeatMode.Restart
+                ),
+                label = "RippleAlpha$index"
+            )
 
-    Box(contentAlignment = Alignment.Center) {
-        repeat(2) { index ->
             Box(
                 modifier = Modifier
-                    .size(200.dp)
+                    .fillMaxSize()
                     .graphicsLayer {
-                        val s = scale - (index * 0.4f)
-                        val a = if (s > 0) alpha else 0f
-                        scaleX = s
-                        scaleY = s
-                        this.alpha = a
+                        scaleX = scale
+                        scaleY = scale
+                        this.alpha = alpha
                     }
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                Color.Transparent
+                            )
+                        ),
+                        CircleShape
+                    )
+                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape)
             )
         }
+        
+        // Central pulse
+        val centerScale by infiniteTransition.animateFloat(
+            initialValue = 0.95f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                tween(1500, easing = EaseInOutSine),
+                RepeatMode.Reverse
+            ),
+            label = "CenterPulse"
+        )
+        
+        Box(
+            modifier = Modifier
+                .size(140.dp)
+                .scale(centerScale)
+                .background(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                    CircleShape
+                )
+                .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), CircleShape)
+        )
     }
 }
 
@@ -377,6 +544,7 @@ private fun RecordingCardExpressive(
     isPlaying: Boolean,
     playbackPosition: Int,
     playbackDuration: Int,
+    marks: List<Long> = emptyList(),
     onTogglePlay: () -> Unit,
     onDelete: () -> Unit,
     onRename: (String) -> Unit
@@ -391,7 +559,7 @@ private fun RecordingCardExpressive(
             detectTapGestures(onLongPress = { showRenameDialog = true }, onTap = { onTogglePlay() })
         },
         shape = SquircleShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
         border = BorderStroke(1.dp, if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
         elevation = 0.dp
     ) {
@@ -403,12 +571,16 @@ private fun RecordingCardExpressive(
                     color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (isPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
-                        )
+                        if (isPlaying) {
+                            ExpressiveLoadingIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                        } else {
+                            Icon(
+                                Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(20.dp))
@@ -436,13 +608,31 @@ private fun RecordingCardExpressive(
             
             if (playbackDuration > 0 && (isPlaying || (playbackPosition > 0 && !isPlaying))) {
                 Spacer(Modifier.height(20.dp))
-                // Official Linear Wavy Progress Indicator
-                ToolzWavyLinearProgressIndicator(
-                    progress = { playbackPosition.toFloat() / playbackDuration.toFloat() },
-                    modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                )
+                // Official Linear Wavy Progress Indicator with Marks
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.Center) {
+                    val width = maxWidth
+                    ToolzWavyLinearProgressIndicator(
+                        progress = { playbackPosition.toFloat() / playbackDuration.toFloat() },
+                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    )
+                    
+                    // Marks Visualization on Progress Bar
+                    marks.forEach { mark ->
+                        val ratio = mark.toFloat() / playbackDuration.toFloat()
+                        if (ratio in 0f..1f) {
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = width * ratio - 2.dp)
+                                    .size(4.dp, 16.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
+                                    .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                            )
+                        }
+                    }
+                }
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(formatDuration(playbackPosition.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                     Text(formatDuration(playbackDuration.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
@@ -498,25 +688,39 @@ private fun RecordingCardExpressive(
 
 @Composable
 private fun EmptyArchiveView() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Surface(
-                modifier = Modifier.size(120.dp),
-                shape = SquircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.MicNone, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    StaggeredEntrance(index = 0) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    modifier = Modifier.size(160.dp),
+                    shape = ExtraLargeExpressiveShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.MicNone,
+                            null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                        )
+                    }
                 }
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    "NO CAPTURES FOUND",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                    letterSpacing = 2.sp
+                )
+                Text(
+                    "START RECORDING TO POPULATE ARCHIVE",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "NO CAPTURES FOUND", 
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                letterSpacing = 1.sp
-            )
         }
     }
 }
@@ -533,7 +737,8 @@ fun VoiceRecorderSettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle() }
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        shape = ExtraLargeExpressiveShape
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
             Text("AUDIO CONFIGURATION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, modifier = Modifier.padding(vertical = 16.dp))
@@ -542,7 +747,7 @@ fun VoiceRecorderSettingsSheet(
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text("SENSITIVITY (GAIN)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
                     Text("${String.format("%.1f", state.gainLevel)}x", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    Slider(value = state.gainLevel, onValueChange = onGainChange, valueRange = 0.5f..3.0f, modifier = Modifier.padding(top = 12.dp))
+                    ExpressiveSlider(value = state.gainLevel, onValueChange = onGainChange, valueRange = 0.5f..3.0f, modifier = Modifier.padding(top = 12.dp))
                 }
             }
 
@@ -552,7 +757,7 @@ fun VoiceRecorderSettingsSheet(
                         Text("PERSISTENT RECORDING", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
                         Text("Allow capture in background", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                     }
-                    Switch(checked = state.isBackgroundEnabled, onCheckedChange = onBackgroundToggle)
+                    ExpressiveSwitch(checked = state.isBackgroundEnabled, onCheckedChange = onBackgroundToggle)
                 }
             }
         }
