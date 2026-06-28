@@ -216,7 +216,7 @@
         <service
             android:name=".service.ClipboardTileService"
             android:label="Toolz: Clipboard"
-            android:icon="@android:drawable/ic_menu_recent_history"
+            android:icon="@drawable/ic_clipboard"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter>
@@ -269,7 +269,7 @@
         <service
             android:name=".service.QuickToolzTileService"
             android:label="Toolz: Quick Access"
-            android:icon="@drawable/ic_launcher_foreground"
+            android:icon="@drawable/ic_quick_access"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter>
@@ -286,6 +286,13 @@
 
         <activity
             android:name=".service.CaffeinatePopupActivity"
+            android:theme="@style/Theme.Toolz.Transparent"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="" />
+
+        <activity
+            android:name=".service.ClipboardPopupActivity"
             android:theme="@style/Theme.Toolz.Transparent"
             android:exported="false"
             android:excludeFromRecents="true"
