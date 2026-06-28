@@ -1,13 +1,14 @@
 package com.frerox.toolz.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,15 +39,15 @@ fun QuickToolzBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 40.dp, topEnd = 40.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(36.dp, 4.dp)
+                    .padding(top = 16.dp, bottom = 8.dp)
+                    .size(48.dp, 6.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
             )
         }
     ) {
@@ -57,64 +58,64 @@ fun QuickToolzBottomSheet(
                 .padding(bottom = 48.dp)
         ) {
             Text(
-                text = "Quick Toolz",
+                text = "Quick Access",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
-                letterSpacing = (-0.5).sp
+                letterSpacing = (-1).sp
             )
             
             Spacer(modifier = Modifier.height(24.dp))
 
             if (pinnedTools.isNotEmpty()) {
-                Text(
-                    text = "PINNED",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 1.sp
+                ExpressiveStatePill(
+                    text = "Pinned",
+                    icon = Icons.Rounded.PushPin,
+                    color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(items = pinnedTools.toList()) { route: String ->
+                    itemsIndexed(items = pinnedTools.toList()) { index, route ->
                         val tool = categories.flatMap { it.items }.find { it.route == route }
                         if (tool != null) {
-                            QuickToolItem(tool, onNavigate)
+                            StaggeredEntrance(index = index) {
+                                QuickToolItem(tool, onNavigate)
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(32.dp))
             }
 
             if (recentTools.isNotEmpty()) {
-                Text(
-                    text = "RECENT",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.secondary,
-                    letterSpacing = 1.sp
+                ExpressiveStatePill(
+                    text = "Recent",
+                    icon = Icons.Rounded.History,
+                    color = MaterialTheme.colorScheme.secondary
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(items = recentTools.take(5)) { route: String ->
+                    itemsIndexed(items = recentTools.take(6)) { index, route ->
                         val tool = categories.flatMap { it.items }.find { it.route == route }
                         if (tool != null) {
-                            QuickToolItem(tool, onNavigate)
+                            StaggeredEntrance(index = index + 3) {
+                                QuickToolItem(tool, onNavigate)
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(32.dp))
             }
 
-            Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+            ExpressiveCard(
+                onClick = {},
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(24.dp)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -122,15 +123,16 @@ fun QuickToolzBottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        Icons.Rounded.PushPin,
+                        Icons.Rounded.Info,
                         null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "You can pin tools by long pressing them in the dashboard",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Long press tools in the dashboard to pin them here for rapid access.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
                     )
                 }
             }
@@ -140,39 +142,46 @@ fun QuickToolzBottomSheet(
 
 @Composable
 fun QuickToolItem(tool: ToolItem, onNavigate: (String) -> Unit) {
-    Surface(
-        onClick = { onNavigate(tool.route) },
-        modifier = Modifier.size(100.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = tool.color.copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, tool.color.copy(alpha = 0.2f))
+    val haptic = rememberToolzHapticFeedback()
+    
+    ExpressiveCard(
+        onClick = {
+            haptic.click()
+            onNavigate(tool.route)
+        },
+        modifier = Modifier.size(width = 110.dp, height = 120.dp),
+        containerColor = tool.color.copy(alpha = 0.08f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tool.color.copy(alpha = 0.15f)),
+        shape = RoundedCornerShape(28.dp)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(12.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = tool.color.copy(alpha = 0.15f)
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = tool.color.copy(alpha = 0.12f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = tool.icon,
                         contentDescription = null,
                         tint = tool.color,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = tool.title,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }
