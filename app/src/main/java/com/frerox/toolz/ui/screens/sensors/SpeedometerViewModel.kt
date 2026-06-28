@@ -18,9 +18,9 @@ import kotlin.math.*
 /**
  * Supported velocity units with conversion factors.
  */
-enum class SpeedUnit(val label: String, val factor: Float, val precision: Int = 0) {
-    KMH("KM/H", 3.6f, 0),
-    MPH("MPH", 2.23694f, 0),
+enum class SpeedUnit(val label: String, val factor: Float, val precision: Int = 1) {
+    KMH("KM/H", 3.6f, 1),
+    MPH("MPH", 2.23694f, 1),
     KNOTS("KNOTS", 1.94384f, 1)
 }
 
@@ -37,7 +37,9 @@ data class SpeedState(
     val accuracy: Float = 0f,
     val isGpsEnabled: Boolean = true,
     val unit: SpeedUnit = SpeedUnit.KMH,
-    val isTracking: Boolean = false
+    val isTracking: Boolean = false,
+    val speedHistory: List<Float> = emptyList(),
+    val isHudMode: Boolean = false
 ) {
     val speedDisplay: Float get() = speedMps * unit.factor
     val maxSpeedDisplay: Float get() = maxSpeedMps * unit.factor
@@ -63,28 +65,46 @@ class SpeedometerViewModel @Inject constructor(
         override fun onLocationResult(locationResult: LocationResult) {
             val location = locationResult.lastLocation ?: return
             
-            val speedMps = if (location.hasSpeed()) location.speed else {
+            // Filter by accuracy: Ignore very poor quality signals that cause jitter
+            if (location.accuracy > 50) return
+
+            var speedMps = if (location.hasSpeed()) location.speed else {
                 lastLocation?.let { last ->
                     val dist = location.distanceTo(last)
                     val time = (location.time - last.time) / 1000f
-                    if (time > 0) dist / time else 0f
+                    // If moving less than 1 meter per second manually calculated, treat as noise
+                    if (time > 0 && dist > 1.0f) dist / time else 0f
                 } ?: 0f
             }
             
+            // Noise filtering: Threshold for "zero" speed to prevent drift while stationary
+            // 2 km/h is approximately 0.555 m/s
+            if (speedMps < 0.555f) speedMps = 0f
+
             _speedState.update { state ->
-                val newDistance = if (lastLocation != null) {
-                    state.totalDistanceMeters + location.distanceTo(lastLocation!!)
+                val distanceStep = if (lastLocation != null && state.isTracking) {
+                    location.distanceTo(lastLocation!!)
+                } else 0f
+
+                // Only accumulate distance if moving at a meaningful speed
+                val newDistance = if (speedMps > 0.555f) {
+                    state.totalDistanceMeters + distanceStep
                 } else state.totalDistanceMeters
 
+                val newHistory = if (state.isTracking) {
+                    (state.speedHistory + speedMps).takeLast(60)
+                } else state.speedHistory
+
                 state.copy(
-                    speedMps = if (speedMps < 0.5f) 0f else speedMps, // Noise filtering
+                    speedMps = if (!state.isTracking) 0f else speedMps,
                     altitude = location.altitude,
                     latitude = location.latitude,
                     longitude = location.longitude,
-                    maxSpeedMps = maxOf(state.maxSpeedMps, speedMps),
+                    maxSpeedMps = if (state.isTracking) maxOf(state.maxSpeedMps, speedMps) else state.maxSpeedMps,
                     totalDistanceMeters = newDistance,
                     accuracy = location.accuracy,
-                    isGpsEnabled = isLocationEnabled()
+                    isGpsEnabled = isLocationEnabled(),
+                    speedHistory = newHistory
                 )
             }
             lastLocation = location
@@ -106,8 +126,8 @@ class SpeedometerViewModel @Inject constructor(
     @SuppressLint("MissingPermission")
     fun startTracking() {
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
-            .setMinUpdateDistanceMeters(0.5f)
-            .setWaitForAccurateLocation(false)
+            .setMinUpdateDistanceMeters(1.0f) // Slightly higher distance threshold to reduce jitter
+            .setWaitForAccurateLocation(true) // Wait for better initial accuracy
             .build()
         fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, context.mainLooper)
         _speedState.update { it.copy(isTracking = true) }
@@ -127,8 +147,12 @@ class SpeedometerViewModel @Inject constructor(
         }
     }
 
+    fun toggleHudMode() {
+        _speedState.update { it.copy(isHudMode = !it.isHudMode) }
+    }
+
     fun resetStats() {
-        _speedState.update { it.copy(maxSpeedMps = 0f, totalDistanceMeters = 0.0) }
+        _speedState.update { it.copy(maxSpeedMps = 0f, totalDistanceMeters = 0.0, speedHistory = emptyList()) }
     }
 
     override fun onCleared() {
