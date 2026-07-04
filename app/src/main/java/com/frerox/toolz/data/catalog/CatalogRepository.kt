@@ -124,12 +124,12 @@ class CatalogRepository @Inject constructor(
             val filtered = audioStreams
                 .filter { stream ->
                     val format = stream.getFormat()
-                    format != null && (
-                        format.name.contains("m4a", ignoreCase = true) ||
-                        format.name.contains("mp4a", ignoreCase = true) ||
-                        format.name.contains("webma", ignoreCase = true) ||
-                        format.name.contains("opus", ignoreCase = true)
-                    )
+                    if (format == null) return@filter true // If unknown format, allow it as fallback
+                    format.name.contains("m4a", ignoreCase = true) ||
+                    format.name.contains("mp4a", ignoreCase = true) ||
+                    format.name.contains("webma", ignoreCase = true) ||
+                    format.name.contains("opus", ignoreCase = true) ||
+                    format.name.contains("webm", ignoreCase = true)
                 }
                 .sortedByDescending { it.averageBitrate }
                 .ifEmpty { audioStreams.sortedByDescending { it.averageBitrate } }
@@ -143,8 +143,20 @@ class CatalogRepository @Inject constructor(
                 else -> filtered.firstOrNull() // AUTO or HIGH → highest bitrate
             }
 
-            android.util.Log.d("CatalogRepo", "Resolved stream in ${System.currentTimeMillis() - startTime}ms: ${preferred?.content != null}")
-            preferred?.content
+            var streamUrl = preferred?.content
+
+            if (streamUrl == null) {
+                // Fallback to multiplexed video stream
+                val videoStreams = streamInfo.videoStreams
+                if (!videoStreams.isNullOrEmpty()) {
+                    android.util.Log.w("CatalogRepo", "No audio streams found! Falling back to lowest resolution multiplexed video stream.")
+                    // Sort by lowest resolution to save bandwidth since we only need audio
+                    streamUrl = videoStreams.sortedBy { it.resolution.replace("p", "").toIntOrNull() ?: Int.MAX_VALUE }.firstOrNull()?.content
+                }
+            }
+
+            android.util.Log.d("CatalogRepo", "Resolved stream in ${System.currentTimeMillis() - startTime}ms: ${streamUrl != null}")
+            streamUrl
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -197,7 +209,14 @@ class CatalogRepository @Inject constructor(
         onProgress: (Float) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder().url(streamUrl).build()
+            val request = Request.Builder()
+                .url(streamUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .build()
             val response = okHttpClient.newCall(request).execute()
             
             if (!response.isSuccessful) {
@@ -220,6 +239,10 @@ class CatalogRepository @Inject constructor(
             var totalBytesRead = 0L
             
             var lastProgressTime = 0L
+            var syntheticProgress = 0.02f
+            withContext(Dispatchers.Main) {
+                onProgress(syntheticProgress)
+            }
             
             inputStream.use { input ->
                 outputStream.use { output ->
@@ -233,7 +256,8 @@ class CatalogRepository @Inject constructor(
                             val progress = if (contentLength > 0) {
                                 totalBytesRead.toFloat() / contentLength.toFloat()
                             } else {
-                                0f
+                                syntheticProgress = (syntheticProgress + 0.015f).coerceAtMost(0.9f)
+                                syntheticProgress
                             }
                             withContext(Dispatchers.Main) {
                                 onProgress(progress)
@@ -243,6 +267,9 @@ class CatalogRepository @Inject constructor(
                 }
             }
             response.close()
+            withContext(Dispatchers.Main) {
+                onProgress(1f)
+            }
             true
         } catch (e: CancellationException) {
             throw e
@@ -299,9 +326,12 @@ class CatalogRepository @Inject constructor(
                     } else null
                 )
 
+            builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+
             // Add headers
             request.headers().forEach { (key, values) ->
                 values.forEach { value ->
+                    if (key.equals("User-Agent", ignoreCase = true)) return@forEach
                     builder.addHeader(key, value)
                 }
             }
