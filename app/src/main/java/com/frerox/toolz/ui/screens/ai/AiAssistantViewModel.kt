@@ -48,6 +48,7 @@ data class AiAssistantUiState(
     val aiSearchEnabled   : Boolean          = false,
     val aiSearchIconVisible: Boolean         = true,
     val loadingPhaseText  : String           = "",
+    val isCoachMode       : Boolean          = false,
 )
 
 data class AiSettingsUiState(
@@ -81,6 +82,7 @@ class AiAssistantViewModel @Inject constructor(
     private val settingsManager: AiSettingsManager,
     private val openAiService  : OpenAiService,
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
+    private val savedStateHandle: androidx.lifecycle.SavedStateHandle,
 ) : ViewModel() {
 
     private val premadePrompts = listOf(
@@ -123,7 +125,18 @@ class AiAssistantViewModel @Inject constructor(
         viewModelScope.launch {
             aiDao.getAllChats().collect { chats -> _uiState.update { it.copy(chats = chats) } }
         }
-        createNewChat()
+        
+        val initialChatId = savedStateHandle.get<Int>("chatId")
+        val isCoach = savedStateHandle.get<Boolean>("isCoachMode") ?: false
+        
+        _uiState.update { it.copy(isCoachMode = isCoach) }
+
+        if (initialChatId != null && initialChatId != -1) {
+            loadChat(initialChatId)
+        } else {
+            createNewChat()
+        }
+
         refreshPrompts()
     }
 
@@ -470,7 +483,19 @@ class AiAssistantViewModel @Inject constructor(
 
     fun loadChat(chatId: Int) {
         messagesJob?.cancel()
-        _uiState.update { it.copy(currentChatId = chatId, isHistoryOpen = false, error = null, chatSummary = null) }
+        viewModelScope.launch {
+            val chat = aiDao.getAllChatsSync().find { it.id == chatId }
+            val isCoach = chat?.title == "AI Fitness Coach"
+            _uiState.update { 
+                it.copy(
+                    currentChatId = chatId, 
+                    isHistoryOpen = false, 
+                    error = null, 
+                    chatSummary = null,
+                    isCoachMode = isCoach
+                ) 
+            }
+        }
         messagesJob = viewModelScope.launch {
             aiDao.getMessagesForChat(chatId).collect { messages -> _uiState.update { it.copy(messages = messages) } }
         }
@@ -479,7 +504,17 @@ class AiAssistantViewModel @Inject constructor(
     fun createNewChat() {
         cancelRequest()
         messagesJob?.cancel()
-        _uiState.update { it.copy(currentChatId = null, messages = emptyList(), error = null, quotaExceeded = false, streamingText = "", chatSummary = null) }
+        _uiState.update { 
+            it.copy(
+                currentChatId = null, 
+                messages = emptyList(), 
+                error = null, 
+                quotaExceeded = false, 
+                streamingText = "", 
+                chatSummary = null,
+                isCoachMode = false
+            ) 
+        }
         refreshPrompts()
     }
 
@@ -545,7 +580,21 @@ class AiAssistantViewModel @Inject constructor(
             val accumulated = StringBuilder()
             var lastSources: String? = null
 
-            chatRepository.getChatResponse(text, history, currentImage).collect { r ->
+            val systemPrompt = if (_uiState.value.isCoachMode) {
+                """You are an elite AI Fitness Coach.
+                RULES:
+                1. Answer directly and concisely (2-4 sentences).
+                2. Use **bold** for emphasis and bullet points for lists.
+                3. Be punchy, professional, and actionable.
+                4. Ground your advice in real fitness data."""
+            } else null
+
+            chatRepository.getChatResponse(
+                prompt = text,
+                history = history,
+                image = currentImage,
+                systemPromptOverride = systemPrompt
+            ).collect { r ->
                 r.onSuccess { chunk ->
                     accumulated.append(chunk.text)
                     if (chunk.sources != null) {
