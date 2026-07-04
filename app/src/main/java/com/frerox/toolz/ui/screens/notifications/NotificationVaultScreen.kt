@@ -56,7 +56,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
@@ -146,9 +149,16 @@ fun NotificationVaultScreen(
     var showContextSheet by remember { mutableStateOf<NotificationEntry?>(null) }
     var showAppDetails by remember { mutableStateOf<AppDetails?>(null) }
     var isPermissionGranted by remember { mutableStateOf(true) }
+    val shizukuAuthorized by viewModel.shizukuAuthorized.collectAsStateWithLifecycle()
+    var showShizukuSetup by remember { mutableStateOf(false) }
 
     val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val showDetailSheet = selectedNotification != null && !isSupportingPaneVisible
+
+    // Refresh Shizuku status on resume
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshShizukuStatus()
+    }
 
     LaunchedEffect(Unit) {
         val listeners = Settings.Secure.getString(
@@ -182,6 +192,17 @@ fun NotificationVaultScreen(
                     selectedNotification = selectedNotification,
                     isPermissionGranted = isPermissionGranted,
                     showSearchBar = showSearchBar,
+                    shizukuAuthorized = shizukuAuthorized,
+                    onShizukuClick = {
+                        if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+                            // Already authorized, running permission grant is handled in ON_RESUME/refreshShizukuStatus
+                            viewModel.refreshShizukuStatus()
+                        } else if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()) {
+                            com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(1001)
+                        } else {
+                            showShizukuSetup = true
+                        }
+                    },
                     onToggleSearch = {
                         vibrationManager?.vibrateTick()
                         showSearchBar = !showSearchBar
@@ -491,6 +512,12 @@ fun NotificationVaultScreen(
             },
         )
     }
+
+    if (showShizukuSetup) {
+        com.frerox.toolz.ui.components.ShizukuSetupBottomSheet(
+            onDismiss = { showShizukuSetup = false }
+        )
+    }
 }
 
 // ─── Feed Pane ────────────────────────────────────────────────────────────────
@@ -505,6 +532,8 @@ private fun NotificationFeedPane(
     selectedNotification: NotificationEntry?,
     isPermissionGranted: Boolean,
     showSearchBar: Boolean,
+    shizukuAuthorized: Boolean,
+    onShizukuClick: () -> Unit,
     onToggleSearch: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onCategorySelect: (String) -> Unit,
@@ -522,6 +551,7 @@ private fun NotificationFeedPane(
     val vibrationManager = LocalVibrationManager.current
     val performanceMode = LocalPerformanceMode.current
     val listState = rememberLazyListState()
+    var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(
         snapAnimationSpec = spring(stiffness = Spring.StiffnessMediumLow)
     )
@@ -554,6 +584,14 @@ private fun NotificationFeedPane(
                         }
                     },
                     actions = {
+                        // Shizuku
+                        IconButton(onClick = onShizukuClick) {
+                            Icon(
+                                Icons.Rounded.Memory,
+                                contentDescription = "Shizuku",
+                                tint = if (shizukuAuthorized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                        }
                         // Animated search toggle
                         IconButton(onClick = onToggleSearch) {
                             AnimatedContent(
@@ -758,28 +796,26 @@ private fun NotificationFeedPane(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                            .padding(horizontal = 12.dp, vertical = 16.dp)
                             .navigationBarsPadding(),
-                        horizontalArrangement = Arrangement.Center,
+                        horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                            StatPill(
-                                icon = Icons.Rounded.Notifications,
-                                value = notifications.size.toString(),
-                                label = "Archived",
-                            )
-                            StatPill(
-                                icon = Icons.Rounded.Today,
-                                value = todayCount.toString(),
-                                label = "Today",
-                            )
-                            StatPill(
-                                icon = Icons.Rounded.Apps,
-                                value = totalApps.toString(),
-                                label = "Apps",
-                            )
-                        }
+                        StatPill(
+                            icon = Icons.Rounded.Notifications,
+                            value = notifications.size.toString(),
+                            label = "Archived",
+                        )
+                        StatPill(
+                            icon = Icons.Rounded.Today,
+                            value = todayCount.toString(),
+                            label = "Today",
+                        )
+                        StatPill(
+                            icon = Icons.Rounded.Apps,
+                            value = totalApps.toString(),
+                            label = "Apps",
+                        )
                     }
                 }
             }
@@ -820,13 +856,18 @@ private fun NotificationFeedPane(
 
                         // Sticky group header
                         stickyHeader(key = "header_$group") {
+                            val isCollapsed = collapsedGroups.contains(group)
                             Surface(
                                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                tonalElevation = 2.dp
+                                tonalElevation = 2.dp,
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    collapsedGroups = if (isCollapsed) collapsedGroups - group else collapsedGroups + group
+                                }
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -868,12 +909,26 @@ private fun NotificationFeedPane(
                                         modifier = Modifier.weight(1f),
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                                     )
+                                    IconButton(
+                                        onClick = {
+                                            vibrationManager?.vibrateTick()
+                                            collapsedGroups = if (isCollapsed) collapsedGroups - group else collapsedGroups + group
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCollapsed) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
+                                            contentDescription = if (isCollapsed) "Expand" else "Collapse",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        itemsIndexed(groupItems, key = { _, item -> item.id }) { index, notification ->
-                            StaggeredEntrance(index = index.coerceAtMost(12)) {
+                        if (!collapsedGroups.contains(group)) {
+                            itemsIndexed(groupItems, key = { _, item -> item.id }) { index, notification ->
                                 SwipeToDismissNotification(
                                     notification = notification,
                                     isSelected = selectedNotification?.id == notification.id,
@@ -1938,6 +1993,8 @@ private fun FeedLightPreview() {
             selectedNotification = null,
             isPermissionGranted = true,
             showSearchBar = false,
+            shizukuAuthorized = true,
+            onShizukuClick = {},
             onToggleSearch = {},
             onSearchQueryChange = {},
             onCategorySelect = {},
@@ -1968,6 +2025,8 @@ private fun FeedDarkPreview() {
             selectedNotification = null,
             isPermissionGranted = false,
             showSearchBar = true,
+            shizukuAuthorized = true,
+            onShizukuClick = {},
             onToggleSearch = {},
             onSearchQueryChange = {},
             onCategorySelect = {},

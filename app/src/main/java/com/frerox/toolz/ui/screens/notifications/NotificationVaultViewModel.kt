@@ -28,8 +28,39 @@ data class AppDetails(
 class NotificationVaultViewModel @Inject constructor(
     private val repository: NotificationRepository,
     private val settingsRepository: SettingsRepository,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 ) : ViewModel() {
+
+    private val _shizukuAuthorized = MutableStateFlow(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized())
+    val shizukuAuthorized = _shizukuAuthorized.asStateFlow()
+
+    init {
+        // Grant notification listener permission immediately if Shizuku is already authorized.
+        // This avoids requiring a navigate-away-and-back to trigger ON_RESUME.
+        if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+            grantNotificationPermissionWithShizuku()
+        }
+    }
+
+    fun refreshShizukuStatus() {
+        val authorized = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
+        _shizukuAuthorized.value = authorized
+        if (authorized) {
+            grantNotificationPermissionWithShizuku()
+        }
+    }
+
+    private fun grantNotificationPermissionWithShizuku() {
+        viewModelScope.launch {
+            try {
+                val command = "cmd notification allow_listener com.frerox.toolz/com.frerox.toolz.service.NotificationVaultService"
+                shizukuExecutor.executeSingle(command)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
