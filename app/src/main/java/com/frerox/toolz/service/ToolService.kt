@@ -64,8 +64,8 @@ class ToolService : Service() {
     val timerInitial: StateFlow<Long> = _timerInitial
     private val _isTimerRunning = MutableStateFlow(false)
     val isTimerRunning: StateFlow<Boolean> = _isTimerRunning
-    private val _timerFinishedCount = MutableStateFlow(0)
-    val timerFinishedCount: StateFlow<Int> = _timerFinishedCount
+    private val _isTimerRinging = MutableStateFlow(false)
+    val isTimerRinging: StateFlow<Boolean> = _isTimerRinging
     private var timerJob: Job? = null
     private var timerEndTimestamp: Long = 0L
 
@@ -234,41 +234,50 @@ class ToolService : Service() {
             manager.cancel(NotificationHelper.ID_TIMER)
             manager.cancel(NotificationHelper.ID_POMODORO)
             manager.cancel(NotificationHelper.ID_TODO)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            ensureForeground()
         } else {
             val manager = getSystemService(NotificationManager::class.java)
             if (!isTimerNotificationsEnabled) manager.cancel(NotificationHelper.ID_TIMER)
             if (!isPomodoroNotificationsEnabled) {
                 manager.cancel(NotificationHelper.ID_POMODORO)
-            } else if (!_isPomodoroRunning.value) {
-                // Persistent notification when enabled but not running
+            } else if (_isPomodoroRunning.value || (_pomodoroRemaining.value < _pomodoroTotalMs.value)) {
                 updatePomodoroNotification()
+            } else {
+                manager.cancel(NotificationHelper.ID_POMODORO)
             }
             ensureForeground()
         }
     }
 
     private fun ensureForeground() {
-        if (!isGlobalNotificationsEnabled) return
-
         val notif = when {
             _isStopwatchRunning.value -> createStopwatchNotification()
             _isTimerRunning.value -> createTimerNotification()
             _isPomodoroRunning.value -> createPomodoroNotification()
             _isTodoSessionActive.value -> createTodoNotification()
-            isPomodoroNotificationsEnabled -> createPomodoroNotification()
-            else -> {
-                stopForeground(STOP_FOREGROUND_DETACH)
-                return
-            }
+            isPomodoroNotificationsEnabled && (_isPomodoroRunning.value || (_pomodoroRemaining.value < _pomodoroTotalMs.value)) -> createPomodoroNotification()
+            else -> createGenericNotification()
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NotificationHelper.ID_POMODORO, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
-            startForeground(NotificationHelper.ID_POMODORO, notif)
+            startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif)
         }
+    }
+
+    private fun createGenericNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(this, 3000, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
+            .setContentTitle("Toolz is running")
+            .setContentText("Active background services")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setOngoing(true)
+            .setSilent(true)
+            .setContentIntent(pendingIntent)
+            .build()
     }
 
     // --- Stopwatch Logic ---
@@ -282,7 +291,7 @@ class ToolService : Service() {
                 delay(100)
             }
         }
-        startForeground(NotificationHelper.ID_STOPWATCH, createStopwatchNotification())
+        ensureForeground()
     }
 
     fun pauseStopwatch() {
@@ -315,13 +324,13 @@ class ToolService : Service() {
                 onTimerFinished()
             }
         }
-        startForeground(NotificationHelper.ID_TIMER, createTimerNotification())
+        ensureForeground()
     }
 
     fun pauseTimer() {
         _isTimerRunning.value = false
         timerJob?.cancel()
-        updateTimerNotification("Paused")
+        ensureForeground()
     }
 
     fun resetTimer() {
@@ -329,7 +338,7 @@ class ToolService : Service() {
         timerJob?.cancel()
         _timerRemaining.value = 0L
         _timerInitial.value = 0L
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        ensureForeground()
     }
 
     fun setTimerInitial(millis: Long) {
@@ -340,10 +349,12 @@ class ToolService : Service() {
 
     private fun onTimerFinished() {
         _isTimerRunning.value = false
-        _timerFinishedCount.value++
-        startAlarm(timerRingtoneUri, isTimerGradualVolume)
-        showAlarmNotification("Timer", "Time is up!", NotificationHelper.ID_TIMER_ALARM, Screen.Timer.route)
-        updateTimerNotification("Time is up!")
+        if (isTimerNotificationsEnabled) {
+            startAlarm(timerRingtoneUri, isTimerGradualVolume)
+            showAlarmNotification("Timer", "Time is up!", NotificationHelper.ID_TIMER_ALARM, Screen.Timer.route)
+        }
+        _isTimerRinging.value = true
+        ensureForeground()
     }
 
     // --- Pomodoro Logic ---
@@ -370,7 +381,7 @@ class ToolService : Service() {
             }
         }
         serviceScope.launch { pushPomodoroWidgetState() }
-        startForeground(NotificationHelper.ID_POMODORO, createPomodoroNotification())
+        ensureForeground()
     }
 
     private fun onPomodoroFinished() {
@@ -448,6 +459,8 @@ class ToolService : Service() {
         
         serviceScope.launch { pushPomodoroWidgetState() }
         stopForeground(STOP_FOREGROUND_REMOVE)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.cancel(NotificationHelper.ID_POMODORO)
     }
 
     fun setPomodoroMode(mode: String) {
@@ -477,7 +490,7 @@ class ToolService : Service() {
                 delay(1000)
             }
         }
-        startForeground(NotificationHelper.ID_TODO, createTodoNotification())
+        ensureForeground()
     }
 
     fun stopTodoSession() {
@@ -529,11 +542,15 @@ class ToolService : Service() {
     }
 
     fun stopAlarm() {
+        _isTimerRinging.value = false
         volumeJob?.cancel()
         volumeJob = null
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        manager.cancel(NotificationHelper.ID_TIMER_ALARM)
+        ensureForeground()
     }
 
     private fun showAlarmNotification(title: String, message: String, notificationId: Int, route: String) {
@@ -637,32 +654,55 @@ class ToolService : Service() {
     }
 
     private fun createPomodoroNotification(text: String? = null): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Pomodoro.route) }
+        val intent = Intent(this, MainActivity::class.java).apply { 
+            putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Pomodoro.route)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(this, 3003, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_TOGGLE }
         val togglePI = PendingIntent.getService(this, 3, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
 
+        val skipIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_SKIP }
+        val skipPI = PendingIntent.getService(this, 32, skipIntent, PendingIntent.FLAG_IMMUTABLE)
+
         val stopIntent = Intent(this, ToolService::class.java).apply { action = ACTION_POMODORO_STOP }
         val stopPI = PendingIntent.getService(this, 31, stopIntent, PendingIntent.FLAG_IMMUTABLE)
 
+        val modeLabel = when (_pomodoroMode.value) {
+            "WORK" -> "Focus Session"
+            "SHORT_BREAK" -> "Short Break"
+            "LONG_BREAK" -> "Long Break"
+            else -> "Pomodoro"
+        }
+
         val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
-            .setContentTitle("Pomodoro (${_pomodoroMode.value})")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(modeLabel)
+            .setSmallIcon(if (_pomodoroMode.value == "WORK") R.drawable.ic_launcher_foreground else R.drawable.ic_coffee)
             .setOngoing(_isPomodoroRunning.value)
             .setContentIntent(pendingIntent)
             .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .addAction(if (_isPomodoroRunning.value) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, if (_isPomodoroRunning.value) "Pause" else "Resume", togglePI)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPI)
+            .addAction(
+                if (_isPomodoroRunning.value) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+                if (_isPomodoroRunning.value) "Pause" else "Resume",
+                togglePI
+            )
+            .addAction(R.drawable.ic_widget_next, "Skip", skipPI)
+            .addAction(R.drawable.ic_notif_close, "Stop", stopPI)
 
+        val totalMs = _pomodoroTotalMs.value
+        val remainingMs = _pomodoroRemaining.value
+        
         if (_isPomodoroRunning.value) {
             builder.setUsesChronometer(true)
-            builder.setWhen(System.currentTimeMillis() + _pomodoroRemaining.value)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) builder.setChronometerCountDown(true)
-            builder.setContentText("Session in progress")
+            builder.setWhen(System.currentTimeMillis() + remainingMs)
+            builder.setChronometerCountDown(true)
+            builder.setContentText("Focusing... • ${formatTime(remainingMs)} left")
+            builder.setProgress(totalMs.toInt(), (totalMs - remainingMs).toInt(), false)
         } else {
-            builder.setContentText(text ?: formatTime(_pomodoroRemaining.value))
+            builder.setContentText(text ?: "Paused • ${formatTime(remainingMs)} left")
+            builder.setProgress(totalMs.toInt(), (totalMs - remainingMs).toInt(), false)
         }
         return builder.build()
     }

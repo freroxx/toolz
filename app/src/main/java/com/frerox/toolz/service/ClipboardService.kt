@@ -11,12 +11,14 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.ToolzApplication
 import com.frerox.toolz.data.ai.ChatRepository
 import com.frerox.toolz.data.clipboard.ClipboardClassifier
 import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.NotificationHelper
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -31,25 +33,78 @@ class ClipboardService : Service() {
     @Inject lateinit var classifier: ClipboardClassifier
     @Inject lateinit var aiRepository: ChatRepository
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var clipboardManager: ClipboardManager? = null
     private var isAiMonitoringEnabled = true
-    
+
+    /**
+     * Clipboard change listener — fires for ALL system-wide copy events, even in background.
+     *
+     * Strategy:
+     *  1. If Shizuku is authorized → read via ADB shell (works in background, no focus check needed).
+     *  2. Otherwise → only attempt standard ClipboardManager API if app is actually in focus.
+     *     Trying to read primaryClip without focus causes Android to deny access and log an error.
+     *
+     * The AccessibilityService (FocusFlowAccessibilityService) is the fallback for case 2:
+     * it triggers a clipboard check the moment Toolz gains focus, capturing any missed copies.
+     */
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        checkClipboard()
+        serviceScope.launch {
+            if (ShizukuHelper.isAuthorized()) {
+                // Shizuku path — safe to call from background, no focus requirement
+                readClipboardViaShizuku()
+            } else if (ToolzApplication.isFocused.value) {
+                // Standard path — only safe when app is in focus
+                readClipboardViaStandardApi()
+            }
+            // If neither: AccessibilityService will trigger a check when Toolz regains focus
+        }
     }
 
-    private fun checkClipboard() {
+    private suspend fun readClipboardViaShizuku() {
+        try {
+            val text = shizukuExecutor.getClipboardText()
+            if (text != null) {
+                processClipboardText(text)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Shizuku clipboard read failed", e)
+        }
+    }
+
+    private fun readClipboardViaStandardApi() {
+        try {
+            val clip = clipboardManager?.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            val item = clip.getItemAt(0)
+            val text = item?.coerceToText(this@ClipboardService)?.toString() ?: return
+            serviceScope.launch { processClipboardText(text) }
+        } catch (e: Exception) {
+            // Silently swallow — this can still race during focus transitions
+            Log.w(TAG, "Standard clipboard read denied or failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Called by AccessibilityService or onStartCommand when app gains focus.
+     * Tries Shizuku first, then standard API (since we know we're in focus here).
+     */
+    fun checkClipboard() {
+        serviceScope.launch {
+            if (ShizukuHelper.isAuthorized()) {
+                readClipboardViaShizuku()
+            } else {
+                readClipboardViaStandardApi()
+            }
+        }
+    }
+
+    private fun processClipboardText(text: String) {
+        if (text.isBlank()) return
         serviceScope.launch {
             try {
-                val clip = clipboardManager?.primaryClip ?: return@launch
-                if (clip.itemCount == 0) return@launch
-                
-                val item = clip.getItemAt(0)
-                val text = item?.coerceToText(this@ClipboardService)?.toString() ?: return@launch
-                if (text.isBlank()) return@launch
-                
                 // Avoid duplicate of the last entry
                 val latest = clipboardDao.getLatestEntry()
                 if (latest?.content == text) return@launch
@@ -159,23 +214,37 @@ class ClipboardService : Service() {
     private fun startPeriodicCheck() {
         serviceScope.launch {
             while (isActive) {
-                checkClipboard() 
+                val shizukuActive = ShizukuHelper.isAuthorized()
+
+                // Shizuku backup read — the listener handles most cases, but poll as a safety net
+                // in case a copy happened while the listener binder was briefly disconnected.
+                if (shizukuActive) {
+                    readClipboardViaShizuku()
+                }
+
+                // AI reprocessing for any entries that missed AI classification
                 try {
                     val unprocessed = clipboardDao.getUnprocessedEntries()
                     unprocessed.take(2).forEach { entry ->
                         processWithAi(entry.id, entry.content, entry.type)
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Periodic check failed", e)
+                    Log.e(TAG, "Periodic AI reprocessing failed", e)
                 }
-                delay(30000) // 30 seconds poll
+
+                delay(if (shizukuActive) 5000L else 30000L)
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_CHECK_CLIPBOARD) {
-            checkClipboard()
+            val externalText = intent.getStringExtra(EXTRA_CLIPBOARD_TEXT)
+            if (externalText != null) {
+                processClipboardText(externalText)
+            } else {
+                checkClipboard()
+            }
         }
         return START_STICKY
     }
@@ -202,6 +271,7 @@ class ClipboardService : Service() {
 
     companion object {
         const val ACTION_CHECK_CLIPBOARD = "com.frerox.toolz.action.CHECK_CLIPBOARD"
+        const val EXTRA_CLIPBOARD_TEXT = "extra_clipboard_text"
         const val MAX_ENTRIES = 150
     }
 }

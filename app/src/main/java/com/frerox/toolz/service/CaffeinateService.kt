@@ -66,6 +66,14 @@ class CaffeinateService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Guaranteed startForeground call at the entry point
+        val initialNotification = createNotification(currentNotificationText())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, initialNotification)
+        }
+
         when (intent?.action) {
             ACTION_START -> {
                 isRunning = true

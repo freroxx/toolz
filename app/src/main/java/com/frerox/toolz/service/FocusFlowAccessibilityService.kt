@@ -22,6 +22,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.CaffeinateRepository
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import java.util.*
@@ -117,7 +118,18 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
         validateAndLock(packageName)
         checkCaffeinate(packageName)
-        triggerClipboardCheck()
+        
+        // Only trigger clipboard check if WE are the ones becoming focused
+        if (packageName == TOOLZ_PACKAGE) {
+            // Check if standard access is needed. If Shizuku is authorized, 
+            // the service handles it automatically without needing focus.
+            if (!ShizukuHelper.isAuthorized()) {
+                serviceScope.launch {
+                    delay(250) // Small delay to let MainActivity register focus
+                    triggerClipboardCheck()
+                }
+            }
+        }
     }
 
     private fun triggerClipboardCheck() {
