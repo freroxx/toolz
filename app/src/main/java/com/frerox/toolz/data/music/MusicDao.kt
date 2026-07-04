@@ -44,7 +44,7 @@ interface MusicDao {
     @Query("SELECT * FROM music_tracks WHERE uri = :uri")
     suspend fun getTrackByUri(uri: String): MusicTrack?
 
-    @Query("SELECT * FROM music_tracks WHERE sourceUrl = :sourceUrl")
+    @Query("SELECT * FROM music_tracks WHERE sourceUrl = :sourceUrl ORDER BY CASE WHEN path IS NULL THEN 1 ELSE 0 END LIMIT 1")
     suspend fun getTrackBySourceUrl(sourceUrl: String): MusicTrack?
 
     @Query("SELECT * FROM music_tracks WHERE path = :path")
@@ -58,6 +58,9 @@ interface MusicDao {
 
     @Query("UPDATE music_tracks SET playCount = playCount + 1, lastPlayed = :timestamp WHERE sourceUrl = :sourceUrl")
     suspend fun incrementPlayCountBySourceUrl(sourceUrl: String, timestamp: Long)
+
+    @Query("DELETE FROM music_tracks WHERE uri = :uri")
+    suspend fun deleteTrackByUri(uri: String)
 
     @Query("SELECT * FROM music_tracks")
     suspend fun getAllTracksSync(): List<MusicTrack>

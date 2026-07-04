@@ -280,6 +280,47 @@ class MusicRepository @Inject constructor(
         musicDao.insertTrack(track)
     }
 
+    suspend fun upsertDownloadedTrack(track: MusicTrack) = withContext(Dispatchers.IO) {
+        // Find any pre-existing record for this track (could be catalog track with YouTube URL as uri)
+        val existing = track.sourceUrl?.let { musicDao.getTrackBySourceUrl(it) }
+            ?: musicDao.getTrackByUri(track.uri)
+
+        if (existing == null) {
+            // Brand new track: just insert
+            musicDao.insertTrack(track)
+        } else if (existing.uri == track.uri) {
+            // Same URI (content:// → content:// re-download): safe to update in-place
+            musicDao.updateTrack(existing.copy(
+                title       = track.title,
+                artist      = track.artist,
+                album       = track.album,
+                duration    = if (track.duration > 0L) track.duration else existing.duration,
+                thumbnailUri= track.thumbnailUri ?: existing.thumbnailUri,
+                path        = track.path,
+                sourceUrl   = track.sourceUrl ?: existing.sourceUrl,
+                dateAdded   = track.dateAdded
+            ))
+        } else {
+            // URI is CHANGING (YouTube URL → content://). Room @PrimaryKey means we can't UPDATE.
+            // We must: 1) preserve important metadata, 2) delete old row, 3) insert new row.
+            val merged = track.copy(
+                isFavorite            = existing.isFavorite,
+                playCount             = existing.playCount,
+                lastPlayed            = existing.lastPlayed,
+                aiLyrics              = existing.aiLyrics,
+                aiArtistVitals        = existing.aiArtistVitals,
+                aiSongMeaning         = existing.aiSongMeaning,
+                aiRecommendationsJson = existing.aiRecommendationsJson,
+                lastAiSync            = existing.lastAiSync,
+                karaokeSingCount      = existing.karaokeSingCount,
+                thumbnailUri          = track.thumbnailUri ?: existing.thumbnailUri,
+                sourceUrl             = track.sourceUrl ?: existing.sourceUrl
+            )
+            musicDao.deleteTrackByUri(existing.uri)
+            musicDao.insertTrack(merged)
+        }
+    }
+
     suspend fun updateTrack(track: MusicTrack) {
         musicDao.updateTrack(track)
     }
