@@ -24,6 +24,7 @@ object NotificationHelper {
     const val CHANNEL_MUSIC_DOWNLOADS = "music_downloads"
 
     // Notification IDs
+    const val ID_FOREGROUND_SERVICE = 1000
     const val ID_STOPWATCH = 2001
     const val ID_TIMER = 2002
     const val ID_POMODORO = 2003
