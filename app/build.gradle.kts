@@ -42,10 +42,11 @@ android {
 
     configurations.all {
         resolutionStrategy {
-            force("org.jetbrains.kotlin:kotlin-stdlib:2.3.21")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.3.21")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.3.21")
-            force("org.jetbrains.kotlin:kotlin-reflect:2.3.21")
+            force("org.jetbrains.kotlin:kotlin-stdlib:2.4.0")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.4.0")
+            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.4.0")
+            force("org.jetbrains.kotlin:kotlin-reflect:2.4.0")
+            force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
         }
     }
 
@@ -209,6 +210,8 @@ dependencies {
 
     // FFmpeg & Lottie
     implementation(libs.ffmpeg.kit.standard)
+    implementation(libs.youtubedl.android)
+    implementation(libs.youtubedl.android.ffmpeg)
     implementation(libs.smart.exception.java)
     implementation(libs.lottie.compose)
 

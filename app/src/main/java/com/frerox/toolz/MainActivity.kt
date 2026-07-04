@@ -56,7 +56,7 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.repository.FlashlightRepository
 import com.frerox.toolz.service.FlashlightService
 import com.frerox.toolz.ui.navigation.Screen
-import com.frerox.toolz.ui.screens.LoadingScreen
+import com.frerox.toolz.ui.screens.LoadingOverlay
 import com.frerox.toolz.ui.screens.LoadingViewModel
 import com.frerox.toolz.ui.screens.OnboardingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
@@ -141,6 +141,11 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     private val currentIntentState = mutableStateOf<Intent?>(null)
     private val currentIntentVersion = mutableStateOf(0L)
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        ToolzApplication.setFocused(hasFocus)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -173,6 +178,13 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
             val offlineState by offlineManager.offlineState.collectAsState(initial = OfflineState.ONLINE)
 
+            val loadingViewModel: LoadingViewModel = hiltViewModel()
+            val loadingVisible by loadingViewModel.isVisible.collectAsState()
+            val loadingMessage by loadingViewModel.loadingMessage.collectAsState()
+            val loadingProgress by loadingViewModel.loadingProgress.collectAsState()
+
+            val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
+
             var offlineOverlayVisible by remember { mutableStateOf(false) }
             var offlineOverlayReady by remember { mutableStateOf(false) }
             var lastOfflineState by remember { mutableStateOf(offlineState) }
@@ -186,6 +198,16 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                     delay(1000)
                     offlineOverlayVisible = false
                     lastOfflineState = offlineState
+                }
+            }
+
+            val incomingIntent = currentIntentState.value
+            val incomingIntentVersion = currentIntentVersion.value
+
+            LaunchedEffect(incomingIntentVersion) {
+                val latestIntent = incomingIntent ?: return@LaunchedEffect
+                if (isQuickOpenIntent(latestIntent)) {
+                    loadingViewModel.skipLoading()
                 }
             }
 
@@ -229,8 +251,6 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                         ) {
                             val navController = rememberNavController()
                             val pdfViewModel: PdfViewModel = hiltViewModel()
-                            val incomingIntent = currentIntentState.value
-                            val incomingIntentVersion = currentIntentVersion.value
 
                             ToolzNavHost(
                                 navController = navController,
@@ -241,11 +261,18 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                                 backgroundGradientEnabled = backgroundGradientEnabled,
                                 incomingIntent = incomingIntent,
                                 incomingIntentVersion = incomingIntentVersion,
+                                onboardingCompleted = onboardingCompleted
                             )
 
                             UpdateOverlay(settingsRepository)
                         }
                     }
+
+                    LoadingOverlay(
+                        isVisible = loadingVisible,
+                        loadingMessage = loadingMessage,
+                        loadingProgress = loadingProgress
+                    )
 
                     OfflineTransitionOverlay(
                         state = offlineState,
@@ -369,6 +396,33 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     private fun stopStepService() {
         val intent = Intent(this, StepCounterService::class.java)
         stopService(intent)
+    }
+
+    private fun isQuickOpenIntent(intent: Intent): Boolean {
+        // PDF View/Send
+        if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_SEND) {
+            val uri = if (intent.action == Intent.ACTION_SEND) {
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                intent.data
+            }
+            if (uri != null) {
+                val mimeType = contentResolver.getType(uri)
+                val isPdf = intent.type == "application/pdf" ||
+                        mimeType == "application/pdf" ||
+                        uri.toString().lowercase().endsWith(".pdf")
+                if (isPdf) return true
+            }
+        }
+
+        // Specific tool navigation
+        if (intent.hasExtra(EXTRA_NAVIGATE_TO) || 
+            intent.hasExtra(EXTRA_SHOW_UPDATE) || 
+            intent.hasExtra(EXTRA_SHOW_UPDATE_DIALOG)) {
+            return true
+        }
+
+        return false
     }
 }
 
@@ -517,8 +571,8 @@ fun ToolzNavHost(
     backgroundGradientEnabled: Boolean,
     incomingIntent: Intent?,
     incomingIntentVersion: Long,
+    onboardingCompleted: Boolean,
 ) {
-    val onboardingCompleted by settingsRepository.onboardingCompleted.collectAsState(initial = true)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
@@ -565,7 +619,7 @@ fun ToolzNavHost(
     LaunchedEffect(pendingExternalRoute, onboardingCompleted, currentRoute) {
         val route = pendingExternalRoute ?: return@LaunchedEffect
         if (!onboardingCompleted) return@LaunchedEffect
-        if (currentRoute == null || currentRoute == Screen.Loading.route || currentRoute == "onboarding") return@LaunchedEffect
+        if (currentRoute == null || currentRoute == "onboarding") return@LaunchedEffect
 
         if (currentRoute != route) {
             navController.navigate(route) {
@@ -576,16 +630,10 @@ fun ToolzNavHost(
     }
     NavHost(
         navController = navController,
-        startDestination = Screen.Loading.route,
+        startDestination = if (onboardingCompleted) Screen.Dashboard.route else "onboarding",
         enterTransition = {
-            if (targetState.destination.route == Screen.Dashboard.route && initialState.destination.route == Screen.Loading.route) {
-                fadeIn(animationSpec = tween(300)) + scaleIn(
-                    initialScale = 1.02f, // Subtle scale down for "landing" effect
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                )
+            if (targetState.destination.route == Screen.Dashboard.route && initialState.destination.route == "onboarding") {
+                fadeIn(animationSpec = tween(500))
             } else if (performanceMode) {
                 fadeIn(animationSpec = tween(100))
             } else {
@@ -605,12 +653,7 @@ fun ToolzNavHost(
             }
         },
         exitTransition = {
-            if (initialState.destination.route == Screen.Loading.route) {
-                fadeOut(animationSpec = tween(200)) + scaleOut(
-                    targetScale = 0.98f,
-                    animationSpec = tween(200)
-                )
-            } else if (performanceMode) {
+            if (performanceMode) {
                 fadeOut(animationSpec = tween(100))
             } else {
                 fadeOut(animationSpec = tween(300)) + scaleOut(
@@ -646,19 +689,6 @@ fun ToolzNavHost(
             )
         }
     ) {
-        composable(Screen.Loading.route) {
-            val loadingViewModel: LoadingViewModel = hiltViewModel()
-            LoadingScreen(
-                viewModel = loadingViewModel,
-                onLoadingComplete = {
-                    val nextRoute = if (onboardingCompleted) Screen.Dashboard.route else "onboarding"
-                    navController.navigate(nextRoute) {
-                        popUpTo(Screen.Loading.route) { inclusive = true }
-                    }
-                }
-            )
-        }
-
         composable("onboarding") {
             OnboardingScreen(
                 onFinish = {
@@ -715,8 +745,11 @@ fun ToolzNavHost(
         }
 
         composable(
-            route = Screen.AiAssistant.route + "?chatId={chatId}",
-            arguments = listOf(navArgument("chatId") { type = NavType.IntType; defaultValue = -1 })
+            route = Screen.AiAssistant.route,
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("isCoachMode") { type = NavType.BoolType; defaultValue = false }
+            )
         ) {
             AiAssistantScreen(
                 onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
@@ -872,7 +905,20 @@ fun ToolzNavHost(
             AltimeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.StepCounter.route) {
-            StepCounterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            StepCounterScreen(
+                viewModel = hiltViewModel(), 
+                onBack = { navController.popBackStack() },
+                onNavigateToTrends = { navController.navigate(Screen.StepTrends.route) },
+                onNavigateToAiAssistant = { chatId ->
+                    navController.navigate(Screen.AiAssistant.createRoute(chatId, isCoachMode = true))
+                }
+            )
+        }
+        composable(Screen.StepTrends.route) {
+            StepTrendsScreen(
+                viewModel = hiltViewModel(),
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.VoiceRecorder.route) {
             VoiceRecorderScreen(onBack = { navController.popBackStack() })
@@ -940,7 +986,10 @@ fun ToolzNavHost(
             DeviceInfoScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.FlipCoin.route) {
-            FlipCoinScreen(onBack = { navController.popBackStack() })
+            FlipCoinScreen(
+                onBack = { navController.popBackStack() },
+                settingsRepository = settingsRepository
+            )
         }
         composable(Screen.PeriodicTable.route) {
             PeriodicTableScreen(onBack = { navController.popBackStack() })
