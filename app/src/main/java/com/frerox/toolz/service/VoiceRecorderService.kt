@@ -39,6 +39,9 @@ class VoiceRecorderService : Service() {
     private val _maxAmplitude = MutableStateFlow(0)
     val maxAmplitude: StateFlow<Int> = _maxAmplitude
 
+    private val _currentPath = MutableStateFlow<String?>(null)
+    val currentPath: StateFlow<String?> = _currentPath
+
     private var gainLevel: Float = 1.0f
 
     private var mediaRecorder: MediaRecorder? = null
@@ -73,6 +76,7 @@ class VoiceRecorderService : Service() {
         
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         currentFile = File(folder, "REC_$timeStamp.m4a")
+        _currentPath.value = currentFile?.absolutePath
 
         try {
             mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -157,6 +161,7 @@ class VoiceRecorderService : Service() {
             currentFile?.delete()
         }
         
+        _currentPath.value = null
         _isRecording.value = false
         _isPaused.value = false
         _durationMillis.value = 0L
@@ -223,6 +228,12 @@ class VoiceRecorderService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Ensure foreground immediately if an action is provided
+        if (intent?.action != null) {
+            val notification = createNotification()
+            startForeground(NotificationHelper.ID_VOICE_RECORDER, notification)
+        }
+
         when (intent?.action) {
             ACTION_STOP -> stopRecording(true)
             ACTION_PAUSE -> pauseRecording()

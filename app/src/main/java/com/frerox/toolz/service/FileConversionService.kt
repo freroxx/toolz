@@ -12,130 +12,186 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.R
 import com.frerox.toolz.util.ConversionEngine
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Foreground service that runs file conversions off the main thread.
+ *
+ * Accepts a batch of URIs via the intent extra "input_uris" (ArrayList<Uri>).
+ * Processes them sequentially and broadcasts per-file and overall progress.
+ *
+ * Broadcast actions:
+ *  - COM_FREROX_TOOLZ_CONVERSION_PROGRESS  (extra: "progress" Int, "queue_pos" Int, "queue_total" Int)
+ *  - COM_FREROX_TOOLZ_CONVERSION_SUCCESS   (extra: "output_path" String, "queue_pos" Int, "queue_total" Int)
+ *  - COM_FREROX_TOOLZ_CONVERSION_ERROR     (extra: "error_message" String)
+ */
 @AndroidEntryPoint
 class FileConversionService : Service() {
 
     @Inject
     lateinit var conversionEngine: ConversionEngine
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val NOTIFICATION_ID = 8888
     private val CHANNEL_ID = "file_conversion_channel"
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val inputUri = intent?.getParcelableExtra<Uri>("input_uri")
-        val typeString = intent?.getStringExtra("conversion_type")
+        @Suppress("UNCHECKED_CAST")
+        val inputUris = intent?.getParcelableArrayListExtra<Uri>("input_uris")
+            ?: intent?.getParcelableExtra<Uri>("input_uri")?.let { arrayListOf(it) }
+            ?: run { stopSelf(); return START_NOT_STICKY }
+
+        val typeString = intent?.getStringExtra("conversion_type") ?: run { stopSelf(); return START_NOT_STICKY }
         val highQuality = intent?.getBooleanExtra("high_quality", true) ?: true
         val type = try {
-            ConversionEngine.ConversionType.valueOf(typeString ?: "")
-        } catch (e: Exception) {
-            null
+            ConversionEngine.ConversionType.valueOf(typeString)
+        } catch (_: Exception) {
+            stopSelf(); return START_NOT_STICKY
         }
 
-        if (inputUri != null && type != null) {
-            createNotificationChannel()
-            startForeground(NOTIFICATION_ID, createNotification("Preparing conversion...", 0))
-            performConversion(inputUri, type, highQuality)
-        } else {
-            stopSelf()
-        }
-
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification("Starting conversion…", 0, 1, 1))
+        processQueue(inputUris, type, highQuality)
         return START_NOT_STICKY
     }
 
-    private fun performConversion(inputUri: Uri, type: ConversionEngine.ConversionType, highQuality: Boolean) {
-        conversionEngine.convertFile(inputUri, type, highQuality)
-            .onEach { status ->
-                when (status) {
-                    is ConversionEngine.ConversionStatus.Progress -> {
-                        val progressText = if (status.percentage >= 0) {
-                            "Converting to ${type.extension.uppercase()}... ${status.percentage}%"
-                        } else {
-                            "Processing file..."
+    private fun processQueue(
+        uris: List<Uri>,
+        type: ConversionEngine.ConversionType,
+        highQuality: Boolean,
+    ) {
+        serviceScope.launch {
+            val total = uris.size
+            for ((idx, uri) in uris.withIndex()) {
+                val pos = idx + 1
+                updateNotification("Converting file $pos / $total → .${type.extension.uppercase()}", 0, pos, total)
+
+                conversionEngine.routeConversion(uri, type, highQuality)
+                    .onEach { status ->
+                        when (status) {
+                            is ConversionEngine.ConversionStatus.Progress -> {
+                                val pct = status.percentage
+                                updateNotification(
+                                    "[$pos/$total] Converting → .${type.extension.uppercase()}… ${if (pct > 0) "$pct%" else ""}",
+                                    pct, pos, total,
+                                )
+                                broadcast("COM_FREROX_TOOLZ_CONVERSION_PROGRESS") {
+                                    putExtra("progress", pct)
+                                    putExtra("queue_pos", pos)
+                                    putExtra("queue_total", total)
+                                }
+                            }
+                            is ConversionEngine.ConversionStatus.Success -> {
+                                val isLast = pos == total
+                                updateNotification(
+                                    if (isLast) "Conversion complete! ✓" else "File $pos done, continuing…",
+                                    100, pos, total, finished = isLast,
+                                )
+                                broadcast("COM_FREROX_TOOLZ_CONVERSION_SUCCESS") {
+                                    putExtra("output_path", status.outputPath)
+                                    putExtra("queue_pos", pos)
+                                    putExtra("queue_total", total)
+                                }
+                            }
+                            is ConversionEngine.ConversionStatus.Error -> {
+                                updateNotification("Error: ${status.message}", 0, pos, total, finished = true)
+                                broadcast("COM_FREROX_TOOLZ_CONVERSION_ERROR") {
+                                    putExtra("error_message", status.message)
+                                    putExtra("queue_pos", pos)
+                                    putExtra("queue_total", total)
+                                }
+                                // Stop processing queue on error
+                                stopForeground(STOP_FOREGROUND_DETACH)
+                                stopSelf()
+                                return@onEach
+                            }
                         }
-                        updateNotification(progressText, status.percentage)
-                        
-                        sendBroadcast(Intent("COM_FREROX_TOOLZ_CONVERSION_PROGRESS").apply {
-                            putExtra("progress", status.percentage)
-                            setPackage(packageName)
-                        })
                     }
-                    is ConversionEngine.ConversionStatus.Success -> {
-                        updateNotification("Conversion complete!", 100, isFinished = true)
-                        sendBroadcast(Intent("COM_FREROX_TOOLZ_CONVERSION_SUCCESS").apply {
-                            putExtra("output_path", status.outputPath)
-                            setPackage(packageName)
-                        })
-                        stopForeground(STOP_FOREGROUND_DETACH)
-                        stopSelf()
-                    }
-                    is ConversionEngine.ConversionStatus.Error -> {
-                        updateNotification("Error: ${status.message}", 0, isFinished = true)
-                        sendBroadcast(Intent("COM_FREROX_TOOLZ_CONVERSION_ERROR").apply {
-                            putExtra("error_message", status.message)
-                            setPackage(packageName)
-                        })
-                        stopForeground(STOP_FOREGROUND_DETACH)
-                        stopSelf()
-                    }
-                }
+                    .launchIn(serviceScope)
+                    .join()
             }
-            .launchIn(serviceScope)
+
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf()
+        }
     }
+
+    // ── Notification helpers ──────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "File Conversion",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows progress of file conversions"
-            }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply { description = "Shows progress of file conversions" }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(channel)
         }
     }
 
-    private fun createNotification(content: String, progress: Int, isFinished: Boolean = false): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE
+    private fun buildNotification(
+        content: String,
+        progress: Int,
+        queuePos: Int,
+        queueTotal: Int,
+        finished: Boolean = false,
+    ): Notification {
+        val pending = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            },
+            PendingIntent.FLAG_IMMUTABLE,
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Toolz File Converter")
+            .setContentTitle(if (queueTotal > 1) "Toolz · $queuePos of $queueTotal files" else "Toolz File Converter")
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(!isFinished)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(isFinished)
+            .setOngoing(!finished)
+            .setContentIntent(pending)
+            .setAutoCancel(finished)
 
-        if (!isFinished && progress >= 0) {
-            builder.setProgress(100, progress, false)
-        } else if (!isFinished && progress < 0) {
-            builder.setProgress(100, 0, true)
+        when {
+            !finished && progress > 0 -> builder.setProgress(100, progress, false)
+            !finished             -> builder.setProgress(100, 0, true)
         }
-
         return builder.build()
     }
 
-    private fun updateNotification(content: String, progress: Int, isFinished: Boolean = false) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, createNotification(content, progress, isFinished))
+    private fun updateNotification(
+        content: String,
+        progress: Int,
+        queuePos: Int,
+        queueTotal: Int,
+        finished: Boolean = false,
+    ) {
+        val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        mgr.notify(NOTIFICATION_ID, buildNotification(content, progress, queuePos, queueTotal, finished))
+    }
+
+    private fun broadcast(action: String, block: Intent.() -> Unit = {}) {
+        sendBroadcast(Intent(action).apply {
+            setPackage(packageName)
+            block()
+        })
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
