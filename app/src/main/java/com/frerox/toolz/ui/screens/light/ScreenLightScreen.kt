@@ -35,9 +35,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.*
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun ScreenLightScreen(
     viewModel: ScreenLightViewModel,
@@ -48,7 +51,27 @@ fun ScreenLightScreen(
     val activity = context as? Activity
     var showControls by remember { mutableStateOf(true) }
     
-    val contentColor = if (state.color.luminance() > 0.5f) Color.Black else Color.White
+    // Strobe logic
+    var strobeFlash by remember { mutableStateOf(false) }
+    LaunchedEffect(state.isStrobeEnabled, state.strobeInterval) {
+        if (state.isStrobeEnabled) {
+            while (true) {
+                strobeFlash = !strobeFlash
+                delay(state.strobeInterval)
+            }
+        } else {
+            strobeFlash = false
+        }
+    }
+
+    val displayColor = if (state.isStrobeEnabled) {
+        if (strobeFlash) state.color else Color.Black
+    } else {
+        state.color
+    }
+
+    val contentColor = if (displayColor.luminance() > 0.5f) Color.Black else Color.White
+    val interactionSource = remember { MutableInteractionSource() }
 
     val presets = listOf(
         Color.White, 
@@ -94,7 +117,7 @@ fun ScreenLightScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(state.color)
+            .background(displayColor)
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -105,19 +128,20 @@ fun ScreenLightScreen(
         // Main Display Info (when controls are hidden)
         AnimatedVisibility(
             visible = !showControls && !state.isLocked,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + expandIn(expandFrom = Alignment.Center),
+            exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.Center),
             modifier = Modifier.align(Alignment.Center)
         ) {
             Surface(
                 color = contentColor.copy(alpha = 0.1f),
-                shape = RoundedCornerShape(12.dp)
+                shape = MediumExpressiveShape,
+                border = BorderStroke(1.dp, contentColor.copy(alpha = 0.1f))
             ) {
                 Text(
                     "TAP TO CONFIGURE",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contentColor.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = contentColor.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp
                 )
@@ -127,14 +151,14 @@ fun ScreenLightScreen(
         // Lock Status Indicator
         AnimatedVisibility(
             visible = state.isLocked,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut(),
+            enter = fadeIn(tween(400)) + scaleIn(spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow)),
+            exit = fadeOut(tween(300)) + scaleOut(),
             modifier = Modifier.align(Alignment.Center)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
-                    modifier = Modifier.size(140.dp),
-                    shape = RoundedCornerShape(48.dp),
+                    modifier = Modifier.size(160.dp),
+                    shape = ExtraLargeExpressiveShape,
                     color = contentColor.copy(alpha = 0.15f),
                     border = BorderStroke(2.dp, contentColor.copy(alpha = 0.2f))
                 ) {
@@ -143,21 +167,22 @@ fun ScreenLightScreen(
                             Icons.Rounded.Lock,
                             contentDescription = "Locked",
                             tint = contentColor,
-                            modifier = Modifier.size(56.dp)
+                            modifier = Modifier.size(64.dp)
                         )
                     }
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
                 Text(
                     "SCREEN LOCKED",
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     color = contentColor,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
                 )
+                Spacer(Modifier.height(8.dp))
                 Text(
                     "LONG PRESS TO UNLOCK",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelLarge,
                     color = contentColor.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
@@ -168,8 +193,8 @@ fun ScreenLightScreen(
         // Controls Overlay
         AnimatedVisibility(
             visible = showControls && !state.isLocked,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut()
+            enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut()
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 // Top Bar
@@ -177,36 +202,45 @@ fun ScreenLightScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
+                    ToolzExpressiveIconButton(
                         onClick = onBack,
-                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(contentColor.copy(alpha = 0.15f))
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = contentColor.copy(alpha = 0.15f),
+                            contentColor = contentColor
+                        )
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = contentColor)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
                     }
                     
                     Surface(
                         color = contentColor.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(14.dp)
+                        shape = SmallExpressiveShape
                     ) {
                         Text(
                             "SCREEN LIGHT",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
                             color = contentColor,
                             letterSpacing = 2.sp
                         )
                     }
 
-                    IconButton(
-                        onClick = { viewModel.toggleLock() },
-                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(contentColor.copy(alpha = 0.15f))
+                    ToolzExpressiveIconToggleButton(
+                        checked = false,
+                        onCheckedChange = { viewModel.toggleLock() },
+                        shapes = IconButtonDefaults.toggleableShapes(),
+                        colors = IconButtonDefaults.filledIconToggleButtonColors(
+                            containerColor = contentColor.copy(alpha = 0.15f),
+                            contentColor = contentColor
+                        )
                     ) {
-                        Icon(Icons.Rounded.LockOpen, "Lock", tint = contentColor)
+                        Icon(Icons.Rounded.LockOpen, "Lock")
                     }
                 }
 
@@ -215,103 +249,172 @@ fun ScreenLightScreen(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(24.dp)
-                        .fillMaxWidth(),
-                    shape = RoundedCornerShape(48.dp),
-                    color = (if (state.color.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.2f),
-                    border = BorderStroke(1.dp, contentColor.copy(alpha = 0.2f))
+                        .fillMaxWidth()
+                        .expressivePressScale(interactionSource),
+                    shape = ExtraLargeExpressiveShape,
+                    color = (if (state.color.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, contentColor.copy(alpha = 0.15f)),
+                    tonalElevation = 8.dp
                 ) {
                     Column(
-                        modifier = Modifier.padding(28.dp),
+                        modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Intensity Slider
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.LightMode, null, tint = contentColor, modifier = Modifier.size(24.dp))
-                            Spacer(Modifier.width(16.dp))
-                            Slider(
-                                value = state.brightness,
-                                onValueChange = { viewModel.setBrightness(it) },
-                                modifier = Modifier.weight(1f),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = contentColor,
-                                    activeTrackColor = contentColor,
-                                    inactiveTrackColor = contentColor.copy(alpha = 0.2f)
+                        // Strobe Toggle & Intensity Label
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.LightMode, null, tint = contentColor, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    "BRIGHTNESS",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = contentColor,
+                                    letterSpacing = 1.sp
                                 )
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Text(
-                                "${(state.brightness * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = contentColor,
-                                modifier = Modifier.width(40.dp)
-                            )
+                            }
+
+                            ToolzExpressiveIconToggleButton(
+                                checked = state.isStrobeEnabled,
+                                onCheckedChange = { viewModel.toggleStrobe() },
+                                modifier = Modifier.height(36.dp),
+                                colors = IconButtonDefaults.filledIconToggleButtonColors(
+                                    checkedContainerColor = contentColor,
+                                    checkedContentColor = if (contentColor == Color.White) Color.Black else Color.White,
+                                    containerColor = contentColor.copy(alpha = 0.1f),
+                                    contentColor = contentColor
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (state.isStrobeEnabled) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
+                                        null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "STROBE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
                         }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // Intensity Slider
+                        SquigglySlider(
+                            value = state.brightness,
+                            onValueChange = { viewModel.setBrightness(it) },
+                            valueRange = 0.01f..1.0f,
+                            activeColor = contentColor,
+                            inactiveColor = contentColor.copy(alpha = 0.2f),
+                            isPlaying = !state.isLocked
+                        )
 
                         Spacer(modifier = Modifier.height(24.dp))
 
                         // Presets
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp)
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             items(presets) { color ->
+                                val isSelected = state.color == color && !state.isStrobeEnabled
                                 Box(
                                     modifier = Modifier
-                                        .size(52.dp)
+                                        .size(48.dp)
                                         .clip(CircleShape)
                                         .background(color)
                                         .border(
-                                            width = if (state.color == color) 3.5.dp else 1.dp,
-                                            color = if (state.color == color) contentColor else contentColor.copy(alpha = 0.2f),
+                                            width = if (isSelected) 3.dp else 1.dp,
+                                            color = if (isSelected) contentColor else contentColor.copy(alpha = 0.2f),
                                             shape = CircleShape
                                         )
-                                        .clickable { viewModel.setColor(color) }
+                                        .bouncyClick { viewModel.setColor(color) },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    if (state.color == color) {
+                                    if (isSelected) {
                                         Icon(
                                             Icons.Rounded.Check, 
                                             null, 
                                             tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
-                                            modifier = Modifier.align(Alignment.Center).size(24.dp)
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(32.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                         
-                        // Custom Color Hue Slider
-                        var hue by remember { mutableFloatStateOf(0f) }
-                        val hueColors = remember {
-                            listOf(
-                                Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red
-                            )
+                        // Custom Color Hue Slider / Strobe Speed Slider
+                        if (state.isStrobeEnabled) {
+                           Column(modifier = Modifier.fillMaxWidth()) {
+                               Row(verticalAlignment = Alignment.CenterVertically) {
+                                   Icon(Icons.Rounded.Speed, null, tint = contentColor, modifier = Modifier.size(18.dp))
+                                   Spacer(Modifier.width(12.dp))
+                                   Text(
+                                       "STROBE SPEED",
+                                       style = MaterialTheme.typography.labelSmall,
+                                       fontWeight = FontWeight.Black,
+                                       color = contentColor,
+                                       letterSpacing = 1.sp
+                                   )
+                               }
+                               Slider(
+                                   value = (1000L - state.strobeInterval).toFloat(),
+                                   onValueChange = { viewModel.setStrobeInterval(1000L - it.toLong()) },
+                                   valueRange = 0f..950f,
+                                   colors = SliderDefaults.colors(
+                                       thumbColor = contentColor,
+                                       activeTrackColor = contentColor,
+                                       inactiveTrackColor = contentColor.copy(alpha = 0.2f)
+                                   )
+                               )
+                           }
+                        } else {
+                            var hue by remember { mutableFloatStateOf(0f) }
+                            val hueColors = remember {
+                                listOf(
+                                    Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red
+                                )
+                            }
+                            
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Brush.horizontalGradient(hueColors))
+                                )
+                                
+                                Slider(
+                                    value = hue,
+                                    onValueChange = { 
+                                        hue = it
+                                        val hsv = floatArrayOf(it * 360f, 1f, 1f)
+                                        viewModel.setColor(Color(android.graphics.Color.HSVToColor(hsv)))
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = contentColor,
+                                        activeTrackColor = Color.Transparent,
+                                        inactiveTrackColor = Color.Transparent
+                                    )
+                                )
+                            }
                         }
-                        
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(10.dp)
-                                .clip(RoundedCornerShape(5.dp))
-                                .background(Brush.horizontalGradient(hueColors))
-                        )
-                        
-                        Slider(
-                            value = hue,
-                            onValueChange = { 
-                                hue = it
-                                val hsv = floatArrayOf(it * 360f, 1f, 1f)
-                                viewModel.setColor(Color(android.graphics.Color.HSVToColor(hsv)))
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = SliderDefaults.colors(
-                                thumbColor = contentColor,
-                                activeTrackColor = Color.Transparent,
-                                inactiveTrackColor = Color.Transparent
-                            )
-                        )
                     }
                 }
             }

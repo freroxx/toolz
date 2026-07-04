@@ -12,7 +12,9 @@ import javax.inject.Inject
 data class ScreenLightState(
     val color: Color = Color.White,
     val brightness: Float = 1.0f,
-    val isLocked: Boolean = false
+    val isLocked: Boolean = false,
+    val isStrobeEnabled: Boolean = false,
+    val strobeInterval: Long = 500L
 )
 
 @HiltViewModel
@@ -21,7 +23,7 @@ class ScreenLightViewModel @Inject constructor() : ViewModel() {
     val uiState: StateFlow<ScreenLightState> = _uiState.asStateFlow()
 
     fun setColor(color: Color) {
-        _uiState.update { it.copy(color = color) }
+        _uiState.update { it.copy(color = color, isStrobeEnabled = false) }
     }
 
     fun setBrightness(brightness: Float) {
@@ -30,5 +32,13 @@ class ScreenLightViewModel @Inject constructor() : ViewModel() {
     
     fun toggleLock() {
         _uiState.update { it.copy(isLocked = !it.isLocked) }
+    }
+
+    fun toggleStrobe() {
+        _uiState.update { it.copy(isStrobeEnabled = !it.isStrobeEnabled) }
+    }
+
+    fun setStrobeInterval(interval: Long) {
+        _uiState.update { it.copy(strobeInterval = interval) }
     }
 }
