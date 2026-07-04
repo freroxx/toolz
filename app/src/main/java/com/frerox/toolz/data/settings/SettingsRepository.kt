@@ -224,8 +224,10 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_LYRICS_WORD_SYNC_ENABLED = booleanPreferencesKey("music_lyrics_word_sync_enabled")
     private val KARAOKE_WORD_SYNC_ENABLED = booleanPreferencesKey("karaoke_word_sync_enabled")
     private val KARAOKE_SING_CONFIDENTLY_ENABLED = booleanPreferencesKey("karaoke_sing_confidently_enabled")
+    private val KARAOKE_SING_CONFIDENTLY_MODE = stringPreferencesKey("karaoke_sing_confidently_mode")
     private val KARAOKE_SPEECH_CORRECTION_ENABLED = booleanPreferencesKey("karaoke_speech_correction_enabled")
     private val KARAOKE_QUICK_SING_ENABLED = booleanPreferencesKey("karaoke_quick_sing_enabled")
+    private val KARAOKE_AUTO_RECORD_ENABLED = booleanPreferencesKey("karaoke_auto_record_enabled")
     private val MUSIC_VISUALIZER_SENSITIVITY = floatPreferencesKey("music_visualizer_sensitivity")
     private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
 
@@ -268,7 +270,7 @@ class SettingsRepository @Inject constructor(
     private val LIVE_DNS_NOTIFICATIONS = booleanPreferencesKey("live_dns_notifications")
 
     val liveVpnNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_VPN_NOTIFICATIONS] ?: true }
-    val liveDnsNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_DNS_NOTIFICATIONS] ?: true }
+    val liveDnsNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_DNS_NOTIFICATIONS] ?: false }
 
     suspend fun setLiveVpnNotifications(enabled: Boolean) {
         dataStore.edit { it[LIVE_VPN_NOTIFICATIONS] = enabled }
@@ -286,6 +288,8 @@ class SettingsRepository @Inject constructor(
     // Timer Duration Persistence
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
     private val LAST_TIMER_SECONDS = intPreferencesKey("last_timer_seconds")
+    private val TIMER_HISTORY = stringPreferencesKey("timer_history")  // JSON: "min:sec" -> count
+    private val LOCKED_TIMER_PRESETS = stringPreferencesKey("locked_timer_presets") // JSON: List of "min:sec"
 
     // Update System
     private val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
@@ -325,6 +329,19 @@ class SettingsRepository @Inject constructor(
     private val NETWORK_BENCHMARK_SERVERS = stringSetPreferencesKey("network_benchmark_servers")
     private val NETWORK_LAST_TRACE_TARGET = stringPreferencesKey("network_last_trace_target")
     private val NETWORK_AUTO_CONNECT_SHIZUKU = booleanPreferencesKey("network_auto_connect_shizuku")
+
+    // BMI Persistence
+    private val BMI_HEIGHT = stringPreferencesKey("bmi_height")
+    private val BMI_WEIGHT = stringPreferencesKey("bmi_weight")
+    private val BMI_AGE = stringPreferencesKey("bmi_age")
+    private val BMI_GENDER = stringPreferencesKey("bmi_gender")
+    private val BMI_ACTIVITY = stringPreferencesKey("bmi_activity")
+    private val BMI_IS_KG = booleanPreferencesKey("bmi_is_kg")
+    private val BMI_IS_CM = booleanPreferencesKey("bmi_is_cm")
+
+    // Flip Coin Settings
+    private val FLIP_COIN_HEADS_IMAGE_URI = stringPreferencesKey("flip_coin_heads_image_uri")
+    private val FLIP_COIN_TAILS_IMAGE_URI = stringPreferencesKey("flip_coin_tails_image_uri")
 
     private val defaultAlarmUri: String by lazy {
         RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString() ?: ""
@@ -508,14 +525,19 @@ class SettingsRepository @Inject constructor(
     ) { enabled, offline -> if (offline) false else enabled }
     val musicKeepScreenOnLyrics: Flow<Boolean> = dataStore.data.map { it[MUSIC_KEEP_SCREEN_ON_LYRICS] ?: true }
     val musicLyricsLayout: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_LAYOUT] ?: "LEFT" }
-    val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: false }
+    val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: true }
     val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
-    val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: false }
+    val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: true }
     val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: false }
     val karaokeWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_WORD_SYNC_ENABLED] ?: true }
-    val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: true }
-    val karaokeSpeechCorrectionEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SPEECH_CORRECTION_ENABLED] ?: true }
-    val karaokeQuickSingEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_QUICK_SING_ENABLED] ?: false }
+    val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: false }
+    // Mode supersedes the legacy boolean. Default is AUTO (matches old "enabled" behaviour).
+    val karaokeSingConfidentlyMode: Flow<String> = dataStore.data.map {
+        it[KARAOKE_SING_CONFIDENTLY_MODE] ?: if (it[KARAOKE_SING_CONFIDENTLY_ENABLED] == true) "AUTO" else "OFF"
+    }
+    val karaokeSpeechCorrectionEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SPEECH_CORRECTION_ENABLED] ?: false }
+    val karaokeQuickSingEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_QUICK_SING_ENABLED] ?: true }
+    val karaokeAutoRecordEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_AUTO_RECORD_ENABLED] ?: true }
     val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
@@ -594,6 +616,16 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    val timerHistory: Flow<Map<String, Int>> = dataStore.data.map { prefs ->
+        val json = prefs[TIMER_HISTORY] ?: "{}"
+        parseTimerHistoryJson(json)
+    }
+
+    val lockedTimerPresets: Flow<List<String>> = dataStore.data.map { prefs ->
+        val json = prefs[LOCKED_TIMER_PRESETS] ?: "[]"
+        parseLockedPresetsJson(json)
+    }
+
     val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
     val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
     val autoUpdateEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_UPDATE_ENABLED] ?: false }
@@ -624,7 +656,7 @@ class SettingsRepository @Inject constructor(
     val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
 
     val aiClipboardMonitoringEnabled: Flow<Boolean> = combine(
-        dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: true },
+        dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: false },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
@@ -637,6 +669,18 @@ class SettingsRepository @Inject constructor(
     }
     val networkLastTraceTarget: Flow<String> = dataStore.data.map { it[NETWORK_LAST_TRACE_TARGET] ?: "1.1.1.1" }
     val networkAutoConnectShizuku: Flow<Boolean> = dataStore.data.map { it[NETWORK_AUTO_CONNECT_SHIZUKU] ?: true }
+
+    // BMI Flows
+    val bmiHeight: Flow<String> = dataStore.data.map { it[BMI_HEIGHT] ?: "" }
+    val bmiWeight: Flow<String> = dataStore.data.map { it[BMI_WEIGHT] ?: "" }
+    val bmiAge: Flow<String> = dataStore.data.map { it[BMI_AGE] ?: "" }
+    val bmiGender: Flow<String> = dataStore.data.map { it[BMI_GENDER] ?: "MALE" }
+    val bmiActivity: Flow<String> = dataStore.data.map { it[BMI_ACTIVITY] ?: "SEDENTARY" }
+    val bmiIsKg: Flow<Boolean> = dataStore.data.map { it[BMI_IS_KG] ?: true }
+    val bmiIsCm: Flow<Boolean> = dataStore.data.map { it[BMI_IS_CM] ?: true }
+
+    val flipCoinHeadsImageUri: Flow<String?> = dataStore.data.map { it[FLIP_COIN_HEADS_IMAGE_URI] }
+    val flipCoinTailsImageUri: Flow<String?> = dataStore.data.map { it[FLIP_COIN_TAILS_IMAGE_URI] }
 
     suspend fun setStepGoal(goal: Int) { dataStore.edit { it[STEP_GOAL] = goal } }
     suspend fun setRingtoneUri(uri: String) { dataStore.edit { it[RINGTONE_URI] = uri } }
@@ -780,8 +824,16 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicLyricsWordSyncEnabled(enabled: Boolean) { dataStore.edit { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] = enabled } }
     suspend fun setKaraokeWordSyncEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_WORD_SYNC_ENABLED] = enabled } }
     suspend fun setKaraokeSingConfidentlyEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_SING_CONFIDENTLY_ENABLED] = enabled } }
+    suspend fun setKaraokeSingConfidentlyMode(mode: String) {
+        dataStore.edit {
+            it[KARAOKE_SING_CONFIDENTLY_MODE] = mode
+            // Keep legacy boolean in sync so older code reading it still works.
+            it[KARAOKE_SING_CONFIDENTLY_ENABLED] = (mode != "OFF")
+        }
+    }
     suspend fun setKaraokeSpeechCorrectionEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_SPEECH_CORRECTION_ENABLED] = enabled } }
     suspend fun setKaraokeQuickSingEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_QUICK_SING_ENABLED] = enabled } }
+    suspend fun setKaraokeAutoRecordEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_AUTO_RECORD_ENABLED] = enabled } }
     suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
@@ -825,6 +877,78 @@ class SettingsRepository @Inject constructor(
             it[LAST_TIMER_MINUTES] = minutes
             it[LAST_TIMER_SECONDS] = seconds
         }
+    }
+
+    suspend fun recordTimerUsage(minutes: Int, seconds: Int) {
+        val key = "$minutes:$seconds"
+        dataStore.edit { prefs ->
+            val json = prefs[TIMER_HISTORY] ?: "{}"
+            val history = parseTimerHistoryJson(json).toMutableMap()
+            history[key] = (history[key] ?: 0) + 1
+            // Keep top 20 entries max
+            val sorted = history.entries.sortedByDescending { it.value }.take(20)
+            val newHistory = sorted.associate { it.key to it.value }
+            prefs[TIMER_HISTORY] = serializeTimerHistoryJson(newHistory)
+        }
+    }
+
+    suspend fun updateLockedTimerPreset(index: Int, minutes: Int, seconds: Int) {
+        dataStore.edit { prefs ->
+            val json = prefs[LOCKED_TIMER_PRESETS] ?: "[]"
+            val locked = parseLockedPresetsJson(json).toMutableList()
+            
+            // Ensure list has enough elements
+            while (locked.size <= index) {
+                locked.add("")
+            }
+            
+            locked[index] = "$minutes:$seconds"
+            prefs[LOCKED_TIMER_PRESETS] = serializeLockedPresetsJson(locked)
+        }
+    }
+
+    private fun parseLockedPresetsJson(json: String): List<String> {
+        return try {
+            val trimmed = json.trim()
+            if (trimmed == "[]" || trimmed.isBlank()) return emptyList()
+            val content = trimmed.removePrefix("[").removeSuffix("]")
+            if (content.isBlank()) return emptyList()
+            content.split(",").map { it.trim().removeSurrounding("\"") }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serializeLockedPresetsJson(list: List<String>): String {
+        if (list.isEmpty()) return "[]"
+        return "[${list.joinToString(",") { "\"$it\"" }}]"
+    }
+
+    private fun parseTimerHistoryJson(json: String): Map<String, Int> {
+        return try {
+            val map = mutableMapOf<String, Int>()
+            val trimmed = json.trim()
+            if (trimmed == "{}" || trimmed.isBlank()) return emptyMap()
+            val entries = trimmed.removePrefix("{").removeSuffix("}")
+            if (entries.isBlank()) return emptyMap()
+            entries.split(",").forEach { entry ->
+                val parts = entry.split(":")
+                if (parts.size == 2) {
+                    val k = parts[0].trim().removeSurrounding("\"")
+                    val v = parts[1].trim().removeSuffix("}").toIntOrNull() ?: 0
+                    map[k] = v
+                }
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun serializeTimerHistoryJson(map: Map<String, Int>): String {
+        if (map.isEmpty()) return "{}"
+        val entries = map.entries.joinToString(",") { kvp -> "\"${kvp.key}\":${kvp.value}" }
+        return "{$entries}"
     }
 
     suspend fun setLastUpdateCheck(timestamp: Long) { dataStore.edit { it[LAST_UPDATE_CHECK] = timestamp } }
@@ -897,6 +1021,26 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setNetworkAutoConnectShizuku(enabled: Boolean) {
         dataStore.edit { it[NETWORK_AUTO_CONNECT_SHIZUKU] = enabled }
+    }
+
+    suspend fun setBmiHeight(height: String) { dataStore.edit { it[BMI_HEIGHT] = height } }
+    suspend fun setBmiWeight(weight: String) { dataStore.edit { it[BMI_WEIGHT] = weight } }
+    suspend fun setBmiAge(age: String) { dataStore.edit { it[BMI_AGE] = age } }
+    suspend fun setBmiGender(gender: String) { dataStore.edit { it[BMI_GENDER] = gender } }
+    suspend fun setBmiActivity(activity: String) { dataStore.edit { it[BMI_ACTIVITY] = activity } }
+    suspend fun setBmiIsKg(isKg: Boolean) { dataStore.edit { it[BMI_IS_KG] = isKg } }
+    suspend fun setBmiIsCm(isCm: Boolean) { dataStore.edit { it[BMI_IS_CM] = isCm } }
+
+    suspend fun setFlipCoinHeadsImageUri(uri: String?) {
+        dataStore.edit { 
+            if (uri == null) it.remove(FLIP_COIN_HEADS_IMAGE_URI) else it[FLIP_COIN_HEADS_IMAGE_URI] = uri
+        }
+    }
+
+    suspend fun setFlipCoinTailsImageUri(uri: String?) {
+        dataStore.edit {
+            if (uri == null) it.remove(FLIP_COIN_TAILS_IMAGE_URI) else it[FLIP_COIN_TAILS_IMAGE_URI] = uri
+        }
     }
 
     suspend fun resetOnboarding() {
