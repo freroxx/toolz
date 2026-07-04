@@ -6,8 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.DeviceSpecHelper
+import com.frerox.toolz.data.update.UpdateCheckResult
+import com.frerox.toolz.data.update.UpdateRepository
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -18,7 +22,8 @@ import javax.inject.Inject
 class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
-    private val aiSettingsManager: AiSettingsManager
+    private val aiSettingsManager: AiSettingsManager,
+    private val updateRepository: UpdateRepository
 ) : ViewModel() {
 
     data class OnboardingState(
@@ -30,7 +35,9 @@ class OnboardingViewModel @Inject constructor(
         val groqApiKey: String = "",
         val notificationsEnabled: Boolean = true,
         val vaultEnabled: Boolean = true,
-        val deviceSpecs: DeviceSpecHelper.DeviceSpecs? = null
+        val shizukuAuthorized: Boolean = false,
+        val deviceSpecs: DeviceSpecHelper.DeviceSpecs? = null,
+        val updateState: UpdateCheckResult? = null
     )
 
     private val _uiState = MutableStateFlow(OnboardingState())
@@ -40,8 +47,13 @@ class OnboardingViewModel @Inject constructor(
         val specs = DeviceSpecHelper.getDeviceSpecs(context)
         _uiState.update { it.copy(
             deviceSpecs = specs,
-            performanceMode = specs.recommendPerformanceMode
+            performanceMode = specs.recommendPerformanceMode,
+            shizukuAuthorized = ShizukuHelper.isAuthorized()
         ) }
+    }
+
+    fun refreshShizukuStatus() {
+        _uiState.update { it.copy(shizukuAuthorized = ShizukuHelper.isAuthorized()) }
     }
 
     fun updateName(name: String) = _uiState.update { it.copy(name = name) }
@@ -52,6 +64,15 @@ class OnboardingViewModel @Inject constructor(
     fun updateGroqKey(key: String) = _uiState.update { it.copy(groqApiKey = key) }
     fun updateNotifications(enabled: Boolean) = _uiState.update { it.copy(notificationsEnabled = enabled) }
     fun updateVault(enabled: Boolean) = _uiState.update { it.copy(vaultEnabled = enabled) }
+
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(updateState = null) }
+            delay(1500) // Aesthetic delay for animation
+            val result = updateRepository.checkForUpdates(false)
+            _uiState.update { it.copy(updateState = result) }
+        }
+    }
 
     fun finishOnboarding(onFinish: () -> Unit) {
         viewModelScope.launch {
