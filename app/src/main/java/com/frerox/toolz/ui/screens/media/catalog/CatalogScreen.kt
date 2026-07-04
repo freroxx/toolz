@@ -17,6 +17,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -45,15 +47,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridScope
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridScope
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -78,6 +78,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MicExternalOn
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Science
@@ -92,7 +93,9 @@ import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
@@ -105,6 +108,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
@@ -113,6 +118,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -153,6 +159,8 @@ import androidx.compose.material3.carousel.rememberCarouselState
 import com.frerox.toolz.ui.components.ExpressiveCarousel
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ExpressiveSearchField
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -166,6 +174,9 @@ import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import com.frerox.toolz.ui.components.ExpressiveCarousel
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalIsDarkTheme
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -183,7 +194,7 @@ fun CatalogContent(
     musicRepository: MusicRepository,
     localTracks: List<MusicTrack>,
     currentTrack: MusicTrack?,
-    gridState: LazyGridState = rememberLazyGridState(),
+    gridState: LazyStaggeredGridState = rememberLazyStaggeredGridState(),
     onPlayTrack: (Uri, String, String, String, String) -> Unit,
     onPlayInKaraoke: (Uri, String, String, String, String) -> Unit,
     onEnqueue: (CatalogTrack, Boolean) -> Unit
@@ -403,7 +414,6 @@ fun CatalogContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .toolzBackground()
             .onGloballyPositioned { rootCoordinates = it }
     ) {
         Box(
@@ -419,17 +429,23 @@ fun CatalogContent(
                     }
                 }
         ) {
-            val columns = if (configuration.screenWidthDp > 600) 4 else 3
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
+            val columns = when {
+                state.layoutMode == LayoutMode.LIST -> 1
+                configuration.screenWidthDp > 600 -> 4
+                else -> 2
+            }
+                LazyVerticalStaggeredGrid(
+                columns = StaggeredGridCells.Fixed(columns),
                 state = gridState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 120.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 64.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 120.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalItemSpacing = 12.dp
             ) {
+                // Determine max spans where needed (not strictly maxLineSpan in staggered, just FullLine)
+                val fullSpan = StaggeredGridItemSpan.FullLine
                 // ... (items remain the same)
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     CatalogTopActions(
                         onToggleLayout = {
                             catalogViewModel.setLayoutMode(
@@ -441,7 +457,7 @@ fun CatalogContent(
                     )
                 }
 
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     CatalogSearchBar(
                         query = state.query,
                         onQueryChange = { catalogViewModel.onSearchQueryChange(it) },
@@ -452,7 +468,7 @@ fun CatalogContent(
                     )
                 }
 
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     GenreFilterChips(
                         selectedGenre = state.selectedGenre,
                         onGenreSelected = { catalogViewModel.onGenreSelected(it) }
@@ -460,7 +476,7 @@ fun CatalogContent(
                 }
 
                 state.error?.let { message ->
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
                         ErrorCard(
                             message = message,
                             onRetry = {
@@ -474,46 +490,47 @@ fun CatalogContent(
 
                 if (state.query.isBlank()) {
                     if (state.isLoading) {
-                        item(span = { GridItemSpan(maxLineSpan) }) { HeroSkeleton() }
-                        item(span = { GridItemSpan(maxLineSpan) }) { CatalogSectionSkeleton(title = "Trending Now", listMode = state.layoutMode == LayoutMode.LIST) }
-                        item(span = { GridItemSpan(maxLineSpan) }) { CatalogSectionSkeleton(title = "Just for you", listMode = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Catalog", listMode = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Recommendations", listMode = true) }
                     } else {
                         if (state.quickPicks.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
+                            item(span = StaggeredGridItemSpan.FullLine) {
                                 SectionHeader(
-                                    title = "Discover",
-                                    subtitle = "Rotate on refresh • Best of modern sounds",
+                                    title = "Quick picks",
+                                    subtitle = "${state.quickPicks.size} ready to play",
                                     icon = Icons.Rounded.AutoAwesome
                                 )
                             }
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                FeaturedCarousel(
-                                    tracks = state.quickPicks,
-                                    focusedTrackUrl = focusedTrack?.sourceUrl,
-                                    onTrackClick = { track, coords ->
-                                        onResolveAndPlay(track, coords, 24.dp, LayoutMode.GRID)
-                                    },
-                                    onLongClick = { track ->
-                                        if (hapticEnabled) {
-                                            vibrationManager?.vibrateLongClick()
-                                                ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                        }
-                                        trackForAction = track
+                            catalogTrackRows(
+                                tracks = state.quickPicks,
+                                layoutMode = LayoutMode.LIST,
+                                downloadedSourceUrls = downloadedSourceUrls,
+                                downloadingTracks = state.downloadingTracks,
+                                focusedTrackUrl = focusedTrack?.sourceUrl,
+                                onTrackClick = { track, coords, radius, mode ->
+                                    onResolveAndPlay(track, coords, radius, mode)
+                                },
+                                onTrackDownload = { selectedTrackForDownload = it },
+                                onTrackLongPress = { track ->
+                                    if (hapticEnabled) {
+                                        vibrationManager?.vibrateLongClick()
+                                            ?: view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                     }
-                                )
-                            }
+                                    trackForAction = track
+                                }
+                            )
                         }
 
-                        item(span = { GridItemSpan(maxLineSpan) }) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
                             SectionHeader(
-                                title = "Trending Now",
-                                subtitle = "Eight sharper picks that rotate across refreshes",
+                                title = "Trending",
+                                subtitle = "${state.trending.size.coerceAtMost(9)} tracks",
                                 icon = Icons.AutoMirrored.Rounded.TrendingUp
                             )
                         }
                         catalogTrackRows(
                             tracks = state.trending.take(9),
-                            layoutMode = state.layoutMode,
+                            layoutMode = LayoutMode.LIST,
                             downloadedSourceUrls = downloadedSourceUrls,
                             downloadingTracks = state.downloadingTracks,
                             focusedTrackUrl = focusedTrack?.sourceUrl,
@@ -530,21 +547,21 @@ fun CatalogContent(
                             }
                         )
 
-                        item(span = { GridItemSpan(maxLineSpan) }) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
                             SectionHeader(
-                                title = "Just for you",
+                                title = "Recommended",
                                 subtitle = state.recommendationTitle.removePrefix("Just for you · ").ifBlank {
-                                    "Built from what you're listening to and coming back to"
+                                    "Based on your listening"
                                 },
                                 icon = Icons.Rounded.Star
                             )
                         }
                         if (state.isLoadingRecommendations && state.justForYou.isEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) { RecommendationSkeleton() }
+                            item(span = StaggeredGridItemSpan.FullLine) { RecommendationSkeleton() }
                         } else {
                             catalogTrackRows(
                                 tracks = state.justForYou,
-                                layoutMode = state.layoutMode, // Now respects layout mode
+                                layoutMode = LayoutMode.LIST,
                                 downloadedSourceUrls = downloadedSourceUrls,
                                 downloadingTracks = state.downloadingTracks,
                                 focusedTrackUrl = focusedTrack?.sourceUrl,
@@ -562,22 +579,22 @@ fun CatalogContent(
                             )
                         }
                         if (state.isLoadingMoreRecommendations) {
-                            item(span = { GridItemSpan(maxLineSpan) }) { RecommendationSkeleton(compact = true) }
+                            item(span = StaggeredGridItemSpan.FullLine) { RecommendationSkeleton(compact = true) }
                         }
                     }
                 } else {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    item(span = StaggeredGridItemSpan.FullLine) {
                         SectionHeader(
                             title = if (state.selectedGenre != null) state.selectedGenre!! else "Search Results",
-                            subtitle = if (state.selectedGenre != null) "Genre mix with cleaner song-only results" else "Tap to play, long press for more actions",
+                            subtitle = if (state.selectedGenre != null) "Song-focused genre results" else "Tap to play, long press for actions",
                             icon = if (state.selectedGenre != null) Icons.Rounded.Category else Icons.Rounded.Search
                         )
                     }
 
                     if (state.isLoading) {
-                        item(span = { GridItemSpan(maxLineSpan) }) { CatalogSectionSkeleton(title = "Loading", listMode = state.layoutMode == LayoutMode.LIST) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Loading", listMode = state.layoutMode == LayoutMode.LIST) }
                     } else if (state.tracks.isEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(28.dp),
@@ -628,7 +645,7 @@ fun CatalogContent(
                     }
 
                     if (state.isLoadingMore) {
-                        item(span = { GridItemSpan(maxLineSpan) }) { RecommendationSkeleton(compact = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { RecommendationSkeleton(compact = true) }
                     }
                 }
             }
@@ -662,7 +679,7 @@ fun CatalogContent(
                     radius = focusedTrackRadius,
                     color = dynamicColorsForFocus.primary,
                     layoutMode = focusedTrackLayoutMode,
-                    isDiscover = state.quickPicks.any { it.sourceUrl == track.sourceUrl },
+                    isDiscover = focusedTrackLayoutMode == LayoutMode.FEATURED,
                     isReturning = isReturning.value
                 )
             }
@@ -670,7 +687,7 @@ fun CatalogContent(
     }
 }
 
-private fun LazyGridScope.catalogTrackRows(
+private fun LazyStaggeredGridScope.catalogTrackRows(
     tracks: List<CatalogTrack>,
     layoutMode: LayoutMode,
     downloadedSourceUrls: Set<String>,
@@ -684,66 +701,46 @@ private fun LazyGridScope.catalogTrackRows(
         this.itemsIndexed(
             items = tracks,
             key = { _, track -> track.sourceUrl },
-            span = { _, _ -> GridItemSpan(this.maxLineSpan) }
-        ) { index, track ->
+            span = { _, _ -> StaggeredGridItemSpan.FullLine }
+        ) { _, track ->
             var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-            
-            val entryAlpha = remember { Animatable(0f) }
-            val entryOffsetY = remember { Animatable(30f) }
-            
-            LaunchedEffect(track.sourceUrl) {
-                delay((index % 8) * 60L)
-                launch { entryAlpha.animateTo(1f, tween(500)) }
-                launch { entryOffsetY.animateTo(0f, tween(500, easing = FastOutSlowInEasing)) }
-            }
 
             CatalogListCard(
                 track = track,
                 isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
-                progress = downloadingTracks[track.sourceUrl],
+                progress = downloadingTracks[track.id] ?: downloadingTracks[track.sourceUrl],
                 isFocused = focusedTrackUrl == track.sourceUrl,
-                onClick = { itemCoords?.let { onTrackClick(track, it, 24.dp, LayoutMode.LIST) } },
+                onClick = { itemCoords?.let { onTrackClick(track, it, 16.dp, LayoutMode.LIST) } },
                 onDownload = { onTrackDownload(track) },
                 onLongPress = { onTrackLongPress(track) },
                 onMore = { onTrackLongPress(track) },
                 modifier = Modifier
-                    .graphicsLayer {
-                        alpha = entryAlpha.value
-                        translationY = entryOffsetY.value
-                    }
+                    .animateItem()
                     .onGloballyPositioned { itemCoords = it }
             )
         }
     } else {
         this.itemsIndexed(
             items = tracks,
-            key = { _, track -> track.sourceUrl }
-        ) { index, track ->
-            var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
-            
-            val entryAlpha = remember { Animatable(0f) }
-            val entryOffsetY = remember { Animatable(30f) }
-            
-            LaunchedEffect(track.sourceUrl) {
-                delay((index % 12) * 50L)
-                launch { entryAlpha.animateTo(1f, tween(500)) }
-                launch { entryOffsetY.animateTo(0f, tween(500, easing = FastOutSlowInEasing)) }
+            key = { _, track -> track.sourceUrl },
+            span = { index, _ ->
+                val spanCount = if (index % 5 == 0) StaggeredGridItemSpan.FullLine else StaggeredGridItemSpan.SingleLane
+                spanCount
             }
+        ) { _, track ->
+            var itemCoords by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
             CatalogGridCard(
                 track = track,
                 isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
-                progress = downloadingTracks[track.sourceUrl],
+                progress = downloadingTracks[track.id] ?: downloadingTracks[track.sourceUrl],
                 isFocused = focusedTrackUrl == track.sourceUrl,
-                onClick = { itemCoords?.let { onTrackClick(track, it, 24.dp, LayoutMode.GRID) } },
+                onClick = { itemCoords?.let { onTrackClick(track, it, 16.dp, LayoutMode.GRID) } },
                 onDownload = { onTrackDownload(track) },
                 onLongPress = { onTrackLongPress(track) },
                 onMore = { onTrackLongPress(track) },
                 modifier = Modifier
-                    .graphicsLayer {
-                        alpha = entryAlpha.value
-                        translationY = entryOffsetY.value
-                    }
+                    .animateItem()
                     .onGloballyPositioned { itemCoords = it }
             )
         }
@@ -756,30 +753,54 @@ private fun CatalogTopActions(
     onToggleLayout: () -> Unit,
     onRefresh: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 4.dp)
     ) {
-        Column {
-            Text(
-                "Catalog",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                "Discover and stream",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalIconButton(onClick = onRefresh, shape = RoundedCornerShape(16.dp)) {
-                Icon(Icons.Rounded.Refresh, null)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Catalog",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "Online tracks",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            FilledTonalIconButton(onClick = onToggleLayout, shape = RoundedCornerShape(16.dp)) {
-                Icon(if (layoutMode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView, null)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalIconButton(
+                    onClick = {},
+                    modifier = Modifier.size(42.dp).bouncyClick(onClick = onRefresh),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
+                }
+                FilledTonalIconButton(
+                    onClick = {},
+                    modifier = Modifier.size(42.dp).bouncyClick(onClick = onToggleLayout),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Icon(
+                        if (layoutMode == LayoutMode.GRID) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.GridView,
+                        null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
@@ -790,19 +811,19 @@ private fun SectionHeader(title: String, subtitle: String, icon: androidx.compos
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
+            .padding(top = 16.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(42.dp),
+            modifier = Modifier.size(40.dp),
             shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
             }
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 title,
@@ -813,7 +834,7 @@ private fun SectionHeader(title: String, subtitle: String, icon: androidx.compos
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -950,7 +971,8 @@ private fun FeaturedCarouselItem(
 ) {
     val scale by animateFloatAsState(if (isFocused && !staticScale) 1.05f else 1f, label = "featuredScale")
     
-    Surface(
+    ExpressiveCard(
+        onClick = { },
         modifier = modifier
             .width(240.dp)
             .graphicsLayer {
@@ -958,7 +980,7 @@ private fun FeaturedCarouselItem(
                 scaleY = scale
             },
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f),
         border = if (isFocused) BorderStroke(3.dp, color) else null
     ) {
         Box(modifier = Modifier.clip(RoundedCornerShape(24.dp))) {
@@ -1033,7 +1055,7 @@ private fun GenreFilterChips(
         contentPadding = PaddingValues(horizontal = 4.dp)
     ) {
         item {
-            ExpressiveFilterChip(
+            CatalogFilterChip(
                 selected = selectedGenre == null,
                 onClick = { onGenreSelected(null) },
                 label = "All",
@@ -1041,7 +1063,7 @@ private fun GenreFilterChips(
             )
         }
         items(genres) { genre ->
-            ExpressiveFilterChip(
+            CatalogFilterChip(
                 selected = selectedGenre == genre,
                 onClick = { onGenreSelected(if (selectedGenre == genre) null else genre) },
                 label = genre
@@ -1051,44 +1073,26 @@ private fun GenreFilterChips(
 }
 
 @Composable
-private fun ExpressiveFilterChip(
+private fun CatalogFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null
 ) {
-    val scale by animateFloatAsState(if (selected) 1.02f else 1f, label = "chipScale")
-    val backgroundColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-    val shape = RoundedCornerShape(if (selected) 16.dp else 24.dp)
-    
-    Surface(
+    FilterChip(
+        selected = selected,
         onClick = onClick,
-        modifier = Modifier.graphicsLayer { 
-            scaleX = scale
-            scaleY = scale
+        label = { Text(label, maxLines = 1) },
+        leadingIcon = icon?.let {
+            { Icon(it, null, modifier = Modifier.size(16.dp)) }
         },
-        shape = shape,
-        color = backgroundColor,
-        border = if (!selected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)) else null
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (icon != null) {
-                Icon(icon, null, modifier = Modifier.size(16.dp), tint = contentColor)
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(
-                label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
-                color = contentColor
-            )
-        }
-    }
+        shape = RoundedCornerShape(12.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+    )
 }
 
 @Composable
@@ -1097,50 +1101,49 @@ private fun CatalogSearchBar(
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit
 ) {
-    ExpressiveSearchField(
-        query = query,
-        onQueryChange = onQueryChange,
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
+            .padding(horizontal = 4.dp)
+            .heightIn(min = 56.dp),
         placeholder = {
             Text(
-                text = "Search songs, artists, moods...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                text = "Search artists, songs...",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
             )
         },
         leadingIcon = {
             Icon(
                 imageVector = Icons.Rounded.Search,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp).padding(start = 4.dp)
             )
         },
         trailingIcon = {
-            AnimatedVisibility(
-                visible = query.isNotEmpty(),
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
-            ) {
+            if (query.isNotEmpty()) {
                 IconButton(
                     onClick = onClear,
-                    modifier = Modifier.size(32.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                    )
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "Clear",
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
         },
+        singleLine = true,
+        shape = RoundedCornerShape(18.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+        )
     )
 }
 
@@ -1157,77 +1160,58 @@ private fun CatalogGridCard(
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.05f else 1f, label = "gridScale")
-    Surface(
+    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.03f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "gridScale")
+    val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "gridAlpha")
+
+    Column(
         modifier = modifier
-            .aspectRatio(0.85f)
+            .fillMaxWidth()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (isFocused) 20.dp.toPx() else 0f
             }
-            .clip(RoundedCornerShape(24.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.20f),
-        border = if (isFocused) BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(bottom = 8.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.weight(1f)) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = track.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomStart)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
-                            )
-                        )
-                        .padding(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        DurationBadge(track.duration)
-                        DownloadButton(
-                            isDownloaded = isDownloaded,
-                            progress = progress,
-                            onDownload = onDownload,
-                            compact = true
-                        )
-                    }
-                }
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))) {
+            AsyncImage(
+                model = track.thumbnailUrl,
+                contentDescription = track.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            if (isFocused) {
+                Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
             }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    track.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    track.artist,
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
+                DownloadButton(
+                    isDownloaded = isDownloaded,
+                    progress = progress,
+                    onDownload = onDownload,
+                    compact = true
                 )
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+        )
+        Text(
+            text = track.artist,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+        )
     }
 }
 
@@ -1244,39 +1228,47 @@ private fun CatalogListCard(
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.03f else 1f, label = "listScale")
+    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.02f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "listScale")
+    val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "listAlpha")
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (isFocused) 15.dp.toPx() else 0f
             }
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
-        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongPress
+            ),
+        color = Color.Transparent
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = track.title,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(18.dp)),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Box(contentAlignment = Alignment.BottomEnd) {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = track.title,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                if (isFocused) {
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(14.dp)))
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f).alpha(alpha)) {
                 Text(
                     track.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1285,8 +1277,9 @@ private fun CatalogListCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     track.artist,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1301,12 +1294,9 @@ private fun CatalogListCard(
                 )
                 IconButton(
                     onClick = onMore,
-                    modifier = Modifier.size(34.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                    )
+                    modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(Icons.Rounded.MoreHoriz, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -1398,10 +1388,11 @@ private fun DownloadButton(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    progress = { progress ?: 0f },
-                    strokeWidth = 2.5.dp,
+                    progress = { (progress ?: 0f).coerceIn(0f, 1f) },
                     modifier = Modifier.size(if (compact) 24.dp else 28.dp),
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    strokeCap = StrokeCap.Round
                 )
             }
 
@@ -1619,7 +1610,8 @@ private fun CatalogTrackActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
         Column(
@@ -1773,7 +1765,8 @@ fun DownloadOptionsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         dragHandle = { BottomSheetDefaults.DragHandle() },
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
             modifier = Modifier

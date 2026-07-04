@@ -4,8 +4,10 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.frerox.toolz.data.catalog.CatalogRepository
@@ -41,7 +43,7 @@ import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Page
 
 enum class CatalogMode { TRENDING, SEARCH }
-enum class LayoutMode { GRID, LIST }
+enum class LayoutMode { GRID, LIST, FEATURED }
 
 data class CatalogUiState(
     val quickPicks: List<CatalogTrack> = emptyList(),
@@ -56,10 +58,11 @@ data class CatalogUiState(
     val error: String? = null,
     val query: String = "",
     val mode: CatalogMode = CatalogMode.TRENDING,
-    val layoutMode: LayoutMode = LayoutMode.GRID,
+    val layoutMode: LayoutMode = LayoutMode.LIST,
     val downloadingTracks: Map<String, Float> = emptyMap(),
     val activeDownload: CatalogTrack? = null,
     val showDownloadPopup: Boolean = false,
+    val downloadError: String? = null,
     val selectedGenre: String? = null,
     val recommendationTitle: String = "Just for you"
 )
@@ -107,15 +110,73 @@ class CatalogViewModel @Inject constructor(
     init {
         WorkManager.getInstance(context).getWorkInfosByTagFlow("music_download")
             .onEach { workInfos ->
-                val downloads = workInfos
-                    .filter { !it.state.isFinished }
-                    .associate { info ->
-                        val trackId = info.tags.find { it.startsWith("download_") }?.removePrefix("download_") ?: ""
-                        trackId to info.progress.getFloat("progress", 0f)
-                    }
-                    .filterKeys { it.isNotEmpty() }
+                val taggedInfos = workInfos.mapNotNull { info ->
+                    val trackId = info.tags
+                        .firstOrNull { it.startsWith("download_") }
+                        ?.removePrefix("download_")
+                        ?.takeIf { it.isNotBlank() }
+                    trackId?.let { it to info }
+                }
 
-                _uiState.update { it.copy(downloadingTracks = downloads) }
+                val effectiveInfos = taggedInfos
+                    .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+                    .map { (trackId, infos) ->
+                        val info = infos.firstOrNull { !it.state.isFinished }
+                            ?: infos.firstOrNull { it.state == WorkInfo.State.FAILED }
+                            ?: infos.firstOrNull { it.state == WorkInfo.State.SUCCEEDED }
+                            ?: infos.first()
+                        trackId to info
+                    }
+
+                _uiState.update { current ->
+                    var downloads = current.downloadingTracks
+                    var activeDownload = current.activeDownload
+                    var showDownloadPopup = current.showDownloadPopup
+                    var downloadError: String? = null
+
+                    effectiveInfos.forEach { (trackId, info) ->
+                        when (info.state) {
+                            WorkInfo.State.ENQUEUED,
+                            WorkInfo.State.RUNNING,
+                            WorkInfo.State.BLOCKED -> {
+                                val previous = downloads[trackId] ?: 0.02f
+                                val next = info.progress
+                                    .getFloat("progress", previous)
+                                    .coerceIn(0.02f, 0.99f)
+                                downloads = downloads + (trackId to maxOf(previous, next))
+                            }
+                            WorkInfo.State.SUCCEEDED -> {
+                                downloads = (downloads + (trackId to 1f))
+                                if (activeDownload?.id == trackId) {
+                                    activeDownload = null
+                                    showDownloadPopup = false
+                                }
+                            }
+                            WorkInfo.State.FAILED -> {
+                                downloads = downloads - trackId
+                                if (activeDownload?.id == trackId) {
+                                    activeDownload = null
+                                    showDownloadPopup = false
+                                    downloadError = "Download failed. Check the format, storage access, or connection."
+                                }
+                            }
+                            WorkInfo.State.CANCELLED -> {
+                                downloads = downloads - trackId
+                                if (activeDownload?.id == trackId) {
+                                    activeDownload = null
+                                    showDownloadPopup = false
+                                }
+                            }
+                        }
+                    }
+
+                    current.copy(
+                        downloadingTracks = downloads.filterValues { it < 1f },
+                        activeDownload = activeDownload,
+                        showDownloadPopup = showDownloadPopup && activeDownload != null,
+                        downloadError = downloadError
+                    )
+                }
             }
             .launchIn(viewModelScope)
 
@@ -229,7 +290,14 @@ class CatalogViewModel @Inject constructor(
 
     fun downloadTrack(track: CatalogTrack) {
         viewModelScope.launch {
-            _uiState.update { it.copy(activeDownload = track, showDownloadPopup = true) }
+            _uiState.update {
+                it.copy(
+                    activeDownload = track,
+                    showDownloadPopup = true,
+                    downloadingTracks = it.downloadingTracks + (track.id to 0.02f),
+                    downloadError = null
+                )
+            }
 
             val workRequest = OneTimeWorkRequestBuilder<com.frerox.toolz.worker.MusicDownloadWorker>()
                 .setInputData(
@@ -249,7 +317,11 @@ class CatalogViewModel @Inject constructor(
                 .addTag("music_download")
                 .build()
 
-            WorkManager.getInstance(context).enqueue(workRequest)
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "music_download_${track.id}",
+                ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
         }
     }
 
@@ -307,7 +379,23 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isResolving = true) }
             try {
-                // Pre-calculate quality to avoid reading from flow inside the heavy block
+                // 1. Check if the song has already been downloaded (offline playback)
+                val localTrack = withContext(Dispatchers.IO) {
+                    musicRepository.getTrackBySourceUrl(track.sourceUrl)
+                }
+                if (localTrack != null && localTrack.uri.isNotBlank()) {
+                    val localUri = Uri.parse(localTrack.uri)
+                    onStreamResolved(
+                        localUri,
+                        localTrack.title,
+                        localTrack.artist ?: "Unknown Artist",
+                        localTrack.thumbnailUri ?: track.thumbnailUrl ?: "",
+                        track.sourceUrl
+                    )
+                    return@launch
+                }
+
+                // 2. Resolve stream online
                 val quality = catalogStreamQuality.value
                 
                 var streamUrl: String? = null
