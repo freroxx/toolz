@@ -42,6 +42,7 @@ import androidx.compose.material3.adaptive.layout.SupportingPaneScaffold
 import androidx.compose.material3.adaptive.layout.SupportingPaneScaffoldRole
 import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaffoldNavigator
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -128,6 +129,7 @@ fun ClipboardScreen(
     val isAiSearching   by viewModel.isAiSearching.collectAsStateWithLifecycle()
     val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
     val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle()
+    val shizukuAuthorized by viewModel.shizukuAuthorized.collectAsStateWithLifecycle()
 
     val context         = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
@@ -146,6 +148,7 @@ fun ClipboardScreen(
     var showSearchBar by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showContextSheet by remember { mutableStateOf<ClipboardEntry?>(null) }
+    var showShizukuSetup by remember { mutableStateOf(false) }
 
     val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val showDetailSheet = selectedEntry != null && !isSupportingPaneVisible
@@ -202,6 +205,7 @@ fun ClipboardScreen(
                     offlineMode          = offlineMode,
                     selectedEntry        = selectedEntry,
                     showSearchBar        = showSearchBar,
+                    shizukuAuthorized    = shizukuAuthorized,
                     onBack               = onBack,
                     onToggleSearch       = {
                         vibrationManager?.vibrateTick()
@@ -235,6 +239,15 @@ fun ClipboardScreen(
                     },
                     onClearAll           = { showClearDialog = true },
                     onRefresh            = { viewModel.categorizeAllWithAi() },
+                    onShizukuClick       = {
+                        if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+                            // OK
+                        } else if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()) {
+                            com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(1001)
+                        } else {
+                            showShizukuSetup = true
+                        }
+                    }
                 )
             }
         },
@@ -345,6 +358,12 @@ fun ClipboardScreen(
         )
     }
 
+    if (showShizukuSetup) {
+        com.frerox.toolz.ui.components.ShizukuSetupBottomSheet(
+            onDismiss = { showShizukuSetup = false }
+        )
+    }
+
     // ── Clear all dialog ──────────────────────────────────────────────────
     if (showClearDialog) {
         val pinnedCount = entries.count { it.isPinned }
@@ -395,6 +414,7 @@ private fun ClipboardFeedPane(
     offlineMode       : Boolean,
     selectedEntry     : ClipboardEntry?,
     showSearchBar     : Boolean,
+    shizukuAuthorized : Boolean,
     onBack            : () -> Unit,
     onToggleSearch    : () -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -409,10 +429,13 @@ private fun ClipboardFeedPane(
     onContextualAction: (String, ClipboardEntry) -> Unit,
     onClearAll        : () -> Unit,
     onRefresh         : () -> Unit,
+    onShizukuClick    : () -> Unit,
 ) {
+    val context          = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val performanceMode  = LocalPerformanceMode.current
     val listState        = rememberLazyListState()
+    var collapsedGroups by rememberSaveable { mutableStateOf(setOf<String>()) }
     val scrollBehavior   = TopAppBarDefaults.enterAlwaysScrollBehavior(
         snapAnimationSpec = spring(stiffness = Spring.StiffnessMediumLow)
     )
@@ -438,6 +461,14 @@ private fun ClipboardFeedPane(
                         }
                     },
                     actions = {
+                        // Shizuku
+                        IconButton(onClick = onShizukuClick) {
+                            Icon(
+                                Icons.Rounded.Memory,
+                                contentDescription = "Shizuku",
+                                tint = if (shizukuAuthorized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                        }
                         // Refresh
                         IconButton(onClick = {
                             vibrationManager?.vibrateTick()
@@ -689,44 +720,79 @@ private fun ClipboardFeedPane(
                     groups.forEach { group ->
                         // Group header
                         stickyHeader(key = "header_${group.label}") {
+                            val isCollapsed = collapsedGroups.contains(group.label)
                             Surface(
-                                color    = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                tonalElevation = 2.dp,
+                                onClick = {
+                                    vibrationManager?.vibrateTick()
+                                    collapsedGroups = if (isCollapsed) collapsedGroups - group.label else collapsedGroups + group.label
+                                }
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     Text(
                                         group.label,
-                                        style      = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Black,
-                                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = MaterialTheme.colorScheme.primary,
                                     )
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp, 18.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.secondaryContainer),
-                                        contentAlignment = Alignment.Center,
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
                                     ) {
-                                        Text(
-                                            "${group.entries.size}",
-                                            style      = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color      = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.ContentPaste,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                            Text(
+                                                "${group.entries.size}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Black,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            )
+                                        }
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.weight(1f),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            vibrationManager?.vibrateTick()
+                                            collapsedGroups = if (isCollapsed) collapsedGroups - group.label else collapsedGroups + group.label
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCollapsed) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
+                                            contentDescription = if (isCollapsed) "Expand" else "Collapse",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
                             }
                         }
 
-                        items(group.entries, key = { it.id }) { entry ->
-                            val entryIndex = group.entries.indexOf(entry)
-                            StaggeredEntrance(index = entryIndex.coerceAtMost(10)) {
+                        if (!collapsedGroups.contains(group.label)) {
+                            items(group.entries, key = { it.id }) { entry ->
                                 SwipeToDismissClipEntry(
                                     entry       = entry,
                                     isSelected  = selectedEntry?.id == entry.id,
@@ -1573,6 +1639,7 @@ private fun FeedLightPreview() {
             offlineMode        = false,
             selectedEntry      = null,
             showSearchBar      = false,
+            shizukuAuthorized  = false,
             onBack             = {},
             onToggleSearch     = {},
             onSearchQueryChange= {},
@@ -1587,6 +1654,7 @@ private fun FeedLightPreview() {
             onContextualAction = { _, _ -> },
             onClearAll         = {},
             onRefresh          = {},
+            onShizukuClick     = {},
         )
     }
 }
@@ -1607,6 +1675,7 @@ private fun FeedDarkPreview() {
             offlineMode        = false,
             selectedEntry      = null,
             showSearchBar      = true,
+            shizukuAuthorized  = true,
             onBack             = {},
             onToggleSearch     = {},
             onSearchQueryChange= {},
@@ -1621,6 +1690,7 @@ private fun FeedDarkPreview() {
             onContextualAction = { _, _ -> },
             onClearAll         = {},
             onRefresh          = {},
+            onShizukuClick     = {},
         )
     }
 }

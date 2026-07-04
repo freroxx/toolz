@@ -13,8 +13,10 @@ import com.frerox.toolz.data.clipboard.ClipboardDao
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ClipboardService
+import com.frerox.toolz.ToolzApplication
 import com.frerox.toolz.util.ConnectivityObserver
 import com.frerox.toolz.util.NetworkConnectivityObserver
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -35,6 +37,7 @@ class ClipboardViewModel @Inject constructor(
     private val clipboardDao: ClipboardDao,
     private val aiRepository: ChatRepository,
     private val settingsRepository: SettingsRepository,
+    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor,
     val classifier: ClipboardClassifier
 ) : AndroidViewModel(application) {
 
@@ -47,6 +50,9 @@ class ClipboardViewModel @Inject constructor(
 
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    private val _shizukuAuthorized = MutableStateFlow(ShizukuHelper.isAuthorized())
+    val shizukuAuthorized = _shizukuAuthorized.asStateFlow()
 
     private val _isSummarizing = MutableStateFlow<Int?>(null)
     val isSummarizing = _isSummarizing.asStateFlow()
@@ -102,6 +108,10 @@ class ClipboardViewModel @Inject constructor(
         val network = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun isAppInForeground(): Boolean {
+        return ToolzApplication.isFocused.value
     }
 
     private fun performAiSearch(query: String) {
@@ -237,28 +247,49 @@ class ClipboardViewModel @Inject constructor(
     }
 
     fun refreshClipboard() {
+        _shizukuAuthorized.value = ShizukuHelper.isAuthorized()
         viewModelScope.launch {
             try {
-                val cm = application.getSystemService(Context.CLIPBOARD_SERVICE) as AndroidClipboardManager
-                val clip = cm.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val text = clip.getItemAt(0).coerceToText(application).toString()
-                    if (text.isNotBlank()) {
-                        val latest = clipboardDao.getLatestEntry()
-                        if (latest?.content != text) {
-                            val type = classifier.classify(text)
-                            val entry = ClipboardEntry(
-                                content = text,
-                                timestamp = System.currentTimeMillis(),
-                                type = type,
-                                isAiProcessed = false
-                            )
-                            clipboardDao.insert(entry)
+                // Primary: Try Shizuku if available (even if authorized just now)
+                if (ShizukuHelper.isAuthorized()) {
+                    val text = shizukuExecutor.getClipboardText()
+                    if (text != null) {
+                        processClipboardTextLocally(text)
+                    }
+                    return@launch
+                }
+
+                // Fallback: Standard ClipboardManager (Only if foreground)
+                if (isAppInForeground()) {
+                    try {
+                        val cm = application.getSystemService(Context.CLIPBOARD_SERVICE) as AndroidClipboardManager
+                        val clip = cm.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            val text = clip.getItemAt(0).coerceToText(application).toString()
+                            processClipboardTextLocally(text)
                         }
+                    } catch (e: Exception) {
+                        // Silent catch for denial errors
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    private suspend fun processClipboardTextLocally(text: String) {
+        if (text.isNotBlank()) {
+            val latest = clipboardDao.getLatestEntry()
+            if (latest?.content != text) {
+                val type = classifier.classify(text)
+                val entry = ClipboardEntry(
+                    content = text,
+                    timestamp = System.currentTimeMillis(),
+                    type = type,
+                    isAiProcessed = false
+                )
+                clipboardDao.insert(entry)
             }
         }
     }
