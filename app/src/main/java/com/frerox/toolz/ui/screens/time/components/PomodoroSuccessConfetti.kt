@@ -60,16 +60,31 @@ fun PomodoroSuccessConfetti(
         val width = size.width
         val height = size.height
 
+        val globalAlpha = when {
+            progress < 0.1f -> progress / 0.1f
+            progress > 0.8f -> (1f - progress) / 0.2f
+            else -> 1f
+        }.coerceIn(0f, 1f)
+
         particles.forEach { particle ->
             val y = (particle.y + progress * particle.speed) % 1.5f
             if (y < 1.1f) {
                 val x = (particle.x + progress * particle.drift) % 1.0f
-                rotate(progress * particle.rotationSpeed, Offset(x * width, y * height)) {
-                    drawRect(
-                        color = particle.color,
-                        topLeft = Offset(x * width, y * height),
-                        size = androidx.compose.ui.geometry.Size(particle.size.dp.toPx(), (particle.size * 0.6f).dp.toPx())
-                    )
+                val particleAlpha = when {
+                    y < 0f -> 0f
+                    y < 0.1f -> y / 0.1f
+                    y > 0.9f -> (1.1f - y) / 0.2f
+                    else -> 1f
+                }.coerceIn(0f, 1f) * globalAlpha
+
+                if (particleAlpha > 0f) {
+                    rotate(progress * particle.rotationSpeed, Offset(x * width, y * height)) {
+                        drawRect(
+                            color = particle.color.copy(alpha = particleAlpha),
+                            topLeft = Offset(x * width, y * height),
+                            size = androidx.compose.ui.geometry.Size(particle.size.dp.toPx(), (particle.size * 0.6f).dp.toPx())
+                        )
+                    }
                 }
             }
         }
