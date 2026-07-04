@@ -192,6 +192,16 @@ class ShizukuShellExecutor @Inject constructor(
             }
         }
     }
+
+    suspend fun getClipboardText(): String? = withContext(Dispatchers.IO) {
+        if (!ensureService()) return@withContext null
+        try {
+            userService?.getClipboardText()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 }
 
 sealed class ShellOutput {

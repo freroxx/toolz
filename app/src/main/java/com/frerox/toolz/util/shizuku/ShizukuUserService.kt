@@ -22,7 +22,7 @@ class ShizukuUserService : IUserService.Stub() {
     override fun runCommandWithCallback(cmd: String, callback: ICommandCallback) {
         try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-            
+
             val outThread = Thread {
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
                 var line: String?
@@ -53,11 +53,54 @@ class ShizukuUserService : IUserService.Stub() {
             val exitCode = process.waitFor()
             outThread.join()
             errThread.join()
-            
+
             callback.onExit(exitCode)
         } catch (e: Exception) {
             callback.onError("Exception: ${e.message}")
             callback.onExit(-1)
+        }
+    }
+
+    override fun getClipboardText(): String? {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd clipboard get"))
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = reader.readText().trim()
+
+            if (output.isBlank()) return null
+
+            // Primary parser: extract after "T:" prefix, before trailing " }"
+            // Output format: ClipData { label } ( Item { T:actual text } )
+            val tIdx = output.indexOf("T:")
+            if (tIdx >= 0) {
+                val content = output.substring(tIdx + 2)
+                // Strip the trailing " }" that closes the Item block
+                val trimmed = content.trimEnd()
+                val result = if (trimmed.endsWith(" }")) {
+                    trimmed.dropLast(2)
+                } else if (trimmed.endsWith("}")) {
+                    trimmed.dropLast(1).trimEnd()
+                } else {
+                    trimmed
+                }
+                return result.ifBlank { null }
+            }
+
+            // Fallback: extract between first and last double-quote
+            // Works for simpler output formats on some ROMs
+            if (output.startsWith("ClipData")) {
+                val firstQuote = output.indexOf('"')
+                val lastQuote = output.lastIndexOf('"')
+                if (firstQuote in 0 until lastQuote) {
+                    return output.substring(firstQuote + 1, lastQuote).ifBlank { null }
+                }
+            }
+
+            // Last resort: return raw output if non-blank
+            output.ifBlank { null }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 }
