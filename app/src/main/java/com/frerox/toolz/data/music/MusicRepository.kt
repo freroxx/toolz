@@ -160,10 +160,10 @@ class MusicRepository @Inject constructor(
         
         suspend fun scanRecursive(directory: DocumentFile) {
             directory.listFiles().forEach { file ->
-                if (file.isDirectory) {
-                    scanRecursive(file)
-                } else if (isAudioFile(file.name ?: "")) {
-                    try {
+                try {
+                    if (file.isDirectory) {
+                        scanRecursive(file)
+                    } else if (isAudioFile(file.name ?: "")) {
                         val retriever = MediaMetadataRetriever()
                         retriever.setDataSource(context, file.uri)
                         val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
@@ -178,7 +178,6 @@ class MusicRepository @Inject constructor(
                         if (existingTrack == null) {
                             tracks.add(extractMetadata(file.uri))
                         } else {
-                            // Fix buggy thumbnails or update data
                             val currentThumb = existingTrack.thumbnailUri
                             val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
                             if (currentThumb == null || isBuggyThumb) {
@@ -189,11 +188,11 @@ class MusicRepository @Inject constructor(
                                 ))
                             }
                         }
-                    } catch (e: Exception) {
-                        val existingTrack = musicDao.getTrackByUri(file.uri.toString())
-                        if (existingTrack == null) {
-                            tracks.add(extractMetadata(file.uri))
-                        }
+                    }
+                } catch (e: Exception) {
+                    val existingTrack = musicDao.getTrackByUri(file.uri.toString())
+                    if (existingTrack == null) {
+                        tracks.add(extractMetadata(file.uri))
                     }
                 }
             }
