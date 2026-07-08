@@ -8,6 +8,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -85,6 +88,8 @@ import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -2044,7 +2049,7 @@ fun UniversalPill(
                     catalogState.downloadingTracks.values.average().toFloat(),
                     catalogState.downloadingTracks.size))
             if (musicState.isPlaying || musicState.currentTrack != null) add(PillPage.Music)
-            if (timerState.isRunning || timerState.remainingTime > 0)   add(PillPage.Timer)
+            if (timerState.isRunning || timerState.remainingTime > 0 || timerState.isRinging) add(PillPage.Timer)
             if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) add(PillPage.Stopwatch)
             if (pomodoroState.isRunning)                                add(PillPage.Pomodoro)
             if (recordingState.isRecording || recordingState.isPaused)  add(PillPage.Recorder)
@@ -2483,24 +2488,182 @@ fun MusicPillContent(state: MusicUiState, vm: MusicPlayerViewModel, onNavigate: 
 @Composable
 fun TimerPillContent(state: TimerState, vm: TimerViewModel, onNavigate: (String) -> Unit) {
     val c = MaterialTheme.colorScheme
-    Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
-        .bouncyClick { onNavigate(Screen.Timer.route) }, verticalAlignment = Alignment.CenterVertically) {
-        PillIcon(c.primaryContainer, Icons.Rounded.Timer)
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            val s = state.remainingTime / 1000
-            Text(String.format("%02d:%02d", s / 60, s % 60),
-                style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            val p = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f
-            ExpressiveLinearProgressIndicator({ p },
-                Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
-                color = c.primary, trackColor = c.primary.copy(alpha = 0.13f))
+    val isRinging = state.isRinging
+    val pillAccent = if (isRinging) c.error else c.primary
+    val pillContainer = if (isRinging) c.errorContainer else c.primaryContainer
+
+    val longPressProgress = remember { Animatable(0f) }
+    var isLongPressing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var isDismissed by remember { mutableStateOf(false) }
+
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (isDismissed) 0f else 1f,
+        animationSpec = tween(600),
+        label = "pillAlpha"
+    )
+
+    if (animatedAlpha <= 0f && isDismissed) return
+
+    val scale = 1f - (longPressProgress.value * 0.04f)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .alpha(animatedAlpha)
+            .pointerInput(isRinging) {
+                if (isRinging) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val down = awaitFirstDown()
+                            isLongPressing = true
+                            val job = scope.launch {
+                                longPressProgress.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = tween(800, easing = LinearEasing)
+                                )
+                                if (longPressProgress.value >= 1f) {
+                                    vm.stopRingtone()
+                                    isDismissed = true
+                                    isLongPressing = false
+                                }
+                            }
+                            
+                            var pointerUp = false
+                            while (!pointerUp) {
+                                val event = awaitPointerEvent()
+                                if (event.changes.all { !it.pressed }) {
+                                    pointerUp = true
+                                }
+                            }
+
+                            isLongPressing = false
+                            job.cancel()
+                            if (!isDismissed) {
+                                scope.launch {
+                                    longPressProgress.animateTo(0f, tween(300))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    detectTapGestures(
+                        onTap = { onNavigate(Screen.Timer.route) }
+                    )
+                }
+            }
+    ) {
+        // Long press progress background fill
+        if (longPressProgress.value > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(pillAccent.copy(alpha = 0.15f * longPressProgress.value))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(longPressProgress.value)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                pillAccent.copy(alpha = 0.4f),
+                                pillAccent.copy(alpha = 0.0f)
+                            )
+                        )
+                    )
+            )
         }
-        Spacer(Modifier.width(10.dp))
-        FilledTonalIconButton(onClick = { vm.toggleStartStop() }, modifier = Modifier.size(46.dp), shape = CircleShape,
-            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = c.primaryContainer)) {
-            Icon(if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null,
-                tint = c.primary, modifier = Modifier.size(24.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = SquircleShape,
+                color = if (isRinging) c.error else c.primaryContainer.copy(alpha = 0.55f),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (isRinging) Icons.Rounded.NotificationsActive else Icons.Rounded.Timer,
+                        null,
+                        tint = if (isRinging) c.onError else c.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                if (isRinging) {
+                    Text(
+                        "TIME IS UP!",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = c.error,
+                        letterSpacing = 2.sp
+                    )
+                    Text(
+                        if (isLongPressing) "Hold to dismiss..." else "Long press to stop",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = c.error.copy(alpha = 0.8f),
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    val s = state.remainingTime / 1000
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            String.format("%02d:%02d", s / 60, s % 60),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            color = c.onSurface
+                        )
+                        if (state.remainingTime > 0) {
+                            Text(
+                                " left",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = c.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(bottom = 6.dp, start = 4.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    val p = if (state.initialTime > 0) state.remainingTime.toFloat() / state.initialTime else 0f
+                    ToolzWavyLinearProgressIndicator(
+                        { p },
+                        Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                        color = pillAccent,
+                        trackColor = pillAccent.copy(alpha = 0.12f)
+                    )
+                }
+            }
+
+            if (!isRinging) {
+                Spacer(Modifier.width(16.dp))
+                FilledTonalIconButton(
+                    onClick = { vm.toggleStartStop() },
+                    modifier = Modifier.size(52.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = pillContainer,
+                        contentColor = pillAccent
+                    )
+                ) {
+                    Icon(
+                        if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        null,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
         }
     }
 }
