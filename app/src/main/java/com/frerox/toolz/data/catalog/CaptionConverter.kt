@@ -14,11 +14,11 @@ package com.frerox.toolz.data.catalog
 object CaptionConverter {
 
     private val VTT_TIMESTAMP_REGEX = Regex(
-        """(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*\d"""
+        """(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})"""
     )
 
     private val SRT_TIMESTAMP_REGEX = Regex(
-        """(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*\d"""
+        """(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})"""
     )
 
     /**

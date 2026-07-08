@@ -229,7 +229,9 @@ class SettingsRepository @Inject constructor(
     private val KARAOKE_QUICK_SING_ENABLED = booleanPreferencesKey("karaoke_quick_sing_enabled")
     private val KARAOKE_AUTO_RECORD_ENABLED = booleanPreferencesKey("karaoke_auto_record_enabled")
     private val MUSIC_VISUALIZER_SENSITIVITY = floatPreferencesKey("music_visualizer_sensitivity")
+    private val MUSIC_VISUALIZER_AUTO_SENSITIVITY = booleanPreferencesKey("music_visualizer_auto_sensitivity")
     private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
+    private val MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES = intPreferencesKey("music_sleep_timer_last_custom_minutes")
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
@@ -531,14 +533,16 @@ class SettingsRepository @Inject constructor(
     val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: false }
     val karaokeWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_WORD_SYNC_ENABLED] ?: true }
     val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: false }
-    // Mode supersedes the legacy boolean. Default is AUTO (matches old "enabled" behaviour).
+    // Mode supersedes the legacy boolean. Default is AUTO.
     val karaokeSingConfidentlyMode: Flow<String> = dataStore.data.map {
-        it[KARAOKE_SING_CONFIDENTLY_MODE] ?: if (it[KARAOKE_SING_CONFIDENTLY_ENABLED] == true) "AUTO" else "OFF"
+        it[KARAOKE_SING_CONFIDENTLY_MODE] ?: "AUTO"
     }
     val karaokeSpeechCorrectionEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SPEECH_CORRECTION_ENABLED] ?: false }
     val karaokeQuickSingEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_QUICK_SING_ENABLED] ?: true }
     val karaokeAutoRecordEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_AUTO_RECORD_ENABLED] ?: true }
     val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
+    val musicVisualizerAutoSensitivity: Flow<Boolean> = dataStore.data.map { it[MUSIC_VISUALIZER_AUTO_SENSITIVITY] ?: true }
+    val musicSleepTimerLastCustomMinutes: Flow<Int> = dataStore.data.map { it[MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES] ?: 20 }
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
@@ -835,6 +839,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setKaraokeQuickSingEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_QUICK_SING_ENABLED] = enabled } }
     suspend fun setKaraokeAutoRecordEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_AUTO_RECORD_ENABLED] = enabled } }
     suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
+    suspend fun setMusicVisualizerAutoSensitivity(enabled: Boolean) { dataStore.edit { it[MUSIC_VISUALIZER_AUTO_SENSITIVITY] = enabled } }
+    suspend fun setMusicSleepTimerLastCustomMinutes(minutes: Int) { dataStore.edit { it[MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES] = minutes } }
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
