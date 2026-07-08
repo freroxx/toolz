@@ -18,6 +18,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.service.CaffeinateService
+import com.frerox.toolz.ToolzApplication
 import com.frerox.toolz.util.QREngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -227,15 +228,28 @@ class QRViewModel @Inject constructor() : ViewModel() {
     }
 
     fun checkClipboard(context: Context) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val text = clip.getItemAt(0).text?.toString() ?: ""
-            if (text.isNotBlank() && text != _inputText.value) {
-                val type = detectInputType(text)
-                if (type != QRInputType.TEXT || text.length > 5) {
-                    _clipboardSuggestion.value = text to type
+        viewModelScope.launch {
+            // Priority 1: Shizuku (if we have the executor injected or helper available)
+            // Note: QRViewModel doesn't currently have shizukuExecutor injected. 
+            // We can check ShizukuHelper but without the executor we can't read.
+            // However, we can at least be safer with the focus check.
+            
+            if (!ToolzApplication.isFocused.value) return@launch
+            
+            try {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString() ?: ""
+                    if (text.isNotBlank() && text != _inputText.value) {
+                        val type = detectInputType(text)
+                        if (type != QRInputType.TEXT || text.length > 5) {
+                            _clipboardSuggestion.value = text to type
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                // Ignore denial errors
             }
         }
     }
