@@ -22,7 +22,7 @@ data class AiLyricsState(
     val isSynced: Boolean = false,
     val layout: LyricsLayout = LyricsLayout.LEFT,
     val fontFamily: LyricsFont = LyricsFont.SANS_SERIF,
-    val alwaysSync: Boolean = false,
+    val alwaysSync: Boolean = true,
     val isWordSyncEnabled: Boolean = false,
     val isKaraokeWordSyncEnabled: Boolean = true
 )
@@ -86,6 +86,8 @@ sealed class AiTab(val index: Int, val title: String) {
     object MusicTaste : AiTab(2, "Music Taste")
 }
 
+enum class SingConfidentlyMode { OFF, AUTO, AUTO_PROCEED, MANUAL }
+
 data class NowPlayingAiUiState(
     val currentSong: AiSong? = null,
     val selectedTab: AiTab = AiTab.Lyrics,
@@ -102,18 +104,31 @@ data class NowPlayingAiUiState(
     val karaokeScore: Int = 0,
     val karaokeCorrectWords: Int = 0,
     val karaokeTotalWords: Int = 0,
+    val karaokeCorrectLines: Int = 0,
+    val karaokeTotalLines: Int = 0,
     val karaokeMostAccurateLine: String? = null,
     val karaokeStreak: Int = 0,
     val karaokeMaxStreak: Int = 0,
     val micRms: Float = 0f,
+    val isListening: Boolean = false,
+    val isReconnecting: Boolean = false,
     val quickSingEnabled: Boolean = true,
+    val autoRecordEnabled: Boolean = true,
+    // Session ID – incremented each startKaraokeRecording(); every async update
+    // carries the session ID it was spawned in so stale results from a prior
+    // session can never land on the current UI state.
+    val karaokeSessionId: Int = 0,
     // Sing Confidently
-    val karaokeSingConfidentlyEnabled: Boolean = true,
+    val singConfidentlyMode: SingConfidentlyMode = SingConfidentlyMode.AUTO,
+    val karaokeSingConfidentlyEnabled: Boolean = true, // Legacy boolean for backward compat
     val isSearchingInstrumental: Boolean = false,
     val instrumentalMatch: CatalogTrack? = null,
+    val instrumentalTopResults: List<CatalogTrack> = emptyList(),
     val instrumentalSearchResults: List<CatalogTrack> = emptyList(),
     val isSingConfidentlyActive: Boolean = false,
     val isResolvingInstrumental: Boolean = false,
     val instrumentalStreamUrl: String? = null,
-    val karaokeMissedStreak: Int = 0
+    val isInstrumentalPlaying: Boolean = false,
+    val karaokeMissedStreak: Int = 0,
+    val userName: String = ""
 )
