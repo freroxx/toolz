@@ -58,9 +58,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.frerox.toolz.ui.components.AlbumArtImage
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.KaraokeMicIcon
+import com.frerox.toolz.ui.screens.media.BreathingDotsIndicator
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.util.VibrationManager
 
@@ -178,7 +180,6 @@ fun NowPlayingAiContent(
             )
 
             Box(modifier = Modifier.weight(1f)) {
-                val performanceMode = LocalPerformanceMode.current
                 AnimatedContent(
                     targetState = uiState.selectedTab,
                     transitionSpec = {
@@ -264,23 +265,35 @@ fun AiHeader(
                         letterSpacing = 2.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        "Powered by Toolz Intelligence",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    AnimatedContent(targetState = uiState.isReconnecting, label = "micStatus") { reconnecting ->
+                        if (reconnecting) {
+                            Text(
+                                "reconnecting mic…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Black
+                            )
+                        } else {
+                            Text(
+                                "Powered by Toolz Intelligence",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (uiState.isAiEnabled && (uiState.lyricsState.syncedLyrics.isNotEmpty() || uiState.instrumentalMatch != null)) {
                     KaraokeMicIcon(
-                        isActive = uiState.isSingConfidentlyActive,
+                        isActive = uiState.isSingConfidentlyActive || uiState.isKaraokeRecording,
                         onClick = onToggleKaraoke,
                         size = 36.dp,
                         iconSize = 18.dp,
-                        isLoading = uiState.isResolvingInstrumental
+                        isLoading = uiState.isResolvingInstrumental || uiState.isReconnecting,
+                        micRms = uiState.micRms
                     )
                 }
 
@@ -681,47 +694,14 @@ fun SyncedLyricLine(
             }
         }
     } else if (line.content == "[STOP_INDICATOR]") {
-        Row(
+        BreathingDotsIndicator(
+            isActive = isCurrent,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val indicatorAlpha by animateFloatAsState(
-                if (isCurrent) 1f else 0.2f,
-                tween(500),
-                label = "stopAlpha"
-            )
-            
-            repeat(3) { i ->
-                val delay = i * 200
-                val infiniteTransition = rememberInfiniteTransition(label = "dots")
-                val dy by if (isCurrent) {
-                    infiniteTransition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = -10f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(600, delayMillis = delay, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "dy"
-                    )
-                } else {
-                    remember { mutableStateOf(0f) }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .graphicsLayer { translationY = dy }
-                        .alpha(indicatorAlpha),
-                    shape = CircleShape,
-                    color = if (isCurrent) primary else dim
-                ) {}
-                if (i < 2) Spacer(Modifier.width(12.dp))
-            }
-        }
+            activeColor = primary,
+            inactiveColor = dim
+        )
     } else {
         val animFrac by animateFloatAsState(
             if (isCurrent) 1f else 0f,
@@ -1083,21 +1063,13 @@ fun RecommendationCard(
                         shadowElevation = 8.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            if (rec.thumbnailUrl != null) {
-                                AsyncImage(
-                                    model = rec.thumbnailUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Rounded.MusicNote,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(32.dp)
-                                )
-                            }
+                            AlbumArtImage(
+                                url = rec.thumbnailUrl,
+                                seed = rec.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                                iconSize = 32.dp
+                            )
                         }
                     }
 
