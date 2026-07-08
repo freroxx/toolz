@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.*
@@ -12,16 +13,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.screens.media.rememberDynamicColors
-import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import kotlin.math.sin
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KaraokeMicIcon
+// KaraokeMicIcon — M3 Expressive pill-shaped mic button
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -29,128 +30,133 @@ fun KaraokeMicIcon(
     isActive: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 48.dp,
-    iconSize: Dp = 24.dp,
+    size: Dp = 56.dp,
+    iconSize: Dp = 26.dp,
     thumbnailUri: String? = null,
-    isLoading: Boolean = false
+    isLoading: Boolean = false,
+    micRms: Float = 0f
 ) {
     val dynamicColors = rememberDynamicColors(thumbnailUri)
-    val performanceMode = LocalPerformanceMode.current
-    val inf = rememberInfiniteTransition(label = "micIconInf")
 
-    // Outer ripple ring (only when active + not in performance mode)
-    val rippleScale by inf.animateFloat(
-        1f, 1.55f,
-        infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Restart),
-        label = "rippleScale"
-    )
-    val rippleAlpha by inf.animateFloat(
-        0.45f, 0f,
-        infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Restart),
-        label = "rippleAlpha"
-    )
-
-    // Icon scale spring on active toggle
-    val baseScale by animateFloatAsState(
-        targetValue = if (isActive) 1.14f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "micBaseScale"
-    )
-
-    // Glow alpha
-    val glowAlpha by animateFloatAsState(
-        targetValue = if (isActive) 0.55f else 0f,
-        animationSpec = tween(500),
-        label = "micGlow"
-    )
-
-    // Container color
+    // Animated container color — idle = surfaceContainerHigh, active = vibrant primary tint
     val containerColor by animateColorAsState(
-        targetValue = if (isActive) dynamicColors.primary.copy(alpha = 0.16f)
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
-        animationSpec = tween(300),
-        label = "micContainerColor"
+        targetValue = if (isActive)
+            dynamicColors.primary.copy(alpha = 0.18f)
+        else
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "micContainer"
     )
 
-    // Icon tint
+    val borderColor by animateColorAsState(
+        targetValue = if (isActive)
+            dynamicColors.primary.copy(alpha = 0.7f)
+        else
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        animationSpec = tween(350),
+        label = "micBorder"
+    )
+
     val iconColor by animateColorAsState(
         targetValue = if (isActive) dynamicColors.primary
-        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-        animationSpec = tween(300),
-        label = "micIconColor"
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(350),
+        label = "micIcon"
+    )
+
+    // Gentle press scale
+    val pressedScale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+        label = "pressScale"
+    )
+
+    // Infinite glow pulse when active
+    val inf = rememberInfiniteTransition(label = "micInf")
+    val glowPulse by if (isActive) {
+        inf.animateFloat(
+            0.5f, 1f,
+            infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "glowPulse"
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
+
+    // RMS-driven mic icon scale
+    val rmsBoost = if (isActive && micRms > -40f) {
+        ((micRms + 40f) / 40f).coerceIn(0f, 1f) * 0.18f
+    } else 0f
+    val micIconScale by animateFloatAsState(
+        targetValue = 1f + rmsBoost,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+        label = "rmsScale"
     )
 
     Box(
-        modifier = modifier
-            .size(size)
-            .scale(baseScale)
-            .bouncyClick { onClick() },
+        modifier = modifier.size(size),
         contentAlignment = Alignment.Center
     ) {
-        // Ripple ring
-        if (isActive && !performanceMode) {
+        // Outer glow ring — only when active
+        if (isActive) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .scale(rippleScale)
-                    .background(
-                        dynamicColors.primary.copy(alpha = rippleAlpha),
-                        CircleShape
-                    )
-            )
-        }
-
-        // Radial glow halo
-        if (isActive && !performanceMode) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
+                    .size(size + 16.dp)
+                    .graphicsLayer {
+                        alpha = glowPulse * 0.55f
+                        scaleX = 1f + glowPulse * 0.06f
+                        scaleY = 1f + glowPulse * 0.06f
+                    }
                     .background(
                         Brush.radialGradient(
                             listOf(
-                                dynamicColors.primary.copy(alpha = glowAlpha),
-                                Color.Transparent
+                                dynamicColors.primary.copy(alpha = 0.45f),
+                                dynamicColors.primary.copy(alpha = 0.0f)
                             )
                         ),
-                        CircleShape
+                        RoundedCornerShape(50)
                     )
             )
         }
 
-        // Drop shadow when active
-        val shadowMod = if (isActive) {
-            Modifier.shadow(
-                elevation = 10.dp,
-                shape = CircleShape,
-                spotColor = dynamicColors.primary.copy(alpha = 0.5f),
-                ambientColor = dynamicColors.primary.copy(alpha = 0.2f)
-            )
-        } else Modifier
-
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(shadowMod),
+            onClick = onClick,
+            modifier = Modifier.size(size),
             shape = CircleShape,
             color = containerColor,
-            onClick = onClick
+            border = androidx.compose.foundation.BorderStroke(
+                if (isActive) 2.dp else 1.dp,
+                borderColor
+            ),
+            shadowElevation = if (isActive) 10.dp else 2.dp,
+            tonalElevation = if (isActive) 6.dp else 0.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(iconSize + 8.dp),
+                        modifier = Modifier.size(iconSize + 6.dp),
                         color = dynamicColors.primary,
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.5.dp
                     )
                 } else {
+                    // Waveform bars alongside icon when active
+                    if (isActive) {
+                        RmsWaveformBars(
+                            micRms = micRms,
+                            color = dynamicColors.primary,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                     Icon(
                         imageVector = Icons.Rounded.Mic,
-                        contentDescription = if (isActive) "Exit Karaoke" else "Enter Karaoke",
+                        contentDescription = if (isActive) "Stop Recording" else "Start Recording",
                         tint = iconColor,
-                        modifier = Modifier.size(iconSize)
+                        modifier = Modifier
+                            .size(iconSize)
+                            .graphicsLayer {
+                                scaleX = micIconScale
+                                scaleY = micIconScale
+                            }
                     )
                 }
             }
@@ -159,7 +165,61 @@ fun KaraokeMicIcon(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SmallKaraokeMicIcon — compact variant used in Now Playing row
+// RmsWaveformBars — 5 animated bars driven by mic RMS + infinite wave
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RmsWaveformBars(
+    micRms: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val inf = rememberInfiniteTransition(label = "waveInf")
+
+    // Base wave phase
+    val phase by inf.animateFloat(
+        0f, (2 * Math.PI).toFloat(),
+        infiniteRepeatable(tween(1200, easing = LinearEasing)),
+        label = "wavePhase"
+    )
+
+    // Normalize RMS: -60dB..0dB → 0..1
+    val rmsNorm = ((micRms + 60f) / 60f).coerceIn(0f, 1f)
+
+    val bars = 5
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(bars) { i ->
+                val sinVal = sin(phase + i * 0.8f).toFloat()
+                val barHeightFrac = (0.18f + rmsNorm * 0.45f + sinVal * 0.15f * rmsNorm).coerceIn(0.08f, 0.9f)
+                val animatedHeight by animateFloatAsState(
+                    targetValue = barHeightFrac,
+                    animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+                    label = "bar$i"
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(animatedHeight)
+                        .padding(horizontal = 1.5.dp)
+                        .background(
+                            color.copy(alpha = 0.35f + rmsNorm * 0.25f),
+                            RoundedCornerShape(50)
+                        )
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SmallKaraokeMicIcon — compact pill used in track rows
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -169,14 +229,12 @@ fun SmallKaraokeMicIcon(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     thumbnailUri: String? = null,
-    isLoading: Boolean = false
+    isLoading: Boolean = false,
+    micRms: Float = 0f
 ) {
     val scale by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
         label = "smallMicScale"
     )
 
@@ -185,16 +243,17 @@ fun SmallKaraokeMicIcon(
             isActive = isActive,
             onClick = onClick,
             modifier = modifier.scale(scale),
-            size = 36.dp,
-            iconSize = 18.dp,
+            size = 38.dp,
+            iconSize = 19.dp,
             thumbnailUri = thumbnailUri,
-            isLoading = isLoading
+            isLoading = isLoading,
+            micRms = micRms
         )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LiveMicIcon — pulsing variant used inside active karaoke as a status badge
+// LiveMicIcon — pulsing status badge inside active karaoke
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -204,17 +263,16 @@ fun LiveMicIcon(
     modifier: Modifier = Modifier
 ) {
     val dynamicColors = rememberDynamicColors(thumbnailUri)
-    val performanceMode = LocalPerformanceMode.current
     val inf = rememberInfiniteTransition(label = "liveMicInf")
 
     val pulse by inf.animateFloat(
-        1f, 1.25f,
+        1f, 1.28f,
         infiniteRepeatable(tween(650, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "livePulse"
     )
 
     val color by animateColorAsState(
-        targetValue = if (isRecording) Color.Red else dynamicColors.primary,
+        targetValue = if (isRecording) Color(0xFFFF1744) else dynamicColors.primary,
         animationSpec = tween(400),
         label = "liveMicColor"
     )
@@ -222,14 +280,14 @@ fun LiveMicIcon(
     Box(
         modifier = modifier
             .size(32.dp)
-            .scale(if (isRecording && !performanceMode) pulse else 1f),
+            .scale(if (isRecording) pulse else 1f),
         contentAlignment = Alignment.Center
     ) {
-        if (isRecording && !performanceMode) {
+        if (isRecording) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(color.copy(alpha = 0.18f), CircleShape)
+                    .background(color.copy(alpha = 0.15f), CircleShape)
             )
         }
         Surface(
