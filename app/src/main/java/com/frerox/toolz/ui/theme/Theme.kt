@@ -130,11 +130,15 @@ fun toolzAppBackgroundBrush(
         )
         Brush.verticalGradient(colors)
     } else {
-        Brush.verticalGradient(
-            0.0f to background,
-            0.35f to primary.copy(alpha = if (performanceMode) 0.03f else 0.06f),
-            0.75f to secondary.copy(alpha = if (performanceMode) 0.015f else 0.035f),
-            1.0f to background
+        Brush.linearGradient(
+            colors = listOf(
+                primary.copy(alpha = if (performanceMode) 0.08f else 0.15f),
+                background,
+                secondary.copy(alpha = if (performanceMode) 0.05f else 0.10f),
+                background
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(2500f, 1500f)
         )
     }
 }
@@ -176,8 +180,8 @@ fun Modifier.toolzBackground(): Modifier = composed {
                 )
             } else {
                 listOf(
-                    colorScheme.primary.copy(alpha = 0.1f), 
-                    colorScheme.secondary.copy(alpha = 0.05f), 
+                    colorScheme.primary.copy(alpha = 0.20f),
+                    colorScheme.secondary.copy(alpha = 0.12f),
                     colorScheme.background
                 )
             },
@@ -186,7 +190,8 @@ fun Modifier.toolzBackground(): Modifier = composed {
         )
     }
 
-    this.background(brush).background(colorScheme.background.copy(alpha = 0.25f))
+    val overlayAlpha = if (isDark) 0.25f else 0.12f
+    this.background(brush).background(colorScheme.background.copy(alpha = overlayAlpha))
 }
 
 @Composable
