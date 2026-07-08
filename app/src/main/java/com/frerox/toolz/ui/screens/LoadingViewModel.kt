@@ -6,6 +6,7 @@ import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,15 +24,26 @@ class LoadingViewModel @Inject constructor(
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
 
+    private val _isVisible = MutableStateFlow(true)
+    val isVisible = _isVisible.asStateFlow()
+
     private val _loadingMessage = MutableStateFlow("PREPARING WORKSPACE")
     val loadingMessage = _loadingMessage.asStateFlow()
 
-    // Deterministic progress [0f → 1f] — wired to ToolzWavyLinearProgressIndicator
+    // Deterministic progress [0f → 1f] — wired to ExpressiveContainedLoadingIndicator
     private val _loadingProgress = MutableStateFlow(0f)
     val loadingProgress = _loadingProgress.asStateFlow()
 
     init {
         performInitialization()
+    }
+
+    fun skipLoading() {
+        viewModelScope.launch {
+            _loadingProgress.value = 1f
+            _isInitialized.value = true
+            _isVisible.value = false
+        }
     }
 
     private fun performInitialization() {
@@ -41,76 +53,53 @@ class LoadingViewModel @Inject constructor(
             val shouldSkipLoading = currentTime - lastLoading < 5 * 60 * 1000L // 5-minute threshold
 
             if (shouldSkipLoading) {
-                // Fast-path: animate progress to 100 quickly and exit
-                animateProgressTo(1f, durationMs = 350)
+                // Fast-path: snap to 100% and exit immediately
+                _loadingProgress.value = 1f
                 _isInitialized.value = true
+                delay(100) // Minimal breather for Compose to render before hiding
+                _isVisible.value = false
                 return@launch
             }
 
-            val startTime = System.currentTimeMillis()
-
-            // ── Stage 1: Environment check ────────────────────────────────────
+            // ── Stage 1: Environment ready ────────────────────────────────
             _loadingMessage.value = "PREPARING WORKSPACE"
-            animateProgressTo(0.15f)
+            _loadingProgress.value = 0.10f
 
-            // ── Stage 2: Sync AI keys ─────────────────────────────────────────
+            // ── Stage 2 + 3: Run AI sync and update check concurrently ────
             _loadingMessage.value = "SYNCING INTELLIGENCE"
-            try {
-                aiSettingsManager.syncRemoteKeys()
-            } catch (_: Exception) {
-                // Non-fatal — continue loading
-            }
-            animateProgressTo(0.50f)
+            _loadingProgress.value = 0.30f
 
-            // ── Stage 3: Update check ─────────────────────────────────────────
+            val aiJob = async {
+                try { aiSettingsManager.syncRemoteKeys() } catch (_: Exception) { false }
+            }
+
+            val updateJob = async {
+                try {
+                    val lastCheck = settingsRepository.lastUpdateCheck.first()
+                    if (currentTime - lastCheck > 24 * 60 * 60 * 1000L) {
+                        updateRepository.checkForUpdates()
+                        settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
+                    }
+                } catch (_: Exception) { /* Non-fatal */ }
+            }
+
+            // AI sync finishes first (it's a no-op or fast network call) → advance to 60%
+            aiJob.await()
+            _loadingProgress.value = 0.60f
             _loadingMessage.value = "CHECKING FOR UPDATES"
-            try {
-                val lastCheck = settingsRepository.lastUpdateCheck.first()
-                if (System.currentTimeMillis() - lastCheck > 24 * 60 * 60 * 1000L) {
-                    updateRepository.checkForUpdates()
-                    settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
-                }
-            } catch (_: Exception) {
-                // Non-fatal — continue loading
-            }
-            animateProgressTo(0.80f)
 
-            // ── Stage 4: Minimum visual duration for polish ───────────────────
-            _loadingMessage.value = "ALMOST THERE"
-            val elapsedTime = System.currentTimeMillis() - startTime
-            val minLoadingTimeMs = 1000L // Reduced from 1600L for instant feel
-            if (elapsedTime < minLoadingTimeMs) {
-                delay(minLoadingTimeMs - elapsedTime)
-            }
+            // Wait for update check → advance to 90%
+            updateJob.await()
+            _loadingProgress.value = 0.90f
 
-            // ── Stage 5: Complete ─────────────────────────────────────────────
-            animateProgressTo(1f, durationMs = 200) // Faster final progress
-            settingsRepository.setLastLoadingTime(System.currentTimeMillis())
+            // ── Stage 4: Complete ─────────────────────────────────────────
             _loadingMessage.value = "READY"
+            _loadingProgress.value = 1f
+            settingsRepository.setLastLoadingTime(System.currentTimeMillis())
 
-            // Brief pause at 100% so the user sees the completed state
-            delay(100)
             _isInitialized.value = true
+            delay(200) // Allow the dashboard to render behind the overlay
+            _isVisible.value = false
         }
-    }
-
-    /**
-     * Smoothly interpolates [_loadingProgress] toward [target] over [durationMs].
-     * Uses small ticks to produce a fluid animation without flooding StateFlow.
-     */
-    private suspend fun animateProgressTo(
-        target: Float,
-        durationMs: Long = 400L,
-        stepMs: Long = 16L,
-    ) {
-        val start = _loadingProgress.value
-        if (start >= target) return
-        val steps = (durationMs / stepMs).coerceAtLeast(1)
-        val delta = target - start
-        for (i in 1..steps) {
-            _loadingProgress.value = start + delta * (i.toFloat() / steps)
-            delay(stepMs)
-        }
-        _loadingProgress.value = target
     }
 }
