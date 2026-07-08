@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.media
 
+import com.frerox.toolz.BuildConfig
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -48,8 +49,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -94,6 +97,14 @@ data class MusicUiState(
     ),
     val customEqualizerGains    : List<Float>               = List(5) { 0f },
     val visualizerSensitivity   : Float                     = 1.0f,
+    val visualizerAutoSensitivity: Boolean                  = false,
+    // True once we've actually tried to attach and found we don't hold
+    // RECORD_AUDIO. Distinct from "not yet attached" so the UI can show a
+    // real "needs microphone access" prompt instead of the ring just
+    // silently sitting in its idle animation forever, which is what made
+    // this look like a bug ("bars are there but never react") rather than
+    // a permission gate.
+    val visualizerNeedsPermission: Boolean                  = false,
     val showMusicSettings       : Boolean                   = false,
     val karaokeEnabled          : Boolean                   = true,
     val isKaraokeActive         : Boolean                   = false,
@@ -101,7 +112,9 @@ data class MusicUiState(
     val alwaysSync              : Boolean                   = true,
     val catalogResults          : List<CatalogTrack>        = emptyList(),
     val catalogStreamQuality    : String                    = "AUTO",
-    val isMutedByAi             : Boolean                   = false
+    val isMutedByAi             : Boolean                   = false,
+    val karaokeSessionsCount    : Int                       = 0,
+    val karaokeAvgScore         : Int                       = -1
 )
 
 data class QueueEntry(val id: String, val track: MusicTrack)
@@ -139,6 +152,17 @@ class MusicPlayerViewModel @Inject constructor(
     private var pendingAction     : (() -> Unit)? = null
     private var equalizer         : Equalizer?  = null
     private var visualizer        : Visualizer? = null
+
+    // Reused across every onFftDataCapture callback (fires up to ~60x/sec)
+    // to avoid allocating fresh FloatArrays on the audio capture thread.
+    // `spectrumScratch` holds the in-progress computation; `spectrumBufA/B`
+    // are alternated as the published result so the buffer currently held
+    // by `_visualizerData.value` (being read on the UI thread) is never the
+    // same object this thread is about to write into next.
+    private val spectrumScratch = FloatArray(64)
+    private val spectrumBufA = FloatArray(64)
+    private val spectrumBufB = FloatArray(64)
+    private var useSpectrumBufA = true
     private var shakeDetector     : ShakeDetector? = null
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -268,6 +292,15 @@ class MusicPlayerViewModel @Inject constructor(
                         viewModelScope.launch { repository.updateTrack(updated) }
                         _uiState.update { it.copy(currentTrack = updated) }
                     }
+
+                    // Extra safety net for the visualizer: if a skip left it
+                    // unattached (e.g. the retry loop was still waiting on a
+                    // session id while the track buffered), the track
+                    // becoming READY is the clearest possible signal to try
+                    // again right now rather than waiting on a poll.
+                    if (_uiState.value.showVisualizer && player.isPlaying) {
+                        startVisualizer()
+                    }
                 }
 
                 Player.STATE_ENDED -> {
@@ -292,9 +325,14 @@ class MusicPlayerViewModel @Inject constructor(
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
-            // Clear resolve state on error so the spinner doesn't hang forever.
             _uiState.update { it.copy(isResolvingCatalog = false) }
-            player.prepare()
+            if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
+                || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
+            ) {
+                player.prepare()
+            } else {
+                player.stop()
+            }
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -360,6 +398,24 @@ class MusicPlayerViewModel @Inject constructor(
         player.setAudioAttributes(audioAttributes, false)
         player.setHandleAudioBecomingNoisy(true)
         player.addListener(playerListener)
+        // The Visualizer must be attached to the *current* audio session id.
+        // ExoPlayer can (re)allocate a new session id on track changes, on
+        // audio-focus recovery, or a few hundred ms after playback actually
+        // starts — any of which used to leave the FFT listener silently
+        // attached to a stale/invalid session, which is the root cause of
+        // "the visualizer sometimes just stops reacting". Reacting to this
+        // callback and re-arming the Visualizer whenever it fires keeps it
+        // permanently in sync with whatever session is actually playing.
+        player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onAudioSessionIdChanged(
+                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+                audioSessionId: Int
+            ) {
+                if (_uiState.value.showVisualizer && player.isPlaying) {
+                    restartVisualizer()
+                }
+            }
+        })
 
         connectToMediaController()
 
@@ -422,6 +478,11 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.musicVisualizerSensitivity.collect { sens ->
                 _uiState.update { it.copy(visualizerSensitivity = sens) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.musicVisualizerAutoSensitivity.collect { enabled ->
+                _uiState.update { it.copy(visualizerAutoSensitivity = enabled) }
             }
         }
         viewModelScope.launch {
@@ -542,7 +603,20 @@ class MusicPlayerViewModel @Inject constructor(
         controllerFuture?.addListener({
             runCatching {
                 controller = controllerFuture?.get()
+
+                // Every queue/move/remove/clear call in this ViewModel targets
+                // `controller ?: player` once connected, so `controller` is
+                // the Player instance that actually fires timeline/media-item
+                // events from here on. `playerListener` was previously only
+                // ever attached to the local `player` (see init{}), so once
+                // `controller` took over, onTimelineChanged (→ updateQueue()),
+                // onIsPlayingChanged, and onMediaItemTransition all went silent
+                // for controller-driven changes — including every reorder,
+                // remove, and clear fired from the Up Next sheet. Attaching
+                // the listener here is what makes the sheet (and playback
+                // state generally) actually reflect controller-driven changes.
                 controller?.addListener(playerListener)
+
                 val dur = controller?.duration?.coerceAtLeast(0L) ?: 0L
                 val currentMediaItem = controller?.currentMediaItem
                 val mediaId = currentMediaItem?.mediaId ?: currentMediaItem?.requestMetadata?.mediaUri?.toString()
@@ -600,9 +674,10 @@ class MusicPlayerViewModel @Inject constructor(
         if (shakeDetector == null) {
             shakeDetector = ShakeDetector { if (player.isPlaying) skipNext() }
         }
+        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
         sensorManager.registerListener(
             shakeDetector,
-            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            sensor,
             SensorManager.SENSOR_DELAY_UI
         )
     }
@@ -708,45 +783,197 @@ class MusicPlayerViewModel @Inject constructor(
     // Visualizer
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Waiting for ExoPlayer to allocate a real, attachable audio session id.
+    // Right after `play()` (or right after a skip, while the next track is
+    // still buffering) `audioSessionId` can read 0 for an unpredictable
+    // amount of time — a network fetch on the new track can easily take
+    // longer than a short fixed retry burst. The previous version gave up
+    // after ~600ms and never tried again, which is exactly why skipping to
+    // a track that took a moment to load left the visualizer permanently
+    // frozen. Retrying for as long as it's still relevant (visualizer not
+    // yet attached, and still supposed to be showing) fixes that without
+    // risking an infinite loop, since it stops the moment either condition
+    // flips.
+    private var visualizerAttachJob: kotlinx.coroutines.Job? = null
+
     private fun startVisualizer() {
-        if (visualizer != null || !_uiState.value.showVisualizer) return
-        val sessionId = player.audioSessionId
-        if (sessionId == 0) return
-        runCatching {
-            visualizer = Visualizer(sessionId).apply {
-                captureSize = Visualizer.getCaptureSizeRange()[1]
-                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, rate: Int) {}
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, rate: Int) {
-                        fft ?: return
-                        val n   = fft.size / 2
-                        val mag = FloatArray(64)
-                        for (i in 0 until 64) {
-                            val start = (Math.pow(2.0, i / 10.6) - 1).toInt().coerceIn(0, n - 1)
-                            val end   = (Math.pow(2.0, (i + 1) / 10.6) - 1).toInt().coerceIn(start + 1, n)
-                            var sum   = 0f
-                            for (j in start until end) {
-                                val r  = fft[j * 2].toInt()
-                                val im = fft[j * 2 + 1].toInt()
-                                sum += Math.hypot(r.toDouble(), im.toDouble()).toFloat()
-                            }
-                            val avg = if (end > start) sum / (end - start) else 0f
-                            mag[i]  = (avg * (1f + i * 0.05f) * 2.5f).coerceIn(0f, 100f)
-                        }
-                        _visualizerData.value = mag
+        if (!_uiState.value.showVisualizer) {
+            if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, showVisualizer is off")
+            return
+        }
+        if (visualizer != null) {
+            if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, already attached")
+            return
+        }
+
+        // android.media.audiofx.Visualizer throws SecurityException without
+        // RECORD_AUDIO, even when only reading the app's own playback
+        // session. That throw was being swallowed by attachVisualizer's
+        // runCatching and treated identically to "session id not ready
+        // yet", so this loop retried every 30ms *forever* — it could never
+        // succeed, it just silently burned battery while the ring sat in
+        // its idle animation with no indication anything was wrong. Bail
+        // out immediately and let the UI ask for the permission instead of
+        // masquerading a permission gate as "still attaching".
+        val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!hasMicPermission) {
+            android.util.Log.w("MusicVisualizer", "startVisualizer: blocked, RECORD_AUDIO not granted")
+            _uiState.update { it.copy(visualizerNeedsPermission = true) }
+            return
+        }
+        _uiState.update { it.copy(visualizerNeedsPermission = false) }
+
+        visualizerAttachJob?.cancel()
+        visualizerAttachJob = viewModelScope.launch {
+            while (currentCoroutineContext().isActive &&
+                _uiState.value.showVisualizer &&
+                !_uiState.value.visualizerNeedsPermission &&
+                visualizer == null
+            ) {
+                val sessionId = player.audioSessionId
+                if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                    if (attachVisualizer(sessionId)) {
+                        if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attach loop: attached OK on session $sessionId")
+                        return@launch
                     }
-                }, Visualizer.getMaxCaptureRate(), false, true)
-                enabled = true
+                }
+                // Was 120ms — a valid session id after play/skip usually
+                // shows up within a frame or two, so polling this much
+                // slower than that was pure added latency on top of
+                // whatever ExoPlayer itself needed to buffer.
+                delay(30L)
             }
         }
     }
 
-    private fun stopVisualizer() {
+    /** Called by the UI right after the user grants (or re-grants) RECORD_AUDIO. */
+    fun retryVisualizerAfterPermissionGranted() {
+        _uiState.update { it.copy(visualizerNeedsPermission = false) }
+        if (_uiState.value.showVisualizer && player.isPlaying) startVisualizer()
+    }
+
+    /** Tears down and re-creates the Visualizer against whatever session id is current. */
+    private fun restartVisualizer() {
+        detachVisualizer()
+        startVisualizer()
+    }
+
+    private var fftCaptureCount = 0
+
+    private fun attachVisualizer(sessionId: Int): Boolean {
+        val maxRate = Visualizer.getMaxCaptureRate()
+        if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attachVisualizer: sessionId=$sessionId maxCaptureRate=$maxRate")
+        fftCaptureCount = 0
+        return runCatching {
+            visualizer = Visualizer(sessionId).apply {
+                // 1024 is plenty of resolution for 64 log-spaced output
+                // bins — some devices expose a much larger max (2048-4096+),
+                // which only means more bytes to walk through per callback
+                // (up to the capture rate, i.e. potentially 60x/sec) with no
+                // visible gain, since the extra resolution gets binned away
+                // in computeSpectrum() anyway.
+                val range = Visualizer.getCaptureSizeRange()
+                captureSize = range[1].coerceAtMost(1024).coerceAtLeast(range[0])
+                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, rate: Int) {}
+                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, rate: Int) {
+                        fft ?: return
+                        if (BuildConfig.DEBUG) {
+                            fftCaptureCount++
+                            if (fftCaptureCount == 1 || fftCaptureCount % 120 == 0) {
+                                android.util.Log.d("MusicVisualizer", "onFftDataCapture: frame #$fftCaptureCount, size=${fft.size}")
+                            }
+                        }
+                        _visualizerData.value = computeSpectrum(fft)
+                    }
+                }, maxRate, false, true)
+                enabled = true
+            }
+        }.onFailure { e ->
+            android.util.Log.e("MusicVisualizer", "attachVisualizer: FAILED (${e.javaClass.simpleName}): ${e.message}")
+            visualizer = null
+            if (e is SecurityException) {
+                // Permission was revoked (or the check above raced with a
+                // change) — stop the retry loop, it will never succeed
+                // without RECORD_AUDIO, and surface it to the UI instead of
+                // spinning forever.
+                _uiState.update { it.copy(visualizerNeedsPermission = true) }
+            }
+            // Anything else (bad/racy session id) is treated as "not
+            // attached yet" and the retry loop keeps going.
+        }.isSuccess
+    }
+
+    /**
+     * Converts a raw FFT capture into 64 perceptually log-spaced magnitude
+     * bins. Pulled out of the capture callback (which fires up to ~60x/sec on
+     * the audio thread) so it stays a pure, allocation-light function instead
+     * of inline logic.
+     */
+    private fun computeSpectrum(fft: ByteArray): FloatArray {
+        val n = fft.size / 2
+        for (i in 0 until 64) {
+            val start = (Math.pow(2.0, i / 10.6) - 1).toInt().coerceIn(0, n - 1)
+            val end = (Math.pow(2.0, (i + 1) / 10.6) - 1).toInt().coerceIn(start + 1, n)
+            // RMS across the bin instead of a plain average. A plain average
+            // lets a handful of quiet partials dilute one loud one, which is
+            // exactly why sharp transients (kicks, snares, plucks) sitting
+            // next to quieter harmonics used to get smeared into the
+            // surrounding wash instead of standing out — RMS matches how the
+            // ear actually weighs energy across a band.
+            var sumSq = 0f
+            for (j in start until end) {
+                val r = fft[j * 2].toInt()
+                val im = fft[j * 2 + 1].toInt()
+                val m = Math.hypot(r.toDouble(), im.toDouble()).toFloat()
+                sumSq += m * m
+            }
+            val rms = if (end > start) kotlin.math.sqrt(sumSq / (end - start)) else 0f
+            // High-shelf compensation, now a soft sqrt curve instead of a
+            // straight linear ramp: high FFT bins are naturally quieter for
+            // most music, so without this the ring dies off toward the
+            // treble side — but the old linear ramp over-boosted the very
+            // top bins (up to ~4x) and made bright, cymbal-heavy songs clip
+            // out. The curved shelf still lifts the treble enough to stay
+            // visible without blowing past the ceiling.
+            val shelf = 1f + kotlin.math.sqrt(i / 63f) * 1.6f
+            spectrumScratch[i] = (rms * shelf * 2.2f).coerceIn(0f, 100f)
+        }
+        // One pass of light neighbor blending, clamped (not wrapped) at the
+        // array edges so sub-bass never bleeds into treble. This softens
+        // single-bin flicker — adjacent bins catching the same transient at
+        // slightly different strengths — into a more cohesive spectral
+        // shape, while each bin still keeps most of its own value so
+        // distinct bass/mid/treble regions don't smear together.
+        //
+        // Written into whichever ping-pong buffer isn't currently published
+        // (held by _visualizerData.value and possibly being read on the UI
+        // thread right now) so there's zero allocation here and zero risk of
+        // mutating an array out from under a concurrent reader.
+        val out = if (useSpectrumBufA) spectrumBufA else spectrumBufB
+        useSpectrumBufA = !useSpectrumBufA
+        for (i in 0 until 64) {
+            val prev = spectrumScratch[(i - 1).coerceAtLeast(0)]
+            val next = spectrumScratch[(i + 1).coerceAtMost(63)]
+            out[i] = spectrumScratch[i] * 0.7f + (prev + next) * 0.15f
+        }
+        return out
+    }
+
+    private fun detachVisualizer() {
+        visualizerAttachJob?.cancel()
+        visualizerAttachJob = null
         runCatching {
             visualizer?.enabled = false
             visualizer?.release()
         }
         visualizer = null
+    }
+
+    private fun stopVisualizer() {
+        detachVisualizer()
         _visualizerData.value = FloatArray(0)
     }
 
@@ -757,13 +984,30 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
+    fun setVisualizerAutoSensitivity(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setMusicVisualizerAutoSensitivity(enabled)
+            _uiState.update { it.copy(visualizerAutoSensitivity = enabled) }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Service
     // ─────────────────────────────────────────────────────────────────────────
 
+    // startService() is a binder IPC call — cheap in isolation, but it was
+    // previously fired on *every* play()/skipNext()/skipPrevious()/playTrack()
+    // tap, including while the service was already running. That's wasted
+    // main-thread work stacking up right in the middle of a tap-to-transport-
+    // action path, which is exactly where a dropped frame is most visible.
+    // The service only needs to be told to start once per session; guard
+    // it so repeated taps don't repeat the IPC.
+    private var playerServiceStarted = false
     private fun startPlayerService() {
+        if (playerServiceStarted) return
         runCatching {
             context.startService(Intent(context, MusicPlayerService::class.java))
+            playerServiceStarted = true
         }
     }
 
@@ -778,13 +1022,29 @@ class MusicPlayerViewModel @Inject constructor(
                 if (_sliderPosition.value == null) {
                     val p: Player = controller ?: player
                     val pos = p.currentPosition.coerceAtLeast(0)
-                    _uiState.update { it.copy(playbackPosition = pos) }
+                    // Only write to the dedicated `_playbackPosition` flow, not
+                    // into `_uiState`. `MusicUiState` is one big object collected
+                    // once at the top of the whole screen (`val state by
+                    // viewModel.uiState.collectAsState()`), so copying it here
+                    // was forcing a full-screen recomposition on every tick —
+                    // up to 60/sec with fast seeking, lyric sync, or karaoke
+                    // active — even though the scrubber already reads position
+                    // from this same flow directly via a scoped
+                    // collectAsStateWithLifecycle further down the tree. The
+                    // `playbackPosition`/`duration` fields on MusicUiState are
+                    // kept for callers that only need an occasional snapshot,
+                    // not as the hot-path source of truth.
                     _playbackPosition.value = pos
+
+                    val dur = p.duration
+                    if (_uiState.value.isKaraokeActive && dur > 0 && pos >= dur - 800 && p.isPlaying) {
+                        p.pause()
+                    }
                 }
                 val isSynced = _uiState.value.currentTrack?.aiLyrics?.contains("[0") == true
                 val interval = when {
                     _uiState.value.performanceMode         -> 500L
-                    _uiState.value.fastSeeking || isSynced -> 16L
+                    _uiState.value.fastSeeking || isSynced || _uiState.value.isKaraokeActive -> 16L
                     else                                   -> 100L
                 }
                 delay(interval)
@@ -977,6 +1237,15 @@ class MusicPlayerViewModel @Inject constructor(
             _uiState.update { it.copy(isResolvingCatalog = true) }
             try {
                 val items = tracks.map { track ->
+                    val localTrack = withContext(Dispatchers.IO) {
+                        repository.getTrackBySourceUrl(track.sourceUrl)
+                    }
+                    val playableUri = if (localTrack != null && localTrack.uri.isNotBlank()) {
+                        localTrack.uri
+                    } else {
+                        track.sourceUrl
+                    }
+
                     val meta = MediaMetadata.Builder()
                         .setTitle(track.title).setArtist(track.artist)
                         .setAlbumTitle("YouTube Catalog").setDisplayTitle(track.title)
@@ -988,7 +1257,7 @@ class MusicPlayerViewModel @Inject constructor(
                         }).build()
 
                     MediaItem.Builder()
-                        .setMediaId(track.sourceUrl).setUri(track.sourceUrl.toUri())
+                        .setMediaId(track.sourceUrl).setUri(playableUri.toUri())
                         .setMediaMetadata(meta).build()
                 }
 
@@ -1030,16 +1299,27 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun enqueueCatalogTrack(track: CatalogTrack, playNext: Boolean) {
-        val item  = track.toMediaItem()
-        val p: Player = controller ?: player
-        if (playNext) {
-            val idx = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
-            p.addMediaItem(idx, item)
-        } else {
-            p.addMediaItem(item)
+        viewModelScope.launch {
+            val localTrack = withContext(Dispatchers.IO) {
+                repository.getTrackBySourceUrl(track.sourceUrl)
+            }
+            val item = if (localTrack != null && localTrack.uri.isNotBlank()) {
+                localTrack.toMediaItem()
+            } else {
+                track.toMediaItem()
+            }
+            withContext(Dispatchers.Main) {
+                val p: Player = controller ?: player
+                if (playNext) {
+                    val idx = if (p.mediaItemCount > 0) p.currentMediaItemIndex + 1 else 0
+                    p.addMediaItem(idx, item)
+                } else {
+                    p.addMediaItem(item)
+                }
+                if (!p.isPlaying && !p.playWhenReady) p.prepare()
+                hapticClick()
+            }
         }
-        if (!p.isPlaying && !p.playWhenReady) p.prepare()
-        hapticClick()
     }
 
     // ── Media item builders ───────────────────────────────────────────────────
@@ -1052,8 +1332,20 @@ class MusicPlayerViewModel @Inject constructor(
             .setArtworkUri(thumbnailUri?.toUri())
             .apply { sourceUrl?.let { setExtras(android.os.Bundle().apply { putString("source_url", it) }) } }
             .build()
+        val playableUri = if (uri.startsWith("content://") || uri.startsWith("file://")) {
+            uri
+        } else {
+            path?.let {
+                when {
+                    it.startsWith("content://") || it.startsWith("file://") -> it
+                    it.startsWith("/") -> android.net.Uri.fromFile(java.io.File(it)).toString()
+                    else -> it
+                }
+            } ?: uri
+        }
+        val parsedUri = if (playableUri.startsWith("/")) android.net.Uri.fromFile(java.io.File(playableUri)) else playableUri.toUri()
         return MediaItem.Builder()
-            .setMediaId(uri).setUri(uri.toUri()).setMediaMetadata(meta).build()
+            .setMediaId(uri).setUri(parsedUri).setMediaMetadata(meta).build()
     }
 
     private fun CatalogTrack.toMediaItem(): MediaItem {
@@ -1115,29 +1407,39 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
-    fun play()  { 
+    fun play()  {
         startPlayerService()
         val p: Player = controller ?: player
         if (!p.isPlaying) {
+            // Act first, decorate after: the transport call fires immediately
+            // on this same frame so tapping play is instant. The volume ramp
+            // is a purely cosmetic fade-in layered on top afterward — it no
+            // longer gates when playback actually starts.
             p.volume = 0f
             p.play()
             if (!_uiState.value.isMutedByAi) {
                 fadeVolume(1f, 100)
+            } else {
+                p.volume = 0f
             }
         }
-        hapticClick() 
+        hapticClick()
     }
-    fun pause() { 
+    fun pause() {
         val p: Player = controller ?: player
         if (p.isPlaying) {
-            fadeVolume(0f, 100) {
-                p.pause()
-                if (!_uiState.value.isMutedByAi) {
+            // Pause immediately — do not wait on a fade to actually stop
+            // audio/update state. The fade below is a quick cosmetic volume
+            // dip that runs fully after the fact and resets volume for the
+            // next play(), it never blocks the pause itself.
+            p.pause()
+            if (!_uiState.value.isMutedByAi) {
+                fadeVolume(0f, 80) {
                     p.volume = 1f
                 }
             }
         }
-        hapticClick() 
+        hapticClick()
     }
 
     fun stop() {
@@ -1167,33 +1469,41 @@ class MusicPlayerViewModel @Inject constructor(
         setVolume(if (muted) 0f else 1f)
     }
 
+    fun updateKaraokeStats(count: Int, avgScore: Int) {
+        _uiState.update { it.copy(karaokeSessionsCount = count, karaokeAvgScore = avgScore) }
+    }
+
     fun skipNext() {
         val p: Player = controller ?: player
-        fadeVolume(0f, 100) {
-            if (p.hasNextMediaItem()) p.seekToNext()
-            else if (p.repeatMode == Player.REPEAT_MODE_ALL) p.seekTo(0, 0)
-            
-            if (!_uiState.value.isMutedByAi) {
-                p.volume = 1f
-            } else {
-                p.volume = 0f
-            }
-            hapticClick()
+        // Skip immediately — ExoPlayer's own transition already gives a clean
+        // cut, so there's no reason to hold the actual seek hostage behind a
+        // 100ms fade. The fade now runs as a quick decorative dip *after* the
+        // real skip has already happened, so the tap feels instant.
+        if (p.hasNextMediaItem()) p.seekToNext()
+        else if (p.repeatMode == Player.REPEAT_MODE_ALL) p.seekTo(0, 0)
+        hapticClick()
+
+        if (!_uiState.value.isMutedByAi) {
+            val target = p.volume
+            p.volume = 0f
+            fadeVolume(target.takeIf { it > 0f } ?: 1f, 120)
+        } else {
+            p.volume = 0f
         }
     }
 
     fun skipPrevious() {
         val p: Player = controller ?: player
-        fadeVolume(0f, 100) {
-            if (p.currentPosition > 3_000) p.seekTo(0)
-            else if (p.hasPreviousMediaItem()) p.seekToPrevious()
-            
-            if (!_uiState.value.isMutedByAi) {
-                p.volume = 1f
-            } else {
-                p.volume = 0f
-            }
-            hapticClick()
+        if (p.currentPosition > 3_000) p.seekTo(0)
+        else if (p.hasPreviousMediaItem()) p.seekToPrevious()
+        hapticClick()
+
+        if (!_uiState.value.isMutedByAi) {
+            val target = p.volume
+            p.volume = 0f
+            fadeVolume(target.takeIf { it > 0f } ?: 1f, 120)
+        } else {
+            p.volume = 0f
         }
     }
 

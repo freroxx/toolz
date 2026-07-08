@@ -161,12 +161,12 @@ import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ExpressiveSearchField
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.AlbumArtImage
 import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -503,7 +503,7 @@ fun CatalogContent(
                             }
                             catalogTrackRows(
                                 tracks = state.quickPicks,
-                                layoutMode = LayoutMode.LIST,
+                                layoutMode = state.layoutMode,
                                 downloadedSourceUrls = downloadedSourceUrls,
                                 downloadingTracks = state.downloadingTracks,
                                 focusedTrackUrl = focusedTrack?.sourceUrl,
@@ -530,7 +530,7 @@ fun CatalogContent(
                         }
                         catalogTrackRows(
                             tracks = state.trending.take(9),
-                            layoutMode = LayoutMode.LIST,
+                            layoutMode = state.layoutMode,
                             downloadedSourceUrls = downloadedSourceUrls,
                             downloadingTracks = state.downloadingTracks,
                             focusedTrackUrl = focusedTrack?.sourceUrl,
@@ -561,7 +561,7 @@ fun CatalogContent(
                         } else {
                             catalogTrackRows(
                                 tracks = state.justForYou,
-                                layoutMode = LayoutMode.LIST,
+                                layoutMode = state.layoutMode,
                                 downloadedSourceUrls = downloadedSourceUrls,
                                 downloadingTracks = state.downloadingTracks,
                                 focusedTrackUrl = focusedTrack?.sourceUrl,
@@ -778,8 +778,8 @@ private fun CatalogTopActions(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalIconButton(
-                    onClick = {},
-                    modifier = Modifier.size(42.dp).bouncyClick(onClick = onRefresh),
+                    onClick = onRefresh,
+                    modifier = Modifier.size(42.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -788,8 +788,8 @@ private fun CatalogTopActions(
                     Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
                 }
                 FilledTonalIconButton(
-                    onClick = {},
-                    modifier = Modifier.size(42.dp).bouncyClick(onClick = onToggleLayout),
+                    onClick = onToggleLayout,
+                    modifier = Modifier.size(42.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -984,9 +984,9 @@ private fun FeaturedCarouselItem(
         border = if (isFocused) BorderStroke(3.dp, color) else null
     ) {
         Box(modifier = Modifier.clip(RoundedCornerShape(24.dp))) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = track.title,
+            AlbumArtImage(
+                url = track.thumbnailUrl,
+                seed = track.title,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.5f)
@@ -1175,9 +1175,9 @@ private fun CatalogGridCard(
             .padding(bottom = 8.dp)
     ) {
         Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = track.title,
+            AlbumArtImage(
+                url = track.thumbnailUrl,
+                seed = track.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
@@ -1252,9 +1252,9 @@ private fun CatalogListCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(contentAlignment = Alignment.BottomEnd) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = track.title,
+                AlbumArtImage(
+                    url = track.thumbnailUrl,
+                    seed = track.title,
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(14.dp)),
@@ -1621,9 +1621,9 @@ private fun CatalogTrackActionsSheet(
                 .padding(bottom = 28.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = null,
+                AlbumArtImage(
+                    url = track.thumbnailUrl,
+                    seed = track.title,
                     modifier = Modifier
                         .size(76.dp)
                         .clip(RoundedCornerShape(22.dp)),
@@ -1888,9 +1888,9 @@ fun SpinningDownloadPopup(
                         strokeWidth = 10.dp,
                         strokeCap = StrokeCap.Round
                     )
-                    AsyncImage(
-                        model = track.thumbnailUrl,
-                        contentDescription = null,
+                    AlbumArtImage(
+                        url = track.thumbnailUrl,
+                        seed = track.title,
                         modifier = Modifier
                             .size(128.dp)
                             .clip(CircleShape)
