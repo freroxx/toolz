@@ -109,7 +109,9 @@ fun CleanerScreen(
 
     LaunchedEffect(Unit) { viewModel.checkPermission() }
 
-    BackHandler(enabled = gridCategory != null) { viewModel.closeGridView() }
+    BackHandler(enabled = gridCategory != null) {
+        viewModel.closeGridView()
+    }
 
     // ── Permission dialog ─────────────────────────────────────────────────
     if (showPermDialog) {
@@ -246,6 +248,7 @@ fun CleanerScreen(
                                     spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)
                                 ) { it } + fadeIn(),
                                 exit    = slideOutVertically { it } + fadeOut(tween(200)),
+                                modifier = Modifier
                             ) {
                                 gridCategory?.let { category ->
                                     SectionGridView(
