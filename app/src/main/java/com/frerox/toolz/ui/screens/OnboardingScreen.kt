@@ -12,16 +12,17 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -43,12 +44,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -59,25 +58,23 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Analytics
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeveloperBoard
-import androidx.compose.material.icons.rounded.Face
-import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.Hub
-import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.VpnKey
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.BasicAlertDialog
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -100,9 +97,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -146,6 +144,23 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.launch
 
+/**
+ * Onboarding, redesigned around Material 3 Expressive:
+ *  - a warm, calm voice instead of jargon ("Notifications", not "PROTOCOLS")
+ *  - spring-driven motion throughout, not just fades
+ *  - a live "setup score" so people can see what skipping costs them
+ *  - clearer value framing on every permission ask
+ */
+
+private const val ExpressiveDamping = Spring.DampingRatioMediumBouncy
+private const val ExpressiveStiffnessLow = Spring.StiffnessLow
+private const val ExpressiveStiffnessMedium = Spring.StiffnessMedium
+
+private val ExpressiveSpring = spring<Float>(dampingRatio = ExpressiveDamping, stiffness = ExpressiveStiffnessLow)
+private val ExpressiveSpringDp = spring<androidx.compose.ui.unit.Dp>(dampingRatio = ExpressiveDamping, stiffness = ExpressiveStiffnessMedium)
+private val ExpressiveSpringIntOffset = spring<androidx.compose.ui.unit.IntOffset>(dampingRatio = ExpressiveDamping, stiffness = ExpressiveStiffnessLow)
+private val ExpressiveSpringIntSize = spring<androidx.compose.ui.unit.IntSize>(dampingRatio = ExpressiveDamping, stiffness = ExpressiveStiffnessMedium)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun OnboardingScreen(
@@ -162,9 +177,9 @@ fun OnboardingScreen(
 
     val goNext: () -> Unit = {
         vibrationManager?.vibrateClick()
-        scope.launch { 
+        scope.launch {
             if (pagerState.currentPage < pageCount - 1) {
-                pagerState.animateScrollToPage(pagerState.currentPage + 1) 
+                pagerState.animateScrollToPage(pagerState.currentPage + 1)
             }
         }
     }
@@ -177,6 +192,18 @@ fun OnboardingScreen(
         "DARK" -> true
         "LIGHT" -> false
         else -> isSystemInDarkTheme()
+    }
+
+    // Live personalization score — a small, honest signal of how "set up" the
+    // experience will feel, without gating anything. Purely informative.
+    val setupScore = remember(uiState) {
+        var total = 0
+        var done = 0
+        total++; if (uiState.name.isNotBlank()) done++
+        total++; if (uiState.groqApiKey.isNotBlank()) done++
+        total++; if (uiState.notificationsEnabled) done++
+        total++; if (uiState.shizukuAuthorized) done++
+        done.toFloat() / total
     }
 
     ToolzTheme(
@@ -197,13 +224,13 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AnimatedVisibility(
                         visible = pagerState.currentPage > 0,
-                        enter = scaleIn() + fadeIn(),
+                        enter = scaleIn(ExpressiveSpring) + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
                         IconButton(onClick = goPrev) {
@@ -212,16 +239,24 @@ fun OnboardingScreen(
                     }
                     if (pagerState.currentPage == 0) Spacer(modifier = Modifier.width(48.dp))
 
-                    // Progress
+                    // Step progress — expressive morphing dots
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         repeat(pageCount) { index ->
                             val isActive = index == pagerState.currentPage
-                            val dotWidth by animateDpAsState(if (isActive) 24.dp else 8.dp, label = "dot")
-                            val color = if (isActive) MaterialTheme.colorScheme.primary 
-                                       else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            val isPast = index < pagerState.currentPage
+                            val dotWidth by animateDpAsState(
+                                targetValue = if (isActive) 28.dp else 8.dp,
+                                animationSpec = ExpressiveSpringDp,
+                                label = "dot_width"
+                            )
+                            val color = when {
+                                isActive -> MaterialTheme.colorScheme.primary
+                                isPast -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            }
                             Box(
                                 modifier = Modifier
                                     .height(8.dp)
@@ -232,9 +267,13 @@ fun OnboardingScreen(
                         }
                     }
 
-                    IconButton(onClick = { showSkipDialog = true }) {
-                        Icon(Icons.Rounded.FastForward, contentDescription = "Skip", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-                    }
+                    // Setup score ring replaces the old blunt "skip" fast-forward icon.
+                    // Tapping it still offers to skip, but now it visibly communicates
+                    // "here's what you'd be leaving on the table."
+                    SetupScoreBadge(
+                        progress = setupScore,
+                        onClick = { showSkipDialog = true }
+                    )
                 }
 
                 HorizontalPager(
@@ -245,8 +284,8 @@ fun OnboardingScreen(
                     AnimatedContent(
                         targetState = page,
                         transitionSpec = {
-                            (fadeIn(tween(400)) + slideInHorizontally { it / 2 })
-                                .togetherWith(fadeOut(tween(400)) + slideOutHorizontally { -it / 2 })
+                            (fadeIn(tween(420)) + slideInHorizontally(ExpressiveSpringIntOffset) { it / 3 })
+                                .togetherWith(fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 4 })
                         },
                         label = "page"
                     ) { targetPage ->
@@ -318,7 +357,7 @@ fun OnboardingScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background) // Ensure solid base
+                        .background(MaterialTheme.colorScheme.background)
                         .toolzBackground(),
                     contentAlignment = Alignment.Center
                 ) {
@@ -328,13 +367,18 @@ fun OnboardingScreen(
                             color = MaterialTheme.colorScheme.primary,
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         )
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(28.dp))
                         Text(
-                            "DEPLOYING WORKSPACE", // Fixed typo in "DEPLOYING"
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 2.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                            "Setting things up",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Just a moment",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -344,12 +388,70 @@ fun OnboardingScreen(
 
     if (showSkipDialog) {
         SkipConfirmationDialogExpressive(
+            setupScore = setupScore,
             onConfirm = {
                 showSkipDialog = false
                 viewModel.skipOnboarding(onFinish)
             },
             onDismiss = { showSkipDialog = false }
         )
+    }
+}
+
+// ── Setup score badge (new) ────────────────────────────────────────────────
+// A quiet ring that fills in as the person completes optional steps (name,
+// AI key, notifications, deep access). Replaces the old plain "skip" icon
+// with something that actually communicates value.
+
+@Composable
+private fun SetupScoreBadge(progress: Float, onClick: () -> Unit) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = ExpressiveSpring,
+        label = "setup_score"
+    )
+    val trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+    val progressColor = MaterialTheme.colorScheme.primary
+
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = Color.Transparent,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.size(36.dp)) {
+                    val stroke = 3.dp.toPx()
+                    drawArc(
+                        color = trackColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    )
+                    drawArc(
+                        color = progressColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f * animatedProgress,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    )
+                }
+                Text(
+                    "${(animatedProgress * 100).toInt()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
     }
 }
 
@@ -365,20 +467,17 @@ fun WelcomeStep(onNext: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
-                // Smooth static glow
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(220.dp)) {
                 Surface(
-                    modifier = Modifier.size(200.dp).graphicsLayer { alpha = 0.35f },
+                    modifier = Modifier.size(188.dp),
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
                 ) {}
-                
                 Surface(
                     shape = SquircleShape,
-                    modifier = Modifier.size(130.dp),
+                    modifier = Modifier.size(124.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    tonalElevation = 4.dp
+                    tonalElevation = 3.dp
                 ) {
                     Image(
                         painter = painterResource(R.drawable.app_logo),
@@ -390,61 +489,51 @@ fun WelcomeStep(onNext: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 1) {
             Text(
-                "TOOLZ",
-                style = MaterialTheme.typography.displayLarge,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-2).sp
-            )
-        }
-
-        StaggeredEntrance(index = 2) {
-            Text(
-                "Absolute digital sovereignty.",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                "Welcome to Toolz",
+                style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        StaggeredEntrance(index = 2) {
+            Text(
+                "A fast, private toolkit — built by frerox",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
 
         StaggeredEntrance(index = 3) {
             Text(
-                "Made by frerox",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp
-            )
-        }
-
-        Spacer(Modifier.height(32.dp))
-
-        StaggeredEntrance(index = 4) {
-            Text(
-                "A minimalist suite of high-precision instruments designed for speed and privacy.",
+                "Let's spend a minute setting things up the way you like them. You can change any of this later.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
         }
 
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(56.dp))
 
-        StaggeredEntrance(index = 5) {
+        StaggeredEntrance(index = 4) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(80.dp),
+                modifier = Modifier.fillMaxWidth().height(64.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("GET STARTED", fontWeight = FontWeight.Black, letterSpacing = 1.sp, fontSize = 18.sp)
-                Spacer(Modifier.width(12.dp))
-                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null)
+                Text("Get started", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Spacer(Modifier.width(10.dp))
+                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -471,25 +560,28 @@ fun UpdateStep(
     ) {
         StaggeredEntrance(index = 0) {
             Text(
-                "SYSTEM UPDATE",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-1).sp
+                "Checking for updates",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
             )
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(200.dp)) {
             AnimatedContent(
                 targetState = state,
-                transitionSpec = { fadeIn(tween(500)) togetherWith fadeOut(tween(500)) },
+                transitionSpec = {
+                    (fadeIn(tween(450)) + scaleIn(initialScale = 0.85f, animationSpec = tween(450)))
+                        .togetherWith(fadeOut(tween(300)))
+                },
                 label = "update_anim"
             ) { updateState ->
                 when (updateState) {
                     null -> {
                         ExpressiveContainedLoadingIndicator(
-                            modifier = Modifier.size(220.dp),
+                            modifier = Modifier.size(180.dp),
                             color = MaterialTheme.colorScheme.primary,
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
                         )
@@ -497,24 +589,24 @@ fun UpdateStep(
                     is UpdateCheckResult.NewUpdate -> {
                         Surface(
                             shape = SquircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                            modifier = Modifier.size(160.dp)
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                            modifier = Modifier.size(140.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.SystemUpdate, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp))
+                                Icon(Icons.Rounded.SystemUpdate, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(60.dp))
                             }
                         }
                     }
                     else -> {
                         Surface(
                             shape = SquircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                            modifier = Modifier.size(160.dp)
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                            modifier = Modifier.size(140.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp))
+                                Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(60.dp))
                             }
                         }
                     }
@@ -522,27 +614,27 @@ fun UpdateStep(
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 1) {
             AnimatedContent(targetState = state, label = "text") { updateState ->
                 val title = when (updateState) {
-                    null -> "Synchronizing..."
-                    is UpdateCheckResult.NewUpdate -> "Protocol Update Found"
-                    is UpdateCheckResult.UpToDate -> "Systems Optimal"
-                    else -> "Connection Offline"
+                    null -> "Looking for the latest version…"
+                    is UpdateCheckResult.NewUpdate -> "An update is ready"
+                    is UpdateCheckResult.UpToDate -> "You're up to date"
+                    else -> "Couldn't reach the update server"
                 }
                 val desc = when (updateState) {
-                    null -> "Checking for available system updates."
-                    is UpdateCheckResult.NewUpdate -> "Version ${updateState.version} is ready for deployment."
-                    is UpdateCheckResult.UpToDate -> "You are running the latest version of Toolz."
-                    else -> "Could not reach update server. Skipping for now."
+                    null -> "This only takes a second."
+                    is UpdateCheckResult.NewUpdate -> "Version ${updateState.version} is available whenever you're ready."
+                    is UpdateCheckResult.UpToDate -> "You're already running the newest release of Toolz."
+                    else -> "No worries — we'll check again later. You can continue for now."
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(8.dp))
@@ -551,22 +643,22 @@ fun UpdateStep(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 32.dp)
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(56.dp))
 
         StaggeredEntrance(index = 2) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 shape = ExtraLargeExpressiveShape,
                 enabled = state != null
             ) {
-                Text(if (state is UpdateCheckResult.NewUpdate) "UPDATE & CONTINUE" else "CONTINUE", fontWeight = FontWeight.Black)
+                Text(if (state is UpdateCheckResult.NewUpdate) "Update and continue" else "Continue", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -587,6 +679,7 @@ fun PersonaStep(
     onNext: () -> Unit
 ) {
     val themeOptions = listOf("LIGHT", "SYSTEM", "DARK")
+    val themeLabels = listOf("Light", "Auto", "Dark")
     val scrollState = rememberScrollState()
 
     Column(
@@ -597,25 +690,20 @@ fun PersonaStep(
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Text(
-                "PERSONA",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-1).sp
-            )
+            SectionHeader(eyebrow = "Step 2 of 5", title = "Make it yours")
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
         StaggeredEntrance(index = 1) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(24.dp)) {
-                    Text("IDENTITY", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Spacer(Modifier.height(16.dp))
+                    CardEyebrow("Your name")
+                    Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = name,
                         onValueChange = onNameChange,
-                        placeholder = { Text("Your Name / Agent ID") },
+                        placeholder = { Text("What should we call you?") },
                         modifier = Modifier.fillMaxWidth(),
                         shape = SquircleShape,
                         singleLine = true,
@@ -626,30 +714,30 @@ fun PersonaStep(
                         )
                     )
 
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(28.dp))
 
-                    Text("INTERFACE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Spacer(Modifier.height(16.dp))
+                    CardEyebrow("Appearance")
+                    Spacer(Modifier.height(12.dp))
                     ToolzConnectedButtonGroup(
                         selectedIndex = themeOptions.indexOf(themeMode).coerceAtLeast(0),
-                        options = themeOptions,
+                        options = themeLabels,
                         onOptionSelected = { onThemeChange(themeOptions[it]) },
-                        modifier = Modifier.fillMaxWidth().height(60.dp)
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
                     )
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(20.dp))
 
                     OnboardingToggleExpressive(
-                        title = "Dynamic Spectrum",
-                        desc = "Sync with system colors",
+                        title = "Match system colors",
+                        desc = "Pull accents from your wallpaper",
                         icon = Icons.Rounded.Palette,
                         checked = dynamicColor,
                         onCheckedChange = onDynamicColorChange
                     )
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     OnboardingToggleExpressive(
-                        title = "Organic Gradients",
-                        desc = "Premium visual depth",
+                        title = "Soft gradient background",
+                        desc = "A subtle touch of depth",
                         icon = Icons.Rounded.Gradient,
                         checked = gradient,
                         onCheckedChange = onGradientChange
@@ -658,17 +746,27 @@ fun PersonaStep(
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 2) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 enabled = name.isNotBlank(),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("CONTINUE", fontWeight = FontWeight.Black)
+                Text("Continue", fontWeight = FontWeight.SemiBold)
             }
+        }
+        if (name.isBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Add a name to continue",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -689,60 +787,73 @@ fun SystemStep(
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Text(
-                "SYSTEM",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-1).sp
-            )
+            SectionHeader(eyebrow = "Step 3 of 5", title = "Tuned for your device")
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
         StaggeredEntrance(index = 1) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            }
+                        }
                         Spacer(Modifier.width(12.dp))
-                        Text("HARDWARE SCAN", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("Quick hardware check", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
-                    
+
                     Spacer(Modifier.height(24.dp))
-                    
-                    InfoSpecRow("RAM CAPACITY", "${String.format("%.1f", specs?.totalRamGb ?: 0.0)} GB")
-                    Spacer(Modifier.height(8.dp))
-                    InfoSpecRow("ANDROID VERSION", specs?.androidVersion?.toString() ?: "Unknown")
-                    
-                    Spacer(Modifier.height(24.dp))
-                    
+
+                    InfoSpecRow("Memory", "${String.format("%.1f", specs?.totalRamGb ?: 0.0)} GB")
+                    Spacer(Modifier.height(10.dp))
+                    InfoSpecRow("Android version", specs?.androidVersion?.toString() ?: "Unknown")
+
+                    Spacer(Modifier.height(20.dp))
+
                     val ramFraction = ((specs?.totalRamGb ?: 0.0) / 16.0).toFloat().coerceIn(0f, 1f)
                     ToolzWavyLinearProgressIndicator(
                         progress = { ramFraction },
                         modifier = Modifier.fillMaxWidth().height(8.dp)
                     )
 
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(28.dp))
 
                     OnboardingToggleExpressive(
-                        title = "Performance Mode",
-                        desc = "Maximize speed by limiting FX",
+                        title = "Performance mode",
+                        desc = "Lighter animations, snappier feel",
                         icon = Icons.Rounded.Speed,
                         checked = performanceMode,
                         onCheckedChange = onPerformanceModeChange
                     )
-                    
-                    if (specs?.recommendPerformanceMode == true && !performanceMode) {
-                        Spacer(Modifier.height(16.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                            shape = MediumExpressiveShape,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("Recommended for your device", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+
+                    AnimatedVisibility(
+                        visible = specs?.recommendPerformanceMode == true && !performanceMode,
+                        enter = expandVertically(ExpressiveSpringIntSize) + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column {
+                            Spacer(Modifier.height(14.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                                shape = MediumExpressiveShape,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "We think this would run smoother on your device",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
                             }
                         }
                     }
@@ -750,15 +861,15 @@ fun SystemStep(
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 2) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("OPTIMIZE", fontWeight = FontWeight.Black)
+                Text("Continue", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -781,26 +892,21 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Text(
-                "INTELLIGENCE",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-1).sp
-            )
+            SectionHeader(eyebrow = "Step 4 of 5", title = "Turn on AI features")
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
         StaggeredEntrance(index = 1) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(24.dp)) {
-                    Text("AI ENGINE (GROQ)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Spacer(Modifier.height(16.dp))
-                    
+                    CardEyebrow("Groq API key")
+                    Spacer(Modifier.height(12.dp))
+
                     OutlinedTextField(
                         value = apiKey,
                         onValueChange = onApiKeyChange,
-                        placeholder = { Text("Groq API Key (Important)") },
+                        placeholder = { Text("Paste your key here") },
                         modifier = Modifier.fillMaxWidth(),
                         shape = SquircleShape,
                         singleLine = true,
@@ -815,35 +921,39 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
                         )
                     )
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(20.dp))
 
                     ToolzOutlinedExpressiveButton(
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))
                             context.startActivity(intent)
                         },
-                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape = MediumExpressiveShape
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("GET API KEY", fontWeight = FontWeight.Bold)
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Get a free key", fontWeight = FontWeight.SemiBold)
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(20.dp))
 
                     Surface(
                         onClick = { showGuide = true },
                         shape = MediumExpressiveShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.secondary)
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("Why Groq?", fontWeight = FontWeight.Bold)
-                                Text("Ultra-fast, private, and free AI layers.", style = MaterialTheme.typography.bodySmall)
+                                Text("Why Groq?", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "It's fast, free to start, and your key stays on this device.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             Icon(
                                 Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -856,15 +966,15 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 2) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text(if (apiKey.isBlank()) "BYPASS" else "CONNECT", fontWeight = FontWeight.Black)
+                Text(if (apiKey.isBlank()) "Skip for now" else "Continue", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -876,25 +986,33 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
             shape = ExtraLargeExpressiveShape
         ) {
             Column(Modifier.padding(28.dp).navigationBarsPadding()) {
-                Text("GROQ SETUP", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                Spacer(Modifier.height(24.dp))
+                Text("Setting up Groq", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
                 val steps = AiSettingsHelper.tutorials["Groq"] ?: emptyList()
                 steps.forEachIndexed { i, step ->
                     Row(Modifier.padding(vertical = 8.dp)) {
-                        Text("${i + 1}.", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(12.dp))
-                        Text(step)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("${i + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Text(step, modifier = Modifier.weight(1f))
                     }
                 }
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(28.dp))
                 ToolzExpressiveButton(
-                    onClick = { 
+                    onClick = {
                         scope.launch { sheetState.hide() }.invokeOnCompletion { showGuide = false }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = BouncyShape
                 ) {
-                    Text("DONE")
+                    Text("Got it")
                 }
             }
         }
@@ -955,6 +1073,14 @@ fun AccessStep(
     }
     val permissionsState = rememberMultiplePermissionsState(permissions)
 
+    val grantedCount = listOf(
+        permissionsState.allPermissionsGranted,
+        usageStatsGranted,
+        notificationListenerGranted,
+        accessibilityGranted,
+        shizukuAuthorized
+    ).count { it }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -962,55 +1088,65 @@ fun AccessStep(
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Text(
-                "ACCESS",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-1).sp
+            SectionHeader(
+                eyebrow = "Step 5 of 5",
+                title = "Choose what to share",
+                trailing = "$grantedCount/5 on"
             )
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(12.dp))
 
         StaggeredEntrance(index = 1) {
+            Text(
+                "Everything here is optional and stays on your device. Turn on only what's useful to you.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        StaggeredEntrance(index = 2) {
             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-                LazyColumn(modifier = Modifier.padding(24.dp).height(400.dp)) {
+                LazyColumn(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).height(400.dp)) {
                     item {
-                        Text("PROTOCOLS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(8.dp))
+                        CardEyebrow("Device access")
+                        Spacer(Modifier.height(4.dp))
                     }
 
                     item {
-                        ProtocolRow("Hardware Suite", "Camera, Mic & Location", Icons.Rounded.DeveloperBoard, permissionsState.allPermissionsGranted) {
+                        ProtocolRow("Camera, mic & location", "For scanning and location-based tools", Icons.Rounded.DeveloperBoard, permissionsState.allPermissionsGranted) {
                             permissionsState.launchMultiplePermissionRequest()
                         }
                     }
                     item {
-                        ProtocolRow("Storage Vault", "File processing & indexing", Icons.Rounded.Storage, false) {
+                        ProtocolRow("Files", "So Toolz can open and process files you pick", Icons.Rounded.Storage, false) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                               context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
                             } else {
-                               permissionsState.launchMultiplePermissionRequest()
+                                permissionsState.launchMultiplePermissionRequest()
                             }
                         }
                     }
                     item {
-                        ProtocolRow("Analytics", "Usage tracking protocols", Icons.Rounded.Analytics, usageStatsGranted) {
+                        ProtocolRow("Usage insights", "See time spent in apps, stays local", Icons.Rounded.Analytics, usageStatsGranted) {
                             context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                         }
                     }
                     item {
-                        ProtocolRow("System Vault", "Notification local indexing", Icons.Rounded.Security, notificationListenerGranted) {
+                        ProtocolRow("Notification history", "Search and revisit past notifications", Icons.Rounded.Security, notificationListenerGranted) {
                             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                         }
                     }
                     item {
-                        ProtocolRow("Control Bridge", "Advanced control integration", Icons.Rounded.Hub, accessibilityGranted) {
+                        ProtocolRow("Automation", "Lets Toolz tap through routine tasks for you", Icons.Rounded.Hub, accessibilityGranted) {
                             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         }
                     }
                     item {
-                        ProtocolRow("Shizuku Protocol", "Root-less system access", Icons.Rounded.Memory, shizukuAuthorized) {
+                        ProtocolRow("Shizuku", "Unlocks advanced tools without root", Icons.Rounded.Shield, shizukuAuthorized) {
                             if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
                                 // Already authorized
                             } else if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()) {
@@ -1022,31 +1158,32 @@ fun AccessStep(
                     }
 
                     item {
-                        Spacer(Modifier.height(32.dp))
-                        Text("STREAMS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(24.dp))
+                        CardEyebrow("Notifications")
+                        Spacer(Modifier.height(4.dp))
                     }
-                    
+
                     item {
-                        OnboardingToggleExpressive("Push Notifications", "Real-time updates", Icons.Rounded.NotificationsActive, notificationsEnabled, onNotificationsChange)
-                        Spacer(Modifier.height(12.dp))
+                        OnboardingToggleExpressive("Push notifications", "Real-time updates from Toolz", Icons.Rounded.NotificationsActive, notificationsEnabled, onNotificationsChange)
+                        Spacer(Modifier.height(10.dp))
                     }
                     item {
-                        OnboardingToggleExpressive("Notification Vault", "Secure local history", Icons.Rounded.VpnKey, vaultEnabled, onVaultChange)
+                        OnboardingToggleExpressive("Keep a local history", "Encrypted, on-device only", Icons.Rounded.VpnKey, vaultEnabled, onVaultChange)
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(36.dp))
 
-        StaggeredEntrance(index = 2) {
+        StaggeredEntrance(index = 3) {
             ToolzExpressiveButton(
                 onClick = onNext,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("AUTHORIZE & CONTINUE", fontWeight = FontWeight.Black)
+                Text("Continue", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -1071,63 +1208,115 @@ fun ReadyStep(name: String, onComplete: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         StaggeredEntrance(index = 0) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(240.dp)) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(220.dp)) {
                 Surface(
-                    modifier = Modifier.size(200.dp).graphicsLayer { alpha = 0.35f },
+                    modifier = Modifier.size(188.dp),
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                 ) {}
                 Surface(
                     shape = SquircleShape,
-                    modifier = Modifier.size(130.dp),
+                    modifier = Modifier.size(124.dp),
                     color = MaterialTheme.colorScheme.primary,
-                    tonalElevation = 6.dp
+                    tonalElevation = 5.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(72.dp))
+                        Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(60.dp))
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(40.dp))
 
         StaggeredEntrance(index = 1) {
             Text(
-                "READY",
-                style = MaterialTheme.typography.displayLarge,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-2).sp
-            )
-        }
-
-        StaggeredEntrance(index = 2) {
-            Text(
-                "Welcome ${name.ifBlank { "Explorer" }}, Toolz is now fully operational!",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                "You're all set",
+                style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
         }
 
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(10.dp))
+
+        StaggeredEntrance(index = 2) {
+            Text(
+                "Welcome, ${name.ifBlank { "friend" }}. Toolz is ready whenever you are.",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Normal,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(Modifier.height(56.dp))
 
         StaggeredEntrance(index = 3) {
             ToolzExpressiveButton(
                 onClick = onComplete,
-                modifier = Modifier.fillMaxWidth().height(80.dp),
+                modifier = Modifier.fillMaxWidth().height(64.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("LAUNCH DASHBOARD", fontWeight = FontWeight.Black, fontSize = 18.sp, letterSpacing = 1.sp)
-                Spacer(Modifier.width(12.dp))
-                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null)
+                Text("Start using Toolz", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Spacer(Modifier.width(10.dp))
+                Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
 // ── Shared ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SectionHeader(eyebrow: String, title: String, trailing: String? = null) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        Column {
+            Text(
+                eyebrow.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (trailing != null) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+            ) {
+                Text(
+                    trailing,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardEyebrow(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.8.sp
+    )
+}
 
 @Composable
 fun OnboardingToggleExpressive(
@@ -1137,21 +1326,27 @@ fun OnboardingToggleExpressive(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val containerColor by androidx.compose.animation.animateColorAsState(
+        targetValue = if (checked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = tween(300),
+        label = "toggle_container"
+    )
     Surface(
         onClick = { onCheckedChange(!checked) },
         shape = MediumExpressiveShape,
-        color = if (checked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = if (checked) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
+        color = containerColor,
+        border = if (checked) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, null, tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
+                Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f))
             }
+            Spacer(Modifier.width(8.dp))
             ExpressiveSwitch(checked, onCheckedChange)
         }
     }
@@ -1161,28 +1356,28 @@ fun OnboardingToggleExpressive(
 private fun ProtocolRow(title: String, desc: String, icon: ImageVector, granted: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = SquircleShape,
+        shape = SmallExpressiveShape,
         color = Color.Transparent,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(40.dp).clip(CircleShape).background(if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(if (granted) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(if (granted) Icons.Rounded.CheckCircle else icon, null, tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Bold)
-                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f))
             }
             if (!granted) {
                 Icon(
                     Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                 )
             }
         }
@@ -1192,26 +1387,48 @@ private fun ProtocolRow(title: String, desc: String, icon: ImageVector, granted:
 @Composable
 private fun InfoSpecRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-        Text(value, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+        Text(value, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SkipConfirmationDialogExpressive(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun SkipConfirmationDialogExpressive(
+    setupScore: Float = 0f,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
     BasicAlertDialog(onDismissRequest = onDismiss) {
         Surface(shape = ExtraLargeExpressiveShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
-                Spacer(Modifier.height(24.dp))
-                Text("SKIP SETUP?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                Spacer(Modifier.height(16.dp))
-                Text("Skipping setup might result in sub-optimal system calibration.", textAlign = TextAlign.Center)
-                Spacer(Modifier.height(32.dp))
-                ToolzExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("BACK") }
-                TextButton(onClick = onConfirm, modifier = Modifier.padding(top = 8.dp)) {
-                    Text("SKIP ANYWAY", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+            Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Insights, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("Skip setup?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    if (setupScore > 0f)
+                        "You're ${(setupScore * 100).toInt()}% through personalizing Toolz. You can always finish this later from Settings."
+                    else
+                        "No problem — you can personalize Toolz anytime from Settings.",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(28.dp))
+                ToolzExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("Keep going", fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(onClick = onConfirm, modifier = Modifier.padding(top = 6.dp)) {
+                    Text("Skip anyway", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -1323,8 +1540,8 @@ private fun hasNotificationListenerPermission(context: Context): Boolean {
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
     return try {
         val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
-        manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any { 
-            it.resolveInfo.serviceInfo.packageName == context.packageName 
+        manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
+            it.resolveInfo.serviceInfo.packageName == context.packageName
         } == true
     } catch (e: Exception) {
         false
