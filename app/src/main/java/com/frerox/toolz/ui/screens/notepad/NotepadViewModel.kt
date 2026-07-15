@@ -25,7 +25,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
 import org.json.JSONObject
-import retrofit2.HttpException
 import javax.inject.Inject
 
 private const val TAG = "NotepadViewModel"
@@ -286,7 +285,7 @@ class NotepadViewModel @Inject constructor(
             _isAiSummarizing.value = true
             _aiSummary.value       = null
 
-            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            val key = aiSettingsManager.getApiKey("Groq")
             if (key.isBlank()) {
                 _aiSummary.value = "⚠ Groq API key not configured. Go to AI Settings → Groq to add your key."
                 _isAiSummarizing.value = false
@@ -361,7 +360,7 @@ class NotepadViewModel @Inject constructor(
             _isAiStyling.value = true
             _aiStyle.value     = null
 
-            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            val key = aiSettingsManager.getApiKey("Groq")
             if (key.isBlank()) {
                 _isAiStyling.value = false
                 return@launch
@@ -449,7 +448,7 @@ Examples:
      */
     fun generateNoteAi(prompt: String?, onComplete: (AiGeneratedNote?) -> Unit) {
         viewModelScope.launch {
-            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            val key = aiSettingsManager.getApiKey("Groq")
             if (key.isBlank()) {
                 onComplete(null)
                 return@launch
@@ -509,7 +508,7 @@ JSON schema:
      */
     fun editNoteWithPromptAi(note: Note, prompt: String, onComplete: (AiGeneratedNote?) -> Unit) {
         viewModelScope.launch {
-            val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+            val key = aiSettingsManager.getApiKey("Groq")
             if (key.isBlank()) {
                 onComplete(null)
                 return@launch
@@ -590,23 +589,7 @@ JSON schema:
         initialKey: String,
         requestBlock: suspend (String) -> T,
     ): T {
-        try {
-            return requestBlock(initialKey)
-        } catch (e: HttpException) {
-            if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
-                val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
-                if (refreshed.source == ApiKeySource.REMOTE &&
-                    refreshed.value.isNotBlank() &&
-                    refreshed.value != initialKey
-                ) {
-                    return requestBlock(refreshed.value)
-                }
-                throw IllegalStateException(
-                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
-                )
-            }
-            throw e
-        }
+        return requestBlock(initialKey)
     }
 
     private fun parseAiStyle(raw: String): AiNoteStyle? {
