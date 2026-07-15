@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.*
 import android.util.Log
 import com.frerox.toolz.data.ai.AiSettingsManager
-import com.frerox.toolz.data.ai.ApiKeySource
 import com.frerox.toolz.data.ai.MessageContent
 import com.frerox.toolz.data.ai.OpenAiMessage
 import com.frerox.toolz.data.ai.OpenAiRequest
@@ -321,7 +320,7 @@ class FormulaOcrProcessor @Inject constructor(
 
     suspend fun runAiCleaner(rawText: String, language: OcrLanguage): String? {
         if (settingsRepository.offlineModeEnabled.first()) return null
-        val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+        val key = aiSettingsManager.getApiKey("Groq")
         if (key.isBlank()) return null
         val truncated = if (rawText.length > 10_000) rawText.take(10_000) + "…" else rawText
         return try {
@@ -356,7 +355,7 @@ class FormulaOcrProcessor @Inject constructor(
 
     suspend fun summarizePdf(text: String): String? {
         if (settingsRepository.offlineModeEnabled.first()) return null
-        val key = aiSettingsManager.resolveApiKeyWithRemoteSync("Groq").value
+        val key = aiSettingsManager.getApiKey("Groq")
         if (key.isBlank()) return null
         val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text
         return try {
@@ -395,22 +394,6 @@ class FormulaOcrProcessor @Inject constructor(
         initialKey: String,
         requestBlock: suspend (String) -> T,
     ): T {
-        try {
-            return requestBlock(initialKey)
-        } catch (e: HttpException) {
-            if (e.code() == 401 && !aiSettingsManager.hasUserApiKey("Groq")) {
-                val refreshed = aiSettingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
-                if (refreshed.source == ApiKeySource.REMOTE &&
-                    refreshed.value.isNotBlank() &&
-                    refreshed.value != initialKey
-                ) {
-                    return requestBlock(refreshed.value)
-                }
-                throw IllegalStateException(
-                    "The Toolz default key for Groq is unavailable. Refresh keys or add your own key in AI settings."
-                )
-            }
-            throw e
-        }
+        return requestBlock(initialKey)
     }
 }

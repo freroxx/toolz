@@ -107,8 +107,6 @@ class AiSettingsManager @Inject constructor(
     fun getApiKey(provider: String = getAiProvider()): String = resolveApiKey(provider).value
     fun hasUserApiKey(provider: String = getAiProvider()): Boolean = !prefs.getString(userKey(provider), null).isNullOrBlank()
 
-    fun isUsingDefaultKey(provider: String = getAiProvider()): Boolean = false
-
     fun getRawApiKey(provider: String = getAiProvider()): String = prefs.getString(userKey(provider), "").orEmpty()
 
     fun setApiKey(key: String, provider: String = getAiProvider()) {
