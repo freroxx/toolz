@@ -16,7 +16,7 @@ private const val PREFS_NAME = "ai_settings"
 
 private val PROVIDERS = listOf("Gemini", "ChatGPT", "Groq", "Claude", "DeepSeek", "OpenRouter")
 
-enum class ApiKeySource { USER, DEFAULT, REMOTE, NONE }
+enum class ApiKeySource { USER, NONE }
 data class ResolvedApiKey(val value: String, val source: ApiKeySource)
 
 @Singleton
@@ -32,7 +32,6 @@ class AiSettingsManager @Inject constructor(
         private const val KEY_EDITED_PROMPTS = "edited_prompts"
         private const val KEY_PROMPT_FORMAT = "prompt_format"
         private fun userKey(p: String) = "api_key_user_$p"
-        private fun remoteKey(p: String) = "api_key_remote_$p"
     }
 
     private val prefs: SharedPreferences by lazy { buildPrefs() }
@@ -101,55 +100,14 @@ class AiSettingsManager @Inject constructor(
         // 1. Check user-provided key
         prefs.getString(userKey(provider), null)?.trim()?.takeIf { it.isNotBlank() }
             ?.let { return ResolvedApiKey(it, ApiKeySource.USER) }
-        
-        // 2. Check remote key (synced from Toolz server)
-        prefs.getString(remoteKey(provider), null)?.trim()?.takeIf { it.isNotBlank() }
-            ?.let { return ResolvedApiKey(it, ApiKeySource.REMOTE) }
 
-        // 3. Check default key from BuildConfig (hardcoded)
-        AiSettingsHelper.getDefaultKey(provider).takeIf { it.isNotBlank() }
-            ?.let { return ResolvedApiKey(it, ApiKeySource.DEFAULT) }
-            
         return ResolvedApiKey("", ApiKeySource.NONE)
-    }
-
-    fun resolveApiKeyWithRemoteSync(provider: String = getAiProvider()): ResolvedApiKey {
-        return resolveApiKey(provider)
-    }
-
-    fun syncRemoteKeys(force: Boolean = false): Boolean {
-        // Placeholder for a remote key hehehe, I hope this works
-        // In a real scenario, this would fetch from a Firebase config or a custom API
-        return false
-    }
-
-    fun refreshRemoteKeys() {
-        syncRemoteKeys(force = true)
-    }
-
-    fun retrySyncKeys() {
-        syncRemoteKeys(force = true)
-    }
-
-    fun invalidateRemoteKey(provider: String, key: String) {
-        if (prefs.getString(remoteKey(provider), null) == key) {
-            prefs.edit().remove(remoteKey(provider)).apply()
-        }
-    }
-
-    fun refreshRemoteKeyAfterAuthFailure(provider: String, failedKey: String): ResolvedApiKey {
-        invalidateRemoteKey(provider, failedKey)
-        syncRemoteKeys(force = true)
-        return resolveApiKey(provider)
     }
 
     fun getApiKey(provider: String = getAiProvider()): String = resolveApiKey(provider).value
     fun hasUserApiKey(provider: String = getAiProvider()): Boolean = !prefs.getString(userKey(provider), null).isNullOrBlank()
-    
-    fun isUsingDefaultKey(provider: String = getAiProvider()): Boolean {
-        val source = resolveApiKey(provider).source
-        return source == ApiKeySource.DEFAULT || source == ApiKeySource.REMOTE
-    }
+
+    fun isUsingDefaultKey(provider: String = getAiProvider()): Boolean = false
 
     fun getRawApiKey(provider: String = getAiProvider()): String = prefs.getString(userKey(provider), "").orEmpty()
 
@@ -158,15 +116,6 @@ class AiSettingsManager @Inject constructor(
         prefs.edit().apply {
             if (s.isBlank()) remove(userKey(provider)) else putString(userKey(provider), s)
         }.apply()
-    }
-
-    fun setRemoteApiKey(key: String, provider: String) {
-        val s = key.trim()
-        if (s.isBlank()) {
-            prefs.edit().remove(remoteKey(provider)).apply()
-        } else {
-            prefs.edit().putString(remoteKey(provider), s).apply()
-        }
     }
 
     // ── Provider / model ───────────────────────────────────────────────────
