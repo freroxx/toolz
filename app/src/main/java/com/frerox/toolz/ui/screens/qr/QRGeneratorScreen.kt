@@ -52,6 +52,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveSlider
 import com.frerox.toolz.ui.components.ExpressiveSwitch
+import com.frerox.toolz.ui.components.SmallExpressiveShape
+import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.horizontalFadingEdges
@@ -208,7 +210,13 @@ fun QRGeneratorScreen(
             ) {
                 val cardShape = if (isFullScreen) RoundedCornerShape(0.dp) else RoundedCornerShape(40.dp)
                 ExpressiveCard(
-                    onClick = { isFullScreen = !isFullScreen },
+                    onClick = {
+                        if (qrBitmap != null) {
+                            isFullScreen = !isFullScreen
+                        } else {
+                            vibrationManager?.vibrateClick()
+                        }
+                    },
                     modifier = Modifier
                         .then(if (isFullScreen) Modifier.fillMaxSize() else Modifier.size(320.dp)),
                     shape = cardShape,
@@ -243,15 +251,23 @@ fun QRGeneratorScreen(
                     }
                 }
 
-                if (isFullScreen) {
-                    IconButton(
-                        onClick = { isFullScreen = false },
+                if (!isFullScreen && qrBitmap != null) {
+                    ToolzExpressiveIconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.updateInputText("")
+                        },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(24.dp)
-                            .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                            .padding(top = 36.dp, end = 36.dp)
+                            .size(36.dp),
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     ) {
-                        Icon(Icons.Rounded.Close, null, tint = Color.White)
+                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -328,8 +344,19 @@ fun QRGeneratorScreen(
                             maxLines = 5,
                             trailingIcon = {
                                 if (inputText.isNotEmpty()) {
-                                    IconButton(onClick = { viewModel.updateInputText("") }) {
-                                        Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    ToolzExpressiveIconButton(
+                                        onClick = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.updateInputText("")
+                                        },
+                                        modifier = Modifier.size(28.dp),
+                                        shape = SmallExpressiveShape,
+                                        colors = IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    ) {
+                                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
                                     }
                                 }
                             },
@@ -717,13 +744,6 @@ fun ChoiceChip(selected: Boolean, label: String, icon: androidx.compose.ui.graph
 fun QRPlaceholder() {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing)),
-        label = "rotation"
-    )
-
     val scale by infiniteTransition.animateFloat(
         initialValue = 0.8f,
         targetValue = 1.1f,
@@ -741,36 +761,6 @@ fun QRPlaceholder() {
     val primaryColor = MaterialTheme.colorScheme.primary
 
     Box(modifier = Modifier.size(220.dp), contentAlignment = Alignment.Center) {
-        // Morphing background shapes
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .rotate(rotation)
-            .alpha(0.15f)
-            .drawBehind {
-                val stroke = 2.dp.toPx()
-                drawRoundRect(
-                    color = primaryColor,
-                    topLeft = Offset(size.width * 0.1f, size.height * 0.1f),
-                    size = Size(size.width * 0.8f, size.height * 0.8f),
-                    cornerRadius = CornerRadius(40.dp.toPx()),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke)
-                )
-                
-                // Using correctly scoped rotate from DrawScope
-                withTransform({
-                    rotate(45f, Offset(size.width / 2, size.height / 2))
-                }) {
-                    drawRoundRect(
-                        color = primaryColor,
-                        topLeft = Offset(size.width * 0.2f, size.height * 0.2f),
-                        size = Size(size.width * 0.6f, size.height * 0.6f),
-                        cornerRadius = CornerRadius(20.dp.toPx()),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(stroke)
-                    )
-                }
-            }
-        )
-
         // Center Pulsing Icon
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
