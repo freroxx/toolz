@@ -82,6 +82,7 @@ fun SettingsScreen(
     val eventReminderNotifications by viewModel.eventReminderNotifications.collectAsState(initial = true)
     val pomodoroNotifications by viewModel.pomodoroNotifications.collectAsState(initial = true)
     val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
+    val caffeinateSummaryNotification by viewModel.caffeinateAutoSummaryNotification.collectAsState(initial = true)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
@@ -956,6 +957,16 @@ fun SettingsScreen(
                                             icon = Icons.Rounded.SystemUpdate,
                                             checked = appUpdateNotifications,
                                             onCheckedChange = { viewModel.setAppUpdateNotifications(it) }
+                                        )
+                                    }
+
+                                    if (matches(searchQuery, "caffeinate", "auto", "summary", "awake")) {
+                                        SettingsToggleItem(
+                                            title = "Auto-Caffeinate Summary",
+                                            subtitle = "Show active app count in notification",
+                                            icon = Icons.Rounded.Coffee,
+                                            checked = caffeinateSummaryNotification,
+                                            onCheckedChange = { viewModel.setCaffeinateAutoSummaryNotification(it) }
                                         )
                                     }
                                 }
