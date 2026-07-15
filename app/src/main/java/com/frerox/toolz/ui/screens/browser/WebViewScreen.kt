@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -126,7 +127,9 @@ fun WebViewScreen(
         viewModel.ensureTabExists(url)
     }
 
-    BackHandler(enabled = canGoBack) { webView?.goBack() }
+    BackHandler(enabled = canGoBack) {
+        webView?.goBack()
+    }
 
     // Handle Tab change
     LaunchedEffect(activeTabId) {
