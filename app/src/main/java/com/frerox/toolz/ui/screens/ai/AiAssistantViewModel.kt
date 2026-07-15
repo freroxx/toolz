@@ -58,7 +58,6 @@ data class AiSettingsUiState(
     val isTesting            : Boolean   = false,
     val testResult           : String?   = null,
     val isKeyValid           : Boolean   = true,
-    val isRemoteKeyAvailable : Boolean   = false,
     val editingConfig        : AiConfig? = null,
     val selectedIcon         : String    = "AUTO",
     val customIconUri        : String?   = null,
@@ -147,7 +146,6 @@ class AiAssistantViewModel @Inject constructor(
                 provider             = provider,
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = settingsManager.getSelectedModel(provider),
-                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(provider),
                 dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
                 promptFormat         = settingsManager.getPromptFormat()
             )
@@ -347,7 +345,6 @@ class AiAssistantViewModel @Inject constructor(
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = it.selectedModel.takeIf { model -> model in availableModels }
                     ?: AiSettingsHelper.getRecommendedModel(provider),
-                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(provider),
             )
         }
         validateKey()
@@ -432,7 +429,6 @@ class AiAssistantViewModel @Inject constructor(
                 selectedModel = config.model, editingConfig = config,
                 selectedIcon = config.iconRes,
                 customIconUri = config.customIconUri,
-                isRemoteKeyAvailable = settingsManager.isUsingDefaultKey(config.provider),
             )
         }
     }
@@ -780,11 +776,6 @@ Summarize this AI conversation as 3-6 concise bullet points.
     fun deleteChat(chat: AiChat) {
         viewModelScope.launch { aiDao.deleteChat(chat); if (_uiState.value.currentChatId == chat.id) createNewChat() }
     }
-
-    // ── Remote Keys ───────────────────────────────────────────────────────
-
-    fun refreshRemoteKeys() { settingsManager.refreshRemoteKeys() }
-    fun retrySyncKeys() { settingsManager.retrySyncKeys() }
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
