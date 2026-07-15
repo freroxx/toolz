@@ -3,14 +3,14 @@ package com.frerox.toolz.ui.screens.settings
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -19,12 +19,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.net.toUri
 import com.frerox.toolz.data.backup.BackupCategory
@@ -32,7 +31,7 @@ import com.frerox.toolz.data.backup.BackupItem
 import com.frerox.toolz.ui.components.*
 
 /**
- * Custom contract to support initial directory hint
+ * Custom contract to support initial directory hint.
  */
 class OpenDocumentWithInitial(private val initialUri: Uri?) : ActivityResultContracts.OpenDocument() {
     override fun createIntent(context: Context, input: Array<String>): Intent {
@@ -42,6 +41,21 @@ class OpenDocumentWithInitial(private val initialUri: Uri?) : ActivityResultCont
     }
 }
 
+/**
+ * BackupRestoreScreen.
+ *
+ * Redesign notes:
+ *  - Real M3 Expressive text: sentence case, standard type scale weights. The old
+ *    ALL-CAPS + FontWeight.Black + letterSpacing headers were poster-design, not M3 —
+ *    removed everywhere, including the "DO NOT CLOSE THE APP" shouting during progress.
+ *  - Color and shape now carry emphasis (tonal surfaces, a colored category icon,
+ *    a filled vs. outlined action pairing) instead of typographic loudness.
+ *  - Added a real confirmation state: after a backup or restore finishes, the action
+ *    card reflects that plainly ("Backup created just now") instead of just resetting
+ *    back to the same buttons with no memory of what happened.
+ *  - Custom interval now opens as a full ExpressiveCard-styled sheet-like dialog that
+ *    matches the rest of the screen instead of a plain system Dialog with a raw Slider.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRestoreScreen(
@@ -52,12 +66,11 @@ fun BackupRestoreScreen(
     val scrollState = rememberScrollState()
     var showCustomIntervalDialog by remember { mutableStateOf(false) }
 
-    // Directory Redirection Hint (Points precisely to Documents/Toolz_Backups)
+    // Directory hint: points the picker at Documents/Toolz_Backups.
     val initialUri = remember {
         "content://com.android.externalstorage.documents/document/primary%3ADocuments%2FToolz_Backups".toUri()
     }
-    
-    // Improved Picker with custom contract for initial URI and broad MIME support
+
     val backupPicker = rememberLauncherForActivityResult(
         contract = OpenDocumentWithInitial(initialUri)
     ) { uri: Uri? ->
@@ -67,8 +80,8 @@ fun BackupRestoreScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Backup & Restore",
-                subtitle = "Manage your data snapshots",
+                title = "Backup & restore",
+                subtitle = "Keep a copy of your data, or bring it back",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -84,24 +97,23 @@ fun BackupRestoreScreen(
                 .padding(padding)
                 .verticalScroll(scrollState)
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. Action Section (Primary backup/restore area)
             StaggeredEntrance(index = 0) {
                 ActionSection(
                     isExporting = uiState.isExporting,
                     isImporting = uiState.isImporting,
                     progress = uiState.progress,
                     onCreateBackup = { viewModel.createBackup() },
-                    onRestoreFile = { 
-                        backupPicker.launch(arrayOf("application/octet-stream", "*/*")) 
+                    onRestoreFile = {
+                        backupPicker.launch(arrayOf("application/octet-stream", "*/*"))
                     }
                 )
             }
 
-            // 2. Data Selection Area
             StaggeredEntrance(index = 1) {
-                GroupedSelectionHeader(
+                SectionHeader(
+                    title = "What to include",
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() }
                 )
@@ -118,7 +130,6 @@ fun BackupRestoreScreen(
                 }
             }
 
-            // 3. Automation Area
             StaggeredEntrance(index = BackupCategory.entries.size + 2) {
                 AutoBackupSection(
                     currentFrequency = uiState.backupFrequency,
@@ -128,7 +139,7 @@ fun BackupRestoreScreen(
                 )
             }
 
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(32.dp))
         }
     }
 
@@ -136,35 +147,35 @@ fun BackupRestoreScreen(
         CustomIntervalDialog(
             initialDays = uiState.customAutoBackupDays,
             onDismiss = { showCustomIntervalDialog = false },
-            onConfirm = { 
+            onConfirm = {
                 viewModel.setCustomAutoBackupDays(it)
                 viewModel.setBackupFrequency("Custom")
-                showCustomIntervalDialog = false 
+                showCustomIntervalDialog = false
             }
         )
     }
 }
 
 @Composable
-private fun GroupedSelectionHeader(
+private fun SectionHeader(
+    title: String,
     onSelectAll: () -> Unit,
     onSelectNone: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            "DATA SELECTION",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            letterSpacing = 1.2.sp
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
         )
         Row {
-            TextButton(onClick = onSelectAll) { Text("SELECT ALL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onSelectNone) { Text("NONE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onSelectAll) { Text("Select all", style = MaterialTheme.typography.labelLarge) }
+            TextButton(onClick = onSelectNone) { Text("None", style = MaterialTheme.typography.labelLarge) }
         }
     }
 }
@@ -179,7 +190,8 @@ private fun CategorySelectionCard(
 ) {
     val itemsInCategory = BackupItem.entries.filter { it.category == category }
     val selectedInCategory = itemsInCategory.filter { selectedItems.contains(it) }
-    val isAllSelected = selectedInCategory.size == itemsInCategory.size
+    val isAllSelected = selectedInCategory.isNotEmpty() && selectedInCategory.size == itemsInCategory.size
+    val isPartiallySelected = selectedInCategory.isNotEmpty() && !isAllSelected
 
     ExpressiveCard(
         onClick = { onToggleCategory(category) },
@@ -190,42 +202,55 @@ private fun CategorySelectionCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val icon = when(category) {
+                val icon: ImageVector = when (category) {
                     BackupCategory.PRODUCTIVITY -> Icons.Rounded.RocketLaunch
                     BackupCategory.SECURITY -> Icons.Rounded.VerifiedUser
                     BackupCategory.PERSONAL -> Icons.Rounded.Person
                     BackupCategory.SYSTEM -> Icons.Rounded.SettingsSuggest
                 }
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    color = if (isAllSelected) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = MaterialTheme.shapes.medium
                 ) {
                     Icon(
-                        icon, 
-                        null, 
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(8.dp).size(20.dp)
+                        icon,
+                        null,
+                        tint = if (isAllSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(10.dp).size(20.dp)
                     )
                 }
                 Spacer(Modifier.width(16.dp))
-                Text(
-                    category.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Checkbox(
-                    checked = isAllSelected,
-                    onCheckedChange = { onToggleCategory(category) },
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        category.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (selectedInCategory.isEmpty()) "Not included"
+                        else "${selectedInCategory.size} of ${itemsInCategory.size} included",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TriStateCheckbox(
+                    state = when {
+                        isAllSelected -> ToggleableState.On
+                        isPartiallySelected -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
+                    },
+                    onClick = { onToggleCategory(category) },
                     colors = CheckboxDefaults.colors(
                         checkedColor = MaterialTheme.colorScheme.primary,
                         uncheckedColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
-            
+
             Spacer(Modifier.height(16.dp))
-            
+
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -253,65 +278,99 @@ private fun ActionSection(
 ) {
     val isBusy = isExporting || isImporting
 
+    // Tracks what just finished so we can show real confirmation after the fact,
+    // without depending on backend state we can't see the shape of. Purely local UI
+    // memory for this screen visit.
+    var justCompleted by remember { mutableStateOf<String?>(null) }
+    var wasBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(isBusy) {
+        if (wasBusy && !isBusy) {
+            justCompleted = if (isExporting) "Backup created just now" else "Restore completed just now"
+        }
+        wasBusy = isBusy
+    }
+
     ExpressiveCard(
         onClick = {},
         modifier = Modifier.fillMaxWidth(),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        elevation = 4.dp
     ) {
         Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (isBusy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(48.dp),
-                    strokeWidth = 4.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    progress ?: "Processing...",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Please do not close the app",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ToolzExpressiveButton(
-                        onClick = onCreateBackup,
-                        modifier = Modifier.weight(1.5f),
-                    ) {
-                        Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("BACKUP")
+            AnimatedContent(targetState = isBusy, label = "backup_action_state") { busy ->
+                if (busy) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        ToolzWavyCircularProgressIndicator(
+                            modifier = Modifier.size(56.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            progress ?: if (isExporting) "Creating your backup" else "Restoring your data",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "This only takes a moment — keep the app open until it finishes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
                     }
-                    
-                    ToolzOutlinedExpressiveButton(
-                        onClick = onRestoreFile,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text("RESTORE")
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ToolzExpressiveButton(
+                                onClick = onCreateBackup,
+                                modifier = Modifier.weight(1.4f),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text("Create backup", fontWeight = FontWeight.SemiBold)
+                            }
+
+                            ToolzOutlinedExpressiveButton(
+                                onClick = onRestoreFile,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text("Restore")
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // Real confirmation, not just an action button — reflects what
+                        // actually just happened on this screen, if anything did.
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            shape = CircleShape
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (justCompleted != null) Icons.Rounded.CheckCircle else Icons.Rounded.FolderOpen,
+                                    null,
+                                    tint = if (justCompleted != null) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    justCompleted ?: "Saved to Documents/Toolz_Backups",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
-                }
-                Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Info, 
-                        null, 
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Stored in Documents/Toolz_Backups",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
                 }
             }
         }
@@ -326,14 +385,16 @@ private fun AutoBackupSection(
     onFrequencyChange: (String) -> Unit,
     onShowCustomInterval: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val options = listOf("Never", "Daily", "Weekly", "Monthly", "Custom")
+    val selectedIndex = options.indexOf(currentFrequency).coerceAtLeast(0)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "AUTOMATION",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp),
-            letterSpacing = 1.2.sp
+            "Automation",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp)
         )
 
         ExpressiveCard(
@@ -342,37 +403,47 @@ private fun AutoBackupSection(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Update, null, tint = MaterialTheme.colorScheme.tertiary)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "Scheduled Backups",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Spacer(Modifier.height(20.dp))
-                
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("Never", "Daily", "Weekly", "Monthly").forEach { option ->
-                        ExpressiveFilterChip(
-                            selected = currentFrequency == option,
-                            onClick = { onFrequencyChange(option) },
-                            label = { Text(option) }
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(
+                            Icons.Rounded.Update,
+                            null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(10.dp).size(20.dp)
                         )
                     }
-                    
-                    ExpressiveFilterChip(
-                        selected = currentFrequency == "Custom",
-                        onClick = onShowCustomInterval,
-                        label = { 
-                            Text(if (currentFrequency == "Custom") "Every $customDays days" else "Custom Interval") 
-                        }
-                    )
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            "Scheduled backups",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (currentFrequency == "Never") "Off — back up manually anytime"
+                            else if (currentFrequency == "Custom") "Every $customDays days"
+                            else currentFrequency,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+                Spacer(Modifier.height(20.dp))
+
+                ToolzConnectedButtonGroup(
+                    selectedIndex = if (currentFrequency == "Custom") 4 else selectedIndex,
+                    options = listOf(
+                        "Never", "Daily", "Weekly", "Monthly",
+                        if (currentFrequency == "Custom") "$customDays d" else "Custom"
+                    ),
+                    onOptionSelected = { index ->
+                        if (index == 4) onShowCustomInterval()
+                        else onFrequencyChange(options[index])
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -384,7 +455,7 @@ private fun CustomIntervalDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
-    var days by remember { mutableStateOf(initialDays) }
+    var days by remember { mutableStateOf(initialDays.coerceIn(1, 30)) }
 
     Dialog(onDismissRequest = onDismiss) {
         ExpressiveCard(
@@ -396,26 +467,53 @@ private fun CustomIntervalDialog(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        Icons.Rounded.Update,
+                        null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(14.dp).size(24.dp)
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
                 Text(
-                    "Custom Interval",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black
+                    "Custom interval",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Back up automatically every",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "$days",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        if (days == 1) " day" else " days",
+                        modifier = Modifier.padding(bottom = 8.dp, start = 4.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(Modifier.height(20.dp))
-                Text(
-                    "Backup every $days days",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.height(32.dp))
                 Slider(
                     value = days.toFloat(),
                     onValueChange = { days = it.toInt() },
                     valueRange = 1f..30f,
-                    steps = 29,
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                    steps = 28,
+                    modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(24.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -424,13 +522,13 @@ private fun CustomIntervalDialog(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("CANCEL")
+                        Text("Cancel")
                     }
                     ToolzExpressiveButton(
                         onClick = { onConfirm(days) },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("SET INTERVAL")
+                        Text("Set interval")
                     }
                 }
             }
