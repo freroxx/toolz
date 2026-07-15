@@ -17,7 +17,6 @@ import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import retrofit2.HttpException
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -181,7 +180,7 @@ class AiRepositoryImpl @Inject constructor(
             return@flow
         }
         val provider = providerOverride ?: settingsManager.getAiProvider()
-        val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
+        val keyState = settingsManager.resolveApiKey(provider)
         val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
         val searchEnabled = settingsRepository.aiSearchEnabled.first()
         
@@ -276,7 +275,7 @@ class AiRepositoryImpl @Inject constructor(
         history: List<AiMessage>
     ): Flow<Result<ChatRepository.ChatResponseChunk>> = flow {
         val provider = settingsManager.getAiProvider()
-        val keyState = settingsManager.resolveApiKeyWithRemoteSync(provider)
+        val keyState = settingsManager.resolveApiKey(provider)
         val modelName = settingsManager.getSelectedModel(provider)
         val groqKey = settingsManager.resolveApiKey("Groq")
 
@@ -328,7 +327,7 @@ class AiRepositoryImpl @Inject constructor(
 
     override fun testConnection(config: AiConfig): Flow<Result<String>> = flow {
         val key = config.apiKey.trim().ifBlank {
-            settingsManager.resolveApiKeyWithRemoteSync(config.provider).value
+            settingsManager.resolveApiKey(config.provider).value
         }
         emit(
             try {
@@ -407,12 +406,6 @@ class AiRepositoryImpl @Inject constructor(
         } else {
             executeProviderCall(provider, keyState.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         }
-    } catch (e: HttpException) {
-        if (e.code() == 401 && (keyState.source == ApiKeySource.REMOTE || keyState.source == ApiKeySource.DEFAULT)) {
-            refreshRemoteKeyAndRetry(provider, keyState.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
-        } else {
-            Result.failure(Exception(httpErrorMessage(e, provider, keyState.source)))
-        }
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -434,31 +427,6 @@ class AiRepositoryImpl @Inject constructor(
         "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         else -> Result.failure(Exception("Unknown provider: $provider"))
-    }
-
-    private suspend fun refreshRemoteKeyAndRetry(
-        provider: String,
-        failedKey: String,
-        modelName: String,
-        prompt: String,
-        history: List<AiMessage>,
-        image: Bitmap?,
-        searchEnabled: Boolean,
-        systemPromptOverride: String?
-    ): Result<ChatRepository.ChatResponseChunk> {
-        settingsManager.invalidateRemoteKey(provider, failedKey)
-        settingsManager.syncRemoteKeys(force = true)
-        val refreshedKey = settingsManager.resolveApiKey(provider)
-
-        if (refreshedKey.value.isBlank() || refreshedKey.value == failedKey) {
-            return Result.failure(Exception("Default key for $provider is invalid or unavailable."))
-        }
-
-        return try {
-            executeProviderCall(provider, refreshedKey.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
     }
 
     private suspend fun callGemini(
@@ -575,14 +543,4 @@ class AiRepositoryImpl @Inject constructor(
 
     private fun bitmapToBase64(bitmap: Bitmap): String = ByteArrayOutputStream().use { bos -> bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bos); Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP) }
     private fun cleanResponseText(text: String): String = text.replace("\uFEFF", "").trim()
-    private fun httpErrorMessage(e: HttpException, provider: String, keySource: ApiKeySource): String {
-        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
-        return when (e.code()) {
-            401 -> "Invalid $provider API key."
-            403 -> "Access denied ($provider)."
-            429 -> "Rate limit ($provider)."
-            400 -> "Bad request ($provider): ${body ?: e.message()}"
-            else -> "HTTP ${e.code()} from $provider."
-        }
-    }
 }

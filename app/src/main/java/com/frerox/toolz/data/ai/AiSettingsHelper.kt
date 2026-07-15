@@ -1,7 +1,5 @@
 package com.frerox.toolz.data.ai
 
-import com.frerox.toolz.BuildConfig
-
 /**
  * Stateless helper for AI provider metadata and lightweight validation.
  */
@@ -152,19 +150,6 @@ object AiSettingsHelper {
         }
     }
 
-    fun getDefaultKey(provider: String): String {
-        val key = when (provider) {
-            "Gemini" -> BuildConfig.GEMINI_DEFAULT
-            "ChatGPT" -> BuildConfig.CHATGPT_DEFAULT
-            "Groq" -> BuildConfig.GROQ_DEFAULT
-            "OpenRouter" -> BuildConfig.OPENROUTER_DEFAULT
-            "Claude" -> BuildConfig.CLAUDE_DEFAULT
-            "DeepSeek" -> BuildConfig.DEEPSEEK_DEFAULT
-            else -> ""
-        }
-        return if (isPlaceholder(key)) "" else key
-    }
-
     fun isPlaceholder(key: String): Boolean {
         if (key.isBlank()) return true
         val k = key.uppercase()
@@ -172,16 +157,6 @@ object AiSettingsHelper {
                 k == "MISSING" || k == "DEFAULT" || k == "UNDEFINED" ||
                 k == "NULL" || k == "API_KEY" || k.length < 10 ||
                 k.contains("INSERT_") || k.contains("KEY_HERE")
-    }
-
-    fun isDefaultKey(key: String): Boolean {
-        if (key.isBlank() || isPlaceholder(key)) return false
-        return key == BuildConfig.GEMINI_DEFAULT ||
-                key == BuildConfig.CHATGPT_DEFAULT ||
-                key == BuildConfig.GROQ_DEFAULT ||
-                key == BuildConfig.OPENROUTER_DEFAULT ||
-                key == BuildConfig.CLAUDE_DEFAULT ||
-                key == BuildConfig.DEEPSEEK_DEFAULT
     }
 
     fun isKnownModel(provider: String, model: String): Boolean {
