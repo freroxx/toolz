@@ -24,6 +24,11 @@ class SettingsRepository @Inject constructor(
     private val SHUTTER_SOUND_URI = stringPreferencesKey("shutter_sound_uri")
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
     
+    // Caffeinate
+    private val CAFFEINATE_AUTO_ALL_APPS = booleanPreferencesKey("caffeinate_auto_all_apps")
+    private val CAFFEINATE_AUTO_SUMMARY_NOTIFICATION = booleanPreferencesKey("caffeinate_auto_summary_notification")
+    private val ACCESSIBILITY_BRIDGE_WAS_ACTIVE = booleanPreferencesKey("accessibility_bridge_was_active")
+    
     // Timer & Stopwatch Settings
     private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
     private val STOPWATCH_KEEP_SCREEN_ON = booleanPreferencesKey("stopwatch_keep_screen_on")
@@ -274,12 +279,28 @@ class SettingsRepository @Inject constructor(
     val liveVpnNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_VPN_NOTIFICATIONS] ?: true }
     val liveDnsNotifications: Flow<Boolean> = dataStore.data.map { it[LIVE_DNS_NOTIFICATIONS] ?: false }
 
+    val caffeinateAutoAllApps: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTO_ALL_APPS] ?: false }
+    val caffeinateAutoSummaryNotification: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTO_SUMMARY_NOTIFICATION] ?: true }
+    val accessibilityBridgeWasActive: Flow<Boolean> = dataStore.data.map { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] ?: false }
+
     suspend fun setLiveVpnNotifications(enabled: Boolean) {
         dataStore.edit { it[LIVE_VPN_NOTIFICATIONS] = enabled }
     }
 
     suspend fun setLiveDnsNotifications(enabled: Boolean) {
         dataStore.edit { it[LIVE_DNS_NOTIFICATIONS] = enabled }
+    }
+
+    suspend fun setCaffeinateAutoAllApps(enabled: Boolean) {
+        dataStore.edit { it[CAFFEINATE_AUTO_ALL_APPS] = enabled }
+    }
+
+    suspend fun setCaffeinateAutoSummaryNotification(enabled: Boolean) {
+        dataStore.edit { it[CAFFEINATE_AUTO_SUMMARY_NOTIFICATION] = enabled }
+    }
+
+    suspend fun setAccessibilityBridgeWasActive(active: Boolean) {
+        dataStore.edit { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] = active }
     }
 
     // Download Settings
