@@ -226,7 +226,7 @@ class StepCounterViewModel @Inject constructor(
         val moveMin = StepTrackerUtils.calculateMoveMinutes(currentSteps)
 
         val availableProviders = AiSettingsHelper.providers.filter { 
-            aiSettingsManager.hasUserApiKey(it) || !AiSettingsHelper.isPlaceholder(AiSettingsHelper.getDefaultKey(it))
+            aiSettingsManager.hasUserApiKey(it)
         }
 
         // Analytics
