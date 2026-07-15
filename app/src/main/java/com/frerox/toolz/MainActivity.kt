@@ -157,10 +157,6 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         scheduleCleanup()
         scheduleUpdateCheck()
 
-        lifecycleScope.launch {
-            aiSettingsManager.syncRemoteKeys()
-        }
-
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
