@@ -22,9 +22,11 @@ import com.frerox.toolz.R
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.CaffeinateRepository
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import java.util.*
 import javax.inject.Inject
 
@@ -41,6 +43,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     
     @Inject
     lateinit var caffeinateRepository: CaffeinateRepository
+    
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
@@ -194,19 +199,32 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun checkCaffeinate(packageName: String) {
-        if (CaffeinateService.isRunning) return // Already running
-
         serviceScope.launch {
+            val autoAllApps = settingsRepository.caffeinateAutoAllApps.first()
             val autoEnabledPackages = withContext(Dispatchers.IO) {
                 caffeinateRepository.getAutoEnabledPackages()
             }
-            if (autoEnabledPackages.contains(packageName)) {
-                val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
-                    action = CaffeinateService.ACTION_START
+            
+            val isTargetApp = autoAllApps || autoEnabledPackages.contains(packageName)
+            
+            if (isTargetApp) {
+                // Should be running
+                if (!CaffeinateService.isRunning) {
+                    val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
+                        action = CaffeinateService.ACTION_AUTO_START
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                } else {
+            } else {
+                // Should not be running (if it was started automatically)
+                if (CaffeinateService.isRunning) {
+                    val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
+                        action = CaffeinateService.ACTION_AUTO_STOP
+                    }
                     startService(intent)
                 }
             }

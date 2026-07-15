@@ -20,12 +20,14 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.palette.graphics.Palette
 import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.WidgetUpdateManager
 import com.frerox.toolz.widget.glance.MusicGlanceWidget
@@ -45,7 +47,6 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var widgetUpdateJob: Job? = null
-    private var currentRotation = 0f
     
     private var sensorManager: SensorManager? = null
     private var acceleration = 0f
@@ -70,6 +71,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     @Inject
     lateinit var widgetUpdateManager: WidgetUpdateManager
+
+    @Inject
+    lateinit var musicRepository: MusicRepository
 
     private val playerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -221,6 +225,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }
             "SKIP_NEXT" -> player.seekToNext()
             "SKIP_PREV" -> player.seekToPrevious()
+            "TOGGLE_FAVORITE" -> {
+                serviceScope.launch {
+                    val currentMediaId = player.currentMediaItem?.mediaId
+                    if (currentMediaId != null) {
+                        val track = musicRepository.getTrackByUri(currentMediaId)
+                        if (track != null) {
+                            musicRepository.toggleFavorite(track)
+                            updateWidget()
+                        }
+                    }
+                }
+            }
         }
         updateWidget()
         return super.onStartCommand(intent, flags, startId)
@@ -230,12 +246,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         widgetUpdateJob?.cancel()
         widgetUpdateJob = serviceScope.launch {
             while (isActive) {
-                val rotationEnabled = settingsRepository.musicRotationEnabled.first()
-                if (player.isPlaying && rotationEnabled) {
-                    currentRotation = (currentRotation + 5f) % 360f
-                }
                 updateWidget()
-                delay(500) 
+                delay(1000)
             }
         }
     }
@@ -245,14 +257,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         updateWidget()
     }
 
+    private var lastAccentColor: String? = null
+
     private fun updateWidget(forceBitmapRefresh: Boolean = false) {
         val currentItem = player.currentMediaItem
-
+        val mediaId    = currentItem?.mediaId
+        
         serviceScope.launch {
             val artShape = settingsRepository.musicArtShape.first()
             val artUri   = currentItem?.mediaMetadata?.artworkUri?.toString()
             val title    = currentItem?.mediaMetadata?.title?.toString() ?: "Not Playing"
             val artist   = currentItem?.mediaMetadata?.artist?.toString() ?: "Tap to open Toolz"
+            val album    = currentItem?.mediaMetadata?.albumTitle?.toString()
 
             val duration = player.duration
             val position = player.currentPosition
@@ -268,6 +284,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     cachedProcessedBitmap = processThumbnail(it, artShape)
                     lastTrackUri = artUri
                     lastShape    = artShape
+                    
+                    // Extract accent color
+                    val palette = Palette.from(it).generate()
+                    val color = palette.getVibrantColor(palette.getMutedColor(Color.BLUE))
+                    lastAccentColor = String.format("#%06X", 0xFFFFFF and color)
                 }
             }
 
@@ -280,14 +301,29 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 } catch (_: Exception) { null }
             }
 
+            val isFavorite = if (mediaId != null) {
+                musicRepository.getTrackByUri(mediaId)?.isFavorite ?: false
+            } else false
+
+            val nextItem = if (player.hasNextMediaItem()) {
+                player.getMediaItemAt(player.currentMediaItemIndex + 1)
+            } else null
+            val nextTitle = nextItem?.mediaMetadata?.title?.toString()
+
             // Push state to Glance DataStore using the WidgetUpdateManager
             widgetUpdateManager.updateMusicWidget(
                 title = title,
                 artist = artist,
+                album = album,
                 progress = progress,
                 isPlaying = player.isPlaying,
+                hasNext = player.hasNextMediaItem(),
+                hasPrev = player.hasPreviousMediaItem(),
+                accentColor = lastAccentColor,
                 artShape = artShape,
-                artFilePath = artFilePath
+                artFilePath = artFilePath,
+                isFavorite = isFavorite,
+                nextTitle = nextTitle
             )
         }
     }

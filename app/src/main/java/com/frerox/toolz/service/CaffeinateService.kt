@@ -19,11 +19,23 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import android.service.quicksettings.TileService
 import android.content.ComponentName
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
+import com.frerox.toolz.data.focus.CaffeinateRepository
+import com.frerox.toolz.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class CaffeinateService : Service() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+    
+    @Inject
+    lateinit var caffeinateRepository: CaffeinateRepository
 
     private var screenWakeLock: PowerManager.WakeLock? = null
     private var cpuWakeLock: PowerManager.WakeLock? = null
@@ -37,7 +49,11 @@ class CaffeinateService : Service() {
     private var startTimeMillis: Long = 0
     private var reminderIntervalMinutes: Int = 30
     private var isInfinite: Boolean = false
+    private var isAutoMode: Boolean = false
     private var themeColor: Int = android.graphics.Color.BLUE
+    
+    private var autoAppsCount: Int = 0
+    private var summaryEnabled: Boolean = true
 
     companion object {
         private const val TAG = "CaffeinateService"
@@ -46,6 +62,8 @@ class CaffeinateService : Service() {
         
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
+        const val ACTION_AUTO_START = "ACTION_AUTO_START"
+        const val ACTION_AUTO_STOP = "ACTION_AUTO_STOP"
         const val ACTION_KEEP_GOING = "ACTION_KEEP_GOING"
         
         const val EXTRA_INTERVAL = "EXTRA_INTERVAL"
@@ -54,6 +72,9 @@ class CaffeinateService : Service() {
 
         private val _elapsedTimeFlow = MutableStateFlow(0L)
         val elapsedTimeFlow = _elapsedTimeFlow.asStateFlow()
+
+        private val _isAutoRunningFlow = MutableStateFlow(false)
+        val isAutoRunningFlow = _isAutoRunningFlow.asStateFlow()
 
         var isRunning = false
             private set
@@ -66,6 +87,17 @@ class CaffeinateService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        serviceScope.launch {
+            summaryEnabled = settingsRepository.caffeinateAutoSummaryNotification.first()
+            autoAppsCount = caffeinateRepository.getAutoEnabledPackages().size
+            if (settingsRepository.caffeinateAutoAllApps.first()) {
+                autoAppsCount = -1 // Indicates "All"
+            }
+            
+            // Bridge Alert Check
+            checkAccessibilityBridgeAlert()
+        }
+
         // Guaranteed startForeground call at the entry point
         val initialNotification = createNotification(currentNotificationText())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -77,13 +109,31 @@ class CaffeinateService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 isRunning = true
+                isAutoMode = false
+                _isAutoRunningFlow.value = false
                 reminderIntervalMinutes = intent.getIntExtra(EXTRA_INTERVAL, 30)
                 isInfinite = intent.getBooleanExtra(EXTRA_INFINITE, false)
                 themeColor = intent.getIntExtra(EXTRA_COLOR, android.graphics.Color.BLUE)
                 startCaffeinate()
             }
+            ACTION_AUTO_START -> {
+                if (!isRunning) {
+                    isRunning = true
+                    isAutoMode = true
+                    _isAutoRunningFlow.value = true
+                    reminderIntervalMinutes = 0
+                    isInfinite = true
+                    themeColor = intent.getIntExtra(EXTRA_COLOR, android.graphics.Color.BLUE)
+                    startCaffeinate()
+                }
+            }
             ACTION_STOP -> {
                 stopCaffeinate()
+            }
+            ACTION_AUTO_STOP -> {
+                if (isAutoMode) {
+                    stopCaffeinate()
+                }
             }
             ACTION_KEEP_GOING -> {
                 // Do nothing for now, since we removed reminders
@@ -95,6 +145,49 @@ class CaffeinateService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private suspend fun checkAccessibilityBridgeAlert() {
+        val wasActive = settingsRepository.accessibilityBridgeWasActive.first()
+        val isCurrentlyActive = isAccessibilityServiceEnabled()
+        
+        if (wasActive && !isCurrentlyActive && summaryEnabled) {
+            showBridgeDisconnectedNotification()
+        }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        return try {
+            val manager = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+            manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
+                it.resolveInfo.serviceInfo.packageName == packageName
+            } == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun showBridgeDisconnectedNotification() {
+        val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 3, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Accessibility Bridge Disconnected")
+            .setContentText("Auto-triggering is disabled. Tap to re-enable.")
+            .setSmallIcon(R.drawable.ic_coffee)
+            .setColor(android.graphics.Color.RED)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID + 2, notification)
     }
 
     private fun startCaffeinate() {
@@ -117,6 +210,8 @@ class CaffeinateService : Service() {
 
     private fun stopCaffeinate() {
         isRunning = false
+        isAutoMode = false
+        _isAutoRunningFlow.value = false
         startTimeMillis = 0
         _elapsedTimeFlow.value = 0
         notificationJob?.cancel()
@@ -200,8 +295,9 @@ class CaffeinateService : Service() {
     }
 
     private fun createNotification(contentText: String = "Screen will stay awake"): Notification {
+        val title = if (isAutoMode) "Auto-Caffeinate Active" else "Caffeinate is Active"
         return NotificationCompat.Builder(this, "caffeinate_channel")
-            .setContentTitle("Caffeinate is Active")
+            .setContentTitle(title)
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_coffee)
             .setOngoing(true)
@@ -284,6 +380,14 @@ class CaffeinateService : Service() {
             String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
         } else {
             String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+        }
+        
+        if (isAutoMode) {
+            val summaryText = if (summaryEnabled) {
+                val countText = if (autoAppsCount == -1) "all apps" else "$autoAppsCount ${if (autoAppsCount == 1) "app" else "apps"}"
+                "\nAuto-Caffeinate is enabled for $countText"
+            } else ""
+            return "Managing sleep for current app • $timeStr$summaryText"
         }
         
         return if (isInfinite) {
