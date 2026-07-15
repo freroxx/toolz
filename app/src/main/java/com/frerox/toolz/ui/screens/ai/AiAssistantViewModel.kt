@@ -38,8 +38,6 @@ data class AiAssistantUiState(
     val pendingConfig     : AiConfig?        = null,
     val selectedImage     : Bitmap?          = null,
     val streamingText     : String           = "",
-    val isSyncingKeys     : Boolean          = false,
-    val keysUnavailable   : Boolean          = false,
     val chatSummary       : String?          = null,
     val isSummarizing     : Boolean          = false,
     val isGeneratingTitle : Boolean          = false,
@@ -546,7 +544,7 @@ class AiAssistantViewModel @Inject constructor(
 
             val resolved = settingsManager.resolveApiKey(provider)
             if (resolved.source == ApiKeySource.NONE) {
-                _uiState.update { it.copy(error = "No API key. Add a key in Settings.", keysUnavailable = true) }
+                _uiState.update { it.copy(error = "No API key. Add a key in Settings.") }
                 return@launch
             }
 
@@ -560,7 +558,7 @@ class AiAssistantViewModel @Inject constructor(
             aiDao.insertMessage(AiMessage(chatId = currentId, text = text, isUser = true))
 
             val webSearchEnabled = _uiState.value.aiSearchEnabled
-            _uiState.update { it.copy(isLoading = true, error = null, quotaExceeded = false, selectedImage = null, streamingText = "", keysUnavailable = false, loadingPhaseText = if (webSearchEnabled) "Surfing the web" else "Analyzing") }
+            _uiState.update { it.copy(isLoading = true, error = null, quotaExceeded = false, selectedImage = null, streamingText = "", loadingPhaseText = if (webSearchEnabled) "Surfing the web" else "Analyzing") }
             
             loadingPhaseJob?.cancel()
             loadingPhaseJob = viewModelScope.launch {
@@ -747,7 +745,7 @@ Summarize this AI conversation as 3-6 concise bullet points.
         settingsManager.setAiProvider(provider)
         settingsManager.setSelectedModel(AiSettingsHelper.getRecommendedModel(provider))
         loadSettings()
-        _uiState.update { it.copy(error = null, quotaExceeded = false, keysUnavailable = false) }
+        _uiState.update { it.copy(error = null, quotaExceeded = false) }
         if (_uiState.value.messages.isNotEmpty()) createNewChat()
     }
 

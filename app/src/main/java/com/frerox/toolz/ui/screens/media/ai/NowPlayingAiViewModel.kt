@@ -1182,21 +1182,7 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     private suspend fun <T> runGroqRequest(initialKey: String, requestBlock: suspend (String) -> T): T {
-        return try {
-            requestBlock(initialKey)
-        } catch (e: HttpException) {
-            if (e.code() == 401 && !settingsManager.hasUserApiKey("Groq")) {
-                val refreshed = settingsManager.refreshRemoteKeyAfterAuthFailure("Groq", initialKey)
-                if ((refreshed.source == ApiKeySource.REMOTE || refreshed.source == ApiKeySource.DEFAULT)
-                    && refreshed.value.isNotBlank()
-                    && refreshed.value != initialKey
-                ) {
-                    return requestBlock(refreshed.value)
-                }
-                throw IllegalStateException("Toolz default Groq key is invalid. Please add your own key in AI Settings.")
-            }
-            throw e
-        }
+        return requestBlock(initialKey)
     }
 
     private suspend fun callGroq(apiKey: String, prompt: String): String? {

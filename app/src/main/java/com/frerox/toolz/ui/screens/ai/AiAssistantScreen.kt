@@ -288,18 +288,6 @@ fun AiAssistantScreen(
             Box(Modifier.fillMaxSize()) {
                 ExpressiveBackground(performanceMode)
                 Box(Modifier.fillMaxSize().padding(padding)) {
-                    AnimatedVisibility(
-                        visible = uiState.keysUnavailable,
-                        enter = expandVertically() + fadeIn(),
-                        exit  = shrinkVertically() + fadeOut(),
-                        modifier = Modifier.align(Alignment.TopCenter).zIndex(2f),
-                    ) {
-                        KeysUnavailableBanner(
-                            isSyncing = uiState.isSyncingKeys,
-                            onRetrySync = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
-                        )
-                    }
-
                     AnimatedContent(
                         targetState = isStarted,
                         transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(400)) },
@@ -319,7 +307,6 @@ fun AiAssistantScreen(
                                 onLongPress     = { selectedMessageForActions = it },
                                 onShowSources   = { selectedMessageForSources = it },
                                 onScrollBottom  = { scope.launch { listState.animateScrollToItem((uiState.messages.size - 1).coerceAtLeast(0)) } },
-                                onRetrySync     = { vibration?.vibrateTick(); viewModel.retrySyncKeys() },
                                 loadingPhaseText = uiState.loadingPhaseText,
                                 onDeepDive      = { viewModel.performDeepDive(it) },
                                 onDismissDeepDive = { viewModel.dismissDeepDive(it) },
@@ -560,7 +547,6 @@ fun ChatMessageList(
     onLongPress: (AiMessage) -> Unit,
     onShowSources: (AiMessage) -> Unit,
     onScrollBottom: () -> Unit,
-    onRetrySync: () -> Unit,
     loadingPhaseText: String?,
     onDeepDive: (AiMessage) -> Unit,
     onDismissDeepDive: (AiMessage) -> Unit,
@@ -607,7 +593,7 @@ fun ChatMessageList(
                     )
                 }
             }
-            if (error != null) item { ErrorMessage(error, onRetrySync) }
+            if (error != null) item { ErrorMessage(error) }
             item { Spacer(Modifier.height(100.dp)) }
         }
 
@@ -975,43 +961,16 @@ fun ActionRow(icon: ImageVector, label: String, color: Color, onClick: () -> Uni
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Keys Unavailable Banner
-// ─────────────────────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-fun KeysUnavailableBanner(isSyncing: Boolean, onRetrySync: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(12.dp), BouncyShape, MaterialTheme.colorScheme.errorContainer, border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(modifier = Modifier.size(36.dp), shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)) {
-                Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.VpnKeyOff, null, Modifier.size(18.dp), MaterialTheme.colorScheme.error) }
-            }
-            Column(Modifier.weight(1f)) {
-                Text("API Keys Unavailable", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                Text("Shared keys could not be synced.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f))
-            }
-            IconButton(onClick = onRetrySync, enabled = !isSyncing) {
-                if (isSyncing) ToolzWavyCircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.error, trackColor = Color.Transparent)
-                else Icon(Icons.Rounded.Sync, null, tint = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Error Message
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ErrorMessage(error: String, onRetry: () -> Unit) {
+fun ErrorMessage(error: String) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), LargeExpressiveShape, MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
             Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            ToolzExpressiveIconButton(onRetry, colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.12f)), shape = SmallExpressiveShape) {
-                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp), MaterialTheme.colorScheme.error)
-            }
         }
     }
 }
