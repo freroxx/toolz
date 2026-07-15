@@ -41,7 +41,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Page
 import java.io.File
-import retrofit2.HttpException
 import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.max
