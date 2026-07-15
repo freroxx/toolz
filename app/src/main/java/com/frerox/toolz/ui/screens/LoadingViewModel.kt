@@ -2,11 +2,9 @@ package com.frerox.toolz.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.frerox.toolz.data.ai.AiSettingsManager
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,7 +15,6 @@ import javax.inject.Inject
 @HiltViewModel
 class LoadingViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val aiSettingsManager: AiSettingsManager,
     private val updateRepository: UpdateRepository,
 ) : ViewModel() {
 
@@ -65,31 +62,18 @@ class LoadingViewModel @Inject constructor(
             _loadingMessage.value = "PREPARING WORKSPACE"
             _loadingProgress.value = 0.10f
 
-            // ── Stage 2 + 3: Run AI sync and update check concurrently ────
-            _loadingMessage.value = "SYNCING INTELLIGENCE"
+            // ── Stage 2 + 3: Run update check ────
+            _loadingMessage.value = "CHECKING FOR UPDATES"
             _loadingProgress.value = 0.30f
 
-            val aiJob = async {
-                try { aiSettingsManager.syncRemoteKeys() } catch (_: Exception) { false }
-            }
+            try {
+                val lastCheck = settingsRepository.lastUpdateCheck.first()
+                if (currentTime - lastCheck > 24 * 60 * 60 * 1000L) {
+                    updateRepository.checkForUpdates()
+                    settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
+                }
+            } catch (_: Exception) { /* Non-fatal */ }
 
-            val updateJob = async {
-                try {
-                    val lastCheck = settingsRepository.lastUpdateCheck.first()
-                    if (currentTime - lastCheck > 24 * 60 * 60 * 1000L) {
-                        updateRepository.checkForUpdates()
-                        settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
-                    }
-                } catch (_: Exception) { /* Non-fatal */ }
-            }
-
-            // AI sync finishes first (it's a no-op or fast network call) → advance to 60%
-            aiJob.await()
-            _loadingProgress.value = 0.60f
-            _loadingMessage.value = "CHECKING FOR UPDATES"
-
-            // Wait for update check → advance to 90%
-            updateJob.await()
             _loadingProgress.value = 0.90f
 
             // ── Stage 4: Complete ─────────────────────────────────────────
