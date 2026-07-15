@@ -266,11 +266,13 @@ fun ToolzFloatingToolbar(
     val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
     val isFlashlightOn by flashlightRepository?.isOn?.collectAsState(false) ?: remember { mutableStateOf(false) }
 
-    val hasActiveService = musicState?.isPlaying == true || 
-                          timerState?.isRunning == true || 
-                          stopwatchState?.isRunning == true || 
-                          pomodoroState?.isRunning == true || 
-                          recordingState?.isRecording == true || 
+    val hasActiveService = musicState?.isPlaying == true ||
+                          timerState?.isRunning == true ||
+                          timerState?.isRinging == true ||
+                          (timerState?.remainingTime ?: 0L) > 0L ||
+                          stopwatchState?.isRunning == true ||
+                          pomodoroState?.isRunning == true ||
+                          recordingState?.isRecording == true ||
                           isCaffeinated || isFlashlightOn ||
                           stepsState?.isEnabledInSettings == true
 

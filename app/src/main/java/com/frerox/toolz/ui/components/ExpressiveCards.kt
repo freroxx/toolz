@@ -47,8 +47,8 @@ fun ExpressiveCard(
         shape = shape,
         color = containerColor,
         contentColor = contentColor,
-        tonalElevation = if (performanceMode) 0.dp else elevation,
-        shadowElevation = if (performanceMode) 0.dp else elevation,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
         border = border
     ) {
         Column(content = content)

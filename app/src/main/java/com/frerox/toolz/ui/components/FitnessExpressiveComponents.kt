@@ -157,6 +157,8 @@ fun InteractiveFitnessChart(
     caloriesPer1k: Int = 40,
     stepLengthCm: Int = 75,
     chartMode: Int = 0, // 0 = Columns, 1 = Line, 2 = Both
+    metric: String = "Steps",
+    distanceUnit: String = "km",
     onDaySelected: (StepEntry?) -> Unit = {}
 ) {
     if (history.isEmpty()) {
@@ -222,8 +224,30 @@ fun InteractiveFitnessChart(
                             selectedIndex = tappedIndex
                             val entry = history[tappedIndex]
                             tooltipEntry = entry
-                            val maxSteps = max(goal, history.maxOf { it.steps }).toFloat().coerceAtLeast(1f)
-                            val progress = (entry.steps.toFloat() / maxSteps).coerceIn(0.05f, 1f)
+                            val metricGoal = when (metric) {
+                                "Steps" -> goal.toDouble()
+                                "Distance" -> StepTrackerUtils.calculateDistanceKm(goal, stepLengthCm)
+                                "Calories" -> StepTrackerUtils.calculateCalories(goal, caloriesPer1k).toDouble()
+                                "Active Time" -> StepTrackerUtils.calculateMoveMinutes(goal).toDouble()
+                                else -> goal.toDouble()
+                            }
+                            val maxVal = max(metricGoal, history.maxOf { e ->
+                                when (metric) {
+                                    "Steps" -> e.steps.toDouble()
+                                    "Distance" -> StepTrackerUtils.calculateDistanceKm(e.steps, stepLengthCm)
+                                    "Calories" -> StepTrackerUtils.calculateCalories(e.steps, caloriesPer1k).toDouble()
+                                    "Active Time" -> StepTrackerUtils.calculateMoveMinutes(e.steps).toDouble()
+                                    else -> e.steps.toDouble()
+                                }
+                            }).toFloat().coerceAtLeast(1f)
+                            val entryVal = when (metric) {
+                                "Steps" -> entry.steps.toDouble()
+                                "Distance" -> StepTrackerUtils.calculateDistanceKm(entry.steps, stepLengthCm)
+                                "Calories" -> StepTrackerUtils.calculateCalories(entry.steps, caloriesPer1k).toDouble()
+                                "Active Time" -> StepTrackerUtils.calculateMoveMinutes(entry.steps).toDouble()
+                                else -> entry.steps.toDouble()
+                            }
+                            val progress = (entryVal.toFloat() / maxVal).coerceIn(0.05f, 1f)
                             val barH = (size.height - 24.dp.toPx()) * progress
                             tooltipBarCenterX = tappedIndex * (barWidth + actualSpacing) + barWidth / 2f
                             tooltipBarTopY = (size.height - 24.dp.toPx()) - barH
@@ -237,10 +261,26 @@ fun InteractiveFitnessChart(
             val rawSpacing = if (history.size > 31) 0f else if (history.size > 7) 2.dp.toPx() else 6.dp.toPx()
             val barWidth = ((size.width - (history.size - 1) * rawSpacing) / history.size).coerceAtLeast(2f)
             val actualSpacing = if (history.size > 1) ((size.width - barWidth * history.size) / (history.size - 1)) else 0f
-            val maxSteps = max(goal, history.maxOf { it.steps }).toFloat().coerceAtLeast(1f)
+            
+            val metricGoal = when (metric) {
+                "Steps" -> goal.toDouble()
+                "Distance" -> StepTrackerUtils.calculateDistanceKm(goal, stepLengthCm)
+                "Calories" -> StepTrackerUtils.calculateCalories(goal, caloriesPer1k).toDouble()
+                "Active Time" -> StepTrackerUtils.calculateMoveMinutes(goal).toDouble()
+                else -> goal.toDouble()
+            }
+            val maxVal = max(metricGoal, history.maxOf { e ->
+                when (metric) {
+                    "Steps" -> e.steps.toDouble()
+                    "Distance" -> StepTrackerUtils.calculateDistanceKm(e.steps, stepLengthCm)
+                    "Calories" -> StepTrackerUtils.calculateCalories(e.steps, caloriesPer1k).toDouble()
+                    "Active Time" -> StepTrackerUtils.calculateMoveMinutes(e.steps).toDouble()
+                    else -> e.steps.toDouble()
+                }
+            }).toFloat().coerceAtLeast(1f)
 
             // Goal line
-            val goalY = chartHeight - (goal.toFloat() / maxSteps) * chartHeight
+            val goalY = chartHeight - (metricGoal.toFloat() / maxVal) * chartHeight
             val pathGoal = Path().apply {
                 moveTo(0f, goalY)
                 val dashLen = 12.dp.toPx()
@@ -264,7 +304,14 @@ fun InteractiveFitnessChart(
                 val points = mutableListOf<Offset>()
                 history.forEachIndexed { index, entry ->
                     val entranceProgress = barAnimations.getOrNull(index)?.value ?: 1f
-                    val dataProgress = (entry.steps.toFloat() / maxSteps).coerceIn(0.05f, 1f)
+                    val entryVal = when (metric) {
+                        "Steps" -> entry.steps.toDouble()
+                        "Distance" -> StepTrackerUtils.calculateDistanceKm(entry.steps, stepLengthCm)
+                        "Calories" -> StepTrackerUtils.calculateCalories(entry.steps, caloriesPer1k).toDouble()
+                        "Active Time" -> StepTrackerUtils.calculateMoveMinutes(entry.steps).toDouble()
+                        else -> entry.steps.toDouble()
+                    }
+                    val dataProgress = (entryVal.toFloat() / maxVal).coerceIn(0.05f, 1f)
                     val barHeight = chartHeight * dataProgress * entranceProgress
                     val x = index * (barWidth + actualSpacing) + barWidth / 2f
                     val y = chartHeight - barHeight
@@ -310,7 +357,14 @@ fun InteractiveFitnessChart(
             // Bars
             history.forEachIndexed { index, entry ->
                 val entranceProgress = barAnimations.getOrNull(index)?.value ?: 1f
-                val dataProgress = (entry.steps.toFloat() / maxSteps).coerceIn(0.05f, 1f)
+                val entryVal = when (metric) {
+                    "Steps" -> entry.steps.toDouble()
+                    "Distance" -> StepTrackerUtils.calculateDistanceKm(entry.steps, stepLengthCm)
+                    "Calories" -> StepTrackerUtils.calculateCalories(entry.steps, caloriesPer1k).toDouble()
+                    "Active Time" -> StepTrackerUtils.calculateMoveMinutes(entry.steps).toDouble()
+                    else -> entry.steps.toDouble()
+                }
+                val dataProgress = (entryVal.toFloat() / maxVal).coerceIn(0.05f, 1f)
                 val barHeight = chartHeight * dataProgress * entranceProgress
                 val x = index * (barWidth + actualSpacing)
                 val y = chartHeight - barHeight
@@ -334,11 +388,11 @@ fun InteractiveFitnessChart(
                     )
                 }
 
-                // Day label below bar
+                // Day label below bar (Mon/Tue/…)
                 val dayLabel = try {
-                    val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(entry.date)
-                    SimpleDateFormat("dd", Locale.getDefault()).format(d!!)
-                } catch (e: Exception) { 
+                    val d = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).parse(entry.date)
+                    SimpleDateFormat("EEE", Locale.ENGLISH).format(d!!)
+                } catch (e: Exception) {
                     when {
                         entry.date.startsWith("Week ") -> entry.date.replace("Week ", "W")
                         entry.date.length > 3 -> entry.date.take(3)
@@ -378,8 +432,8 @@ fun InteractiveFitnessChart(
                 Box(
                     modifier = Modifier
                         .offset(
-                            x = (tipX - 60.dp).coerceAtLeast(0.dp),
-                            y = (tipY - 88.dp).coerceAtLeast(0.dp)
+                             x = (tipX - 60.dp).coerceAtLeast(0.dp),
+                             y = (tipY - 88.dp).coerceAtLeast(0.dp)
                         )
                         .width(120.dp)
                 ) {
@@ -387,7 +441,9 @@ fun InteractiveFitnessChart(
                         entry = entry,
                         goal = goal,
                         caloriesPer1k = caloriesPer1k,
-                        stepLengthCm = stepLengthCm
+                        stepLengthCm = stepLengthCm,
+                        metric = metric,
+                        distanceUnit = distanceUnit
                     )
                 }
             }
@@ -404,7 +460,9 @@ private fun ChartTooltip(
     entry: StepEntry,
     goal: Int,
     caloriesPer1k: Int,
-    stepLengthCm: Int
+    stepLengthCm: Int,
+    metric: String,
+    distanceUnit: String
 ) {
     val goalMet = entry.steps >= goal
     val percent = if (goal > 0) (entry.steps * 100 / goal) else 0
@@ -412,7 +470,18 @@ private fun ChartTooltip(
         val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(entry.date)
         SimpleDateFormat("MMM d", Locale.getDefault()).format(d!!)
     } catch (e: Exception) { entry.date }
-    val calories = StepTrackerUtils.calculateCalories(entry.steps, caloriesPer1k)
+
+    val formattedValue = when (metric) {
+        "Steps" -> "%,d steps".format(entry.steps)
+        "Distance" -> {
+            val km = StepTrackerUtils.calculateDistanceKm(entry.steps, stepLengthCm)
+            val displayDist = if (distanceUnit == "km") km else StepTrackerUtils.kmToMiles(km)
+            "%.2f %s".format(displayDist, distanceUnit)
+        }
+        "Calories" -> "%d kcal".format(StepTrackerUtils.calculateCalories(entry.steps, caloriesPer1k))
+        "Active Time" -> "%d min".format(StepTrackerUtils.calculateMoveMinutes(entry.steps))
+        else -> "%,d steps".format(entry.steps)
+    }
 
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -444,14 +513,14 @@ private fun ChartTooltip(
                 )
             }
             Text(
-                text = "%,d".format(entry.steps),
+                text = formattedValue,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.inverseOnSurface
             )
             Text(
-                text = "$percent% of goal  •  ${calories}kcal",
+                text = "$percent% of goal",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                 color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.6f)
             )

@@ -1,7 +1,6 @@
 package com.frerox.toolz.ui.components
 
 import android.content.res.Configuration
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
@@ -11,15 +10,13 @@ import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaf
 import androidx.compose.material3.adaptive.navigation.rememberSupportingPaneScaffoldNavigator
 import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.theme.ToolzTheme
-import kotlinx.coroutines.launch
 
 /**
  * Premium carousel using HorizontalMultiBrowseCarousel for featured content.
@@ -65,13 +62,6 @@ fun ExpressiveListDetailPaneScaffold(
     modifier: Modifier = Modifier,
 ) {
     val navigator = rememberListDetailPaneScaffoldNavigator()
-    val scope = rememberCoroutineScope()
-
-    BackHandler(enabled = navigator.canNavigateBack()) {
-        scope.launch {
-            navigator.navigateBack()
-        }
-    }
 
     ListDetailPaneScaffold(
         directive = navigator.scaffoldDirective,
@@ -101,13 +91,6 @@ fun ExpressiveSupportingPaneScaffold(
     modifier: Modifier = Modifier,
 ) {
     val navigator = rememberSupportingPaneScaffoldNavigator()
-    val scope = rememberCoroutineScope()
-
-    BackHandler(enabled = navigator.canNavigateBack()) {
-        scope.launch {
-            navigator.navigateBack()
-        }
-    }
 
     SupportingPaneScaffold(
         directive = navigator.scaffoldDirective,
