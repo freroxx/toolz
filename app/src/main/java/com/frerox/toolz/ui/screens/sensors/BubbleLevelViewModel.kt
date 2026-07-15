@@ -20,8 +20,18 @@ import javax.inject.Inject
 data class BubbleState(
     val x: Float = 0f,
     val y: Float = 0f,
-    val isListening: Boolean = false
+    val rawX: Float = 0f,
+    val rawY: Float = 0f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val isHeld: Boolean = false,
+    val isListening: Boolean = false,
+    val mode: LevelMode = LevelMode.BULLSEYE
 )
+
+enum class LevelMode {
+    BULLSEYE, HORIZONTAL, VERTICAL
+}
 
 @HiltViewModel
 class BubbleLevelViewModel @Inject constructor(
@@ -35,7 +45,7 @@ class BubbleLevelViewModel @Inject constructor(
     val bubbleState: StateFlow<BubbleState> = _bubbleState.asStateFlow()
 
     // Low-pass filter constant
-    private val alpha = 0.2f
+    private val alpha = 0.15f // Smoother for expressive feel
     private var currentX = 0f
     private var currentY = 0f
 
@@ -51,13 +61,46 @@ class BubbleLevelViewModel @Inject constructor(
         _bubbleState.update { it.copy(isListening = false) }
     }
 
+    fun calibrate() {
+        _bubbleState.update { 
+            it.copy(
+                offsetX = currentX,
+                offsetY = currentY
+            )
+        }
+    }
+
+    fun resetCalibration() {
+        _bubbleState.update { 
+            it.copy(
+                offsetX = 0f,
+                offsetY = 0f
+            )
+        }
+    }
+
+    fun toggleHold() {
+        _bubbleState.update { it.copy(isHeld = !it.isHeld) }
+    }
+
+    fun setMode(mode: LevelMode) {
+        _bubbleState.update { it.copy(mode = mode) }
+    }
+
     override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER && !_bubbleState.value.isHeld) {
             // Apply low-pass filter for smoother bubble movement
             currentX = currentX + alpha * (event.values[0] - currentX)
             currentY = currentY + alpha * (event.values[1] - currentY)
             
-            _bubbleState.update { it.copy(x = currentX, y = currentY) }
+            _bubbleState.update { 
+                it.copy(
+                    rawX = currentX,
+                    rawY = currentY,
+                    x = currentX - it.offsetX,
+                    y = currentY - it.offsetY
+                )
+            }
         }
     }
 
