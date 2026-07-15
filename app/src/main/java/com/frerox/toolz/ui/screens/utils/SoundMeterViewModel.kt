@@ -22,6 +22,12 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
     private val _decibels = MutableStateFlow(0f)
     val decibels: StateFlow<Float> = _decibels.asStateFlow()
 
+    private val _maxDecibels = MutableStateFlow(0f)
+    val maxDecibels: StateFlow<Float> = _maxDecibels.asStateFlow()
+
+    private val _decibelHistory = MutableStateFlow<List<Float>>(emptyList())
+    val decibelHistory: StateFlow<List<Float>> = _decibelHistory.asStateFlow()
+
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
@@ -62,7 +68,18 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
                         val amplitude = Math.sqrt(sum / readSize)
                         // Reference level for dB is subjective here, using 1.0 as a base
                         val db = if (amplitude > 0) 20 * log10(amplitude) else 0.0
-                        _decibels.value = db.toFloat()
+                        val dbFloat = db.toFloat()
+                        _decibels.value = dbFloat
+                        if (dbFloat > _maxDecibels.value) {
+                            _maxDecibels.value = dbFloat
+                        }
+                        
+                        val currentHistory = _decibelHistory.value.toMutableList()
+                        currentHistory.add(dbFloat)
+                        if (currentHistory.size > 50) {
+                            currentHistory.removeAt(0)
+                        }
+                        _decibelHistory.value = currentHistory
                     }
                     delay(100)
                 }
@@ -73,6 +90,10 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
         }
     }
 
+    fun resetMax() {
+        _maxDecibels.value = 0f
+    }
+
     fun stopRecording() {
         _isRecording.value = false
         recordingJob?.cancel()
@@ -80,6 +101,7 @@ class SoundMeterViewModel @Inject constructor() : ViewModel() {
         audioRecord?.release()
         audioRecord = null
         _decibels.value = 0f
+        _decibelHistory.value = emptyList()
     }
 
     override fun onCleared() {
