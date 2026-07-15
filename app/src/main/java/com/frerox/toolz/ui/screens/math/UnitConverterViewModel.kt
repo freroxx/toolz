@@ -12,13 +12,35 @@ enum class ConversionType {
     LENGTH, WEIGHT, TEMPERATURE, AREA, VOLUME, SPEED, TIME, DIGITAL_STORAGE, ENERGY, FORCE, PRESSURE, POWER, CURRENCY
 }
 
+/** A single "from -> to" pair the user has used before, per type. Used to power the quick-history chips. */
+data class ConversionHistoryEntry(
+    val type: ConversionType,
+    val fromUnit: String,
+    val toUnit: String
+)
+
 data class UnitConverterState(
     val type: ConversionType = ConversionType.LENGTH,
     val inputValue: String = "1",
     val outputValue: String = "",
     val fromUnit: String = "Meter",
     val toUnit: String = "Kilometer",
-    val availableUnits: List<String> = emptyList()
+    val availableUnits: List<String> = emptyList(),
+    // Pinned units per conversion type (shown first in the picker). Long-press a unit to toggle.
+    val pinnedUnits: Map<ConversionType, Set<String>> = emptyMap(),
+    // Most recent distinct from/to pairs, most recent first, capped at 3.
+    val history: List<ConversionHistoryEntry> = emptyList(),
+    // A short human-readable line describing the active multiplier, e.g. "x 0.3048" or "(C x 9/5) + 32".
+    val formulaHint: String = "",
+    // True only for CURRENCY, used to render the "approx." tag since rates are static/demo values.
+    val isApproximate: Boolean = false,
+    // 0f..1f, log-scaled magnitude of the from->to multiplier. Drives the Dial's filled arc so
+    // the ring communicates how large the conversion's scale jump is (e.g. Byte -> Bit fills the
+    // ring almost fully; Meter -> Yard barely fills it). Not used for any actual math.
+    val dialSweep: Float = 0.5f,
+    // Starred "from -> to" pairs a person wants pinned at the very top of the History row,
+    // independent of recency. Keyed by type so favorites don't bleed across categories.
+    val favorites: Map<ConversionType, List<ConversionHistoryEntry>> = emptyMap()
 )
 
 @HiltViewModel
@@ -43,6 +65,14 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
         ConversionType.CURRENCY to listOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "INR", "BRL", "RUB", "KRW", "SGD", "NZD", "MXN", "HKD", "IDR", "TRY", "SAR", "AED")
     )
 
+    /** Returns the unit list for [type] with pinned units (if any) sorted to the front, order preserved otherwise. */
+    fun unitsFor(type: ConversionType): List<String> {
+        val base = unitsMap[type] ?: return emptyList()
+        val pinned = _uiState.value.pinnedUnits[type].orEmpty()
+        if (pinned.isEmpty()) return base
+        return base.sortedBy { if (it in pinned) 0 else 1 }
+    }
+
     init {
         val initialType = ConversionType.LENGTH
         val units = unitsMap[initialType]!!
@@ -51,8 +81,16 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     }
 
     fun onTypeChange(type: ConversionType) {
-        val units = unitsMap[type]!!
-        _uiState.update { it.copy(type = type, availableUnits = units, fromUnit = units[0], toUnit = if (units.size > 1) units[1] else units[0]) }
+        val units = unitsFor(type)
+        _uiState.update {
+            it.copy(
+                type = type,
+                availableUnits = units,
+                fromUnit = units[0],
+                toUnit = if (units.size > 1) units[1] else units[0],
+                isApproximate = type == ConversionType.CURRENCY
+            )
+        }
         convert()
     }
 
@@ -64,38 +102,182 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     fun onFromUnitChange(unit: String) {
         _uiState.update { it.copy(fromUnit = unit) }
         convert()
+        recordHistory()
     }
 
     fun onToUnitChange(unit: String) {
         _uiState.update { it.copy(toUnit = unit) }
         convert()
+        recordHistory()
     }
 
     fun swapUnits() {
         _uiState.update { it.copy(fromUnit = it.toUnit, toUnit = it.fromUnit) }
         convert()
+        recordHistory()
+    }
+
+    /** Toggles whether [unit] is pinned to the top of its category's unit list. */
+    fun togglePinned(type: ConversionType, unit: String) {
+        _uiState.update { state ->
+            val current = state.pinnedUnits[type].orEmpty()
+            val updated = if (unit in current) current - unit else current + unit
+            val newPinned = state.pinnedUnits + (type to updated)
+            state.copy(
+                pinnedUnits = newPinned,
+                availableUnits = unitsFor(type).let { base ->
+                    if (updated.isEmpty()) base else base.sortedBy { if (it in updated) 0 else 1 }
+                }
+            )
+        }
+    }
+
+    /** Toggles whether the current from/to pair is starred as a favorite for its type. */
+    fun toggleFavorite() {
+        val s = _uiState.value
+        val entry = ConversionHistoryEntry(s.type, s.fromUnit, s.toUnit)
+        _uiState.update {
+            val current = it.favorites[it.type].orEmpty()
+            val exists = current.any { f -> f.fromUnit == entry.fromUnit && f.toUnit == entry.toUnit }
+            val updated = if (exists) {
+                current.filterNot { f -> f.fromUnit == entry.fromUnit && f.toUnit == entry.toUnit }
+            } else {
+                (current + entry).takeLast(6)
+            }
+            it.copy(favorites = it.favorites + (it.type to updated))
+        }
+    }
+
+    fun isCurrentFavorite(): Boolean {
+        val s = _uiState.value
+        return s.favorites[s.type].orEmpty().any { it.fromUnit == s.fromUnit && it.toUnit == s.toUnit }
+    }
+
+    /** Restores a from/to pair from the quick-history row. */
+    fun applyHistory(entry: ConversionHistoryEntry) {
+        val units = unitsFor(entry.type)
+        _uiState.update {
+            it.copy(
+                type = entry.type,
+                availableUnits = units,
+                fromUnit = entry.fromUnit,
+                toUnit = entry.toUnit,
+                isApproximate = entry.type == ConversionType.CURRENCY
+            )
+        }
+        convert()
+    }
+
+    private fun recordHistory() {
+        val s = _uiState.value
+        val entry = ConversionHistoryEntry(s.type, s.fromUnit, s.toUnit)
+        _uiState.update {
+            val withoutDupe = it.history.filterNot { h -> h.type == entry.type && h.fromUnit == entry.fromUnit && h.toUnit == entry.toUnit }
+            it.copy(history = (listOf(entry) + withoutDupe).take(3))
+        }
     }
 
     private fun convert() {
         val input = _uiState.value.inputValue.toDoubleOrNull() ?: 0.0
-        val result = when (_uiState.value.type) {
-            ConversionType.LENGTH -> convertLength(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.WEIGHT -> convertWeight(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.TEMPERATURE -> convertTemp(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.AREA -> convertArea(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.VOLUME -> convertVolume(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.SPEED -> convertSpeed(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.TIME -> convertTime(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.DIGITAL_STORAGE -> convertDigital(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.ENERGY -> convertEnergy(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.FORCE -> convertForce(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.PRESSURE -> convertPressure(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.POWER -> convertPower(input, _uiState.value.fromUnit, _uiState.value.toUnit)
-            ConversionType.CURRENCY -> convertCurrency(input, _uiState.value.fromUnit, _uiState.value.toUnit)
+        val from = _uiState.value.fromUnit
+        val to = _uiState.value.toUnit
+        val type = _uiState.value.type
+
+        val result = when (type) {
+            ConversionType.LENGTH -> convertLength(input, from, to)
+            ConversionType.WEIGHT -> convertWeight(input, from, to)
+            ConversionType.TEMPERATURE -> convertTemp(input, from, to)
+            ConversionType.AREA -> convertArea(input, from, to)
+            ConversionType.VOLUME -> convertVolume(input, from, to)
+            ConversionType.SPEED -> convertSpeed(input, from, to)
+            ConversionType.TIME -> convertTime(input, from, to)
+            ConversionType.DIGITAL_STORAGE -> convertDigital(input, from, to)
+            ConversionType.ENERGY -> convertEnergy(input, from, to)
+            ConversionType.FORCE -> convertForce(input, from, to)
+            ConversionType.PRESSURE -> convertPressure(input, from, to)
+            ConversionType.POWER -> convertPower(input, from, to)
+            ConversionType.CURRENCY -> convertCurrency(input, from, to)
         }
-        _uiState.update { 
-            it.copy(outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'))
+
+        val hint = formulaHint(type, from, to)
+        val sweep = dialSweepFor(type, from, to)
+
+        _uiState.update {
+            it.copy(
+                outputValue = if (result % 1.0 == 0.0) result.toLong().toString() else String.format("%.6f", result).trimEnd('0').trimEnd('.'),
+                formulaHint = hint,
+                dialSweep = sweep
+            )
         }
+    }
+
+    /**
+     * Log-scales the magnitude of the from->to multiplier into a 0.05f..1f fill fraction for
+     * the Dial. A multiplier of 1 (or a same-unit no-op) reads as a small "resting" arc; very
+     * large or very small multipliers (e.g. Byte -> Bit at 8x, or Kilometer -> Millimeter at
+     * 1,000,000x) fill most or all of the ring. Purely cosmetic — the real multiplier used for
+     * the displayed result always comes from the type-specific convert functions above.
+     */
+    private fun dialSweepFor(type: ConversionType, from: String, to: String): Float {
+        if (from == to) return 0.08f
+        if (type == ConversionType.TEMPERATURE) return 0.55f
+        val multiplier = when (type) {
+            ConversionType.LENGTH -> convertLength(1.0, from, to)
+            ConversionType.WEIGHT -> convertWeight(1.0, from, to)
+            ConversionType.AREA -> convertArea(1.0, from, to)
+            ConversionType.VOLUME -> convertVolume(1.0, from, to)
+            ConversionType.SPEED -> convertSpeed(1.0, from, to)
+            ConversionType.TIME -> convertTime(1.0, from, to)
+            ConversionType.DIGITAL_STORAGE -> convertDigital(1.0, from, to)
+            ConversionType.ENERGY -> convertEnergy(1.0, from, to)
+            ConversionType.FORCE -> convertForce(1.0, from, to)
+            ConversionType.PRESSURE -> convertPressure(1.0, from, to)
+            ConversionType.POWER -> convertPower(1.0, from, to)
+            ConversionType.CURRENCY -> convertCurrency(1.0, from, to)
+            ConversionType.TEMPERATURE -> 1.0
+        }
+        // log10 distance from 1.0, clamped to a reasonable visual range of +/- 6 orders of magnitude.
+        val logDistance = kotlin.math.abs(kotlin.math.log10(multiplier.coerceIn(1e-12, 1e12)))
+        val normalized = (logDistance / 6.0).coerceIn(0.0, 1.0)
+        return (0.1f + normalized.toFloat() * 0.85f).coerceIn(0.05f, 1f)
+    }
+
+    /** Builds a short, human-readable description of the multiplier/formula in effect, shown under the ribbon. */
+    private fun formulaHint(type: ConversionType, from: String, to: String): String {
+        if (from == to) return "Same unit"
+        if (type == ConversionType.TEMPERATURE) {
+            return when {
+                from == "Celsius" && to == "Fahrenheit" -> "(C x 9/5) + 32"
+                from == "Fahrenheit" && to == "Celsius" -> "(F - 32) x 5/9"
+                from == "Celsius" && to == "Kelvin" -> "C + 273.15"
+                from == "Kelvin" && to == "Celsius" -> "K - 273.15"
+                from == "Fahrenheit" && to == "Kelvin" -> "(F - 32) x 5/9 + 273.15"
+                from == "Kelvin" && to == "Fahrenheit" -> "(K - 273.15) x 9/5 + 32"
+                else -> ""
+            }
+        }
+        // For linear/ratio-based categories, back out the effective multiplier by converting 1.0 unit.
+        val multiplier = when (type) {
+            ConversionType.LENGTH -> convertLength(1.0, from, to)
+            ConversionType.WEIGHT -> convertWeight(1.0, from, to)
+            ConversionType.AREA -> convertArea(1.0, from, to)
+            ConversionType.VOLUME -> convertVolume(1.0, from, to)
+            ConversionType.SPEED -> convertSpeed(1.0, from, to)
+            ConversionType.TIME -> convertTime(1.0, from, to)
+            ConversionType.DIGITAL_STORAGE -> convertDigital(1.0, from, to)
+            ConversionType.ENERGY -> convertEnergy(1.0, from, to)
+            ConversionType.FORCE -> convertForce(1.0, from, to)
+            ConversionType.PRESSURE -> convertPressure(1.0, from, to)
+            ConversionType.POWER -> convertPower(1.0, from, to)
+            ConversionType.CURRENCY -> convertCurrency(1.0, from, to)
+            ConversionType.TEMPERATURE -> 1.0
+        }
+        val formatted = if (multiplier >= 1000 || multiplier < 0.001) {
+            String.format("%.4e", multiplier)
+        } else {
+            String.format("%.6f", multiplier).trimEnd('0').trimEnd('.')
+        }
+        return "x $formatted"
     }
 
     private fun convertLength(value: Double, from: String, to: String): Double {
@@ -117,13 +299,13 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     private fun convertTemp(value: Double, from: String, to: String): Double {
         val inCelsius = when (from) {
             "Celsius" -> value
-            "Fahrenheit" -> (value - 32) * 5/9
+            "Fahrenheit" -> (value - 32) * 5 / 9
             "Kelvin" -> value - 273.15
             else -> value
         }
         return when (to) {
             "Celsius" -> inCelsius
-            "Fahrenheit" -> (inCelsius * 9/5) + 32
+            "Fahrenheit" -> (inCelsius * 9 / 5) + 32
             "Kelvin" -> inCelsius + 273.15
             else -> inCelsius
         }
@@ -203,35 +385,13 @@ class UnitConverterViewModel @Inject constructor() : ViewModel() {
     }
 
     private fun convertCurrency(value: Double, from: String, to: String): Double {
-        // Exchange rates relative to 1 USD (Approximate values for demonstration)
+        // Exchange rates relative to 1 USD (static demo values — not live rates).
         val toUsd = mapOf(
-            "USD" to 1.0,
-            "EUR" to 0.92,
-            "GBP" to 0.79,
-            "JPY" to 150.0,
-            "AUD" to 1.52,
-            "CAD" to 1.35,
-            "CHF" to 0.88,
-            "CNY" to 7.19,
-            "INR" to 82.90,
-            "BRL" to 4.97,
-            "RUB" to 92.50,
-            "KRW" to 1330.0,
-            "SGD" to 1.34,
-            "NZD" to 1.63,
-            "MXN" to 17.10,
-            "HKD" to 7.82,
-            "IDR" to 15600.0,
-            "TRY" to 31.00,
-            "SAR" to 3.75,
-            "AED" to 3.67
+            "USD" to 1.0, "EUR" to 0.92, "GBP" to 0.79, "JPY" to 150.0, "AUD" to 1.52,
+            "CAD" to 1.35, "CHF" to 0.88, "CNY" to 7.19, "INR" to 82.90, "BRL" to 4.97,
+            "RUB" to 92.50, "KRW" to 1330.0, "SGD" to 1.34, "NZD" to 1.63, "MXN" to 17.10,
+            "HKD" to 7.82, "IDR" to 15600.0, "TRY" to 31.00, "SAR" to 3.75, "AED" to 3.67
         )
-        
-        // Value in USD = input / rate_of_from_currency_to_usd (Wait, toUsd means 1 USD = X EUR, so value * (1/X) converts EUR to USD)
-        // If 1 USD = 0.92 EUR, then 1 EUR = 1/0.92 USD.
-        // value_in_usd = value / (toUsd[from] ?: 1.0)
-        // result = value_in_usd * (toUsd[to] ?: 1.0)
-        
         val valueInUsd = value / (toUsd[from] ?: 1.0)
         return valueInUsd * (toUsd[to] ?: 1.0)
     }
