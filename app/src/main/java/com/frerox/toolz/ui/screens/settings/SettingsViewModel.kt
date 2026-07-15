@@ -76,6 +76,7 @@ class SettingsViewModel @Inject constructor(
     val pillFocusEnabled = repository.pillFocusEnabled
     val liveVpnNotifications = repository.liveVpnNotifications
     val liveDnsNotifications = repository.liveDnsNotifications
+    val caffeinateAutoSummaryNotification = repository.caffeinateAutoSummaryNotification
 
     fun setLiveVpnNotifications(enabled: Boolean) {
         viewModelScope.launch { repository.setLiveVpnNotifications(enabled) }
@@ -83,6 +84,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setLiveDnsNotifications(enabled: Boolean) {
         viewModelScope.launch { repository.setLiveDnsNotifications(enabled) }
+    }
+
+    fun setCaffeinateAutoSummaryNotification(enabled: Boolean) {
+        viewModelScope.launch { repository.setCaffeinateAutoSummaryNotification(enabled) }
     }
     val backupFrequency = repository.backupFrequency
     val userName = repository.userName
