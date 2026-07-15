@@ -244,7 +244,6 @@ fun ToolzTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            WindowCompat.setDecorFitsSystemWindows(window, false)
             val insetsController = WindowCompat.getInsetsController(window, view)
             insetsController.isAppearanceLightStatusBars = !darkTheme
             insetsController.isAppearanceLightNavigationBars = !darkTheme
@@ -264,9 +263,8 @@ fun ToolzTheme(
         LocalIsDarkTheme provides darkTheme,
         LocalVibrationManager provides vibrationManager
     ) {
-        MaterialExpressiveTheme(
+        MaterialTheme(
             colorScheme = colorScheme,
-            motionScheme = MotionScheme.expressive(),
             shapes = ToolzExpressiveShapes,
             typography = Typography,
             content = content,
