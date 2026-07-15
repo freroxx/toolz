@@ -1,5 +1,6 @@
 package com.frerox.toolz.ui.screens.focus
 
+import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,6 +45,10 @@ fun CaffeinateScreen(
     viewModel: CaffeinateViewModel = hiltViewModel()
 ) {
     val isRunning by viewModel.isServiceRunning.collectAsState()
+    val isAutoRunning by viewModel.isAutoRunning.collectAsState()
+    val isAutoAllAppsEnabled by viewModel.isAutoAllAppsEnabled.collectAsState()
+    val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsState()
+    val autoEnabledAppsCount by viewModel.autoEnabledAppsCount.collectAsState()
     val allApps by viewModel.allApps.collectAsState()
     val interval by viewModel.reminderInterval.collectAsState()
     val isInfinite by viewModel.isInfinite.collectAsState()
@@ -77,6 +82,7 @@ fun CaffeinateScreen(
 
     LaunchedEffect(Unit) {
         viewModel.checkServiceStatus()
+        viewModel.refreshAccessibilityStatus()
     }
 
     Scaffold(
@@ -131,6 +137,15 @@ fun CaffeinateScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
+            // Accessibility Bridge Indicator
+            AccessibilityBridgeIndicator(
+                isEnabled = isAccessibilityEnabled,
+                onEnable = {
+                    vibrationManager?.vibrateClick()
+                    context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
+            )
+
             // Permission Banner if needed
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission) {
                 PermissionBanner(
@@ -144,6 +159,7 @@ fun CaffeinateScreen(
             // Liquid Toggle Button
             LiquidToggleButton(
                 isRunning = isRunning,
+                isAutoRunning = isAutoRunning,
                 isRainbow = isRainbowMode,
                 onClick = {
                     vibrationManager?.vibrateClick()
@@ -166,7 +182,15 @@ fun CaffeinateScreen(
             // Category Manager
             CategoryManagerUI(
                 apps = allApps,
-                onToggleApp = { viewModel.toggleAppAutoEnable(it) }
+                autoAllAppsEnabled = isAutoAllAppsEnabled,
+                onToggleAutoAllApps = {
+                    vibrationManager?.vibrateClick()
+                    viewModel.toggleAutoAllApps()
+                },
+                onToggleApp = {
+                    vibrationManager?.vibrateClick()
+                    viewModel.toggleAppAutoEnable(it)
+                }
             )
 
             Spacer(Modifier.height(40.dp))
@@ -216,6 +240,101 @@ fun CaffeinateScreen(
 }
 
 @Composable
+fun AccessibilityBridgeIndicator(
+    isEnabled: Boolean,
+    onEnable: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
+    ExpressiveCard(
+        onClick = if (isEnabled) ({}) else onEnable,
+        shape = RoundedCornerShape(32.dp),
+        containerColor = if (isEnabled) MaterialTheme.colorScheme.primaryContainer.copy(0.15f) 
+                         else MaterialTheme.colorScheme.errorContainer.copy(0.15f),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(
+            1.dp, 
+            if (isEnabled) MaterialTheme.colorScheme.primary.copy(0.2f) 
+            else MaterialTheme.colorScheme.error.copy(0.2f)
+        ),
+        elevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                // Pulsing dot
+                Canvas(modifier = Modifier.size(12.dp)) {
+                    drawCircle(
+                        color = if (isEnabled) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                        radius = size.minDimension / 2,
+                        alpha = pulseAlpha
+                    )
+                }
+                if (!isEnabled) {
+                    Canvas(modifier = Modifier.size(24.dp)) {
+                        drawCircle(
+                            color = Color(0xFFFF5252),
+                            radius = (size.minDimension / 2) * (1f + (1f - pulseAlpha)),
+                            alpha = (1f - pulseAlpha) * 0.3f
+                        )
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                @Suppress("DEPRECATION")
+                Text(
+                    if (isEnabled) "BRIDGE CONNECTED" else "BRIDGE DISCONNECTED",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+                Text(
+                    if (isEnabled) "Accessibility automation active" else "Requires Accessibility Service for auto-triggering",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (!isEnabled) {
+                ToolzExpressiveButton(
+                    onClick = onEnable,
+                    modifier = Modifier.height(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = Color.White
+                    )
+                ) {
+                    @Suppress("DEPRECATION")
+                    Text("FIX", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                }
+            } else {
+                Icon(
+                    Icons.Rounded.CheckCircle, 
+                    null, 
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun PermissionBanner(onAuthorize: () -> Unit) {
     Surface(
         onClick = onAuthorize,
@@ -250,10 +369,11 @@ fun PermissionBanner(onAuthorize: () -> Unit) {
 @Composable
 fun LiquidToggleButton(
     isRunning: Boolean,
+    isAutoRunning: Boolean = false,
     isRainbow: Boolean = false,
     onClick: () -> Unit
 ) {
-    val transition = updateTransition(isRunning, label = "liquid_toggle")
+    val transition = updateTransition(isRunning || isAutoRunning, label = "liquid_toggle")
     val liquidLevel by transition.animateFloat(
         transitionSpec = { spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy) },
         label = "level"
@@ -304,9 +424,9 @@ fun LiquidToggleButton(
         Triple(startX, progress, index)
     }
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val primaryColor = if (isAutoRunning && !isRunning) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+    val secondaryColor = if (isAutoRunning && !isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+    val tertiaryColor = if (isAutoRunning && !isRunning) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary
 
     val rainbowColors = listOf(
         Color(0xFFFF5252), Color(0xFFFFEB3B), Color(0xFF4CAF50),
@@ -320,7 +440,7 @@ fun LiquidToggleButton(
         animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
         label = "glow_alpha"
     )
-    val glowAlpha = if (isRunning) infiniteAlpha else 0f
+    val glowAlpha = if (isRunning || isAutoRunning) infiniteAlpha else 0f
 
     Box(
         modifier = Modifier
@@ -328,7 +448,7 @@ fun LiquidToggleButton(
             .bouncyClick(onClick = onClick)
             .aspectRatio(1f)
             .drawBehind {
-                if (isRunning) {
+                if (isRunning || isAutoRunning) {
                     drawCircle(
                         Brush.radialGradient(
                             colors = if (isRainbow) listOf(Color.White.copy(glowAlpha * 0.5f), Color.Transparent)
@@ -343,7 +463,7 @@ fun LiquidToggleButton(
             .border(
                 BorderStroke(
                     width = 6.dp,
-                    brush = if (isRunning) {
+                    brush = if (isRunning || isAutoRunning) {
                         if (rainbowIntensity > 0.01f) {
                             Brush.sweepGradient(
                                 colors = rainbowColors.map { 
@@ -412,7 +532,7 @@ fun LiquidToggleButton(
                 )
                 
                 // Bubbles (Drawn between waves for depth)
-                if (isRunning) {
+                if (isRunning || isAutoRunning) {
                     bubbles.forEach { (startX, progress, index) ->
                         val bubbleY = height - (progress * height * liquidLevel)
                         if (bubbleY > fillHeight - 20f) {
@@ -454,23 +574,23 @@ fun LiquidToggleButton(
             verticalArrangement = Arrangement.Center
         ) {
             Icon(
-                imageVector = if (isRunning) Icons.Rounded.Coffee else Icons.Rounded.CoffeeMaker,
+                imageVector = if (isRunning || isAutoRunning) Icons.Rounded.Coffee else Icons.Rounded.CoffeeMaker,
                 contentDescription = null,
                 modifier = Modifier.size(64.dp).graphicsLayer {
-                    if (isRunning) {
+                    if (isRunning || isAutoRunning) {
                         scaleX = 1f + (glowAlpha * 0.2f)
                         scaleY = 1f + (glowAlpha * 0.2f)
                     }
                 },
-                tint = if (isRunning) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (isRunning || isAutoRunning) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (isRunning) "ACTIVE" else "START",
+                if (isRunning) "ACTIVE" else if (isAutoRunning) "AUTO" else "START",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 2.sp,
-                color = if (isRunning) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (isRunning || isAutoRunning) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -543,11 +663,61 @@ fun ReminderSettingsCard(
 @Composable
 fun CategoryManagerUI(
     apps: List<CaffeinateApp>,
+    autoAllAppsEnabled: Boolean,
+    onToggleAutoAllApps: () -> Unit,
     onToggleApp: (CaffeinateApp) -> Unit
 ) {
     val categories = apps.groupBy { it.category }
 
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        // Global Auto-Caffeinate Switch
+        ExpressiveCard(
+            onClick = onToggleAutoAllApps,
+            shape = RoundedCornerShape(28.dp),
+            containerColor = if (autoAllAppsEnabled) MaterialTheme.colorScheme.primaryContainer.copy(0.3f) 
+                             else MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, if (autoAllAppsEnabled) MaterialTheme.colorScheme.primary.copy(0.3f) 
+                                       else MaterialTheme.colorScheme.outlineVariant.copy(0.1f)),
+            elevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(
+                            if (autoAllAppsEnabled) MaterialTheme.colorScheme.primary.copy(0.1f) 
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            RoundedCornerShape(16.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.AllInclusive, 
+                        null, 
+                        tint = if (autoAllAppsEnabled) MaterialTheme.colorScheme.primary 
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("AUTO-CAFFEINATE ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
+                    Text(
+                        "Enable for all non-system apps",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                ExpressiveSwitch(
+                    checked = autoAllAppsEnabled,
+                    onCheckedChange = { onToggleAutoAllApps() }
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -561,94 +731,119 @@ fun CategoryManagerUI(
                 color = MaterialTheme.colorScheme.primary,
                 letterSpacing = 1.sp
             )
-            Surface(
-                color = MaterialTheme.colorScheme.primary.copy(0.1f),
-                shape = CircleShape
-            ) {
-                Text(
-                    "${apps.count { it.isAutoEnabled }}/${apps.size} ACTIVE",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
+            if (!autoAllAppsEnabled) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(0.1f),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        "${apps.count { it.isAutoEnabled }}/${apps.size} ACTIVE",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            } else {
+                ExpressiveStatePill(
+                    text = "ALL ACTIVE",
+                    icon = Icons.Rounded.CheckCircle,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
         }
 
-        categories.forEach { (category, categoryApps) ->
-            var expanded by remember { mutableStateOf(false) }
+        AnimatedVisibility(
+            visible = !autoAllAppsEnabled,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                categories.forEach { (category, categoryApps) ->
+                    CategoryItem(category, categoryApps, onToggleApp)
+                }
+            }
+        }
+    }
+}
 
-            ExpressiveCard(
-                onClick = { expanded = !expanded },
-                shape = RoundedCornerShape(28.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
-                elevation = 0.dp
+@Composable
+private fun CategoryItem(
+    category: String,
+    categoryApps: List<CaffeinateApp>,
+    onToggleApp: (CaffeinateApp) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExpressiveCard(
+        onClick = { expanded = !expanded },
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+        elevation = 0.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Row(
-                        modifier = Modifier
-                            .padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(MaterialTheme.colorScheme.secondary.copy(0.12f), RoundedCornerShape(14.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                when(category.uppercase()) {
-                                    "WORK", "PRODUCTIVITY" -> Icons.Rounded.Work
-                                    "VIDEO", "ENTERTAINMENT" -> Icons.Rounded.Movie
-                                    "SOCIAL" -> Icons.Rounded.Public
-                                    "GAMING", "GAMES" -> Icons.Rounded.SportsEsports
-                                    "READING" -> Icons.Rounded.MenuBook
-                                    "UTILITY" -> Icons.Rounded.Build
-                                    else -> Icons.Rounded.Category
-                                },
-                                null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Text(category.uppercase(), fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
-                        Icon(
-                            if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                            null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.secondary.copy(0.12f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        when(category.uppercase()) {
+                            "WORK", "PRODUCTIVITY" -> Icons.Rounded.Work
+                            "VIDEO", "ENTERTAINMENT" -> Icons.Rounded.Movie
+                            "SOCIAL" -> Icons.Rounded.Public
+                            "GAMING", "GAMES" -> Icons.Rounded.SportsEsports
+                            "READING" -> Icons.Rounded.MenuBook
+                            "UTILITY" -> Icons.Rounded.Build
+                            else -> Icons.Rounded.Category
+                        },
+                        null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                Text(category.uppercase(), fontWeight = FontWeight.Black, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
+                Icon(
+                    if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-                    AnimatedVisibility(visible = expanded) {
-                        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp)) {
-                            HorizontalDivider(modifier = Modifier.padding(bottom = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(0.2f))
-                            categoryApps.forEach { app ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 6.dp)
-                                        .bouncyClick { onToggleApp(app) }
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        AppIcon(packageName = app.packageName, modifier = Modifier.padding(6.dp))
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(app.appName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
-                                    Checkbox(
-                                        checked = app.isAutoEnabled,
-                                        onCheckedChange = { onToggleApp(app) },
-                                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
-                                    )
-                                }
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp)) {
+                    HorizontalDivider(modifier = Modifier.padding(bottom = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(0.2f))
+                    categoryApps.forEach { app ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .bouncyClick { onToggleApp(app) }
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                AppIcon(packageName = app.packageName, modifier = Modifier.padding(6.dp))
                             }
+                            Spacer(Modifier.width(12.dp))
+                            Text(app.appName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
+                            Checkbox(
+                                checked = app.isAutoEnabled,
+                                onCheckedChange = { onToggleApp(app) },
+                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                            )
                         }
                     }
                 }

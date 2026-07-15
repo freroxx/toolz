@@ -1,15 +1,18 @@
 package com.frerox.toolz.ui.screens.focus
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.view.accessibility.AccessibilityManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.focus.CaffeinateApp
 import com.frerox.toolz.data.focus.CaffeinateRepository
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.CaffeinateService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -20,17 +23,30 @@ import javax.inject.Inject
 @HiltViewModel
 class CaffeinateViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: CaffeinateRepository
+    private val repository: CaffeinateRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _isServiceRunning = MutableStateFlow(false)
     val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
     
+    val isAutoRunning = CaffeinateService.isAutoRunningFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    
+    val isAutoAllAppsEnabled = settingsRepository.caffeinateAutoAllApps
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    
+    private val _isAccessibilityEnabled = MutableStateFlow(false)
+    val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
+
     val elapsedTime = CaffeinateService.elapsedTimeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     val allApps = repository.allApps.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    val autoEnabledAppsCount = allApps.map { apps -> apps.count { it.isAutoEnabled } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    
     private val _reminderInterval = MutableStateFlow(30)
     val reminderInterval: StateFlow<Int> = _reminderInterval.asStateFlow()
 
@@ -48,6 +64,7 @@ class CaffeinateViewModel @Inject constructor(
 
     init {
         checkServiceStatus()
+        refreshAccessibilityStatus()
         viewModelScope.launch {
             allApps.collect { apps ->
                 if (apps.isEmpty()) {
@@ -68,6 +85,28 @@ class CaffeinateViewModel @Inject constructor(
     fun checkServiceStatus() {
         _isServiceRunning.value = CaffeinateService.isRunning
         checkNotificationPermission()
+        refreshAccessibilityStatus()
+    }
+
+    fun refreshAccessibilityStatus() {
+        val enabled = isAccessibilityServiceEnabled(context)
+        _isAccessibilityEnabled.value = enabled
+        if (enabled) {
+            viewModelScope.launch {
+                settingsRepository.setAccessibilityBridgeWasActive(true)
+            }
+        }
+    }
+
+    private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        return try {
+            val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+            manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
+                it.resolveInfo.serviceInfo.packageName == context.packageName
+            } == true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun checkNotificationPermission() {
@@ -129,6 +168,12 @@ class CaffeinateViewModel @Inject constructor(
     fun toggleAppAutoEnable(app: CaffeinateApp) {
         viewModelScope.launch {
             repository.updateAppAutoEnable(app, !app.isAutoEnabled)
+        }
+    }
+
+    fun toggleAutoAllApps() {
+        viewModelScope.launch {
+            settingsRepository.setCaffeinateAutoAllApps(!isAutoAllAppsEnabled.value)
         }
     }
 
