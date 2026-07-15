@@ -179,7 +179,7 @@ fun AiAssistantScreen(
         onSave = { viewModel.onSettingsSaveRequest(); showSettings = false },
         onSaveConfig = viewModel::saveConfig, onDeleteConfig = viewModel::deleteConfig,
         onEditConfig = viewModel::editConfig, onMoveConfig = viewModel::moveConfig,
-        onTest = viewModel::testConnection, onRefresh = viewModel::refreshRemoteKeys,
+        onTest = viewModel::testConnection,
         performanceMode = performanceMode,
         onToggleDynamicPrompts = viewModel::toggleDynamicPrompts,
         onPromptFormatChange = viewModel::updatePromptFormat,
@@ -1311,7 +1311,7 @@ fun AiSettingsDialog(
     onProviderChange: (String) -> Unit, onApiKeyChange: (String) -> Unit, onModelChange: (String) -> Unit, onIconChange: (String) -> Unit,
     onCustomIconClick: () -> Unit, onSave: () -> Unit, onSaveConfig: (String) -> Unit, onDeleteConfig: (AiConfig) -> Unit, onEditConfig: (AiConfig) -> Unit,
     @Suppress("UNUSED_PARAMETER") onMoveConfig: (Int, Int) -> Unit,
-    onTest: () -> Unit, onRefresh: () -> Unit, performanceMode: Boolean,
+    onTest: () -> Unit, performanceMode: Boolean,
     onToggleDynamicPrompts: (Boolean) -> Unit, onPromptFormatChange: (String) -> Unit,
     aiSearchIconVisible: Boolean, onSetAiSearchIconVisible: (Boolean) -> Unit,
 ) {
@@ -1369,7 +1369,6 @@ fun AiSettingsDialog(
                             SettingsApiKeySection(
                                 apiKey = state.apiKey,
                                 provider = state.provider,
-                                isRemoteKeyAvailable = state.isRemoteKeyAvailable,
                                 onApiKeyChange = onApiKeyChange,
                                 onShowTutorial = { showTutorial = true }
                             )
@@ -1390,7 +1389,6 @@ fun AiSettingsDialog(
                                 isTesting = state.isTesting,
                                 testResult = state.testResult,
                                 onTest = onTest,
-                                onRefresh = onRefresh,
                                 onShowConfigSave = { showConfigSave = true },
                                 editingConfig = state.editingConfig
                             )
@@ -1550,7 +1548,6 @@ private fun SettingsModelSection(
 private fun SettingsApiKeySection(
     apiKey: String,
     provider: String,
-    isRemoteKeyAvailable: Boolean,
     onApiKeyChange: (String) -> Unit,
     onShowTutorial: () -> Unit
 ) {
@@ -1560,7 +1557,6 @@ private fun SettingsApiKeySection(
             apiKey, onApiKeyChange, Modifier.fillMaxWidth(), shape = MediumExpressiveShape,
             placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(provider), color = AiDesign.textColor(0.3f)) },
             trailingIcon = { if (apiKey.isNotEmpty()) IconButton({ onApiKeyChange("") }) { Icon(Icons.Rounded.Close, null, tint = AiDesign.textColor(0.5f)) } },
-            supportingText = { if (apiKey.isEmpty() && isRemoteKeyAvailable) Text("Using shared key (limited quota)", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) },
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder(), focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
         )
         Row(Modifier.fillMaxWidth(), Arrangement.End) {
@@ -1623,7 +1619,6 @@ private fun SettingsTestSaveSection(
     isTesting: Boolean,
     testResult: String?,
     onTest: () -> Unit,
-    onRefresh: () -> Unit,
     onShowConfigSave: () -> Unit,
     editingConfig: AiConfig?
 ) {
@@ -1632,9 +1627,6 @@ private fun SettingsTestSaveSection(
             ToolzExpressiveButton(onTest, Modifier.weight(1f).height(48.dp), enabled = !isTesting, shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
                 if (isTesting) ToolzWavyCircularProgressIndicator(Modifier.size(16.dp), MaterialTheme.colorScheme.secondary, Color.Transparent)
                 else Text("Test Connection", fontWeight = FontWeight.Bold)
-            }
-            ToolzExpressiveIconButton(onRefresh, shape = MediumExpressiveShape, colors = IconButtonDefaults.filledIconButtonColors(containerColor = AiDesign.glassColor()), modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Rounded.Sync, null, tint = AiDesign.textColor())
             }
         }
         if (testResult != null) {
