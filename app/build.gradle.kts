@@ -1,6 +1,3 @@
-import java.util.Properties
-import java.io.FileInputStream
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -22,22 +19,6 @@ android {
         versionName = "1.0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        val envFile = rootProject.file(".env")
-        val props = Properties()
-        if (envFile.exists()) {
-            FileInputStream(envFile).use { props.load(it) }
-        }
-
-        val keys = listOf(
-            "GEMINI_DEFAULT", "GROQ_DEFAULT", "OPENROUTER_DEFAULT",
-            "CHATGPT_DEFAULT", "CLAUDE_DEFAULT", "DEEPSEEK_DEFAULT"
-        )
-
-        for (key in keys) {
-            val value = props.getProperty(key) ?: ""
-            buildConfigField("String", key, "\"$value\"")
-        }
     }
 
     configurations.all {
