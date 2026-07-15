@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,39 +40,42 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
-
-// ---------------------------------------------------------------------------
-//  Music Pill — Glance widget
-//  Compact  (< 270dp wide) : thumbnail + title/artist + prev/play/skip controls
-//  Expanded (≥ 270dp wide) : full art + title/artist/progress + all controls
-// ---------------------------------------------------------------------------
 
 class MusicGlanceWidget : GlanceAppWidget() {
 
     companion object {
-        private val COMPACT  = DpSize(180.dp, 80.dp)
-        private val EXPANDED = DpSize(270.dp, 100.dp)
+        private val COMPACT  = DpSize(180.dp, 100.dp)
+        private val EXPANDED = DpSize(270.dp, 120.dp)
     }
 
     override val sizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
     override val stateDefinition = MusicWidgetStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val prefs   = getAppWidgetState<Preferences>(context, MusicWidgetStateDefinition, id)
-        val title   = prefs[MusicWidgetState.KEY_TITLE]    ?: "Not Playing"
-        val artist  = prefs[MusicWidgetState.KEY_ARTIST]   ?: "Tap to open Toolz"
-        val progress= prefs[MusicWidgetState.KEY_PROGRESS]  ?: 0f
-        val playing = prefs[MusicWidgetState.KEY_PLAYING]  ?: false
-        val artPath = prefs[MusicWidgetState.KEY_ART_PATH]
-        val artShape= prefs[MusicWidgetState.KEY_ART_SHAPE] ?: "CIRCLE"
+        val prefs      = getAppWidgetState<Preferences>(context, MusicWidgetStateDefinition, id)
+        val title      = prefs[MusicWidgetState.KEY_TITLE]      ?: "Not Playing"
+        val artist     = prefs[MusicWidgetState.KEY_ARTIST]     ?: "Tap to open Toolz"
+        val progress   = prefs[MusicWidgetState.KEY_PROGRESS]   ?: 0f
+        val playing    = prefs[MusicWidgetState.KEY_PLAYING]    ?: false
+        val artPath    = prefs[MusicWidgetState.KEY_ART_PATH]
+        val artShape   = prefs[MusicWidgetState.KEY_ART_SHAPE]   ?: "CIRCLE"
+        val isFavorite = prefs[MusicWidgetState.KEY_IS_FAVORITE] ?: false
+        val accentHex  = prefs[MusicWidgetState.KEY_ACCENT_COLOR]
+        val hasNext    = prefs[MusicWidgetState.KEY_HAS_NEXT]    ?: false
+        val hasPrev    = prefs[MusicWidgetState.KEY_HAS_PREV]    ?: false
+        val nextTitle  = prefs[MusicWidgetState.KEY_NEXT_TITLE]
 
         val artBitmap = artPath?.let {
             try { BitmapFactory.decodeFile(it) } catch (_: Exception) { null }
         }
+        
+        val accentColor = accentHex?.let { hex ->
+            try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { null }
+        }
 
-        // Intent to open the music player in the app
         val openMusicIntent = Intent(context, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -86,22 +90,32 @@ class MusicGlanceWidget : GlanceAppWidget() {
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .background(GlanceTheme.colors.surface)
-                        .cornerRadius(24.dp)
-                        .clickable(actionStartActivity(openMusicIntent))
-                        .padding(12.dp),
+                        .cornerRadius(28.dp)
+                        .clickable(actionStartActivity(openMusicIntent)),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (isExpanded) {
                         ExpandedMusicContent(
-                            title     = title, artist    = artist,
-                            progress  = progress, isPlaying = playing,
-                            artBitmap = artBitmap, artShape  = artShape,
-                            openMusicIntent = openMusicIntent,
+                            title       = title, 
+                            artist      = artist,
+                            progress    = progress, 
+                            isPlaying   = playing,
+                            artBitmap   = artBitmap, 
+                            artShape    = artShape,
+                            isFavorite  = isFavorite,
+                            accentColor = accentColor,
+                            hasNext     = hasNext,
+                            hasPrev     = hasPrev,
+                            nextTitle   = nextTitle
                         )
                     } else {
                         CompactMusicContent(
-                            title = title, artist = artist,
-                            isPlaying = playing, artBitmap = artBitmap, artShape = artShape,
+                            title       = title, 
+                            artist      = artist,
+                            isPlaying   = playing, 
+                            artBitmap   = artBitmap, 
+                            artShape    = artShape,
+                            accentColor = accentColor
                         )
                     }
                 }
@@ -112,169 +126,189 @@ class MusicGlanceWidget : GlanceAppWidget() {
 
 @Composable
 private fun CompactMusicContent(
-    title: String, artist: String, isPlaying: Boolean,
-    artBitmap: android.graphics.Bitmap?, artShape: String,
+    title: String, 
+    artist: String, 
+    isPlaying: Boolean,
+    artBitmap: android.graphics.Bitmap?, 
+    artShape: String,
+    accentColor: Color?
 ) {
     Row(
-        modifier = GlanceModifier.fillMaxSize(),
+        modifier = GlanceModifier.fillMaxSize().padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val artProvider = artBitmap?.let { ImageProvider(it) } ?: ImageProvider(R.drawable.ic_music_note)
         val cornerDp    = if (artShape == "CIRCLE") 28.dp else 12.dp
 
-        // Album art
         Box(
-            modifier = GlanceModifier.size(52.dp).cornerRadius(cornerDp)
-                .background(GlanceTheme.colors.primaryContainer),
+            modifier = GlanceModifier.size(64.dp).cornerRadius(cornerDp)
+                .background(accentColor?.let { ColorProvider(it.copy(alpha = 0.15f)) } ?: GlanceTheme.colors.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
             Image(provider = artProvider, contentDescription = null,
-                modifier = GlanceModifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp), contentScale = ContentScale.Crop)
         }
 
-        Spacer(GlanceModifier.width(10.dp))
+        Spacer(GlanceModifier.width(12.dp))
 
-        // Title + artist (fills available space)
         Column(
-            modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = GlanceModifier.defaultWeight().fillMaxHeight()
         ) {
+            Spacer(GlanceModifier.defaultWeight())
             Text(title, maxLines = 1, style = TextStyle(
-                color = GlanceTheme.colors.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Bold))
+                color = GlanceTheme.colors.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold))
             Text(artist, maxLines = 1, style = TextStyle(
-                color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
+                color = GlanceTheme.colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium))
+            Spacer(GlanceModifier.defaultWeight())
         }
 
-        Spacer(GlanceModifier.width(6.dp))
+        Spacer(GlanceModifier.width(8.dp))
 
-        // Compact controls: Play/Pause + Skip Next
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            val pkg      = androidx.glance.LocalContext.current.packageName
-            val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.MusicWidgetReceiver")
-            val toggleIntent = Intent(MUSIC_ACTION_TOGGLE).apply { component = receiver }
-            val nextIntent   = Intent(MUSIC_ACTION_NEXT).apply { component = receiver }
+        val pkg      = androidx.glance.LocalContext.current.packageName
+        val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.MusicWidgetReceiver")
+        val toggleIntent = Intent(MUSIC_ACTION_TOGGLE).apply { component = receiver }
 
-            // Play / Pause
-            Box(modifier = GlanceModifier.size(38.dp).cornerRadius(19.dp)
-                    .background(GlanceTheme.colors.primary)
-                    .clickable(actionSendBroadcast(toggleIntent)),
-                contentAlignment = Alignment.Center) {
-                Image(provider = ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
-                    contentDescription = null, modifier = GlanceModifier.size(20.dp),
-                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary))
-            }
-
-            Spacer(GlanceModifier.width(6.dp))
-
-            // Skip Next
-            Box(modifier = GlanceModifier.size(34.dp).cornerRadius(17.dp)
-                    .background(GlanceTheme.colors.surfaceVariant)
-                    .clickable(actionSendBroadcast(nextIntent)),
-                contentAlignment = Alignment.Center) {
-                Image(provider = ImageProvider(R.drawable.ic_widget_next),
-                    contentDescription = "Skip",
-                    modifier = GlanceModifier.size(18.dp),
-                    colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant))
-            }
+        Box(modifier = GlanceModifier.size(48.dp).cornerRadius(24.dp)
+                .background(accentColor?.let { ColorProvider(it) } ?: GlanceTheme.colors.primary)
+                .clickable(actionSendBroadcast(toggleIntent)),
+            contentAlignment = Alignment.Center) {
+            Image(provider = ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
+                contentDescription = null, modifier = GlanceModifier.size(24.dp),
+                colorFilter = androidx.glance.ColorFilter.tint(if (accentColor != null && isColorDark(accentColor)) ColorProvider(Color.White) else GlanceTheme.colors.onPrimary))
         }
     }
 }
 
 @Composable
 private fun ExpandedMusicContent(
-    title: String, artist: String, progress: Float, isPlaying: Boolean,
-    artBitmap: android.graphics.Bitmap?, artShape: String,
-    openMusicIntent: Intent,
+    title: String, 
+    artist: String, 
+    progress: Float, 
+    isPlaying: Boolean,
+    artBitmap: android.graphics.Bitmap?, 
+    artShape: String,
+    isFavorite: Boolean,
+    accentColor: Color?,
+    hasNext: Boolean,
+    hasPrev: Boolean,
+    nextTitle: String?
 ) {
-    Column(modifier = GlanceModifier.fillMaxSize()) {
+    val pkg      = androidx.glance.LocalContext.current.packageName
+    val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.MusicWidgetReceiver")
+    
+    Column(modifier = GlanceModifier.fillMaxSize().padding(12.dp)) {
         Row(
             modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val artProvider = artBitmap?.let { ImageProvider(it) } ?: ImageProvider(R.drawable.ic_music_note)
-            val cornerDp    = if (artShape == "CIRCLE") 40.dp else 16.dp
+            val cornerDp    = if (artShape == "CIRCLE") 36.dp else 16.dp
 
             Box(modifier = GlanceModifier.size(72.dp).cornerRadius(cornerDp)
-                    .background(GlanceTheme.colors.primaryContainer),
+                    .background(accentColor?.let { ColorProvider(it.copy(alpha = 0.1f)) } ?: GlanceTheme.colors.surfaceVariant),
                 contentAlignment = Alignment.Center) {
                 Image(provider = artProvider, contentDescription = null,
-                    modifier = GlanceModifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp), contentScale = ContentScale.Crop)
+            }
+
+            Spacer(GlanceModifier.width(14.dp))
+
+            Column(modifier = GlanceModifier.defaultWeight().fillMaxHeight()) {
+                Spacer(GlanceModifier.defaultWeight())
+                Text(title, maxLines = 1, style = TextStyle(
+                    color = GlanceTheme.colors.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold))
+                Text(artist, maxLines = 1, style = TextStyle(
+                    color = GlanceTheme.colors.onSurfaceVariant, fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                
+                if (nextTitle != null) {
+                    Spacer(GlanceModifier.height(4.dp))
+                    Text("Up next: $nextTitle", maxLines = 1, style = TextStyle(
+                        color = accentColor?.let { ColorProvider(it) } ?: GlanceTheme.colors.primary, 
+                        fontSize = 11.sp, 
+                        fontWeight = FontWeight.Bold))
+                }
+                Spacer(GlanceModifier.defaultWeight())
+            }
+
+            Spacer(GlanceModifier.width(8.dp))
+
+            // Favorite button
+            val favIntent = Intent(MUSIC_ACTION_FAVORITE).apply { component = receiver }
+            Box(modifier = GlanceModifier.size(40.dp).cornerRadius(20.dp)
+                    .clickable(actionSendBroadcast(favIntent)),
+                contentAlignment = Alignment.Center) {
+                // Using ic_music_note as a placeholder for favorite icon if it doesn't exist
+                Image(provider = ImageProvider(R.drawable.ic_music_note),
+                    contentDescription = "Favorite",
+                    modifier = GlanceModifier.size(24.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(if (isFavorite) ColorProvider(Color(0xFFE0555C)) else ColorProvider(Color.Gray.copy(alpha = 0.4f))))
+            }
+        }
+
+        Spacer(GlanceModifier.height(10.dp))
+
+        Row(
+            modifier = GlanceModifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val prevIntent   = Intent(MUSIC_ACTION_PREV).apply { component = receiver }
+            val toggleIntent = Intent(MUSIC_ACTION_TOGGLE).apply { component = receiver }
+            val nextIntent   = Intent(MUSIC_ACTION_NEXT).apply { component = receiver }
+
+            Spacer(GlanceModifier.defaultWeight())
+
+            // Previous
+            Box(modifier = GlanceModifier.size(44.dp).cornerRadius(22.dp)
+                    .background(GlanceTheme.colors.surfaceVariant)
+                    .clickable(actionSendBroadcast(prevIntent)),
+                contentAlignment = Alignment.Center) {
+                Image(provider = ImageProvider(R.drawable.ic_widget_prev),
+                    contentDescription = "Previous",
+                    modifier = GlanceModifier.size(22.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(if (hasPrev) GlanceTheme.colors.onSurface else ColorProvider(Color.Gray)))
             }
 
             Spacer(GlanceModifier.width(16.dp))
 
-            Column(modifier = GlanceModifier.defaultWeight().fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically) {
-                
-                Text(title, maxLines = 1, style = TextStyle(
-                    color = GlanceTheme.colors.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                Text(artist, maxLines = 1, style = TextStyle(
-                    color = GlanceTheme.colors.onSurfaceVariant, fontSize = 12.sp))
-                
-                Spacer(GlanceModifier.height(10.dp))
-
-                Row(
-                    modifier = GlanceModifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val pkg      = androidx.glance.LocalContext.current.packageName
-                    val receiver = android.content.ComponentName(pkg, "com.frerox.toolz.widget.glance.MusicWidgetReceiver")
-                    val prevIntent   = Intent(MUSIC_ACTION_PREV).apply { component = receiver }
-                    val toggleIntent = Intent(MUSIC_ACTION_TOGGLE).apply { component = receiver }
-                    val nextIntent   = Intent(MUSIC_ACTION_NEXT).apply { component = receiver }
-
-                    // Previous
-                    Box(modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
-                            .background(GlanceTheme.colors.surfaceVariant)
-                            .clickable(actionSendBroadcast(prevIntent)),
-                        contentAlignment = Alignment.Center) {
-                        Image(provider = ImageProvider(R.drawable.ic_widget_prev),
-                            contentDescription = "Previous",
-                            modifier = GlanceModifier.size(18.dp),
-                            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant))
-                    }
-
-                    Spacer(GlanceModifier.width(8.dp))
-
-                    // Play / Pause (primary)
-                    Box(modifier = GlanceModifier.size(44.dp).cornerRadius(22.dp)
-                            .background(GlanceTheme.colors.primary)
-                            .clickable(actionSendBroadcast(toggleIntent)),
-                        contentAlignment = Alignment.Center) {
-                        Image(provider = ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
-                            contentDescription = null, modifier = GlanceModifier.size(22.dp),
-                            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary))
-                    }
-
-                    Spacer(GlanceModifier.width(8.dp))
-
-                    // Skip Next
-                    Box(modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
-                            .background(GlanceTheme.colors.surfaceVariant)
-                            .clickable(actionSendBroadcast(nextIntent)),
-                        contentAlignment = Alignment.Center) {
-                        Image(provider = ImageProvider(R.drawable.ic_widget_next),
-                            contentDescription = "Next",
-                            modifier = GlanceModifier.size(18.dp),
-                            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant))
-                    }
-                }
+            // Play / Pause
+            Box(modifier = GlanceModifier.size(56.dp).cornerRadius(28.dp)
+                    .background(accentColor?.let { ColorProvider(it) } ?: GlanceTheme.colors.primary)
+                    .clickable(actionSendBroadcast(toggleIntent)),
+                contentAlignment = Alignment.Center) {
+                Image(provider = ImageProvider(if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play),
+                    contentDescription = null, modifier = GlanceModifier.size(28.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(if (accentColor != null && isColorDark(accentColor)) ColorProvider(Color.White) else GlanceTheme.colors.onPrimary))
             }
+
+            Spacer(GlanceModifier.width(16.dp))
+
+            // Next
+            Box(modifier = GlanceModifier.size(44.dp).cornerRadius(22.dp)
+                    .background(GlanceTheme.colors.surfaceVariant)
+                    .clickable(actionSendBroadcast(nextIntent)),
+                contentAlignment = Alignment.Center) {
+                Image(provider = ImageProvider(R.drawable.ic_widget_next),
+                    contentDescription = "Next",
+                    modifier = GlanceModifier.size(22.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(if (hasNext) GlanceTheme.colors.onSurface else ColorProvider(Color.Gray)))
+            }
+
+            Spacer(GlanceModifier.defaultWeight())
         }
 
-        Spacer(GlanceModifier.height(8.dp))
+        Spacer(GlanceModifier.height(10.dp))
 
-        // Progress bar at bottom
+        // Progress Bar
         LinearProgressIndicator(
             progress = progress,
-            modifier = GlanceModifier.fillMaxWidth().height(4.dp).cornerRadius(2.dp),
-            color = GlanceTheme.colors.primary,
+            modifier = GlanceModifier.fillMaxWidth().height(6.dp).cornerRadius(3.dp),
+            color = accentColor?.let { ColorProvider(it) } ?: GlanceTheme.colors.primary,
             backgroundColor = GlanceTheme.colors.surfaceVariant
         )
     }
 }
 
-// Broadcast action constants (namespaced to avoid conflicts)
-const val MUSIC_ACTION_TOGGLE = "com.frerox.toolz.WIDGET_MUSIC_TOGGLE"
-const val MUSIC_ACTION_NEXT   = "com.frerox.toolz.WIDGET_MUSIC_NEXT"
-const val MUSIC_ACTION_PREV   = "com.frerox.toolz.WIDGET_MUSIC_PREV"
+private fun isColorDark(color: Color): Boolean {
+    val darkness = 1 - (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue)
+    return darkness >= 0.5
+}

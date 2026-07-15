@@ -22,10 +22,16 @@ class WidgetUpdateManager @Inject constructor(
     suspend fun updateMusicWidget(
         title: String,
         artist: String,
+        album: String?,
         progress: Float,
         isPlaying: Boolean,
+        hasNext: Boolean,
+        hasPrev: Boolean,
+        accentColor: String?,
         artShape: String,
-        artFilePath: String?
+        artFilePath: String?,
+        isFavorite: Boolean = false,
+        nextTitle: String? = null
     ) {
         val glanceIds = GlanceAppWidgetManager(context).getGlanceIds(MusicGlanceWidget::class.java)
         glanceIds.forEach { glanceId ->
@@ -33,13 +39,23 @@ class WidgetUpdateManager @Inject constructor(
                 prefs.toMutablePreferences().apply {
                     this[MusicWidgetState.KEY_TITLE] = title
                     this[MusicWidgetState.KEY_ARTIST] = artist
+                    album?.let { this[MusicWidgetState.KEY_ALBUM] = it }
                     this[MusicWidgetState.KEY_PROGRESS] = progress
                     this[MusicWidgetState.KEY_PLAYING] = isPlaying
+                    this[MusicWidgetState.KEY_HAS_NEXT] = hasNext
+                    this[MusicWidgetState.KEY_HAS_PREV] = hasPrev
+                    accentColor?.let { this[MusicWidgetState.KEY_ACCENT_COLOR] = it }
                     this[MusicWidgetState.KEY_ART_SHAPE] = artShape
                     if (artFilePath != null) {
                         this[MusicWidgetState.KEY_ART_PATH] = artFilePath
                     } else {
                         remove(MusicWidgetState.KEY_ART_PATH)
+                    }
+                    this[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
+                    if (nextTitle != null) {
+                        this[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
+                    } else {
+                        remove(MusicWidgetState.KEY_NEXT_TITLE)
                     }
                 }
             }
