@@ -149,6 +149,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.setBackgroundDrawableResource(android.R.color.background_dark)
         Shizuku.addRequestPermissionResultListener(this)
         currentIntentState.value = intent
         currentIntentVersion.value += 1
@@ -236,17 +237,19 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                         modifier = Modifier
                             .fillMaxSize()
                             .toolzBackground()
-                            .graphicsLayer {
+                            .then(
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !performanceMode && blurAnim > 0f) {
-                                    renderEffect = RenderEffect
-                                        .createBlurEffect(blurAnim, blurAnim, Shader.TileMode.CLAMP)
-                                        .asComposeRenderEffect()
-                                }
-                            }
+                                    Modifier.graphicsLayer {
+                                        renderEffect = RenderEffect
+                                            .createBlurEffect(blurAnim, blurAnim, Shader.TileMode.CLAMP)
+                                            .asComposeRenderEffect()
+                                    }
+                                } else Modifier
+                            )
                     ) {
                         Surface(
                             modifier = Modifier.fillMaxSize(),
-                            color = Color.Transparent,
+                            color = MaterialTheme.colorScheme.background,
                             contentColor = MaterialTheme.colorScheme.onBackground
                         ) {
                             val navController = rememberNavController()
@@ -632,61 +635,28 @@ fun ToolzNavHost(
         navController = navController,
         startDestination = if (onboardingCompleted) Screen.Dashboard.route else "onboarding",
         enterTransition = {
-            if (targetState.destination.route == Screen.Dashboard.route && initialState.destination.route == "onboarding") {
-                fadeIn(animationSpec = tween(500))
-            } else if (performanceMode) {
-                fadeIn(animationSpec = tween(100))
-            } else {
-                fadeIn(animationSpec = tween(400)) + scaleIn(
-                    initialScale = 0.92f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ) + slideInVertically(
-                    initialOffsetY = { 24 },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                )
-            }
+            slideInHorizontally(
+                animationSpec = tween(350),
+                initialOffsetX = { it }
+            )
         },
         exitTransition = {
-            if (performanceMode) {
-                fadeOut(animationSpec = tween(100))
-            } else {
-                fadeOut(animationSpec = tween(300)) + scaleOut(
-                    targetScale = 0.96f,
-                    animationSpec = tween(300)
-                )
-            }
+            slideOutHorizontally(
+                animationSpec = tween(350),
+                targetOffsetX = { -it }
+            )
         },
         popEnterTransition = {
-            if (performanceMode) fadeIn(animationSpec = tween(100))
-            else fadeIn(animationSpec = tween(400)) + scaleIn(
-                initialScale = 0.96f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
+            slideInHorizontally(
+                animationSpec = tween(350),
+                initialOffsetX = { -it }
+            ) + scaleIn(initialScale = 1f)
         },
         popExitTransition = {
-            if (performanceMode) fadeOut(animationSpec = tween(100))
-            else fadeOut(animationSpec = tween(300)) + scaleOut(
-                targetScale = 0.92f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            ) + slideOutVertically(
-                targetOffsetY = { 24 },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
+            slideOutHorizontally(
+                animationSpec = tween(350),
+                targetOffsetX = { it }
+            ) + scaleOut(targetScale = 1f)
         }
     ) {
         composable("onboarding") {
