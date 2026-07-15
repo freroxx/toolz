@@ -18,8 +18,14 @@ by PreferencesGlanceStateDefinition
 object MusicWidgetState {
     val KEY_TITLE    = stringPreferencesKey("mw_title")
     val KEY_ARTIST   = stringPreferencesKey("mw_artist")
+    val KEY_ALBUM    = stringPreferencesKey("mw_album")
     val KEY_PROGRESS = floatPreferencesKey("mw_progress")     // 0f–1f
     val KEY_PLAYING  = booleanPreferencesKey("mw_is_playing")
     val KEY_ART_PATH = stringPreferencesKey("mw_art_path")    // absolute file path to processed bitmap
     val KEY_ART_SHAPE= stringPreferencesKey("mw_art_shape")   // "CIRCLE" | "SQUARE"
+    val KEY_ACCENT_COLOR = stringPreferencesKey("mw_accent_color") // hex string
+    val KEY_HAS_NEXT = booleanPreferencesKey("mw_has_next")
+    val KEY_HAS_PREV = booleanPreferencesKey("mw_has_prev")
+    val KEY_IS_FAVORITE = booleanPreferencesKey("mw_is_favorite")
+    val KEY_NEXT_TITLE = stringPreferencesKey("mw_next_title")
 }

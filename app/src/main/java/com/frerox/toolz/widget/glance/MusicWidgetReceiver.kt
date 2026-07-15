@@ -21,6 +21,7 @@ class MusicWidgetReceiver : GlanceAppWidgetReceiver() {
             MUSIC_ACTION_TOGGLE -> serviceIntent.action = "TOGGLE_PLAY"
             MUSIC_ACTION_NEXT   -> serviceIntent.action = "SKIP_NEXT"
             MUSIC_ACTION_PREV   -> serviceIntent.action = "SKIP_PREV"
+            MUSIC_ACTION_FAVORITE -> serviceIntent.action = "TOGGLE_FAVORITE"
             else -> return
         }
         try {
@@ -30,3 +31,9 @@ class MusicWidgetReceiver : GlanceAppWidgetReceiver() {
         }
     }
 }
+
+// Broadcast action constants
+const val MUSIC_ACTION_TOGGLE = "com.frerox.toolz.WIDGET_MUSIC_TOGGLE"
+const val MUSIC_ACTION_NEXT   = "com.frerox.toolz.WIDGET_MUSIC_NEXT"
+const val MUSIC_ACTION_PREV   = "com.frerox.toolz.WIDGET_MUSIC_PREV"
+const val MUSIC_ACTION_FAVORITE = "com.frerox.toolz.WIDGET_MUSIC_FAVORITE"
