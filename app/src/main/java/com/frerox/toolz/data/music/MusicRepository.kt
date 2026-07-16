@@ -97,13 +97,13 @@ class MusicRepository @Inject constructor(
                 val duration = cursor.getLong(durationColumn)
                 val path = cursor.getString(dataColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                
+
                 val albumArtUri = if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null
-                
-                val existingTrack = musicDao.getTrackByUri(contentUri.toString()) 
+
+                val existingTrack = musicDao.getTrackByUri(contentUri.toString())
                     ?: (path?.let { musicDao.getTrackByPath(it) })
                     ?: musicDao.findDuplicate(title, artist, duration, path)
-                
+
                 if (existingTrack == null) {
                     tracks.add(
                         MusicTrack(
@@ -125,23 +125,23 @@ class MusicRepository @Inject constructor(
                     // Update existing track and fix potential buggy thumbnailUri (where it was set to the audio file Uri)
                     val currentThumb = existingTrack.thumbnailUri
                     val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
-                    
-                    val needsUpdate = existingTrack.uri != contentUri.toString() || 
-                                     existingTrack.path != path || 
-                                     currentThumb == null || isBuggyThumb
-                    
+
+                    val needsUpdate = existingTrack.uri != contentUri.toString() ||
+                            existingTrack.path != path ||
+                            currentThumb == null || isBuggyThumb
+
                     if (needsUpdate) {
-                         musicDao.updateTrack(existingTrack.copy(
-                             uri = contentUri.toString(), 
-                             path = path,
-                             albumId = albumId,
-                             thumbnailUri = if (currentThumb == null || isBuggyThumb) albumArtUri else currentThumb
-                         ))
+                        musicDao.updateTrack(existingTrack.copy(
+                            uri = contentUri.toString(),
+                            path = path,
+                            albumId = albumId,
+                            thumbnailUri = if (currentThumb == null || isBuggyThumb) albumArtUri else currentThumb
+                        ))
                     }
                 }
             }
         }
-        
+
         tracks.forEach { musicDao.insertTrack(it) }
         tracks
     }
@@ -157,7 +157,7 @@ class MusicRepository @Inject constructor(
     suspend fun scanCustomFolder(folderUri: Uri): List<MusicTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<MusicTrack>()
         val rootFolder = DocumentFile.fromTreeUri(context, folderUri)
-        
+
         suspend fun scanRecursive(directory: DocumentFile) {
             directory.listFiles().forEach { file ->
                 try {
@@ -166,7 +166,7 @@ class MusicRepository @Inject constructor(
                     } else if (isAudioFile(file.name ?: "")) {
                         val retriever = MediaMetadataRetriever()
                         retriever.setDataSource(context, file.uri)
-                        val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
+                        val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
                             ?: file.name?.substringBeforeLast(".") ?: "Unknown"
                         val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Unknown Artist"
                         val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
@@ -212,13 +212,13 @@ class MusicRepository @Inject constructor(
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
-            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) 
-                ?: uri.lastPathSegment?.substringBeforeLast(".") 
+            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                ?: uri.lastPathSegment?.substringBeforeLast(".")
                 ?: "Unknown"
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Unknown Artist"
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "Unknown Album"
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
-            
+
             val artwork = retriever.embeddedPicture
             var thumbnailUri: String? = null
             if (artwork != null) {
