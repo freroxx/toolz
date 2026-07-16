@@ -355,9 +355,6 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.frerox.toolz.WIDGET_MUSIC_TOGGLE" />
-                <action android:name="com.frerox.toolz.WIDGET_MUSIC_NEXT" />
-                <action android:name="com.frerox.toolz.WIDGET_MUSIC_PREV" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
                 android:resource="@xml/music_widget_info" />
