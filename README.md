@@ -134,7 +134,7 @@ Export and import your data (notes, passwords, settings, AI history, etc.) with 
 Toolz is distributed through **GitHub Releases**:
 
 - **Releases page:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- **Current version:** `1.0.8`
+- **Current version:** `1.0.9`
 
 ### Choose your architecture:
 
