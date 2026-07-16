@@ -5,12 +5,11 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import androidx.compose.animation.*
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +32,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,7 +43,7 @@ import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpdateScreen(
     onBack: () -> Unit,
@@ -53,10 +53,38 @@ fun UpdateScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val preferredAbi by viewModel.preferredAbi.collectAsState()
+    
+    UpdateScreenContent(
+        onBack = onBack,
+        currentVersionName = currentVersionName,
+        currentVersionCode = currentVersionCode,
+        uiState = uiState,
+        preferredAbi = preferredAbi,
+        onCheckForUpdates = { viewModel.checkForUpdates() },
+        onResetState = { viewModel.resetState() },
+        onSetPreferredAbi = { viewModel.setPreferredAbi(it) },
+        getDeviceAbi = { viewModel.getDeviceAbi() },
+        onStartDownload = { viewModel.startDownload(it) }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun UpdateScreenContent(
+    onBack: () -> Unit,
+    currentVersionName: String,
+    currentVersionCode: Long,
+    uiState: UpdateUiState,
+    preferredAbi: String,
+    onCheckForUpdates: () -> Unit,
+    onResetState: () -> Unit,
+    onSetPreferredAbi: (String) -> Unit,
+    getDeviceAbi: () -> String,
+    onStartDownload: (String) -> Unit
+) {
     val context = LocalContext.current
     var showAbiSettings by remember { mutableStateOf(false) }
     var showHelpSheet by remember { mutableStateOf(false) }
-    val performanceMode = LocalPerformanceMode.current
 
     val pullToRefreshState = rememberPullToRefreshState()
     val isRefreshing = uiState is UpdateUiState.Checking
@@ -64,29 +92,40 @@ fun UpdateScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { @Suppress("DEPRECATION") Text("APP GITHUB UPDATER", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp) },
+                title = {
+                    Text(
+                        "Updater",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     ToolzExpressiveIconButton(
                         onClick = onBack,
                         modifier = Modifier.padding(8.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    ToolzExpressiveButton(
+                    ToolzExpressiveIconButton(
                         onClick = { showHelpSheet = true },
-                        modifier = Modifier.padding(end = 4.dp).height(40.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        modifier = Modifier.padding(end = 4.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        )
                     ) {
-                        @Suppress("DEPRECATION")
-                        Text("Help", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.ErrorOutline, contentDescription = "Help")
                     }
                     ToolzExpressiveIconButton(
                         onClick = { showAbiSettings = true },
-                        modifier = Modifier.padding(8.dp),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(end = 8.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = "ABI Settings")
                     }
@@ -112,144 +151,155 @@ fun UpdateScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(140.dp)
-                        .clip(RoundedCornerShape(48.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Rounded.SystemUpdate,
-                        contentDescription = null,
-                        modifier = Modifier.size(72.dp),
-                        tint = Color.White
-                    )
-                }
-
-                Text(
-                    text = "Toolz v$currentVersionName",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                
+                // Central Icon with Expressive Styling
                 Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier
+                        .size(160.dp)
+                        .expressivePressScale(remember { MutableInteractionSource() }),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 2.dp
                 ) {
-                    @Suppress("DEPRECATION")
-                    Text(
-                        text = "BUILD $currentVersionCode",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.SystemUpdate,
+                            contentDescription = null,
+                            modifier = Modifier.size(80.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Toolz v$currentVersionName",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Text(
+                            text = "BUILD $currentVersionCode",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
 
                 AnimatedContent(
                     targetState = uiState,
                     transitionSpec = {
-                        fadeIn() + scaleIn() togetherWith fadeOut() + scaleOut()
+                        (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) + 
+                         scaleIn(initialScale = 0.9f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)))
+                            .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 1.1f))
                     },
-                    label = "update_state"
+                    label = "update_state",
+                    modifier = Modifier.fillMaxWidth()
                 ) { state ->
-                    when (state) {
-                        is UpdateUiState.Downloading -> {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                ) {
-                                    @Suppress("DEPRECATION")
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        when (state) {
+                            is UpdateUiState.Downloading -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        "DOWNLOADING PACKAGE",
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        style = MaterialTheme.typography.labelSmall,
+                                        "DOWNLOADING PATCH",
+                                        style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.primary,
                                         letterSpacing = 1.sp
                                     )
-                                }
-                                
-                                val animatedProgress by animateFloatAsState(
-                                    targetValue = state.progress / 100f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                                    label = "progress"
-                                )
+                                    
+                                    Spacer(Modifier.height(16.dp))
+                                    
+                                    val animatedProgress by animateFloatAsState(
+                                        targetValue = state.progress / 100f,
+                                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                                        label = "progress"
+                                    )
 
-                                ToolzWavyLinearProgressIndicator(
-                                    progress = { animatedProgress },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(12.dp)
-                                )
-                                
-                                Spacer(Modifier.height(16.dp))
-                                
-                                Text(
-                                    "Your patch is being prepared for integration.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                        is UpdateUiState.Checking -> {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                ToolzLoadingIndicator(modifier = Modifier.size(56.dp))
-                                Spacer(Modifier.height(20.dp))
-                                @Suppress("DEPRECATION")
-                                Text(
-                                    "SYNCHRONIZING REPOSITORY...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp
-                                )
-                            }
-                        }
-                        is UpdateUiState.Error -> {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(56.dp))
-                                Spacer(Modifier.height(12.dp))
-                                Text(
-                                    state.message, 
-                                    color = MaterialTheme.colorScheme.error, 
-                                    textAlign = TextAlign.Center,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(Modifier.height(24.dp))
-                                ToolzExpressiveButton(
-                                    onClick = { viewModel.checkForUpdates() }
-                                ) {
-                                    Text("RETRY CONNECTION", fontWeight = FontWeight.Black)
+                                    ToolzWavyLinearProgressIndicator(
+                                        progress = { animatedProgress },
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.8f)
+                                            .height(16.dp)
+                                    )
+                                    
+                                    Spacer(Modifier.height(12.dp))
+                                    
+                                    Text(
+                                        "${state.progress.toInt()}%",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
-                        }
-                        else -> {
-                            ToolzLargeExtendedFloatingActionButton(
-                                onClick = { viewModel.checkForUpdates() },
-                                modifier = Modifier.padding(horizontal = 40.dp),
-                                icon = { Icon(Icons.Rounded.SystemUpdate, null) },
-                                text = { Text("CHECK FOR ENGINE UPDATES", fontWeight = FontWeight.Black, letterSpacing = 1.sp) }
-                            )
+                            is UpdateUiState.Checking -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    ToolzLoadingIndicator(modifier = Modifier.size(64.dp))
+                                    Spacer(Modifier.height(24.dp))
+                                    Text(
+                                        "Checking for updates...",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            is UpdateUiState.Error -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Rounded.ErrorOutline, 
+                                        null, 
+                                        tint = MaterialTheme.colorScheme.error, 
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(
+                                        state.message, 
+                                        color = MaterialTheme.colorScheme.error, 
+                                        textAlign = TextAlign.Center,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(Modifier.height(24.dp))
+                                    ToolzExpressiveButton(
+                                        onClick = onCheckForUpdates,
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                                    ) {
+                                        Text("RETRY CONNECTION", fontWeight = FontWeight.Black)
+                                    }
+                                }
+                            }
+                            else -> {
+                                ToolzExpressiveButton(
+                                    onClick = onCheckForUpdates,
+                                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                                    shape = MaterialTheme.shapes.large
+                                ) {
+                                    Icon(Icons.Rounded.SystemUpdate, null)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("CHECK FOR UPDATES", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                                }
+                            }
                         }
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -276,7 +326,7 @@ fun UpdateScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { 
-                                    viewModel.setPreferredAbi(abi)
+                                    onSetPreferredAbi(abi)
                                     showAbiSettings = false
                                 }
                                 .padding(vertical = 8.dp)
@@ -287,7 +337,7 @@ fun UpdateScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = if (abi == "AUTO") "Auto-detect (${viewModel.getDeviceAbi()})" else abi,
+                                text = if (abi == "AUTO") "Auto-detect (${getDeviceAbi()})" else abi,
                                 style = MaterialTheme.typography.bodyLarge
                             )
                         }
@@ -308,7 +358,7 @@ fun UpdateScreen(
                 val bestAsset = UpdateHelper.getBestAsset(state.release.assets, preferredAbi)
                 Triple(
                     state.release.tagName.removePrefix("v"), 
-                    state.release.body ?: "No changelog.", 
+                    state.release.body ?: "No changelog provided.", 
                     bestAsset?.downloadUrl ?: ""
                 )
             }
@@ -316,7 +366,7 @@ fun UpdateScreen(
                 val bestRelease = state.manifest.releases?.let { UpdateHelper.getBestRelease(it, preferredAbi) }
                 Triple(
                     state.manifest.versionName, 
-                    state.manifest.changelog ?: "No changelog.", 
+                    state.manifest.changelog ?: "No changelog provided.", 
                     bestRelease?.downloadUrl ?: ""
                 )
             }
@@ -326,101 +376,110 @@ fun UpdateScreen(
         val isNewer = isNewerVersion(currentVersionName, latestVersion)
 
         ModalBottomSheet(
-            onDismissRequest = { viewModel.resetState() },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(topStart = 48.dp, topEnd = 48.dp),
-            tonalElevation = 12.dp
+            onDismissRequest = onResetState,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 4.dp
         ) {
             Column(
                 modifier = Modifier
-                    .padding(horizontal = 32.dp, vertical = 24.dp)
+                    .padding(horizontal = 24.dp, vertical = 24.dp)
                     .fillMaxWidth()
                     .navigationBarsPadding()
             ) {
-                @Suppress("DEPRECATION")
-                Text(
-                    text = if (isNewer) "PATCH AVAILABLE" else "SYSTEM UP TO DATE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                Row(
-                    modifier = Modifier.padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    color = if (isNewer) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.medium
                 ) {
                     Text(
-                        "v$latestVersion",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black
+                        text = if (isNewer) "NEW UPDATE AVAILABLE" else "SYSTEM UP TO DATE",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = if (isNewer) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
                     )
-                    if (isNewer) {
-                        Spacer(Modifier.width(12.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            @Suppress("DEPRECATION")
-                            Text(
-                                "NEW",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
-                    }
                 }
                 
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    "v$latestVersion",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black
+                )
+                
                 if (isNewer) {
-                    @Suppress("DEPRECATION")
-                    Text("CHANGELOG", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "CHANGELOG", 
+                        style = MaterialTheme.typography.labelLarge, 
+                        fontWeight = FontWeight.Black, 
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
                     Surface(
-                        modifier = Modifier.padding(vertical = 12.dp).fillMaxWidth().heightIn(max = 200.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(24.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+                        modifier = Modifier
+                            .padding(vertical = 12.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        shape = MaterialTheme.shapes.large,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
-                        LazyColumn(modifier = Modifier.padding(16.dp).then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 12.dp, bottom = 12.dp))) {
+                        LazyColumn(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             item {
-                                Text(changelog, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    changelog, 
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    lineHeight = 24.sp
+                                )
                             }
                         }
                     }
 
+                    Spacer(Modifier.height(16.dp))
+
                     ToolzExpressiveButton(
                         onClick = {
                             if (apkUrl.isNotEmpty()) {
-                                viewModel.startDownload(apkUrl)
+                                onStartDownload(apkUrl)
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(64.dp),
-                        enabled = apkUrl.isNotEmpty()
+                        enabled = apkUrl.isNotEmpty(),
+                        shape = MaterialTheme.shapes.large
                     ) {
                         Icon(Icons.Rounded.Download, contentDescription = null)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("DEPLOY PATCH APK", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text("DOWNLOAD & INSTALL", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
+                    
                     if (apkUrl.isEmpty()) {
-                        val targetAbi = if (preferredAbi == "AUTO") viewModel.getDeviceAbi() else preferredAbi
+                        val targetAbi = if (preferredAbi == "AUTO") getDeviceAbi() else preferredAbi
                         Text(
-                            "No APK asset identified for $targetAbi architecture in this release.",
+                            "No compatible APK found for $targetAbi.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 8.dp)
+                            modifier = Modifier.padding(top = 12.dp),
+                            textAlign = TextAlign.Center
                         )
                     }
                 } else {
+                    Spacer(Modifier.height(12.dp))
                     Text(
-                        "You're running the latest high-fidelity build. No infrastructure updates required at this time.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        "You're currently using the most advanced version of Toolz. No updates are required at this time.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(32.dp))
                     ToolzExpressiveButton(
-                        onClick = { viewModel.resetState() },
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                        onClick = onResetState,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors()
                     ) {
                         Text("DISMISS", fontWeight = FontWeight.Black)
                     }
@@ -440,63 +499,57 @@ fun UpdateHelpBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(36.dp, 4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-            )
-        }
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 4.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text(
-                text = "Update Mechanism",
+                text = "Update System",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black
             )
 
             Text(
-                text = "Toolz uses a multi-layered update system to ensure you always have access to the latest precision instruments.",
-                style = MaterialTheme.typography.bodyMedium,
+                text = "Toolz features a robust update mechanism designed to keep your utility suite at peak performance.",
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             HelpSection(
-                title = "In-App Update",
-                description = "Toolz checks our project manifest and GitHub for new releases. When found, the app downloads and prompts you to install the APK directly.",
+                title = "Automated Checks",
+                description = "We synchronize with our GitHub repository and manifest to identify new builds specifically for your device architecture.",
                 icon = Icons.Rounded.SystemUpdate
             )
 
             HelpSection(
-                title = "Manual Links",
-                description = "If the automated system fails, you can always grab the latest builds directly from our repository.",
+                title = "Manual Override",
+                description = "In case of network synchronization issues, you can access the releases page directly to download APKs.",
                 icon = Icons.Rounded.Download
             )
 
-            ToolzExpressiveButton(
-                onClick = { onNavigateToUrl("https://github.com/freroxx/toolz/releases") },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
-            ) {
-                Icon(Icons.Rounded.Download, null)
-                Spacer(Modifier.width(12.dp))
-                Text("OPEN RELEASES PAGE", fontWeight = FontWeight.Black)
-            }
-            
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("CLOSE", fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolzExpressiveButton(
+                    onClick = { onNavigateToUrl("https://github.com/freroxx/toolz/releases") },
+                    modifier = Modifier.fillMaxWidth().height(64.dp)
+                ) {
+                    Icon(Icons.Rounded.Download, null)
+                    Spacer(Modifier.width(12.dp))
+                    Text("VIEW ALL RELEASES", fontWeight = FontWeight.Black)
+                }
+                
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("CLOSE", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -521,6 +574,37 @@ fun HelpSection(title: String, description: String, icon: ImageVector) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun UpdateScreenPreview() {
+    com.frerox.toolz.ui.theme.ToolzTheme {
+        UpdateScreenContent(
+            onBack = {},
+            currentVersionName = "1.0.9",
+            currentVersionCode = 10,
+            uiState = UpdateUiState.Idle,
+            preferredAbi = "AUTO",
+            onCheckForUpdates = {},
+            onResetState = {},
+            onSetPreferredAbi = {},
+            getDeviceAbi = { "arm64-v8a" },
+            onStartDownload = {}
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview(showBackground = true)
+@Composable
+fun UpdateHelpPreview() {
+    com.frerox.toolz.ui.theme.ToolzTheme {
+        UpdateHelpBottomSheet(
+            onDismiss = {},
+            onNavigateToUrl = {}
+        )
     }
 }
 
