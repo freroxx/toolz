@@ -9,11 +9,8 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
+import android.os.SystemClock
 import androidx.annotation.OptIn
-import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.state.updateAppWidgetState
-import androidx.glance.appwidget.updateAll
-import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -30,7 +27,8 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.WidgetUpdateManager
-import com.frerox.toolz.widget.glance.MusicGlanceWidget
+import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.EXTRA_QUEUE_INDEX
+import com.frerox.toolz.widget.glance.QueueTrackInfo
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -44,10 +42,37 @@ import kotlin.math.sqrt
 @AndroidEntryPoint
 class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
+    companion object {
+        // Service-facing action names. The widget receiver maps its own
+        // broadcast actions (MUSIC_ACTION_*) onto these — kept as constants
+        // here rather than duplicated string literals in both files, so
+        // renaming or adding one can't silently drift out of sync.
+        const val ACTION_TOGGLE_PLAY = "com.frerox.toolz.action.TOGGLE_PLAY"
+        const val ACTION_SKIP_NEXT = "com.frerox.toolz.action.SKIP_NEXT"
+        const val ACTION_SKIP_PREV = "com.frerox.toolz.action.SKIP_PREV"
+        const val ACTION_TOGGLE_FAVORITE = "com.frerox.toolz.action.TOGGLE_FAVORITE"
+        const val ACTION_SEEK_TO_QUEUE_INDEX = "com.frerox.toolz.action.SEEK_TO_QUEUE_INDEX"
+
+        // How many upcoming tracks the widget's "Up Next" queue shows.
+        // Bounded deliberately: Glance's RemoteViews-backed LazyColumn has
+        // real per-row overhead, and nobody scans an 40-deep widget queue
+        // anyway — the next handful is what's actually useful at a glance.
+        private const val MAX_QUEUE_ROWS = 8
+
+        // Correction interval while playing. The widget no longer needs a
+        // per-second push to *look* live — it interpolates position on its
+        // own between updates (see liveProgressFraction) — this loop exists
+        // purely to correct drift from playback speed changes, seeks made
+        // outside the widget, or buffering stalls. 12s keeps drift
+        // imperceptible without re-rendering the widget 12x more than
+        // necessary.
+        private const val PROGRESS_CORRECTION_INTERVAL_MS = 12_000L
+    }
+
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var widgetUpdateJob: Job? = null
-    
+    private var widgetCorrectionJob: Job? = null
+
     private var sensorManager: SensorManager? = null
     private var acceleration = 0f
     private var currentAcceleration = 0f
@@ -59,6 +84,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var cachedProcessedBitmap: Bitmap? = null
     private var lastTrackUri: String? = null
     private var lastShape: String? = null
+    private var lastAccentColor: String? = null
 
     @Inject
     lateinit var player: ExoPlayer
@@ -75,10 +101,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     @Inject
     lateinit var musicRepository: MusicRepository
 
+    @Inject
+    lateinit var vibrationManager: com.frerox.toolz.util.VibrationManager
+
     private val playerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateWidget(forceBitmapRefresh = true)
-            
+
             // Check if we need to resolve the stream URL for catalog tracks
             mediaItem?.let { item ->
                 val isCatalog = item.mediaMetadata.extras?.getBoolean("is_catalog") ?: false
@@ -90,14 +119,20 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updateWidget()
             if (isPlaying) {
-                startWidgetTimer()
+                startWidgetCorrectionLoop()
                 observeShakeSetting()
             } else {
-                stopWidgetTimer()
+                stopWidgetCorrectionLoop()
                 unregisterShakeListener()
             }
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
+            updateWidget()
+        }
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            // The queue itself can change shape (tracks added/removed/
+            // reordered) without a media item transition — re-push so the
+            // widget's Up Next list doesn't go stale.
             updateWidget()
         }
     }
@@ -107,12 +142,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             try {
                 val sourceUrl = item.mediaMetadata.extras?.getString("source_url") ?: return@launch
                 val streamUrl = catalogRepository.resolveAudioStream(sourceUrl)
-                
+
                 if (streamUrl != null) {
                     val updatedItem = item.buildUpon()
                         .setUri(Uri.parse(streamUrl))
                         .build()
-                    
+
                     // Replace the item in the player
                     for (i in 0 until player.mediaItemCount) {
                         if (player.getMediaItemAt(i).mediaId == item.mediaId) {
@@ -129,7 +164,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
-        
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         acceleration = 10f
         currentAcceleration = SensorManager.GRAVITY_EARTH
@@ -139,20 +174,20 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             putExtra("navigate_to", "music_player")
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        
+
         val pendingIntent = PendingIntent.getActivity(
             this, 2001, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        
+
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
             .build()
 
         player.addListener(playerListener)
-        
+
         if (player.isPlaying) {
-            startWidgetTimer()
+            startWidgetCorrectionLoop()
             observeShakeSetting()
         }
         updateWidget(forceBitmapRefresh = true)
@@ -168,7 +203,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }.collectLatest { (enabled, sensitivity) ->
                 // Sensitivity 0.0 -> 35f (hard), 1.0 -> 8f (easy)
                 shakeThreshold = 35f - (sensitivity * 27f)
-                
+
                 if (enabled && player.isPlaying) {
                     registerShakeListener()
                 } else {
@@ -210,6 +245,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             if (now - lastShakeTime > 1000) {
                 lastShakeTime = now
                 if (player.hasNextMediaItem()) {
+                    vibrationManager.vibrateSuccess()
                     player.seekToNext()
                 }
             }
@@ -220,12 +256,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "TOGGLE_PLAY" -> {
+            ACTION_TOGGLE_PLAY -> {
                 if (player.isPlaying) player.pause() else player.play()
             }
-            "SKIP_NEXT" -> player.seekToNext()
-            "SKIP_PREV" -> player.seekToPrevious()
-            "TOGGLE_FAVORITE" -> {
+            ACTION_SKIP_NEXT -> player.seekToNext()
+            ACTION_SKIP_PREV -> player.seekToPrevious()
+            ACTION_SEEK_TO_QUEUE_INDEX -> {
+                val index = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
+                if (index in 0 until player.mediaItemCount) {
+                    player.seekTo(index, 0L)
+                    if (!player.isPlaying) player.play()
+                }
+            }
+            ACTION_TOGGLE_FAVORITE -> {
                 serviceScope.launch {
                     val currentMediaId = player.currentMediaItem?.mediaId
                     if (currentMediaId != null) {
@@ -242,37 +285,59 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    private fun startWidgetTimer() {
-        widgetUpdateJob?.cancel()
-        widgetUpdateJob = serviceScope.launch {
+    /**
+     * Periodic drift correction while playing — NOT a "make the bar move"
+     * timer. The widget derives its own live position between pushes (see
+     * MusicWidgetSupport.liveProgressFraction), so this only needs to run
+     * often enough to catch drift, not every second. Replaces the previous
+     * 1s poll loop, cutting widget re-renders by roughly 12x during
+     * continuous playback while the bar looks equally live.
+     */
+    private fun startWidgetCorrectionLoop() {
+        widgetCorrectionJob?.cancel()
+        widgetCorrectionJob = serviceScope.launch {
             while (isActive) {
+                delay(PROGRESS_CORRECTION_INTERVAL_MS)
                 updateWidget()
-                delay(1000)
             }
         }
     }
 
-    private fun stopWidgetTimer() {
-        widgetUpdateJob?.cancel()
+    private fun stopWidgetCorrectionLoop() {
+        widgetCorrectionJob?.cancel()
         updateWidget()
     }
 
-    private var lastAccentColor: String? = null
+    private fun buildQueueSnapshot(): List<QueueTrackInfo> {
+        if (player.mediaItemCount == 0) return emptyList()
+        val currentIndex = player.currentMediaItemIndex
+        val upcoming = (currentIndex + 1) until player.mediaItemCount
+        return upcoming.take(MAX_QUEUE_ROWS).map { index ->
+            val item = player.getMediaItemAt(index)
+            QueueTrackInfo(
+                mediaId = item.mediaId,
+                title = item.mediaMetadata.title?.toString() ?: "Unknown",
+                artist = item.mediaMetadata.artist?.toString() ?: "Unknown Artist",
+                queueIndex = index
+            )
+        }
+    }
 
     private fun updateWidget(forceBitmapRefresh: Boolean = false) {
         val currentItem = player.currentMediaItem
-        val mediaId    = currentItem?.mediaId
-        
+        val mediaId = currentItem?.mediaId
+        val queueSnapshot = buildQueueSnapshot()
+        val capturedAtElapsedMs = SystemClock.elapsedRealtime()
+        val positionMs = player.currentPosition
+        val durationMs = player.duration.coerceAtLeast(0L)
+        val isPlayingNow = player.isPlaying
+
         serviceScope.launch {
             val artShape = settingsRepository.musicArtShape.first()
-            val artUri   = currentItem?.mediaMetadata?.artworkUri?.toString()
-            val title    = currentItem?.mediaMetadata?.title?.toString() ?: "Not Playing"
-            val artist   = currentItem?.mediaMetadata?.artist?.toString() ?: "Tap to open Toolz"
-            val album    = currentItem?.mediaMetadata?.albumTitle?.toString()
-
-            val duration = player.duration
-            val position = player.currentPosition
-            val progress = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+            val artUri = currentItem?.mediaMetadata?.artworkUri?.toString()
+            val title = currentItem?.mediaMetadata?.title?.toString() ?: "Not Playing"
+            val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Tap to open Toolz"
+            val album = currentItem?.mediaMetadata?.albumTitle?.toString()
 
             // Load & persist art bitmap to a file for Glance to read
             if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
@@ -283,8 +348,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 bitmap?.let {
                     cachedProcessedBitmap = processThumbnail(it, artShape)
                     lastTrackUri = artUri
-                    lastShape    = artShape
-                    
+                    lastShape = artShape
+
                     // Extract accent color
                     val palette = Palette.from(it).generate()
                     val color = palette.getVibrantColor(palette.getMutedColor(Color.BLUE))
@@ -305,25 +370,25 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 musicRepository.getTrackByUri(mediaId)?.isFavorite ?: false
             } else false
 
-            val nextItem = if (player.hasNextMediaItem()) {
-                player.getMediaItemAt(player.currentMediaItemIndex + 1)
-            } else null
-            val nextTitle = nextItem?.mediaMetadata?.title?.toString()
+            val nextTitle = queueSnapshot.firstOrNull()?.title
 
             // Push state to Glance DataStore using the WidgetUpdateManager
             widgetUpdateManager.updateMusicWidget(
                 title = title,
                 artist = artist,
                 album = album,
-                progress = progress,
-                isPlaying = player.isPlaying,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                capturedAtElapsedMs = capturedAtElapsedMs,
+                isPlaying = isPlayingNow,
                 hasNext = player.hasNextMediaItem(),
                 hasPrev = player.hasPreviousMediaItem(),
                 accentColor = lastAccentColor,
                 artShape = artShape,
                 artFilePath = artFilePath,
                 isFavorite = isFavorite,
-                nextTitle = nextTitle
+                nextTitle = nextTitle,
+                queue = queueSnapshot
             )
         }
     }
@@ -347,8 +412,6 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
         return output
     }
-
-    // setupIntents no longer needed — Glance handles click actions declaratively
 
     private suspend fun loadBitmap(uri: String): Bitmap? = withContext(Dispatchers.IO) {
         try {
