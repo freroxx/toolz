@@ -6,9 +6,10 @@ import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.appwidget.updateAll
 import com.frerox.toolz.widget.glance.MusicGlanceWidget
 import com.frerox.toolz.widget.glance.MusicWidgetState
+import com.frerox.toolz.widget.glance.QueueTrackInfo
+import com.frerox.toolz.widget.glance.encodeQueueJson
 import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
 import com.frerox.toolz.widget.glance.PomodoroWidgetState
-import com.frerox.toolz.widget.glance.MusicWidgetStateDefinition
 import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import com.frerox.toolz.widget.glance.SearchBarGlanceWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,44 +24,49 @@ class WidgetUpdateManager @Inject constructor(
         title: String,
         artist: String,
         album: String?,
-        progress: Float,
+        positionMs: Long,
+        durationMs: Long,
+        capturedAtElapsedMs: Long,
         isPlaying: Boolean,
         hasNext: Boolean,
         hasPrev: Boolean,
         accentColor: String?,
         artShape: String,
         artFilePath: String?,
-        isFavorite: Boolean = false,
-        nextTitle: String? = null
+        isFavorite: Boolean,
+        nextTitle: String?,
+        queue: List<QueueTrackInfo>
     ) {
-        val glanceIds = GlanceAppWidgetManager(context).getGlanceIds(MusicGlanceWidget::class.java)
+        val glanceIds = GlanceAppWidgetManager(context)
+            .getGlanceIds(MusicGlanceWidget::class.java)
+
+        if (glanceIds.isEmpty()) return // no widget instances on the home screen — nothing to push
+
         glanceIds.forEach { glanceId ->
-            updateAppWidgetState(context, MusicWidgetStateDefinition, glanceId) { prefs ->
-                prefs.toMutablePreferences().apply {
-                    this[MusicWidgetState.KEY_TITLE] = title
-                    this[MusicWidgetState.KEY_ARTIST] = artist
-                    album?.let { this[MusicWidgetState.KEY_ALBUM] = it }
-                    this[MusicWidgetState.KEY_PROGRESS] = progress
-                    this[MusicWidgetState.KEY_PLAYING] = isPlaying
-                    this[MusicWidgetState.KEY_HAS_NEXT] = hasNext
-                    this[MusicWidgetState.KEY_HAS_PREV] = hasPrev
-                    accentColor?.let { this[MusicWidgetState.KEY_ACCENT_COLOR] = it }
-                    this[MusicWidgetState.KEY_ART_SHAPE] = artShape
-                    if (artFilePath != null) {
-                        this[MusicWidgetState.KEY_ART_PATH] = artFilePath
-                    } else {
-                        remove(MusicWidgetState.KEY_ART_PATH)
-                    }
-                    this[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
-                    if (nextTitle != null) {
-                        this[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
-                    } else {
-                        remove(MusicWidgetState.KEY_NEXT_TITLE)
-                    }
+            updateAppWidgetState(context, glanceId) { prefs ->
+                prefs[MusicWidgetState.KEY_TITLE] = title
+                prefs[MusicWidgetState.KEY_ARTIST] = artist
+                if (album != null) prefs[MusicWidgetState.KEY_ALBUM] = album
+                prefs[MusicWidgetState.KEY_POSITION_MS] = positionMs
+                prefs[MusicWidgetState.KEY_DURATION_MS] = durationMs
+                prefs[MusicWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] = capturedAtElapsedMs
+                prefs[MusicWidgetState.KEY_PLAYING] = isPlaying
+                prefs[MusicWidgetState.KEY_HAS_NEXT] = hasNext
+                prefs[MusicWidgetState.KEY_HAS_PREV] = hasPrev
+                if (accentColor != null) prefs[MusicWidgetState.KEY_ACCENT_COLOR] = accentColor
+                prefs[MusicWidgetState.KEY_ART_SHAPE] = artShape
+                if (artFilePath != null) prefs[MusicWidgetState.KEY_ART_PATH] = artFilePath
+                prefs[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
+                if (nextTitle != null) {
+                    prefs[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
+                } else {
+                    prefs.remove(MusicWidgetState.KEY_NEXT_TITLE)
                 }
+                prefs[MusicWidgetState.KEY_QUEUE_JSON] = encodeQueueJson(queue)
             }
+            // Explicitly trigger a refresh for this instance
+            MusicGlanceWidget().update(context, glanceId)
         }
-        MusicGlanceWidget().updateAll(context)
     }
 
     suspend fun updatePomodoroWidget(
