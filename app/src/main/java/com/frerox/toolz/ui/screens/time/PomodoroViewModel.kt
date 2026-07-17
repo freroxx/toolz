@@ -300,30 +300,34 @@ class PomodoroViewModel @Inject constructor(
                 $currentQuotes
             """.trimIndent()
 
-            try {
-                val resp = withContext(Dispatchers.IO) {
-                    openAiService.getChatCompletion(
-                        url = "https://api.groq.com/openai/v1/chat/completions",
-                        authHeader = "Bearer $groqKey",
-                        request = OpenAiRequest(
-                            model = "llama-3.1-8b-instant",
-                            messages = listOf(
-                                OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that formats quotes. Reply with ONLY the formatted quotes, one per line.")),
-                                OpenAiMessage("user", MessageContent.Text(prompt)),
-                            ),
-                            maxTokens = 2000,
+            val models = listOf("llama-3.1-8b-instant", "gpt-oss-20b")
+            for (modelName in models) {
+                try {
+                    val resp = withContext(Dispatchers.IO) {
+                        openAiService.getChatCompletion(
+                            url = "https://api.groq.com/openai/v1/chat/completions",
+                            authHeader = "Bearer $groqKey",
+                            request = OpenAiRequest(
+                                model = modelName,
+                                messages = listOf(
+                                    OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that formats quotes. Reply with ONLY the formatted quotes, one per line.")),
+                                    OpenAiMessage("user", MessageContent.Text(prompt)),
+                                ),
+                                maxTokens = 2000,
+                            )
                         )
-                    )
+                    }
+                    val formatted = resp.choices.firstOrNull()?.message?.content?.trim()
+                    if (!formatted.isNullOrBlank()) {
+                        settingsRepository.setPomodoroQuotes(formatted)
+                        break
+                    }
+                } catch (e: Exception) {
+                    Log.e("PomodoroVM", "AI format failed with $modelName: ${e.message}")
                 }
-                val formatted = resp.choices.firstOrNull()?.message?.content?.trim()
-                if (!formatted.isNullOrBlank()) {
-                    settingsRepository.setPomodoroQuotes(formatted)
-                }
-            } catch (e: Exception) {
-                Log.e("PomodoroVM", "AI format failed: ${e.message}")
-            } finally {
-                _uiState.update { it.copy(isFormattingQuotes = false) }
             }
+            
+            _uiState.update { it.copy(isFormattingQuotes = false) }
         }
     }
 

@@ -10,24 +10,31 @@ object AiSettingsHelper {
     private val openAiCompatibleProviders = setOf("ChatGPT", "Groq", "DeepSeek", "OpenRouter")
 
     fun getRecommendedModel(provider: String): String = when (provider) {
-        "Gemini" -> "gemini-3.0-flash"
-        "ChatGPT" -> "gpt-5.4-mini"
+        "Gemini" -> "gemini-3.5-flash"
+        "ChatGPT" -> "gpt-5.6-terra"
         "Groq" -> "llama-3.3-70b-versatile"
-        "Claude" -> "claude-sonnet-4-6"
-        "DeepSeek" -> "deepseek-chat"
-        "OpenRouter" -> "anthropic/claude-sonnet-4-6"
-        else -> "gemini-3.0-flash"
+        "Claude" -> "claude-sonnet-5"
+        "DeepSeek" -> "deepseek-v4-flash"
+        "OpenRouter" -> "anthropic/claude-sonnet-5"
+        else -> "gemini-3.5-flash"
     }
 
     fun getModels(provider: String): List<String> = when (provider) {
         "Gemini" -> listOf(
+            "gemini-3.5-flash",
+            "gemini-3.5-pro",
+            "gemini-3.1-pro",
+            "gemini-3.1-flash",
+            "gemini-3.1-flash-lite",
             "gemini-3.0-pro",
             "gemini-3.0-flash",
             "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.5-flash"
         )
         "ChatGPT" -> listOf(
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
             "gpt-5.5",
             "gpt-5.4",
             "gpt-5.4-mini",
@@ -38,6 +45,8 @@ object AiSettingsHelper {
             "gpt-4o-mini"
         )
         "Groq" -> listOf(
+            "gpt-oss-120b",
+            "gpt-oss-20b",
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
             "llama-3.2-90b-vision-preview",
@@ -46,24 +55,36 @@ object AiSettingsHelper {
             "mixtral-8x7b-32768"
         )
         "Claude" -> listOf(
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
             "claude-opus-4-7",
             "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5"
+            "claude-sonnet-4-6"
         )
         "DeepSeek" -> listOf(
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             "deepseek-chat",
             "deepseek-reasoner"
         )
         "OpenRouter" -> listOf(
-            "anthropic/claude-sonnet-4-6",
-            "anthropic/claude-opus-4-7",
-            "openai/gpt-5.5",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "anthropic/claude-sonnet-5",
+            "anthropic/claude-fable-5",
+            "anthropic/claude-opus-4-8",
+            "openai/gpt-5.6-sol",
+            "openai/gpt-5.6-terra",
+            "openai/gpt-5.6-luna",
             "openai/gpt-5.4-mini",
-            "google/gemini-3.0-flash",
-            "google/gemini-3.0-pro",
-            "deepseek/deepseek-chat",
-            "meta-llama/llama-3.3-70b-instruct"
+            "google/gemini-3.5-flash",
+            "google/gemini-3.1-pro",
+            "deepseek/deepseek-v4-pro",
+            "deepseek/deepseek-v4-flash",
+            "meta-llama/llama-3.3-70b-instruct",
+            "meta-llama/llama-3.1-8b-instruct"
         )
         else -> emptyList()
     }
