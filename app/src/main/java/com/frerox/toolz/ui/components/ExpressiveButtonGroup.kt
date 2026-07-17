@@ -23,6 +23,12 @@ import com.frerox.toolz.ui.theme.ToolzTheme
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,11 +70,11 @@ fun ToolzExpressiveButtonGroup(
 fun ToolzConnectedButtonGroup(
     selectedIndex: Int,
     options: List<String>,
-    unCheckedIcons: List<ImageVector>,
-    checkedIcons: List<ImageVector>,
     onOptionSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    unCheckedIcons: List<ImageVector> = emptyList(),
+    checkedIcons: List<ImageVector> = emptyList(),
 ) {
     val haptic = rememberToolzHapticFeedback()
     
@@ -104,11 +110,14 @@ fun ToolzConnectedButtonGroup(
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 }
             ) {
-                Icon(
-                    if (selectedIndex == index) checkedIcons[index] else unCheckedIcons[index],
-                    contentDescription = label,
-                )
-                Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
+                val hasIcons = unCheckedIcons.size > index && checkedIcons.size > index
+                if (hasIcons) {
+                    Icon(
+                        if (selectedIndex == index) checkedIcons[index] else unCheckedIcons[index],
+                        contentDescription = label,
+                    )
+                    Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
+                }
                 Text(label)
             }
         }
@@ -135,16 +144,16 @@ private fun ExpressiveButtonGroupPreview() {
             var selectedIndex by remember { mutableIntStateOf(0) }
             ToolzConnectedButtonGroup(
                 selectedIndex = selectedIndex,
-                options = listOf("Work", "Restaurant", "Coffee"),
+                options = listOf("Search", "Settings", "Home"),
                 unCheckedIcons = listOf(
-                    androidx.compose.material.icons.outlined.Work,
-                    androidx.compose.material.icons.outlined.Restaurant,
-                    androidx.compose.material.icons.outlined.Coffee
+                    Icons.Outlined.Search,
+                    Icons.Outlined.Settings,
+                    Icons.Outlined.Home
                 ),
                 checkedIcons = listOf(
-                    androidx.compose.material.icons.filled.Work,
-                    androidx.compose.material.icons.filled.Restaurant,
-                    androidx.compose.material.icons.filled.Coffee
+                    Icons.Filled.Search,
+                    Icons.Filled.Settings,
+                    Icons.Filled.Home
                 ),
                 onOptionSelected = { selectedIndex = it }
             )

@@ -51,6 +51,12 @@ import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.OutlinedIconToggleButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButtonColors
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.ToggleButtonShapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -172,8 +178,8 @@ fun ToolzElevatedExpressiveToggleButton(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: ButtonColors = ButtonDefaults.elevatedButtonColors(),
-    shapes: ButtonShapes = ButtonDefaults.shapes(),
+    colors: ToggleButtonColors = ToggleButtonDefaults.elevatedToggleButtonColors(),
+    shapes: ToggleButtonShapes = ToggleButtonDefaults.shapes(),
     shape: Shape? = null,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit,
@@ -191,7 +197,7 @@ fun ToolzElevatedExpressiveToggleButton(
         modifier = modifier.expressivePressScale(interactionSource, enabled),
         enabled = enabled,
         colors = colors,
-        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+        shapes = if (shape != null) ToggleButtonShapes(shape, shape, shape) else shapes,
         contentPadding = contentPadding,
         interactionSource = interactionSource,
         content = content,
@@ -344,11 +350,7 @@ fun ToolzExpressiveIconToggleButton(
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-
-
-@Composable
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)@Composable
 fun ExpressiveFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
@@ -556,6 +558,7 @@ private fun ExpressiveButtonsPreview() {
                 label = { Text("SPLIT BUTTON") },
             )
         }
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
