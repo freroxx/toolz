@@ -26,9 +26,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ElevatedToggleButton
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.IconButtonDefaults
@@ -131,6 +136,156 @@ fun ToolzOutlinedExpressiveButton(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
+fun ToolzElevatedExpressiveButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.elevatedButtonColors(),
+    shapes: ButtonShapes = ButtonDefaults.shapes(),
+    shape: Shape? = null,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    ElevatedButton(
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
+        enabled = enabled,
+        colors = colors,
+        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzElevatedExpressiveToggleButton(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.elevatedButtonColors(),
+    shapes: ButtonShapes = ButtonDefaults.shapes(),
+    shape: Shape? = null,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    ElevatedToggleButton(
+        checked = checked,
+        onCheckedChange = {
+            haptic.tick()
+            currentOnCheckedChange(it)
+        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
+        enabled = enabled,
+        colors = colors,
+        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzTonalExpressiveButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.filledTonalButtonColors(),
+    shapes: ButtonShapes = ButtonDefaults.shapes(),
+    shape: Shape? = null,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    FilledTonalButton(
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
+        enabled = enabled,
+        colors = colors,
+        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzTonalExpressiveIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: IconButtonColors = IconButtonDefaults.filledTonalIconButtonColors(),
+    shapes: IconButtonShapes = IconButtonDefaults.shapes(),
+    shape: Shape? = null,
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+
+    FilledTonalIconButton(
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        modifier = modifier,
+        enabled = enabled,
+        colors = colors,
+        shapes = if (shape != null) IconButtonShapes(shape, shape) else shapes,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzTonalExpressiveIconToggleButton(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: IconToggleButtonColors = IconButtonDefaults.filledTonalIconToggleButtonColors(),
+    shapes: IconToggleButtonShapes = IconButtonDefaults.toggleableShapes(),
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+
+    FilledTonalIconToggleButton(
+        checked = checked,
+        onCheckedChange = {
+            haptic.tick()
+            currentOnCheckedChange(it)
+        },
+        modifier = modifier,
+        enabled = enabled,
+        colors = colors,
+        shapes = shapes,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
 fun ToolzExpressiveIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -191,31 +346,7 @@ fun ToolzExpressiveIconToggleButton(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ToolzLargeExtendedFloatingActionButton(
-    onClick: () -> Unit,
-    text: @Composable () -> Unit,
-    icon: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-    expanded: Boolean = true,
-    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
-) {
-    val haptic = rememberToolzHapticFeedback()
-    val currentOnClick by rememberUpdatedState(onClick)
 
-    LargeExtendedFloatingActionButton(
-        onClick = {
-            haptic.click()
-            currentOnClick()
-        },
-        modifier = modifier,
-        icon = icon,
-        text = text,
-        expanded = expanded,
-        containerColor = containerColor,
-        contentColor = contentColor,
-    )
-}
 
 @Composable
 fun ExpressiveFilterChip(
@@ -425,5 +556,93 @@ private fun ExpressiveButtonsPreview() {
                 label = { Text("SPLIT BUTTON") },
             )
         }
-    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzExpressiveTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: ButtonColors = ButtonDefaults.textButtonColors(),
+    shapes: ButtonShapes = ButtonDefaults.shapes(),
+    shape: Shape? = null,
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    TextButton(
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
+        enabled = enabled,
+        colors = colors,
+        shapes = if (shape != null) ButtonShapes(shape, shape) else shapes,
+        contentPadding = contentPadding,
+        interactionSource = interactionSource,
+        content = content,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ToolzOutlinedExpressiveIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: IconButtonColors = IconButtonDefaults.outlinedIconButtonColors(),
+    shapes: IconButtonShapes = IconButtonDefaults.shapes(),
+    shape: Shape? = null,
+    border: BorderStroke? = ButtonDefaults.outlinedButtonBorder(enabled),
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+
+    OutlinedIconButton(
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        modifier = modifier,
+        enabled = enabled,
+        colors = colors,
+        border = border,
+        shapes = if (shape != null) IconButtonShapes(shape, shape) else shapes,
+        content = content,
+    )
+}
+
+@Composable
+fun ToolzOutlinedExpressiveIconToggleButton(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    colors: IconToggleButtonColors = IconButtonDefaults.outlinedIconToggleButtonColors(),
+    shapes: IconToggleButtonShapes = IconButtonDefaults.toggleableShapes(),
+    border: BorderStroke? = ButtonDefaults.outlinedButtonBorder(enabled),
+    content: @Composable () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+
+    OutlinedIconToggleButton(
+        checked = checked,
+        onCheckedChange = {
+            haptic.tick()
+            currentOnCheckedChange(it)
+        },
+        modifier = modifier,
+        enabled = enabled,
+        colors = colors,
+        shapes = shapes,
+        border = border,
+        content = content,
+    )
 }

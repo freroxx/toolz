@@ -20,6 +20,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.theme.ToolzTheme
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Expressive Button Group with overflow support.
@@ -58,6 +64,8 @@ fun ToolzExpressiveButtonGroup(
 fun ToolzConnectedButtonGroup(
     selectedIndex: Int,
     options: List<String>,
+    unCheckedIcons: List<ImageVector>,
+    checkedIcons: List<ImageVector>,
     onOptionSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true
@@ -65,10 +73,18 @@ fun ToolzConnectedButtonGroup(
     val haptic = rememberToolzHapticFeedback()
     
     Row(
-        modifier = modifier,
+        modifier = modifier.padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
     ) {
+        val modifiers = listOf(
+            Modifier.weight(1f),
+            Modifier.weight(1.5f),
+            Modifier.weight(1f),
+        )
+
         options.forEachIndexed { index, label ->
+            val interactionSource = remember { MutableInteractionSource() }
+
             ToggleButton(
                 checked = selectedIndex == index,
                 onCheckedChange = {
@@ -77,23 +93,23 @@ fun ToolzConnectedButtonGroup(
                         onOptionSelected(index)
                     }
                 },
-                modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                modifier = modifiers.getOrElse(index) { Modifier.weight(1f) }
+                    .expressivePressScale(interactionSource, enabled)
+                    .semantics { role = Role.RadioButton },
                 enabled = enabled,
+                interactionSource = interactionSource,
                 shapes = when (index) {
                     0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
                     options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 }
             ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selectedIndex == index) FontWeight.Black else FontWeight.Medium,
-                    color = if (selectedIndex == index) 
-                        MaterialTheme.colorScheme.onPrimaryContainer 
-                    else 
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                Icon(
+                    if (selectedIndex == index) checkedIcons[index] else unCheckedIcons[index],
+                    contentDescription = label,
                 )
+                Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
+                Text(label)
             }
         }
     }
@@ -119,7 +135,17 @@ private fun ExpressiveButtonGroupPreview() {
             var selectedIndex by remember { mutableIntStateOf(0) }
             ToolzConnectedButtonGroup(
                 selectedIndex = selectedIndex,
-                options = listOf("Work", "Home", "Other"),
+                options = listOf("Work", "Restaurant", "Coffee"),
+                unCheckedIcons = listOf(
+                    androidx.compose.material.icons.outlined.Work,
+                    androidx.compose.material.icons.outlined.Restaurant,
+                    androidx.compose.material.icons.outlined.Coffee
+                ),
+                checkedIcons = listOf(
+                    androidx.compose.material.icons.filled.Work,
+                    androidx.compose.material.icons.filled.Restaurant,
+                    androidx.compose.material.icons.filled.Coffee
+                ),
                 onOptionSelected = { selectedIndex = it }
             )
         }
