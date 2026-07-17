@@ -15,11 +15,8 @@ import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -29,15 +26,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
@@ -50,13 +43,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.frerox.toolz.ui.components.ExpressiveCard
-import com.frerox.toolz.ui.components.ExpressiveScanningIndicator
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -71,9 +60,10 @@ fun ScannerScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val performanceMode = LocalPerformanceMode.current
-    
+
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -91,14 +81,14 @@ fun ScannerScreen(
 
     var scanResult by remember { mutableStateOf("") }
     var isFlashOn by remember { mutableStateOf(false) }
-    
+
     val cameraController = remember {
         LifecycleCameraController(context).apply {
             val options = BarcodeScannerOptions.Builder()
                 .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
                 .build()
             val scanner = BarcodeScanning.getClient(options)
-            
+
             setImageAnalysisAnalyzer(
                 ContextCompat.getMainExecutor(context),
                 MlKitAnalyzer(
@@ -127,45 +117,32 @@ fun ScannerScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            ExpressiveTopAppBar(
-                title = "SCANNER",
-                subtitle = "Scan QR codes and barcodes",
+            TopAppBar(
+                title = { },
                 navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
+                    FilledTonalIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     if (onNavigateToGenerator != null) {
-                        IconButton(
-                            onClick = onNavigateToGenerator,
-                            modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        ) {
-                            Icon(
-                                Icons.Rounded.QrCode,
-                                contentDescription = "QR Generator",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                        FilledTonalIconButton(onClick = onNavigateToGenerator) {
+                            Icon(Icons.Rounded.QrCode, contentDescription = "QR Generator")
                         }
                     }
-                    IconButton(
-                        onClick = { 
+                    FilledTonalIconButton(
+                        onClick = {
                             isFlashOn = !isFlashOn
                             cameraController.enableTorch(isFlashOn)
-                        },
-                        modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        }
                     ) {
                         Icon(
                             if (isFlashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
-                            contentDescription = "Flash",
-                            tint = if (isFlashOn) Color.Yellow else MaterialTheme.colorScheme.onSurface
+                            contentDescription = "Flash"
                         )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent
                 )
             )
@@ -173,7 +150,12 @@ fun ScannerScreen(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = padding.calculateTopPadding())
+        ) {
             if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
@@ -183,9 +165,9 @@ fun ScannerScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-                
+
                 ScannerOverlay(performanceMode)
-                
+
                 AnimatedVisibility(
                     visible = scanResult.isNotEmpty(),
                     enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -195,7 +177,7 @@ fun ScannerScreen(
                     ResultCard(
                         result = scanResult,
                         onClose = { scanResult = "" },
-                        onCopy = { 
+                        onCopy = {
                             clipboardManager.setText(AnnotatedString(scanResult))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
@@ -212,63 +194,73 @@ fun ScannerScreen(
 
 @Composable
 fun ScannerOverlay(performanceMode: Boolean) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        // Dimmed background with a clear rounded cutout
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
-            val boxSize = width * 0.72f
-            val left = (width - boxSize) / 2
-            val top = (height - boxSize) / 2
-            val cornerRadius = 28.dp.toPx() // Matches ExpressiveScanningIndicator's 28.dp
+    val primaryColor = MaterialTheme.colorScheme.primary
 
-            val path = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(width, 0f)
-                lineTo(width, height)
-                lineTo(0f, height)
-                close()
-                addRoundRect(
-                    RoundRect(
-                        rect = Rect(left, top, left + boxSize, top + boxSize),
-                        cornerRadius = CornerRadius(cornerRadius)
-                    )
-                )
-                fillType = PathFillType.EvenOdd
-            }
-            drawPath(path, Color.Black.copy(alpha = 0.5f))
-        }
-
-        // Material 3 Expressive Scanning Indicator perfectly filling the cutout
-        ExpressiveScanningIndicator(
-            modifier = Modifier
-                .fillMaxWidth(0.72f)
-                .aspectRatio(1f),
-            color = Color.White,
-            frameColor = Color.White.copy(alpha = 0.5f),
+    val infiniteTransition = rememberInfiniteTransition(label = "scan")
+    val scanLinePos by if (performanceMode) {
+        remember { mutableFloatStateOf(0.5f) }
+    } else {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "scanLine"
         )
+    }
 
-        // Polished M3 hint chip
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 80.dp),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Text(
-                text = "Point at a QR code or barcode",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .background(
-                        color = Color.Black.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(16.dp) // Standard M3 shape
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val cutoutSize = w * 0.7f
+        val left = (w - cutoutSize) / 2
+        val top = (h - cutoutSize) / 2
+        val cr = 24.dp.toPx()
+
+        // Dim overlay with rounded cutout
+        val dimPath = Path().apply {
+            addRect(Rect(0f, 0f, w, h))
+            addRoundRect(RoundRect(Rect(left, top, left + cutoutSize, top + cutoutSize), CornerRadius(cr)))
+            fillType = PathFillType.EvenOdd
+        }
+        drawPath(dimPath, Color.Black.copy(alpha = 0.55f))
+
+        // Corner brackets
+        val bracketLen = 28.dp.toPx()
+        val stroke = 3.dp.toPx()
+
+        // Top-left
+        drawArc(primaryColor, 180f, 90f, false, Offset(left, top), Size(cr * 2, cr * 2), style = Stroke(stroke, cap = StrokeCap.Round))
+        drawLine(primaryColor, Offset(left, top + cr), Offset(left, top + cr + bracketLen), stroke, cap = StrokeCap.Round)
+        drawLine(primaryColor, Offset(left + cr, top), Offset(left + cr + bracketLen, top), stroke, cap = StrokeCap.Round)
+
+        // Top-right
+        drawArc(primaryColor, 270f, 90f, false, Offset(left + cutoutSize - cr * 2, top), Size(cr * 2, cr * 2), style = Stroke(stroke, cap = StrokeCap.Round))
+        drawLine(primaryColor, Offset(left + cutoutSize, top + cr), Offset(left + cutoutSize, top + cr + bracketLen), stroke, cap = StrokeCap.Round)
+        drawLine(primaryColor, Offset(left + cutoutSize - cr - bracketLen, top), Offset(left + cutoutSize - cr, top), stroke, cap = StrokeCap.Round)
+
+        // Bottom-left
+        drawArc(primaryColor, 90f, 90f, false, Offset(left, top + cutoutSize - cr * 2), Size(cr * 2, cr * 2), style = Stroke(stroke, cap = StrokeCap.Round))
+        drawLine(primaryColor, Offset(left, top + cutoutSize - cr - bracketLen), Offset(left, top + cutoutSize - cr), stroke, cap = StrokeCap.Round)
+        drawLine(primaryColor, Offset(left + cr, top + cutoutSize), Offset(left + cr + bracketLen, top + cutoutSize), stroke, cap = StrokeCap.Round)
+
+        // Bottom-right
+        drawArc(primaryColor, 0f, 90f, false, Offset(left + cutoutSize - cr * 2, top + cutoutSize - cr * 2), Size(cr * 2, cr * 2), style = Stroke(stroke, cap = StrokeCap.Round))
+        drawLine(primaryColor, Offset(left + cutoutSize, top + cutoutSize - cr - bracketLen), Offset(left + cutoutSize, top + cutoutSize - cr), stroke, cap = StrokeCap.Round)
+        drawLine(primaryColor, Offset(left + cutoutSize - cr - bracketLen, top + cutoutSize), Offset(left + cutoutSize - cr, top + cutoutSize), stroke, cap = StrokeCap.Round)
+
+        // Scan line
+        if (!performanceMode) {
+            val lineY = top + cr + ((cutoutSize - cr * 2) * scanLinePos)
+            val inset = 12.dp.toPx()
+            drawLine(
+                color = primaryColor.copy(alpha = 0.6f),
+                start = Offset(left + inset, lineY),
+                end = Offset(left + cutoutSize - inset, lineY),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
             )
         }
     }
@@ -281,108 +273,70 @@ fun ResultCard(
     onCopy: () -> Unit
 ) {
     val context = LocalContext.current
-    
-    ExpressiveCard(
-        onClick = {},
+
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(24.dp),
-        shape = RoundedCornerShape(40.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        elevation = 12.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            .padding(16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
     ) {
-        Column(
-            modifier = Modifier.padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Rounded.QrCodeScanner,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        @Suppress("DEPRECATION")
-                        Text(
-                            "SCAN RESULT",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close", modifier = Modifier.size(16.dp))
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(20.dp))
-            
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-            ) {
                 Text(
-                    text = result,
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Start,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis
+                    "Scan Result",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onCopy,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("COPY", fontWeight = FontWeight.Black)
+                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
-                
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = result,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    onClick = onCopy,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy")
+                }
+
                 if (result.startsWith("http") || result.startsWith("www")) {
                     val finalUrl = if (!result.startsWith("http")) "https://$result" else result
                     Button(
                         onClick = {
                             try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                            }
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl)))
+                            } catch (_: Exception) { }
                         },
-                        modifier = Modifier.weight(1f).height(56.dp),
-                        shape = RoundedCornerShape(16.dp)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("OPEN", fontWeight = FontWeight.Black)
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Open")
                     }
                 }
             }
@@ -393,47 +347,35 @@ fun ResultCard(
 @Composable
 fun PermissionRequestView(onRequest: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            modifier = Modifier.size(140.dp),
-            shape = RoundedCornerShape(48.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.Camera,
-                    contentDescription = null,
-                    modifier = Modifier.size(60.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        Spacer(Modifier.height(32.dp))
+        Icon(
+            Icons.Rounded.CameraAlt,
+            contentDescription = null,
+            modifier = Modifier.size(72.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(24.dp))
         Text(
-            "CAMERA ACCESS",
+            "Camera Permission",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Black,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
-            "The scanner needs camera access to read QR codes and barcodes. All processing happens locally on your device.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            "Camera access is needed to scan QR codes and barcodes.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
-        Spacer(Modifier.height(40.dp))
-        Button(
-            onClick = onRequest,
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.fillMaxWidth().height(64.dp)
-        ) {
-            @Suppress("DEPRECATION")
-            Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(32.dp))
+        Button(onClick = onRequest) {
+            Text("Grant Permission")
         }
     }
 }
