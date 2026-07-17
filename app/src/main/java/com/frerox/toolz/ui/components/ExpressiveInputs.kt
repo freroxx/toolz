@@ -38,29 +38,55 @@ fun ExpressiveSwitch(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val performanceMode = LocalPerformanceMode.current
+    val interactionSource = remember { MutableInteractionSource() }
+    
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isDragged by interactionSource.collectIsDraggedAsState()
+    val isActivelyInteracting = isPressed || isDragged
+
+    // Symmetrical offset calculation: inner width is 44.dp (52 - 8), thumb is 24.dp.
+    // Travel distance = 44 - 24 = 20.dp.
+    val targetOffset = if (checked) 20.dp else 0.dp
     
     val thumbOffset by animateDpAsState(
-        targetValue = if (checked) 24.dp else 0.dp,
-        animationSpec = if (performanceMode) tween(100) else spring(
-            dampingRatio = 0.7f,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "switch_thumb"
-    )
-    
-    val containerColor by animateColorAsState(
-        targetValue = if (checked) {
-            MaterialTheme.colorScheme.primary
+        targetValue = targetOffset,
+        animationSpec = if (performanceMode) {
+            tween(120)
         } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+            spring(
+                dampingRatio = 0.6f,
+                stiffness = Spring.StiffnessMediumLow
+            )
         },
-        label = "switch_container"
+        label = "ExpressiveSwitchThumbOffset"
     )
-    
-    val thumbScale by animateFloatAsState(
-        targetValue = if (checked) 1.2f else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow),
-        label = "switch_thumb_scale"
+
+    // Dynamic width stretching when interacting (M3/iOS style physics)
+    val thumbWidthMultiplier = if (isActivelyInteracting) 1.25f else 1.0f
+    val thumbWidth by animateDpAsState(
+        targetValue = 24.dp * thumbWidthMultiplier,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium),
+        label = "ExpressiveSwitchThumbWidth"
+    )
+
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+            checked -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "ExpressiveSwitchContainerColor"
+    )
+
+    val thumbColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            checked -> MaterialTheme.colorScheme.onPrimary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "ExpressiveSwitchThumbColor"
     )
 
     Surface(
@@ -71,25 +97,22 @@ fun ExpressiveSwitch(
         },
         enabled = enabled,
         modifier = modifier
-            .size(52.dp, 32.dp)
-            .clip(CircleShape),
+            .size(52.dp, 32.dp),
         color = containerColor,
         shape = CircleShape,
+        interactionSource = interactionSource,
     ) {
-        Box(modifier = Modifier.fillMaxSize().padding(4.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(4.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
             Box(
                 modifier = Modifier
                     .offset(x = thumbOffset)
-                    .size(24.dp)
-                    .graphicsLayer {
-                        scaleX = thumbScale
-                        scaleY = thumbScale
-                    }
-                    .background(
-                        if (checked) MaterialTheme.colorScheme.onPrimary 
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        CircleShape
-                    )
+                    .size(width = thumbWidth, height = 24.dp)
+                    .background(thumbColor, CircleShape)
             )
         }
     }
