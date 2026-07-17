@@ -555,3 +555,54 @@ private fun ExpressiveNavigationPreview() {
         }
     }
 }
+
+@Composable
+fun ToolzNavigationRail(
+    modifier: Modifier = Modifier,
+    containerColor: Color = NavigationRailDefaults.ContainerColor,
+    contentColor: Color = contentColorFor(containerColor),
+    header: @Composable (ColumnScope.() -> Unit)? = null,
+    windowInsets: WindowInsets = NavigationRailDefaults.windowInsets,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    NavigationRail(
+        modifier = modifier,
+        containerColor = containerColor,
+        contentColor = contentColor,
+        header = header,
+        windowInsets = windowInsets,
+        content = content,
+    )
+}
+
+@Composable
+fun ToolzNavigationRailItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    label: @Composable (() -> Unit)? = null,
+    alwaysShowLabel: Boolean = true,
+    colors: NavigationRailItemColors = NavigationRailItemDefaults.colors(),
+    interactionSource: MutableInteractionSource? = null,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+
+    NavigationRailItem(
+        selected = selected,
+        onClick = {
+            haptic.click()
+            currentOnClick()
+        },
+        icon = icon,
+        modifier = modifier.expressivePressScale(resolvedInteractionSource, enabled),
+        enabled = enabled,
+        label = label,
+        alwaysShowLabel = alwaysShowLabel,
+        colors = colors,
+        interactionSource = resolvedInteractionSource,
+    )
+}
