@@ -117,7 +117,6 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveCarousel
 import com.frerox.toolz.ui.components.ExpressiveContainedLoadingIndicator
 import com.frerox.toolz.ui.components.ExpressiveRefreshIndicator
-import com.frerox.toolz.ui.components.ExpressiveScanningIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
