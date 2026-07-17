@@ -57,7 +57,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveScanningIndicator
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.fadingEdge
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -213,120 +212,65 @@ fun ScannerScreen(
 
 @Composable
 fun ScannerOverlay(performanceMode: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "scan")
-    val scanLinePos by if (performanceMode) remember { mutableFloatStateOf(0.5f) } else infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "line"
-    )
-
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val width = size.width
-        val height = size.height
-        val boxSize = width * 0.7f
-        val left = (width - boxSize) / 2
-        val top = (height - boxSize) / 2
-        val cornerRadius = 32.dp.toPx()
-
-        val path = Path().apply {
-            moveTo(0f, 0f)
-            lineTo(width, 0f)
-            lineTo(width, height)
-            lineTo(0f, height)
-            close()
-            
-            addRoundRect(
-                RoundRect(
-                    rect = Rect(left, top, left + boxSize, top + boxSize),
-                    cornerRadius = CornerRadius(cornerRadius)
-                )
-            )
-            fillType = PathFillType.EvenOdd
-        }
-        drawPath(path, Color.Black.copy(alpha = 0.65f))
-        
-        val lineLength = 40.dp.toPx()
-        val strokeWidth = 6.dp.toPx()
-        val cornerColor = Color.White
-        
-        // Corners
-        drawLine(cornerColor, Offset(left, top + lineLength), Offset(left, top + cornerRadius), strokeWidth, cap = StrokeCap.Round)
-        drawArc(
-            color = cornerColor,
-            startAngle = 180f,
-            sweepAngle = 90f,
-            useCenter = false,
-            topLeft = Offset(left, top),
-            size = Size(cornerRadius * 2, cornerRadius * 2),
-            style = Stroke(strokeWidth, cap = StrokeCap.Round)
-        )
-        drawLine(cornerColor, Offset(left + cornerRadius, top), Offset(left + lineLength, top), strokeWidth, cap = StrokeCap.Round)
-        
-        drawLine(cornerColor, Offset(left + boxSize - lineLength, top), Offset(left + boxSize - cornerRadius, top), strokeWidth, cap = StrokeCap.Round)
-        drawArc(
-            color = cornerColor,
-            startAngle = 270f,
-            sweepAngle = 90f,
-            useCenter = false,
-            topLeft = Offset(left + boxSize - cornerRadius * 2, top),
-            size = Size(cornerRadius * 2, cornerRadius * 2),
-            style = Stroke(strokeWidth, cap = StrokeCap.Round)
-        )
-        drawLine(cornerColor, Offset(left + boxSize, top + cornerRadius), Offset(left + boxSize, top + lineLength), strokeWidth, cap = StrokeCap.Round)
-        
-        drawLine(cornerColor, Offset(left, top + boxSize - lineLength), Offset(left, top + boxSize - cornerRadius), strokeWidth, cap = StrokeCap.Round)
-        drawArc(
-            color = cornerColor,
-            startAngle = 90f,
-            sweepAngle = 90f,
-            useCenter = false,
-            topLeft = Offset(left, top + boxSize - cornerRadius * 2),
-            size = Size(cornerRadius * 2, cornerRadius * 2),
-            style = Stroke(strokeWidth, cap = StrokeCap.Round)
-        )
-        drawLine(cornerColor, Offset(left + cornerRadius, top + boxSize), Offset(left + lineLength, top + boxSize), strokeWidth, cap = StrokeCap.Round)
-        
-        drawLine(cornerColor, Offset(left + boxSize - lineLength, top + boxSize), Offset(left + boxSize - cornerRadius, top + boxSize), strokeWidth, cap = StrokeCap.Round)
-        drawArc(
-            color = cornerColor,
-            startAngle = 0f,
-            sweepAngle = 90f,
-            useCenter = false,
-            topLeft = Offset(left + boxSize - cornerRadius * 2, top + boxSize - cornerRadius * 2),
-            size = Size(cornerRadius * 2, cornerRadius * 2),
-            style = Stroke(strokeWidth, cap = StrokeCap.Round)
-        )
-        drawLine(cornerColor, Offset(left + boxSize, top + boxSize - cornerRadius), Offset(left + boxSize, top + boxSize - lineLength), strokeWidth, cap = StrokeCap.Round)
-
-        if (!performanceMode) {
-            val lineY = top + (boxSize * scanLinePos)
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(Color.White.copy(alpha = 0f), Color.White.copy(alpha = 0.5f), Color.White.copy(alpha = 0f)),
-                    startY = lineY - 20.dp.toPx(),
-                    endY = lineY + 20.dp.toPx()
-                ),
-                topLeft = Offset(left + 4.dp.toPx(), lineY - 1.dp.toPx()),
-                size = Size(boxSize - 8.dp.toPx(), 2.dp.toPx())
-            )
-        }
-    }
-
     Box(
         modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.Center
     ) {
+        // Dimmed background with a clear rounded cutout
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            val boxSize = width * 0.72f
+            val left = (width - boxSize) / 2
+            val top = (height - boxSize) / 2
+            val cornerRadius = 28.dp.toPx() // Matches ExpressiveScanningIndicator's 28.dp
+
+            val path = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(width, 0f)
+                lineTo(width, height)
+                lineTo(0f, height)
+                close()
+                addRoundRect(
+                    RoundRect(
+                        rect = Rect(left, top, left + boxSize, top + boxSize),
+                        cornerRadius = CornerRadius(cornerRadius)
+                    )
+                )
+                fillType = PathFillType.EvenOdd
+            }
+            drawPath(path, Color.Black.copy(alpha = 0.5f))
+        }
+
+        // Material 3 Expressive Scanning Indicator perfectly filling the cutout
         ExpressiveScanningIndicator(
             modifier = Modifier
                 .fillMaxWidth(0.72f)
                 .aspectRatio(1f),
             color = Color.White,
-            frameColor = Color.White.copy(alpha = 0.4f),
+            frameColor = Color.White.copy(alpha = 0.5f),
         )
+
+        // Polished M3 hint chip
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 80.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Text(
+                text = "Point at a QR code or barcode",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .background(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(16.dp) // Standard M3 shape
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
     }
 }
 
