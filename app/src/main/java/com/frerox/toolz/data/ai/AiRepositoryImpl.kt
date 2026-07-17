@@ -226,47 +226,54 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private suspend fun extractSearchQuery(apiKey: String, prompt: String): String? {
-        return try {
-            val request = OpenAiRequest(
-                model = "llama-3.1-8b-instant",
-                messages = listOf(
-                    OpenAiMessage("system", MessageContent.Text("You are an expert searcher. Generate a concise search query for the user prompt. " +
-                        "If it's a simple greeting or doesn't need data, output 'NONE'. Otherwise, output ONLY the search query.")),
-                    OpenAiMessage("user", MessageContent.Text("User says: $prompt\n\nQuery:"))
-                ),
-                maxTokens = 40
-            )
-            val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
-            val query = response.choices.firstOrNull()?.message?.content?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: "NONE"
-            if (query.equals("NONE", ignoreCase = true) || query.isBlank()) null else query
-        } catch (e: Exception) {
-            Log.e(TAG, "Search extraction failed", e)
-            null
+        val models = listOf("llama-3.1-8b-instant", "gpt-oss-20b")
+        for (modelName in models) {
+            try {
+                val request = OpenAiRequest(
+                    model = modelName,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text("You are an expert searcher. Generate a concise search query for the user prompt. " +
+                            "If it's a simple greeting or doesn't need data, output 'NONE'. Otherwise, output ONLY the search query.")),
+                        OpenAiMessage("user", MessageContent.Text("User says: $prompt\n\nQuery:"))
+                    ),
+                    maxTokens = 40
+                )
+                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
+                val query = response.choices.firstOrNull()?.message?.content?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: "NONE"
+                return if (query.equals("NONE", ignoreCase = true) || query.isBlank()) null else query
+            } catch (e: Exception) {
+                Log.e(TAG, "Search extraction failed with $modelName, trying fallback if available", e)
+            }
         }
+        return null
     }
 
     private suspend fun selectBestSources(apiKey: String, prompt: String, results: List<SearchResult>): List<SearchResult> {
         if (results.size <= 5) return results
-        return try {
-            val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" + 
-                results.take(15).withIndex().joinToString("\n") { (i, r) -> "[$i] ${r.title}: ${r.snippet}" } +
-                "\n\nBased on the user prompt, identify the top 5 most relevant results by index. Respond with ONLY a comma-separated list of numbers, e.g., 0,3,7,2,5"
-            
-            val request = OpenAiRequest(
-                model = "llama-3.1-8b-instant",
-                messages = listOf(
-                    OpenAiMessage("system", MessageContent.Text("You are a search result selector. Reply with ONLY indices.")),
-                    OpenAiMessage("user", MessageContent.Text(selectionPrompt))
-                ),
-                maxTokens = 32
-            )
-            
-            val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
-            val indices = response.choices.firstOrNull()?.message?.content?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
-            indices.mapNotNull { results.getOrNull(it) }.distinctBy { it.url }.take(5).ifEmpty { results.take(5) }
-        } catch (_: Exception) {
-            results.take(5)
+        val models = listOf("llama-3.1-8b-instant", "gpt-oss-20b")
+        for (modelName in models) {
+            try {
+                val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" + 
+                    results.take(15).withIndex().joinToString("\n") { (i, r) -> "[$i] ${r.title}: ${r.snippet}" } +
+                    "\n\nBased on the user prompt, identify the top 5 most relevant results by index. Respond with ONLY a comma-separated list of numbers, e.g., 0,3,7,2,5"
+                
+                val request = OpenAiRequest(
+                    model = modelName,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text("You are a search result selector. Reply with ONLY indices.")),
+                        OpenAiMessage("user", MessageContent.Text(selectionPrompt))
+                    ),
+                    maxTokens = 32
+                )
+                
+                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
+                val indices = response.choices.firstOrNull()?.message?.content?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
+                return indices.mapNotNull { results.getOrNull(it) }.distinctBy { it.url }.take(5).ifEmpty { results.take(5) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Source selection failed with $modelName, trying fallback if available", e)
+            }
         }
+        return results.take(5)
     }
 
     override fun performDeepDive(
@@ -309,20 +316,24 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private suspend fun structureWebsiteContent(apiKey: String, title: String, content: String): String {
-        return try {
-            val request = OpenAiRequest(
-                model = "llama-3.1-8b-instant",
-                messages = listOf(
-                    OpenAiMessage("system", MessageContent.Text("You are a content structurer. Clean text and keep facts.")),
-                    OpenAiMessage("user", MessageContent.Text("Title: $title\n\n$content"))
-                ),
-                maxTokens = 1024
-            )
-            val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
-            response.choices.firstOrNull()?.message?.content ?: content.take(1000)
-        } catch (_: Exception) {
-            content.take(1000)
+        val models = listOf("llama-3.1-8b-instant", "gpt-oss-20b")
+        for (modelName in models) {
+            try {
+                val request = OpenAiRequest(
+                    model = modelName,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text("You are a content structurer. Clean text and keep facts.")),
+                        OpenAiMessage("user", MessageContent.Text("Title: $title\n\n$content"))
+                    ),
+                    maxTokens = 1024
+                )
+                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
+                return response.choices.firstOrNull()?.message?.content ?: content.take(1000)
+            } catch (e: Exception) {
+                Log.e(TAG, "Website structuring failed with $modelName", e)
+            }
         }
+        return content.take(1000)
     }
 
     override fun testConnection(config: AiConfig): Flow<Result<String>> = flow {
@@ -398,16 +409,40 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
         searchEnabled: Boolean,
         systemPromptOverride: String?
-    ): Result<ChatRepository.ChatResponseChunk> = try {
+    ): Result<ChatRepository.ChatResponseChunk> {
         if (keyState.value.isBlank()) {
-            Result.failure(Exception("No API key available for $provider"))
-        } else if (image != null && !AiSettingsHelper.supportsVision(provider, modelName)) {
-            Result.failure(Exception("$provider model '$modelName' does not support vision."))
-        } else {
-            executeProviderCall(provider, keyState.value, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
+            return Result.failure(Exception("No API key available for $provider"))
         }
-    } catch (e: Exception) {
-        Result.failure(e)
+        
+        var currentModel = modelName
+        var lastError: Throwable? = null
+        
+        // Try initial model, then try fallback if available
+        repeat(2) { attempt ->
+            try {
+                if (image != null && !AiSettingsHelper.supportsVision(provider, currentModel)) {
+                    return Result.failure(Exception("$provider model '$currentModel' does not support vision."))
+                }
+                return executeProviderCall(provider, keyState.value, currentModel, prompt, history, image, searchEnabled, systemPromptOverride)
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "Call failed with $currentModel, checking for fallback...", e)
+                val fallback = getFallbackModel(currentModel)
+                if (fallback != null && attempt == 0) {
+                    currentModel = fallback
+                    Log.i(TAG, "Retrying with fallback model: $currentModel")
+                } else {
+                    return Result.failure(e)
+                }
+            }
+        }
+        return Result.failure(lastError ?: Exception("Unknown error in callProvider"))
+    }
+
+    private fun getFallbackModel(model: String): String? = when (model) {
+        "llama-3.3-70b-versatile" -> "gpt-oss-120b"
+        "llama-3.1-8b-instant" -> "gpt-oss-20b"
+        else -> null
     }
 
     private suspend fun executeProviderCall(
