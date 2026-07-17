@@ -182,102 +182,6 @@ fun ExpressiveLoadingIndicator(
     }
 }
 
-@Composable
-fun ExpressiveScanningIndicator(
-    modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
-    frameColor: Color = MaterialTheme.colorScheme.surfaceDim,
-) {
-    val performanceMode = LocalPerformanceMode.current
-    BoxWithConstraints(
-        modifier = modifier
-            .clip(RoundedCornerShape(28.dp))
-            .border(1.dp, frameColor.copy(alpha = 0.7f), RoundedCornerShape(28.dp)),
-    ) {
-        val density = LocalDensity.current
-        val maxHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
-        val lineHeightPx = with(density) { 12.dp.toPx() }
-        val travel = remember(maxHeightPx, lineHeightPx) {
-            (maxHeightPx - lineHeightPx).coerceAtLeast(0f)
-        }
-        val infiniteTransition = rememberInfiniteTransition(label = "scanningIndicator")
-        val scanProgress by if (performanceMode) {
-            remember { mutableFloatStateOf(0.5f) }
-        } else {
-            infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "scanProgress",
-            )
-        }
-        val targetOffset = IntOffset(0, (scanProgress * travel).roundToInt())
-        val animatedOffset by animateIntOffsetAsState(
-            targetValue = targetOffset,
-            animationSpec = if (performanceMode) tween(120) else spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessLow,
-            ),
-            label = "scanLineOffset",
-        )
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (!performanceMode) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(12.dp)
-                        .graphicsLayer {
-                            translationY = animatedOffset.y.toFloat()
-                        }
-                        .background(
-                            brush = Brush.verticalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    color.copy(alpha = 0.15f),
-                                    color.copy(alpha = 0.8f),
-                                    color.copy(alpha = 0.15f),
-                                    Color.Transparent,
-                                ),
-                            ),
-                        ),
-                )
-            }
-
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val stroke = 4.dp.toPx()
-                val corner = 24.dp.toPx()
-                val lineLength = size.minDimension * 0.18f
-                val activeColor = color.copy(alpha = if (performanceMode) 0.6f else 0.8f)
-
-                drawRoundRect(
-                    color = frameColor.copy(alpha = 0.12f),
-                    cornerRadius = CornerRadius(corner, corner),
-                    style = Stroke(width = 1.dp.toPx()),
-                )
-
-                drawLine(activeColor, Offset(0f, corner), Offset(0f, corner + lineLength), stroke)
-                drawLine(activeColor, Offset(0f, corner), Offset(corner + lineLength, 0f), stroke)
-                drawLine(activeColor, Offset(size.width, corner), Offset(size.width, corner + lineLength), stroke)
-                drawLine(activeColor, Offset(size.width, corner), Offset(size.width - corner - lineLength, 0f), stroke)
-                drawLine(activeColor, Offset(0f, size.height - corner), Offset(0f, size.height - corner - lineLength), stroke)
-                drawLine(activeColor, Offset(0f, size.height - corner), Offset(corner + lineLength, size.height), stroke)
-                drawLine(activeColor, Offset(size.width, size.height - corner), Offset(size.width, size.height - corner - lineLength), stroke)
-                drawLine(activeColor, Offset(size.width, size.height - corner), Offset(size.width - corner - lineLength, size.height), stroke)
-            }
-
-            Box(modifier = Modifier.align(Alignment.Center)) {
-                ExpressivePulseIndicator(
-                    modifier = Modifier.size(54.dp),
-                    color = color,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 fun ExpressivePulseIndicator(
@@ -667,8 +571,6 @@ private fun ExpressiveProgressPreview() {
             ToolzWavyLinearProgressIndicator(progress = { 0.7f }, modifier = Modifier.fillMaxWidth())
             
             ToolzWavyCircularProgressIndicator(progress = { 0.6f })
-            
-            ExpressiveScanningIndicator(modifier = Modifier.size(120.dp))
         }
     }
 }
