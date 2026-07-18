@@ -1,10 +1,14 @@
 package com.frerox.toolz.ui.screens.focus
 
 import android.app.usage.UsageStatsManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.IBinder
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,6 +22,7 @@ import com.frerox.toolz.data.focus.AppLimit
 import com.frerox.toolz.data.focus.AppLimitRepository
 import com.frerox.toolz.data.focus.AppUsageInfo
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.ToolService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -91,8 +96,6 @@ class FocusFlowViewModel @Inject constructor(
         private const val PREFS_USAGE_CACHE = "focus_daily_usage_cache"
 
         private val EXCLUDED_PACKAGES = emptySet<String>() // Moved to UsageStatsRepository
-
-        private const val SESSION_TICK_MS = 1_000L
     }
 
     // ── Persistent AI category cache ───────────────────────────────────────
@@ -140,56 +143,90 @@ class FocusFlowViewModel @Inject constructor(
     private val _focusSession = MutableStateFlow(FocusSessionUiState())
     val focusSession: StateFlow<FocusSessionUiState> = _focusSession.asStateFlow()
 
-    private var sessionTickJob: kotlinx.coroutines.Job? = null
+    private var toolService: ToolService? = null
+    private var isBound = false
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as ToolService.LocalBinder
+            toolService = binder.getService()
+            isBound = true
+            bindPomodoroFlows(binder.getService())
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            toolService = null
+            isBound = false
+        }
+    }
+
+    private fun bindPomodoroFlows(service: ToolService) {
+        viewModelScope.launch {
+            combine(
+                service.pomodoroRemaining,
+                service.pomodoroTotalMs,
+                service.isPomodoroRunning,
+                service.pomodoroModeState
+            ) { remaining, total, running, mode ->
+                val state = when {
+                    remaining <= 0 && !running -> FocusSessionState.COMPLETED
+                    running -> FocusSessionState.RUNNING
+                    remaining < total && !running -> FocusSessionState.PAUSED
+                    else -> FocusSessionState.IDLE
+                }
+                FocusSessionUiState(
+                    state = state,
+                    totalMillis = total,
+                    remainingMillis = remaining
+                )
+            }.collect { uiState ->
+                _focusSession.value = uiState
+                if (uiState.state == FocusSessionState.IDLE || uiState.state == FocusSessionState.COMPLETED) {
+                    settingsRepository.setFocusFlowSessionActive(false)
+                }
+            }
+        }
+    }
 
     fun startFocusSession(minutes: Int) {
         val totalMs = minutes * 60_000L
-        sessionTickJob?.cancel()
-        _focusSession.value = FocusSessionUiState(
-            state = FocusSessionState.RUNNING,
-            totalMillis = totalMs,
-            remainingMillis = totalMs,
-        )
-        runSessionTicker()
+        viewModelScope.launch {
+            settingsRepository.setFocusFlowSessionActive(true)
+            toolService?.startPomodoro(totalMs, "WORK")
+        }
     }
 
     fun togglePauseFocusSession() {
-        val current = _focusSession.value
-        when (current.state) {
-            FocusSessionState.RUNNING -> {
-                sessionTickJob?.cancel()
-                _focusSession.value = current.copy(state = FocusSessionState.PAUSED)
+        toolService?.let { service ->
+            if (service.isPomodoroRunning.value) {
+                service.pausePomodoro()
+            } else {
+                service.startPomodoro(_focusSession.value.remainingMillis, "WORK")
             }
-            FocusSessionState.PAUSED -> {
-                _focusSession.value = current.copy(state = FocusSessionState.RUNNING)
-                runSessionTicker()
-            }
-            else -> Unit
         }
     }
 
     fun cancelFocusSession() {
-        sessionTickJob?.cancel()
-        _focusSession.value = FocusSessionUiState()
+        viewModelScope.launch {
+            settingsRepository.setFocusFlowSessionActive(false)
+            toolService?.resetPomodoro()
+        }
     }
 
     fun dismissCompletedSession() {
-        _focusSession.value = FocusSessionUiState()
+        viewModelScope.launch {
+            settingsRepository.setFocusFlowSessionActive(false)
+            toolService?.resetPomodoro()
+        }
     }
 
-    private fun runSessionTicker() {
-        sessionTickJob = viewModelScope.launch {
-            while (_focusSession.value.state == FocusSessionState.RUNNING) {
-                kotlinx.coroutines.delay(SESSION_TICK_MS)
-                val current = _focusSession.value
-                if (current.state != FocusSessionState.RUNNING) break
-                val next = (current.remainingMillis - SESSION_TICK_MS).coerceAtLeast(0L)
-                _focusSession.value = if (next <= 0L) {
-                    current.copy(remainingMillis = 0L, state = FocusSessionState.COMPLETED)
-                } else {
-                    current.copy(remainingMillis = next)
-                }
-            }
+    fun resetAllFocusData() {
+        viewModelScope.launch {
+            appLimitRepository.deleteAllLimits()
+            settingsRepository.clearFocusMappings()
+            _aiCategoryCache.value = emptyMap()
+            saveAiCacheToPrefs(emptyMap())
+            refreshStats()
         }
     }
 
@@ -289,6 +326,9 @@ class FocusFlowViewModel @Inject constructor(
     // ── Init ───────────────────────────────────────────────────────────────
 
     init {
+        Intent(context, ToolService::class.java).also { intent ->
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
         refreshStats()
 
         // Auto-refresh adapts interval based on performance mode
@@ -330,9 +370,17 @@ class FocusFlowViewModel @Inject constructor(
         val result = mutableListOf<DailyLocalStat>()
         val tz = TimeZone.getDefault()
         val cal = Calendar.getInstance(tz)
+        
+        // Ensure we are working with midnight boundaries
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+
         for (i in 6 downTo 0) {
             val dCal = cal.clone() as Calendar
             dCal.add(Calendar.DAY_OF_YEAR, -i)
+            
             val y = dCal.get(Calendar.YEAR)
             val m = dCal.get(Calendar.MONTH) + 1
             val d = dCal.get(Calendar.DAY_OF_MONTH)
@@ -342,6 +390,7 @@ class FocusFlowViewModel @Inject constructor(
             val jsonStr = usagePrefs.getString(key, null)
             var total = 0L
             val topApps = mutableListOf<Pair<String, Long>>()
+            
             if (jsonStr != null) {
                 try {
                     val array = org.json.JSONArray(jsonStr)
@@ -352,9 +401,20 @@ class FocusFlowViewModel @Inject constructor(
                         total += time
                         topApps.add(Pair(name, time))
                     }
-                    topApps.sortByDescending { it.second }
                 } catch(e: Exception) { Log.e(TAG, "Failed pulling daily usage", e) }
             }
+
+            // Fallback: If cache is empty or it's TODAY, fetch live from system
+            // Today's cache might be stale since it only updates every refreshStats()
+            if (total <= 0L || i == 0) {
+                val dayStart = dCal.timeInMillis
+                val dayEnd = dayStart + 24 * 3600_000L
+                total = usageRepository.queryTotalUsageInRange(dayStart, dayEnd)
+                // Note: We don't fill topApps for fallback to keep it fast, 
+                // chart only needs the total.
+            }
+
+            topApps.sortByDescending { it.second }
             result.add(DailyLocalStat(shortDate, total, topApps.take(10)))
         }
         return result
@@ -445,6 +505,7 @@ class FocusFlowViewModel @Inject constructor(
     }
 
     fun setAppLimit(packageName: String, limitMinutes: Long) {
+        if (packageName == context.packageName) return // Security: Toolz is immune to limits
         viewModelScope.launch {
             appLimitRepository.setLimit(AppLimit(packageName, limitMinutes * 60_000L))
         }
@@ -459,6 +520,7 @@ class FocusFlowViewModel @Inject constructor(
     }
 
     fun updateAppCategory(packageName: String, isProductive: Boolean) {
+        if (packageName == context.packageName && !isProductive) return // Security: Toolz must be productive
         viewModelScope.launch {
             settingsRepository.setAppCategoryMapping(
                 packageName,
@@ -702,6 +764,13 @@ class FocusFlowViewModel @Inject constructor(
         val cm   = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
         val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        if (isBound) {
+            context.unbindService(connection)
+        }
     }
 }
 

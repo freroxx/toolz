@@ -167,7 +167,7 @@ import kotlin.math.roundToInt
 // SECTION 1 ─ Constants & Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-private enum class TaskFilter(val label: String) { ALL("All"), TODAY("Today"), UPCOMING("Upcoming") }
+private enum class TaskFilter(val label: String) { ALL("All"), TODAY("Today"), UPCOMING("Next") }
 
 private val PriorityColors = listOf(
     Color(0xFF9E9E9E), // 1 · None
