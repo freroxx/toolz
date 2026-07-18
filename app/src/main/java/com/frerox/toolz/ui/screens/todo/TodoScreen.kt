@@ -2237,7 +2237,7 @@ private fun TodoScreenPreview() {
 
                 ToolzConnectedButtonGroup(
                     selectedIndex = 0,
-                    options = listOf("All", "Today", "Upcoming"),
+                    options = listOf("All", "Today", "Next"),
                     onOptionSelected = {},
                     modifier = Modifier
                         .fillMaxWidth()

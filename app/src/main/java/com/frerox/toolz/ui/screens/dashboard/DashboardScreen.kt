@@ -2017,8 +2017,17 @@ fun UniversalPill(
     val flashlightMode by flashlightRepository?.mode?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(com.frerox.toolz.ui.screens.light.FlashlightMode.STEADY) }
     val flashlightBrightness by flashlightRepository?.brightness?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(1.0f) }
 
-    val pillFocusEnabled by settingsRepository.pillFocusEnabled.collectAsState(false)
-    val pillTodoEnabled by settingsRepository.pillTodoEnabled.collectAsState(true)
+    val pillFocusEnabled by settingsRepository.pillFocusEnabled.collectAsState(initial = true)
+    val pillTodoEnabled by settingsRepository.pillTodoEnabled.collectAsState(initial = true)
+    val pillMusicEnabled by settingsRepository.pillMusicEnabled.collectAsState(initial = true)
+    val pillTimerEnabled by settingsRepository.pillTimerEnabled.collectAsState(initial = true)
+    val pillStopwatchEnabled by settingsRepository.pillStopwatchEnabled.collectAsState(initial = true)
+    val pillPomodoroEnabled by settingsRepository.pillPomodoroEnabled.collectAsState(initial = true)
+    val pillStepsEnabled by settingsRepository.pillStepsEnabled.collectAsState(initial = true)
+    val pillRecorderEnabled by settingsRepository.pillRecorderEnabled.collectAsState(initial = true)
+    val pillCaffeinateEnabled by settingsRepository.pillCaffeinateEnabled.collectAsState(initial = true)
+    val pillFlashlightEnabled by settingsRepository.pillFlashlightEnabled.collectAsState(initial = true)
+    val pillCatalogDownloadEnabled by settingsRepository.pillCatalogDownloadEnabled.collectAsState(initial = true)
 
     val appTips = remember(offlineState) {
         listOfNotNull(
@@ -2041,23 +2050,25 @@ fun UniversalPill(
         recordingState, todoState.tasks, isCaffeinated,
         catalogState.downloadingTracks, fillThePill,
         isFlashlightOn, focusScore, pillFocusEnabled, pillTodoEnabled,
-        offlineState, appTips
+        pillMusicEnabled, pillTimerEnabled, pillStopwatchEnabled, pillPomodoroEnabled,
+        pillStepsEnabled, pillRecorderEnabled, pillCaffeinateEnabled, pillFlashlightEnabled,
+        pillCatalogDownloadEnabled, offlineState, appTips
     ) {
         buildList {
-            if (catalogState.downloadingTracks.isNotEmpty())
+            if (pillCatalogDownloadEnabled && catalogState.downloadingTracks.isNotEmpty())
                 add(PillPage.CatalogDownload(
                     catalogState.downloadingTracks.values.average().toFloat(),
                     catalogState.downloadingTracks.size))
-            if (musicState.isPlaying || musicState.currentTrack != null) add(PillPage.Music)
-            if (timerState.isRunning || timerState.remainingTime > 0 || timerState.isRinging) add(PillPage.Timer)
-            if (stopwatchState.isRunning || stopwatchState.elapsedTime > 0) add(PillPage.Stopwatch)
-            if (pomodoroState.isRunning)                                add(PillPage.Pomodoro)
-            if (recordingState.isRecording || recordingState.isPaused)  add(PillPage.Recorder)
+            if (pillMusicEnabled && (musicState.isPlaying || musicState.currentTrack != null)) add(PillPage.Music)
+            if (pillTimerEnabled && (timerState.isRunning || timerState.remainingTime > 0 || timerState.isRinging)) add(PillPage.Timer)
+            if (pillStopwatchEnabled && (stopwatchState.isRunning || stopwatchState.elapsedTime > 0)) add(PillPage.Stopwatch)
+            if (pillPomodoroEnabled && pomodoroState.isRunning)                                add(PillPage.Pomodoro)
+            if (pillRecorderEnabled && (recordingState.isRecording || recordingState.isPaused))  add(PillPage.Recorder)
             if (pillTodoEnabled && todoState.tasks.isNotEmpty())        add(PillPage.Todo)
-            if (isCaffeinated)                                          add(PillPage.Caffeinate)
-            if (isFlashlightOn)                                         add(PillPage.Flashlight)
+            if (pillCaffeinateEnabled && isCaffeinated)                                          add(PillPage.Caffeinate)
+            if (pillFlashlightEnabled && isFlashlightOn)                                         add(PillPage.Flashlight)
             if (pillFocusEnabled && focusScore > 0)                     add(PillPage.Focus)
-            if (stepsState.isSensorPresent)                             add(PillPage.Steps)
+            if (pillStepsEnabled && stepsState.isSensorPresent && stepsState.isEnabledInSettings) add(PillPage.Steps)
             if (isEmpty() && fillThePill) {
                 appTips.forEach { add(PillPage.Tip(it)) }
             }
@@ -2078,6 +2089,7 @@ fun UniversalPill(
                 is PillPage.Pomodoro -> pomodoroState.isRunning
                 is PillPage.Recorder -> recordingState.isRecording
                 is PillPage.Flashlight -> true
+                is PillPage.CatalogDownload -> true
                 else -> false
             }
         }
@@ -2086,10 +2098,15 @@ fun UniversalPill(
         }
     }
 
-    val isActive   = musicState.isPlaying || timerState.isRunning ||
-            stopwatchState.isRunning || pomodoroState.isRunning ||
-            recordingState.isRecording || isCaffeinated || isFlashlightOn ||
-            stepsState.isEnabledInSettings
+    val isActive   = (pillMusicEnabled && musicState.isPlaying) || 
+            (pillTimerEnabled && timerState.isRunning) ||
+            (pillStopwatchEnabled && stopwatchState.isRunning) || 
+            (pillPomodoroEnabled && pomodoroState.isRunning) ||
+            (pillRecorderEnabled && recordingState.isRecording) || 
+            (pillCaffeinateEnabled && isCaffeinated) || 
+            (pillFlashlightEnabled && isFlashlightOn) ||
+            (pillCatalogDownloadEnabled && catalogState.downloadingTracks.isNotEmpty()) ||
+            (pillStepsEnabled && stepsState.isEnabledInSettings && stepsState.motionStatus != "IDLE")
 
     val activeColor = remember(pagerState.currentPage, pages, musicState) {
         val page = pages.getOrNull(pagerState.currentPage)
@@ -2109,7 +2126,6 @@ fun UniversalPill(
             null -> Color(0xFF2196F3)
         }
     }
-
     val primary   = activeColor
     val secondary = activeColor.copy(alpha = 0.7f)
     val tertiary  = activeColor.copy(alpha = 0.5f)
