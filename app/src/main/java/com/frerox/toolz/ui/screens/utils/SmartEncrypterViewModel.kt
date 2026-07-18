@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -70,7 +71,9 @@ data class EncrypterUiState(
     val selectedFileUri: Uri? = null,
     val selectedFileName: String? = null,
     val selectedFileSize: Long = 0,
-    val processedFile: File? = null
+    val processedFile: File? = null,
+    val foundEncFiles: List<File> = emptyList(),
+    val isSearchingEncFiles: Boolean = false
 )
 
 @HiltViewModel
@@ -293,6 +296,52 @@ class SmartEncrypterViewModel @Inject constructor(
                     "Warning: This file doesn't look like an .enc file"
                 } else null
             )
+        }
+    }
+
+    fun scanForEncFiles() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isSearchingEncFiles = true, foundEncFiles = emptyList()) }
+            
+            val root = Environment.getExternalStorageDirectory()
+            val found = mutableListOf<File>()
+            
+            // Skip "Android" folder and hidden system folders to improve performance and privacy
+            scanDirectory(root, 0, 5, found, skipFolders = setOf("Android", "LOST.DIR"))
+            
+            val sorted = found.sortedByDescending { it.lastModified() }
+            
+            _uiState.update { 
+                it.copy(
+                    isSearchingEncFiles = false,
+                    foundEncFiles = sorted
+                )
+            }
+        }
+    }
+
+    private fun scanDirectory(dir: File, currentDepth: Int, maxDepth: Int, found: MutableList<File>, skipFolders: Set<String> = emptySet()) {
+        if (currentDepth > maxDepth || !dir.exists() || !dir.isDirectory) return
+        
+        // Skip hidden folders and specific blacklisted system folders
+        if (dir.name.startsWith(".") || skipFolders.contains(dir.name)) return
+
+        val files = dir.listFiles() ?: return
+        for (file in files) {
+            if (file.isDirectory) {
+                scanDirectory(file, currentDepth + 1, maxDepth, found, skipFolders)
+            } else if (file.name.lowercase().endsWith(".enc")) {
+                found.add(file)
+            }
+        }
+    }
+
+    fun onEncFileSelected(file: File, context: Context) {
+        try {
+            val uri = FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+            onFileSelected(context, uri)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to access file: ${e.message}") }
         }
     }
 
@@ -671,7 +720,7 @@ class SmartEncrypterViewModel @Inject constructor(
                     }
                 } else {
                     outputFile?.delete() // Cleanup blank/partial file
-                    throw Exception("Decryption failed. Check your password.")
+                    throw Exception("Decryption failed. Ensure your password is correct.")
                 }
             } catch (e: Exception) {
                 // If it was cancelled, delete partial file
@@ -680,10 +729,14 @@ class SmartEncrypterViewModel @Inject constructor(
                     _uiState.update { it.copy(isProcessingFile = false, fileProcessingStatus = "Operation cancelled") }
                 } else {
                     outputFile?.delete()
+                    val errorMessage = when (e.message) {
+                        "AUTH_FAILURE" -> "Invalid password or corrupted file"
+                        else -> "File processing failed: ${e.message}"
+                    }
                     _uiState.update { 
                         it.copy(
                             isProcessingFile = false,
-                            error = "File processing failed: ${e.message}"
+                            error = errorMessage
                         )
                     }
                 }

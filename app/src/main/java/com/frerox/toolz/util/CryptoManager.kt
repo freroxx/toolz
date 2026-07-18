@@ -21,6 +21,7 @@ import java.io.OutputStream
 import java.io.FilterInputStream
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
+import javax.crypto.AEADBadTagException
 
 object CryptoManager {
     private const val AES_KEY_SIZE = 256
@@ -144,6 +145,8 @@ object CryptoManager {
             decryptedBytes.fill(0.toByte())
 
             Pair(result, true)
+        } catch (e: AEADBadTagException) {
+            Pair("Invalid password or corrupted data", false)
         } catch (e: Exception) {
             Pair("Decryption failed: ${e.message}", false)
         }
@@ -201,6 +204,8 @@ object CryptoManager {
             decryptedBytes.fill(0.toByte())
 
             Pair(result, true)
+        } catch (e: AEADBadTagException) {
+            Pair("Invalid password or corrupted data", false)
         } catch (e: Exception) {
             Pair("Decryption failed: ${e.message}", false)
         }

@@ -61,6 +61,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.util.CryptoManager.CryptoAlgorithm
 import com.frerox.toolz.util.CryptoManager.CryptoFormat
 import com.frerox.toolz.util.CryptoManager.CryptoOperation
@@ -70,31 +71,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 /**
- * SmartEncrypterScreen — Material 3 Expressive redesign.
- *
- * Redesign notes (what was actually "AI slop" and what replaced it):
- *  - Removed FontWeight.Black used as decoration on nearly every text element. M3
- *    type scale (titleMedium/titleLarge with SemiBold/Bold where it matters) reads
- *    as intentional; blanket Black weight everywhere reads as templated.
- *  - "LIVE MODE ACTIVE" in saturated yellow with a pulsing bolt was sci-fi HUD
- *    cosplay, not M3. Replaced with a small tonal "Live" indicator using color
- *    roles (tertiary) and a calm dot animation instead of a scale-pulsing badge.
- *  - ALL CAPS action button labels ("ENCRYPT"/"DECRYPT") replaced with sentence
- *    case; hierarchy now comes from container color (filled vs. tonal), not shouting.
- *  - Consolidated the shape scale: panels/cards/dialog cards now consistently use
- *    the same corner-radius steps instead of arbitrary 12/16/20/24/32/36dp mixed
- *    throughout the same screen.
- *
- * Real feature additions/fixes (verified against SmartEncrypterViewModel — nothing
- * here calls a function or reads a field that doesn't already exist on it):
- *  - Wired up `clearAll()`, which existed on the ViewModel but was never called from
- *    the UI — added a reset action in the top bar.
- *  - Added a password visibility toggle (local UI state only, no ViewModel change
- *    needed) — previously the password field could never be un-masked to verify
- *    what you typed, a real usability gap for a field with no confirmation step.
- *  - Auto-clear now shows a small circular countdown next to the timer chip, driven
- *    by the same `autoClearSeconds` value already emitted, so there's an at-a-glance
- *    sense of urgency without a giant error-colored banner.
+ * SmartEncrypterScreen — Material 3 Expressive redesign done YAYAYYAYAYYAYA!
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,12 +83,14 @@ fun SmartEncrypterScreen(
     val history by viewModel.history.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val vibrationManager = LocalVibrationManager.current
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showHistory by remember { mutableStateOf(false) }
     var showFullQr by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showPermissionSheet by remember { mutableStateOf(false) }
+    var showEncPicker by remember { mutableStateOf(false) }
 
     // Handle External Intent (Open With...)
     val activity = context as? androidx.appcompat.app.AppCompatActivity
@@ -134,6 +113,13 @@ fun SmartEncrypterScreen(
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.onFileSelected(context, it) }
+    }
+
+    // Specialized picker for .enc files (decrypt mode)
+    val encFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { viewModel.onFileSelected(context, it) }
@@ -253,7 +239,11 @@ fun SmartEncrypterScreen(
                             onGrantClick = { showPermissionSheet = true },
                             onPickPhotos = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
                             onPickFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            onPickAdvanced = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            onPickEncFiles = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.scanForEncFiles()
+                                showEncPicker = true
+                            },
                             onChangeOperation = { viewModel.setFileOperationIntent(null) },
                             onToggleRenamer = viewModel::toggleRenamer,
                             onCustomNameChange = viewModel::onCustomFileNameChanged,
@@ -503,10 +493,25 @@ fun SmartEncrypterScreen(
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            ToolzWavyLinearProgressIndicator(
-                                progress = { uiState.fileProcessingProgress },
-                                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape)
-                            )
+                            val isPreparing = uiState.fileProcessingStatus.contains("Preparing")
+                            val infiniteTransition = rememberInfiniteTransition(label = "preparing_pulse")
+                            val pulseAlpha by if (isPreparing) {
+                                infiniteTransition.animateFloat(
+                                    initialValue = 0.5f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing), RepeatMode.Reverse),
+                                    label = "alpha"
+                                )
+                            } else {
+                                remember { mutableStateOf(1f) }
+                            }
+
+                            Box(modifier = Modifier.alpha(pulseAlpha)) {
+                                ToolzWavyLinearProgressIndicator(
+                                    progress = { uiState.fileProcessingProgress },
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape)
+                                )
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -693,6 +698,23 @@ fun SmartEncrypterScreen(
         )
     }
 
+    if (showEncPicker) {
+        EncFilePickerBottomSheet(
+            uiState = uiState,
+            onDismiss = { showEncPicker = false },
+            onFileSelected = { file ->
+                vibrationManager?.vibrateClick()
+                viewModel.onEncFileSelected(file, context)
+                showEncPicker = false
+            },
+            onAdvancedPicker = {
+                showEncPicker = false
+                encFilePickerLauncher.launch(arrayOf("*/*"))
+            },
+            formatFileSize = viewModel::formatFileSize
+        )
+    }
+
     if (uiState.isFileMode && uiState.fileOperationIntent == null) {
         FileOperationBottomSheet(
             onSelect = viewModel::setFileOperationIntent,
@@ -701,7 +723,16 @@ fun SmartEncrypterScreen(
     }
 
     LaunchedEffect(uiState.error) {
-        uiState.error?.let { snackbarHostState.showSnackbar(it) }
+        uiState.error?.let { 
+            vibrationManager?.vibrateError()
+            snackbarHostState.showSnackbar(it) 
+        }
+    }
+
+    LaunchedEffect(uiState.processedFile) {
+        if (uiState.processedFile != null) {
+            vibrationManager?.vibrateSuccess()
+        }
     }
 }
 
@@ -773,7 +804,7 @@ private fun FileModePanel(
     onGrantClick: () -> Unit,
     onPickPhotos: () -> Unit,
     onPickFiles: () -> Unit,
-    onPickAdvanced: () -> Unit,
+    onPickEncFiles: () -> Unit,
     onChangeOperation: () -> Unit,
     onToggleRenamer: () -> Unit,
     onCustomNameChange: (String) -> Unit,
@@ -839,10 +870,9 @@ private fun FileModePanel(
                                 Text("Change Action", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                        
                         if (operation == CryptoOperation.DECRYPT) {
                             ExpressiveCard(
-                                onClick = onPickFiles,
+                                onClick = onPickEncFiles,
                                 modifier = Modifier.fillMaxWidth().height(140.dp),
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                 shape = RoundedCornerShape(32.dp),
@@ -871,7 +901,6 @@ private fun FileModePanel(
                             ) {
                                 FilePickerButton(label = "Photos", icon = Icons.Rounded.Collections, onClick = onPickPhotos, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.primaryContainer)
                                 FilePickerButton(label = "Files", icon = Icons.Rounded.Folder, onClick = onPickFiles, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                                FilePickerButton(label = "Advanced", icon = Icons.Rounded.AutoFixHigh, onClick = onPickAdvanced, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.tertiaryContainer)
                             }
                         }
                     } else {
@@ -1049,6 +1078,92 @@ private fun PermissionBottomSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Not Now", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EncFilePickerBottomSheet(
+    uiState: EncrypterUiState,
+    onDismiss: () -> Unit,
+    onFileSelected: (File) -> Unit,
+    onAdvancedPicker: () -> Unit,
+    formatFileSize: (Long) -> String
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp)
+                .animateContentSize()
+        ) {
+            Text(
+                "Select .enc file",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Box(modifier = Modifier.weight(1f, fill = false)) {
+                if (uiState.isSearchingEncFiles) {
+                    Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (uiState.foundEncFiles.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.SearchOff, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
+                            Text("No .enc files found", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+                            Text("Check your Downloads or Documents folder", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(uiState.foundEncFiles) { file ->
+                            val date = SimpleDateFormat("MMM d, yyyy HH:mm").format(Date(file.lastModified()))
+                            ListItem(
+                                headlineContent = { Text(file.name, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                                supportingContent = { Text("${formatFileSize(file.length())} • $date") },
+                                leadingContent = {
+                                    Box(
+                                        modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    }
+                                },
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable { onFileSelected(file) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            ToolzOutlinedExpressiveButton(
+                onClick = onAdvancedPicker,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .height(56.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("Advanced (System Picker)", fontWeight = FontWeight.Bold)
             }
         }
     }
