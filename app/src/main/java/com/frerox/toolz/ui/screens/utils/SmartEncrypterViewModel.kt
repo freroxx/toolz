@@ -66,7 +66,11 @@ data class EncrypterUiState(
     val lastTextAlgorithm: CryptoAlgorithm? = null,
     val fileOperationIntent: CryptoOperation? = null,
     val isRenamerEnabled: Boolean = false,
-    val customFileName: String = ""
+    val customFileName: String = "",
+    val selectedFileUri: Uri? = null,
+    val selectedFileName: String? = null,
+    val selectedFileSize: Long = 0,
+    val processedFile: File? = null
 )
 
 @HiltViewModel
@@ -220,6 +224,10 @@ class SmartEncrypterViewModel @Inject constructor(
                 fileOperationIntent = null,
                 isRenamerEnabled = false,
                 customFileName = "",
+                selectedFileUri = null,
+                selectedFileName = null,
+                selectedFileSize = 0,
+                processedFile = null,
                 lastTextAlgorithm = if (!currentIsFileMode) it.selectedAlgorithm else it.lastTextAlgorithm
             )
         }
@@ -246,6 +254,52 @@ class SmartEncrypterViewModel @Inject constructor(
 
     fun onCustomFileNameChanged(name: String) {
         _uiState.update { it.copy(customFileName = name) }
+    }
+
+    fun handleExternalUri(context: Context, uri: Uri) {
+        // Force file mode and decrypt intent for external .enc files
+        _uiState.update { 
+            it.copy(
+                isFileMode = true,
+                fileOperationIntent = CryptoOperation.DECRYPT,
+                selectedFileUri = uri,
+                selectedFileName = getFileName(context, uri),
+                selectedFileSize = getFileSize(context, uri),
+                processedFile = null,
+                error = null
+            )
+        }
+        // Force stream-safe algorithm if needed
+        if (!listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20).contains(_uiState.value.selectedAlgorithm)) {
+            onAlgorithmSelected(CryptoAlgorithm.AES)
+        }
+    }
+
+    fun onFileSelected(context: Context, uri: Uri) {
+        _uiState.update {
+            it.copy(
+                selectedFileUri = uri,
+                selectedFileName = getFileName(context, uri),
+                selectedFileSize = getFileSize(context, uri),
+                fileProcessingStatus = "",
+                processedFile = null,
+                error = null
+            )
+        }
+    }
+
+    fun clearFileSelection() {
+        _uiState.update {
+            it.copy(
+                selectedFileUri = null,
+                selectedFileName = null,
+                selectedFileSize = 0,
+                fileProcessingStatus = "",
+                fileProcessingProgress = 0f,
+                processedFile = null,
+                error = null
+            )
+        }
     }
 
     fun updateFilePermissionStatus(granted: Boolean) {
@@ -491,10 +545,18 @@ class SmartEncrypterViewModel @Inject constructor(
         }
     }
 
-    fun processFile(context: Context, uri: Uri, operation: CryptoOperation) {
+    fun processFile(context: Context) {
         val state = _uiState.value
+        val uri = state.selectedFileUri ?: return
+        val operation = state.fileOperationIntent ?: return
+
         if (state.password.isBlank()) {
-            _uiState.update { it.copy(error = "Password required for file encryption") }
+            _uiState.update { it.copy(error = "Password required for file processing") }
+            return
+        }
+
+        if (state.isRenamerEnabled && state.customFileName.isBlank()) {
+            _uiState.update { it.copy(error = "Please enter a custom output name") }
             return
         }
 
@@ -506,12 +568,12 @@ class SmartEncrypterViewModel @Inject constructor(
                     it.copy(
                         isProcessingFile = true, 
                         fileProcessingProgress = 0f,
-                        fileProcessingStatus = if (operation == CryptoOperation.ENCRYPT) "Encrypting..." else "Decrypting..."
+                        fileProcessingStatus = "Preparing (Deriving Key)..."
                     )
                 }
 
                 val contentResolver = context.contentResolver
-                val totalSize = getFileSize(context, uri)
+                val totalSize = state.selectedFileSize
                 
                 if (totalSize <= 0) throw Exception("File is empty")
                 if (totalSize > 2L * 1024 * 1024 * 1024) throw Exception("File exceeds 2GB limit")
@@ -523,24 +585,42 @@ class SmartEncrypterViewModel @Inject constructor(
                     throw Exception("Not enough storage space")
                 }
 
-                val originalFileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
+                val originalFileName = state.selectedFileName ?: "file_${System.currentTimeMillis()}"
                 
                 val fileName = if (state.isRenamerEnabled && state.customFileName.isNotBlank()) {
-                    state.customFileName
+                    val input = state.customFileName
+                    if (operation == CryptoOperation.DECRYPT) {
+                        // For decryption, if user didn't provide extension, try to recover from original
+                        if (!input.contains(".")) {
+                            val originalWithoutEnc = originalFileName.removeSuffix(".enc").removeSuffix(".ENC")
+                            val originalExt = originalWithoutEnc.substringAfterLast('.', "")
+                            if (originalExt.isNotEmpty()) "$input.$originalExt" else input
+                        } else {
+                            input
+                        }
+                    } else {
+                        input
+                    }
                 } else {
                     originalFileName
                 }
 
                 val baseOutputName = if (operation == CryptoOperation.ENCRYPT) {
-                    if (fileName.endsWith(".enc")) fileName else "$fileName.enc"
+                    if (fileName.endsWith(".enc", ignoreCase = true)) fileName else "$fileName.enc"
                 } else {
-                    fileName.removeSuffix(".enc")
+                    // Remove .enc safely
+                    if (fileName.endsWith(".enc", ignoreCase = true)) {
+                        fileName.substring(0, fileName.length - 4)
+                    } else {
+                        fileName
+                    }
                 }
 
                 outputFile = getUniqueOutputFile(toolzDir, baseOutputName)
                 
                 val success = contentResolver.openInputStream(uri)?.use { inputStream ->
                     FileOutputStream(outputFile).use { outputStream ->
+                        _uiState.update { it.copy(fileProcessingStatus = if (operation == CryptoOperation.ENCRYPT) "Encrypting..." else "Decrypting...") }
                         when (state.selectedAlgorithm) {
                             CryptoAlgorithm.AES -> {
                                 if (operation == CryptoOperation.ENCRYPT) {
@@ -573,12 +653,14 @@ class SmartEncrypterViewModel @Inject constructor(
                     _uiState.update { 
                         it.copy(
                             isProcessingFile = false,
-                            fileProcessingStatus = "Saved: ${outputFile.name}",
+                            fileProcessingStatus = "Successfully processed: ${outputFile!!.name}",
+                            processedFile = outputFile,
                             error = null
                         )
                     }
                 } else {
-                    throw Exception("Crypto operation failed")
+                    outputFile?.delete() // Cleanup blank/partial file
+                    throw Exception("Decryption failed. Check your password.")
                 }
             } catch (e: Exception) {
                 // If it was cancelled, delete partial file
@@ -586,6 +668,7 @@ class SmartEncrypterViewModel @Inject constructor(
                     outputFile?.delete()
                     _uiState.update { it.copy(isProcessingFile = false, fileProcessingStatus = "Operation cancelled") }
                 } else {
+                    outputFile?.delete()
                     _uiState.update { 
                         it.copy(
                             isProcessingFile = false,

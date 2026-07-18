@@ -18,6 +18,7 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.FilterInputStream
 import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
 
@@ -434,6 +435,9 @@ object CryptoManager {
     /**
      * Streaming AES-256-GCM Encryption
      */
+    /**
+     * Streaming AES-256-GCM Encryption
+     */
     fun encryptStreamAes(
         input: InputStream,
         output: OutputStream,
@@ -442,6 +446,7 @@ object CryptoManager {
         onProgress: (Float) -> Unit
     ): Boolean {
         return try {
+            onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
             val iv = ByteArray(IV_SIZE).apply { SecureRandom().nextBytes(this) }
             
@@ -452,20 +457,20 @@ object CryptoManager {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
+            val countingInput = CountingInputStream(input)
             val cipherOutputStream = CipherOutputStream(output, cipher)
             val buffer = ByteArray(64 * 1024)
             var bytesRead: Int
-            var totalBytesRead = 0L
 
-            while (input.read(buffer).also { bytesRead = it } != -1) {
+            while (countingInput.read(buffer).also { bytesRead = it } != -1) {
                 cipherOutputStream.write(buffer, 0, bytesRead)
-                totalBytesRead += bytesRead
                 if (totalSize > 0) {
-                    onProgress(totalBytesRead.toFloat() / totalSize)
+                    onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
                 }
             }
             cipherOutputStream.flush()
             cipherOutputStream.close()
+            onProgress(1f)
             true
         } catch (e: Exception) {
             false
@@ -483,10 +488,12 @@ object CryptoManager {
         onProgress: (Float) -> Unit
     ): Boolean {
         return try {
+            onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE)
             val iv = ByteArray(IV_SIZE)
             
-            if (input.read(salt) != SALT_SIZE || input.read(iv) != IV_SIZE) {
+            val countingInput = CountingInputStream(input)
+            if (countingInput.read(salt) != SALT_SIZE || countingInput.read(iv) != IV_SIZE) {
                 return false
             }
 
@@ -494,20 +501,19 @@ object CryptoManager {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
-            val cipherInputStream = CipherInputStream(input, cipher)
+            val cipherInputStream = CipherInputStream(countingInput, cipher)
             val buffer = ByteArray(64 * 1024)
             var bytesRead: Int
-            var totalBytesRead = (SALT_SIZE + IV_SIZE).toLong()
 
             while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
                 output.write(buffer, 0, bytesRead)
-                totalBytesRead += bytesRead
                 if (totalSize > 0) {
-                    onProgress(totalBytesRead.toFloat() / totalSize)
+                    onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
                 }
             }
             output.flush()
             cipherInputStream.close()
+            onProgress(1f)
             true
         } catch (e: Exception) {
             false
@@ -525,6 +531,7 @@ object CryptoManager {
         onProgress: (Float) -> Unit
     ): Boolean {
         return try {
+            onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
             val nonce = ByteArray(NONCE_SIZE).apply { SecureRandom().nextBytes(this) }
             
@@ -535,20 +542,20 @@ object CryptoManager {
             val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(nonce))
 
+            val countingInput = CountingInputStream(input)
             val cipherOutputStream = CipherOutputStream(output, cipher)
             val buffer = ByteArray(64 * 1024)
             var bytesRead: Int
-            var totalBytesRead = 0L
 
-            while (input.read(buffer).also { bytesRead = it } != -1) {
+            while (countingInput.read(buffer).also { bytesRead = it } != -1) {
                 cipherOutputStream.write(buffer, 0, bytesRead)
-                totalBytesRead += bytesRead
                 if (totalSize > 0) {
-                    onProgress(totalBytesRead.toFloat() / totalSize)
+                    onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
                 }
             }
             cipherOutputStream.flush()
             cipherOutputStream.close()
+            onProgress(1f)
             true
         } catch (e: Exception) {
             false
@@ -566,10 +573,12 @@ object CryptoManager {
         onProgress: (Float) -> Unit
     ): Boolean {
         return try {
+            onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE)
             val nonce = ByteArray(NONCE_SIZE)
             
-            if (input.read(salt) != SALT_SIZE || input.read(nonce) != NONCE_SIZE) {
+            val countingInput = CountingInputStream(input)
+            if (countingInput.read(salt) != SALT_SIZE || countingInput.read(nonce) != NONCE_SIZE) {
                 return false
             }
 
@@ -577,23 +586,39 @@ object CryptoManager {
             val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonce))
 
-            val cipherInputStream = CipherInputStream(input, cipher)
+            val cipherInputStream = CipherInputStream(countingInput, cipher)
             val buffer = ByteArray(64 * 1024)
             var bytesRead: Int
-            var totalBytesRead = (SALT_SIZE + NONCE_SIZE).toLong()
 
             while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
                 output.write(buffer, 0, bytesRead)
-                totalBytesRead += bytesRead
                 if (totalSize > 0) {
-                    onProgress(totalBytesRead.toFloat() / totalSize)
+                    onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
                 }
             }
             output.flush()
             cipherInputStream.close()
+            onProgress(1f)
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+    private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
+        var bytesRead = 0L
+            private set
+
+        override fun read(): Int {
+            val byte = super.read()
+            if (byte != -1) bytesRead++
+            return byte
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val read = super.read(b, off, len)
+            if (read != -1) bytesRead += read
+            return read
         }
     }
 
