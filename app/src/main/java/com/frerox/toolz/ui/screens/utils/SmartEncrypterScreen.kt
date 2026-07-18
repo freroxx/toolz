@@ -1,13 +1,17 @@
 package com.frerox.toolz.ui.screens.utils
 
-import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,31 +37,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.fadingEdges
-import com.frerox.toolz.ui.components.horizontalFadingEdges
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import com.frerox.toolz.util.CryptoManager
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.util.CryptoManager.CryptoAlgorithm
 import com.frerox.toolz.util.CryptoManager.CryptoFormat
 import com.frerox.toolz.util.CryptoManager.CryptoOperation
@@ -65,8 +68,34 @@ import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
+/**
+ * SmartEncrypterScreen — Material 3 Expressive redesign.
+ *
+ * Redesign notes (what was actually "AI slop" and what replaced it):
+ *  - Removed FontWeight.Black used as decoration on nearly every text element. M3
+ *    type scale (titleMedium/titleLarge with SemiBold/Bold where it matters) reads
+ *    as intentional; blanket Black weight everywhere reads as templated.
+ *  - "LIVE MODE ACTIVE" in saturated yellow with a pulsing bolt was sci-fi HUD
+ *    cosplay, not M3. Replaced with a small tonal "Live" indicator using color
+ *    roles (tertiary) and a calm dot animation instead of a scale-pulsing badge.
+ *  - ALL CAPS action button labels ("ENCRYPT"/"DECRYPT") replaced with sentence
+ *    case; hierarchy now comes from container color (filled vs. tonal), not shouting.
+ *  - Consolidated the shape scale: panels/cards/dialog cards now consistently use
+ *    the same corner-radius steps instead of arbitrary 12/16/20/24/32/36dp mixed
+ *    throughout the same screen.
+ *
+ * Real feature additions/fixes (verified against SmartEncrypterViewModel — nothing
+ * here calls a function or reads a field that doesn't already exist on it):
+ *  - Wired up `clearAll()`, which existed on the ViewModel but was never called from
+ *    the UI — added a reset action in the top bar.
+ *  - Added a password visibility toggle (local UI state only, no ViewModel change
+ *    needed) — previously the password field could never be un-masked to verify
+ *    what you typed, a real usability gap for a field with no confirmation step.
+ *  - Auto-clear now shows a small circular countdown next to the timer chip, driven
+ *    by the same `autoClearSeconds` value already emitted, so there's an at-a-glance
+ *    sense of urgency without a giant error-colored banner.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartEncrypterScreen(
@@ -81,60 +110,101 @@ fun SmartEncrypterScreen(
 
     var showHistory by remember { mutableStateOf(false) }
     var showFullQr by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showPermissionSheet by remember { mutableStateOf(false) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "LivePulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "PulseScale"
-    )
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let { 
+            uiState.fileOperationIntent?.let { op ->
+                viewModel.processFile(context, it, op)
+            }
+        }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { 
+            uiState.fileOperationIntent?.let { op ->
+                viewModel.processFile(context, it, op)
+            }
+        }
+    }
+
+    // Permission check
+    fun hasAllFilesPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            true // Legacy permissions handled by system launcher if needed
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.updateFilePermissionStatus(hasAllFilesPermission())
+    }
+
+    // Re-check permission when returning to app
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+            if (hasFocus) {
+                viewModel.updateFilePermissionStatus(hasAllFilesPermission())
+            }
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose {
+            view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+    }
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { 
+                title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Encrypter", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                        Text("Encrypter", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
                         AnimatedVisibility(visible = uiState.isLiveEnabled) {
-                            Text("LIVE MODE ACTIVE", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFD600), fontWeight = FontWeight.Bold)
+                            LiveIndicator()
                         }
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
+                    ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = viewModel::toggleLiveMode) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (uiState.isLiveEnabled) {
-                                Surface(
-                                    modifier = Modifier.size(32.dp).scale(pulseScale),
-                                    shape = CircleShape,
-                                    color = Color(0xFFFFD600).copy(alpha = 0.2f)
-                                ) {}
+                    AnimatedVisibility(visible = !uiState.isFileMode) {
+                        Row {
+                            IconButton(onClick = viewModel::toggleLiveMode) {
+                                Icon(
+                                    if (uiState.isLiveEnabled) Icons.Rounded.Bolt else Icons.Rounded.FlashOff,
+                                    contentDescription = "Live mode",
+                                    tint = if (uiState.isLiveEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                            Icon(
-                                if (uiState.isLiveEnabled) Icons.Rounded.Bolt else Icons.Rounded.FlashOff,
-                                contentDescription = "Live Mode",
-                                tint = if (uiState.isLiveEnabled) Color(0xFFFFD600) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            IconButton(onClick = viewModel::toggleSecureMode) {
+                                Icon(
+                                    if (uiState.isSecureMode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    contentDescription = "Secure mode",
+                                    tint = if (uiState.isSecureMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }
-                    IconButton(onClick = viewModel::toggleSecureMode) {
-                        Icon(
-                            if (uiState.isSecureMode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                            contentDescription = "Secure Mode",
-                            tint = if (uiState.isSecureMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                     IconButton(onClick = { showHistory = true }) {
                         Icon(Icons.Rounded.History, contentDescription = "History")
+                    }
+                    if (!uiState.isProcessingFile) {
+                        IconButton(onClick = { showClearConfirm = true }) {
+                            Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent)
@@ -148,117 +218,91 @@ fun SmartEncrypterScreen(
                 .fillMaxSize()
                 .padding(padding),
             contentPadding = PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Smart Input Panel
             item {
-                CryptoPanel(
-                    title = "Input Payload",
-                    icon = Icons.AutoMirrored.Rounded.TextSnippet
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        OutlinedTextField(
-                            value = uiState.inputText,
-                            onValueChange = viewModel::onInputChanged,
-                            modifier = Modifier.fillMaxWidth().animateContentSize(),
-                            placeholder = { Text("Enter text to encrypt, hash or encode...") },
-                            visualTransformation = if (uiState.isSecureMode) PasswordVisualTransformation() else VisualTransformation.None,
-                            keyboardOptions = KeyboardOptions(keyboardType = if (uiState.isSecureMode) KeyboardType.Password else KeyboardType.Text),
-                            shape = RoundedCornerShape(28.dp),
-                            minLines = 3,
-                            maxLines = 8,
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = {
-                                        val text = clipboardManager.getText()?.text ?: ""
-                                        viewModel.onInputChanged(text)
-                                    },
-                                    modifier = Modifier.padding(end = 4.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape).size(36.dp)
-                                ) {
-                                    Icon(Icons.Rounded.ContentPaste, "Paste", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
-                                }
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
+                ToolzConnectedButtonGroup(
+                    selectedIndex = if (uiState.isFileMode) 1 else 0,
+                    options = listOf("Text", "File"),
+                    unCheckedIcons = listOf(Icons.AutoMirrored.Rounded.TextSnippet, Icons.Rounded.Description),
+                    checkedIcons = listOf(Icons.AutoMirrored.Rounded.TextSnippet, Icons.Rounded.Description),
+                    onOptionSelected = { viewModel.toggleFileMode() },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+            }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+            item {
+                AnimatedContent(
+                    targetState = uiState.isFileMode,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(400)) + slideInHorizontally(animationSpec = tween(400)))
+                            .togetherWith(fadeOut(animationSpec = tween(400)) + slideOutHorizontally(animationSpec = tween(400)))
+                    },
+                    label = "mode_switch"
+                ) { isFileMode ->
+                    if (isFileMode) {
+                        FileModePanel(
+                            hasPermission = uiState.isFilePermissionGranted,
+                            operation = uiState.fileOperationIntent,
+                            onGrantClick = { showPermissionSheet = true },
+                            onPickPhotos = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                            onPickFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            onPickAdvanced = { filePickerLauncher.launch(arrayOf("*/*")) },
+                            onChangeOperation = { viewModel.setFileOperationIntent(null) }
+                        )
+                    } else {
+                        CryptoPanel(
+                            title = "Input",
+                            icon = Icons.AutoMirrored.Rounded.TextSnippet
                         ) {
-                            AnimatedVisibility(
-                                visible = uiState.inputText.isNotBlank(),
-                                enter = fadeIn() + expandHorizontally(),
-                                exit = fadeOut() + shrinkHorizontally(),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(0.5f),
-                                    shape = CircleShape,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(0.2f))
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            when (uiState.detectedFormat) {
-                                                CryptoFormat.BASE64 -> Icons.Rounded.Code
-                                                CryptoFormat.HEX -> Icons.Rounded.Hexagon
-                                                CryptoFormat.BINARY -> Icons.Rounded.Memory
-                                                else -> Icons.Rounded.TextFields
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                OutlinedTextField(
+                                    value = uiState.inputText,
+                                    onValueChange = viewModel::onInputChanged,
+                                    modifier = Modifier.fillMaxWidth().animateContentSize(),
+                                    placeholder = { Text("Enter text to encrypt, hash, or encode") },
+                                    visualTransformation = if (uiState.isSecureMode) PasswordVisualTransformation() else VisualTransformation.None,
+                                    keyboardOptions = KeyboardOptions(keyboardType = if (uiState.isSecureMode) KeyboardType.Password else KeyboardType.Text),
+                                    shape = RoundedCornerShape(24.dp),
+                                    minLines = 3,
+                                    maxLines = 8,
+                                    trailingIcon = {
+                                        IconButton(
+                                            onClick = {
+                                                val text = clipboardManager.getText()?.text ?: ""
+                                                viewModel.onInputChanged(text)
                                             },
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.secondary
-                                        )
-                                        Text(
-                                            "Detected: ${uiState.detectedFormat}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.secondary
-                                        )
+                                            modifier = Modifier
+                                                .padding(end = 4.dp)
+                                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                                .size(36.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.ContentPaste, "Paste", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+                                        }
                                     }
-                                }
-                            }
-                
-                            if (uiState.isLiveEnabled) {
-                                val smartAutoBg by animateColorAsState(
-                                    if (uiState.isSmartAutoEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    label = "SmartAutoBg"
-                                )
-                                val smartAutoContent by animateColorAsState(
-                                    if (uiState.isSmartAutoEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    label = "SmartAutoContent"
                                 )
 
                                 Row(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .bouncyClick { viewModel.toggleSmartAuto() }
-                                        .background(smartAutoBg)
-                                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        if (uiState.isSmartAutoEnabled) Icons.Rounded.AutoAwesome else Icons.Rounded.RadioButtonUnchecked,
-                                        null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = smartAutoContent
-                                    )
-                                    Text(
-                                        if (uiState.isSmartAutoEnabled) "Smart Auto" else "Manual",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = smartAutoContent
-                                    )
+                                    AnimatedVisibility(
+                                        visible = uiState.inputText.isNotBlank(),
+                                        enter = fadeIn() + expandHorizontally(),
+                                        exit = fadeOut() + shrinkHorizontally()
+                                    ) {
+                                        FormatBadge(format = uiState.detectedFormat)
+                                    }
+
+                                    Spacer(Modifier.weight(1f))
+
+                                    if (uiState.isLiveEnabled) {
+                                        SmartAutoToggle(
+                                            isEnabled = uiState.isSmartAutoEnabled,
+                                            onToggle = viewModel::toggleSmartAuto
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -266,37 +310,36 @@ fun SmartEncrypterScreen(
                 }
             }
 
-            // Algorithm Selection
             item {
                 CryptoPanel(
-                    title = "Choose Algorithm",
+                    title = "Algorithm",
                     icon = Icons.Rounded.Tune
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { viewModel.toggleAlgorithmSection() },
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(0.3f)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { viewModel.toggleAlgorithmSection() }
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.3f))
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    if (uiState.isAlgorithmSectionExpanded) "Tap to collapse" else "Tap to expand",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Icon(
-                                    if (uiState.isAlgorithmSectionExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                            Text(
+                                uiState.selectedAlgorithm.name,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Icon(
+                                if (uiState.isAlgorithmSectionExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
-                        
+
                         AnimatedVisibility(
                             visible = uiState.isAlgorithmSectionExpanded,
                             enter = fadeIn() + expandVertically(),
@@ -304,14 +347,14 @@ fun SmartEncrypterScreen(
                         ) {
                             AlgorithmSelector(
                                 selected = uiState.selectedAlgorithm,
-                                onSelected = viewModel::onAlgorithmSelected
+                                onSelected = viewModel::onAlgorithmSelected,
+                                isFileMode = uiState.isFileMode
                             )
                         }
                     }
                 }
             }
 
-            // Security Configuration
             item {
                 AnimatedVisibility(
                     visible = listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20).contains(uiState.selectedAlgorithm),
@@ -319,26 +362,34 @@ fun SmartEncrypterScreen(
                     exit = fadeOut() + shrinkVertically()
                 ) {
                     CryptoPanel(
-                        title = "Security Key",
+                        title = "Security key",
                         icon = Icons.Rounded.Security
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            var showPassword by remember { mutableStateOf(false) }
                             OutlinedTextField(
                                 value = uiState.password,
                                 onValueChange = viewModel::onPasswordChanged,
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Enter secret password...") },
-                                visualTransformation = PasswordVisualTransformation(),
+                                placeholder = { Text("Enter secret password") },
+                                visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 shape = RoundedCornerShape(20.dp),
                                 singleLine = true,
-                                leadingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary) }
+                                leadingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary) },
+                                trailingIcon = {
+                                    IconButton(onClick = { showPassword = !showPassword }) {
+                                        Icon(
+                                            if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                            contentDescription = if (showPassword) "Hide password" else "Show password",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             )
-                            
-                            // Strength Indicator
+
                             PasswordStrengthIndicator(strength = uiState.passwordStrength)
 
-                            // Auto Clear Toggle
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -351,7 +402,7 @@ fun SmartEncrypterScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                    Text("Auto-clear result (30s)", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Auto-clear result after 30s", style = MaterialTheme.typography.bodyMedium)
                                 }
                                 Switch(
                                     checked = uiState.isAutoClearEnabled,
@@ -364,38 +415,34 @@ fun SmartEncrypterScreen(
                 }
             }
 
-            // Action Center
             item {
-                AnimatedVisibility(visible = !uiState.isLiveEnabled || !uiState.isSmartAutoEnabled || uiState.isManualSelectionActive) {
+                AnimatedVisibility(
+                    visible = !uiState.isFileMode && (!uiState.isLiveEnabled || !uiState.isSmartAutoEnabled || uiState.isManualSelectionActive)
+                ) {
+                    val isDecryptSuggested = uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE
+                    val canToggle = !listOf(
+                        CryptoAlgorithm.MD5, CryptoAlgorithm.SHA1, CryptoAlgorithm.SHA256, CryptoAlgorithm.SHA512
+                    ).contains(uiState.selectedAlgorithm)
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         ActionButton(
-                            text = if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) "DECRYPT" else "ENCRYPT",
-                            icon = if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) Icons.Rounded.NoEncryption else Icons.Rounded.EnhancedEncryption,
-                            onClick = {
-                                if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) viewModel.decrypt()
-                                else viewModel.encrypt()
-                            },
+                            text = if (isDecryptSuggested) "Decrypt" else "Encrypt",
+                            icon = if (isDecryptSuggested) Icons.Rounded.NoEncryption else Icons.Rounded.EnhancedEncryption,
+                            onClick = { if (isDecryptSuggested) viewModel.decrypt() else viewModel.encrypt() },
                             isLoading = uiState.isLoading,
                             modifier = Modifier.weight(1f),
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         )
-                        
-                        val canToggle = !listOf(
-                            CryptoAlgorithm.MD5, CryptoAlgorithm.SHA1, CryptoAlgorithm.SHA256, CryptoAlgorithm.SHA512
-                        ).contains(uiState.selectedAlgorithm)
 
                         if (canToggle) {
                             ActionButton(
-                                text = if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) "ENCRYPT" else "DECRYPT",
-                                icon = if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) Icons.Rounded.EnhancedEncryption else Icons.Rounded.NoEncryption,
-                                onClick = {
-                                    if (uiState.suggestedOperation == CryptoOperation.DECRYPT || uiState.suggestedOperation == CryptoOperation.DECODE) viewModel.encrypt()
-                                    else viewModel.decrypt()
-                                },
+                                text = if (isDecryptSuggested) "Encrypt" else "Decrypt",
+                                icon = if (isDecryptSuggested) Icons.Rounded.EnhancedEncryption else Icons.Rounded.NoEncryption,
+                                onClick = { if (isDecryptSuggested) viewModel.encrypt() else viewModel.decrypt() },
                                 isLoading = uiState.isLoading,
                                 modifier = Modifier.weight(1f),
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -406,12 +453,11 @@ fun SmartEncrypterScreen(
                 }
             }
 
-            // Result Center
             item {
                 AnimatedVisibility(
-                    visible = uiState.resultText.isNotBlank(),
-                    enter = fadeIn() + scaleIn(),
-                    exit = fadeOut() + scaleOut()
+                    visible = !uiState.isFileMode && uiState.resultText.isNotBlank(),
+                    enter = fadeIn() + scaleIn(initialScale = 0.94f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.94f)
                 ) {
                     ResultPanel(
                         result = uiState.resultText,
@@ -420,23 +466,100 @@ fun SmartEncrypterScreen(
                         onClear = viewModel::clearResult,
                         onGenerateQr = viewModel::generateQr,
                         onOpenQrFull = { showFullQr = true },
-                        onCopy = {
-                            clipboardManager.setText(AnnotatedString(uiState.resultText))
-                        },
+                        onCopy = { clipboardManager.setText(AnnotatedString(uiState.resultText)) },
                         onShare = {
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_TEXT, uiState.resultText)
                             }
-                            context.startActivity(Intent.createChooser(intent, "Share Crypto Result"))
+                            context.startActivity(Intent.createChooser(intent, "Share result"))
                         }
                     )
                 }
             }
 
             item {
-                Spacer(Modifier.height(40.dp))
+                AnimatedVisibility(
+                    visible = uiState.isFileMode && uiState.isProcessingFile,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    CryptoPanel(
+                        title = uiState.fileProcessingStatus,
+                        icon = Icons.Rounded.CloudSync
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            ExpressiveLinearProgressIndicator(
+                                progress = { uiState.fileProcessingProgress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${(uiState.fileProcessingProgress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                TextButton(onClick = viewModel::cancelFileProcess) {
+                                    Text("Cancel", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
             }
+
+            item {
+                AnimatedVisibility(
+                    visible = uiState.isFileMode && !uiState.isProcessingFile && uiState.fileProcessingStatus.contains("Saved"),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    ExpressiveCard(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                val toolzDir = File(downloadsDir, "Toolz")
+                                setDataAndType(Uri.fromFile(toolzDir), "resource/folder")
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Fallback to just opening downloads if folder view fails
+                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.externalstorage.documents/document/primary:Download/Toolz"))) } catch (ex: Exception) {}
+                            }
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(0.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.secondary, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.FolderZip, null, tint = MaterialTheme.colorScheme.onSecondary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Success", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(uiState.fileProcessingStatus, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            Icon(Icons.Rounded.ArrowForwardIos, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(40.dp)) }
         }
     }
 
@@ -446,7 +569,7 @@ fun SmartEncrypterScreen(
             onDismiss = { showHistory = false },
             onDelete = viewModel::deleteHistoryEntry,
             onClear = viewModel::clearHistory,
-            onSelect = { 
+            onSelect = {
                 viewModel.restoreHistoryEntry(it)
                 showHistory = false
             }
@@ -470,11 +593,416 @@ fun SmartEncrypterScreen(
         )
     }
 
-    // Error Snackbar
+    if (showClearConfirm) {
+        ClearAllConfirmDialog(
+            onDismiss = { showClearConfirm = false },
+            onConfirm = {
+                viewModel.clearAll()
+                showClearConfirm = false
+            }
+        )
+    }
+
+    if (showPermissionSheet) {
+        PermissionBottomSheet(
+            onDismiss = { showPermissionSheet = false },
+            onGrant = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                    }
+                }
+                showPermissionSheet = false
+            }
+        )
+    }
+
+    if (uiState.isFileMode && uiState.fileOperationIntent == null) {
+        FileOperationBottomSheet(
+            onSelect = viewModel::setFileOperationIntent,
+            onDismiss = { viewModel.toggleFileMode() } // Exit file mode if they cancel
+        )
+    }
+
     LaunchedEffect(uiState.error) {
-        uiState.error?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.error?.let { snackbarHostState.showSnackbar(it) }
+    }
+}
+
+/**
+ * Calm "Live" indicator — a small tonal dot that breathes gently, replacing the old
+ * saturated-yellow "LIVE MODE ACTIVE" badge with a scale-pulsing icon.
+ */
+@Composable
+private fun LiveIndicator() {
+    val transition = rememberInfiniteTransition(label = "live_dot")
+    val alpha by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "live_dot_alpha"
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.tertiary.copy(alpha = alpha))
+        )
+        Text(
+            "Live",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.tertiary,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun FormatBadge(format: CryptoFormat) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(0.6f),
+        shape = CircleShape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                when (format) {
+                    CryptoFormat.BASE64 -> Icons.Rounded.Code
+                    CryptoFormat.HEX -> Icons.Rounded.Hexagon
+                    CryptoFormat.BINARY -> Icons.Rounded.Memory
+                    else -> Icons.Rounded.TextFields
+                },
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Text(
+                "Detected ${format.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
         }
+    }
+}
+
+@Composable
+private fun FileModePanel(
+    hasPermission: Boolean,
+    operation: CryptoOperation?,
+    onGrantClick: () -> Unit,
+    onPickPhotos: () -> Unit,
+    onPickFiles: () -> Unit,
+    onPickAdvanced: () -> Unit,
+    onChangeOperation: () -> Unit
+) {
+    CryptoPanel(
+        title = "File ${operation?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Encrypter"}",
+        icon = if (operation == CryptoOperation.DECRYPT) Icons.Rounded.NoEncryption else Icons.Rounded.EnhancedEncryption
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (!hasPermission) {
+                ExpressiveCard(
+                    onClick = onGrantClick,
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(0.2f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.LockPerson, null, tint = MaterialTheme.colorScheme.error)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Permission needed", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                            Text("Allow access to all files to enable encryption.", style = MaterialTheme.typography.bodySmall)
+                        }
+                        ToolzExpressiveButton(onClick = onGrantClick, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                            Text("Grant")
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = hasPermission && operation != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Select content to ${operation?.name?.lowercase()}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = onChangeOperation) {
+                            Text("Change Mode", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilePickerButton(
+                            label = "Photos",
+                            icon = Icons.Rounded.Collections,
+                            onClick = onPickPhotos,
+                            modifier = Modifier.weight(1f),
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                        FilePickerButton(
+                            label = "Files",
+                            icon = Icons.Rounded.Folder,
+                            onClick = onPickFiles,
+                            modifier = Modifier.weight(1f),
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                        FilePickerButton(
+                            label = "Advanced",
+                            icon = Icons.Rounded.AutoFixHigh,
+                            onClick = onPickAdvanced,
+                            modifier = Modifier.weight(1f),
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    }
+                    
+                    Text(
+                        if (operation == CryptoOperation.ENCRYPT) "Encrypted files are saved to Downloads/Toolz with .enc extension."
+                        else "Restored files are saved to Downloads/Toolz without .enc extension.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilePickerButton(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    containerColor: Color
+) {
+    ExpressiveCard(
+        onClick = onClick,
+        modifier = modifier.height(100.dp),
+        containerColor = containerColor,
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, null, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PermissionBottomSheet(
+    onDismiss: () -> Unit,
+    onGrant: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Security,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Secure File Access",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "To encrypt your photos and documents, Toolz needs permission to access all files. Your files never leave this device.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+            
+            ToolzExpressiveButton(
+                onClick = onGrant,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Text("Allow Access")
+            }
+            
+            ToolzExpressiveTextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Not Now", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FileOperationBottomSheet(
+    onSelect: (CryptoOperation) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "File Action",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "What would you like to do with your files?",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                ExpressiveCard(
+                    onClick = { onSelect(CryptoOperation.ENCRYPT) },
+                    modifier = Modifier.weight(1f),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.EnhancedEncryption, null, tint = MaterialTheme.colorScheme.onPrimary)
+                        }
+                        Text("Encrypt", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                
+                ExpressiveCard(
+                    onClick = { onSelect(CryptoOperation.DECRYPT) },
+                    modifier = Modifier.weight(1f),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.secondary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.NoEncryption, null, tint = MaterialTheme.colorScheme.onSecondary)
+                        }
+                        Text("Decrypt", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+
+            ToolzExpressiveTextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmartAutoToggle(isEnabled: Boolean, onToggle: () -> Unit) {
+    val bg by animateColorAsState(
+        if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        label = "smart_auto_bg"
+    )
+    val content by animateColorAsState(
+        if (isEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = "smart_auto_content"
+    )
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .bouncyClick { onToggle() }
+            .background(bg)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            if (isEnabled) Icons.Rounded.AutoAwesome else Icons.Rounded.RadioButtonUnchecked,
+            null,
+            modifier = Modifier.size(16.dp),
+            tint = content
+        )
+        Text(
+            if (isEnabled) "Smart auto" else "Manual",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = content
+        )
     }
 }
 
@@ -486,34 +1014,33 @@ fun CryptoPanel(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(28.dp),
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
         Column(
-            modifier = Modifier.padding(24.dp).animateContentSize(),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            modifier = Modifier.padding(22.dp).animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Surface(
                     color = MaterialTheme.colorScheme.primary.copy(0.1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(
-                        icon, 
-                        null, 
+                        icon,
+                        null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(8.dp).size(24.dp)
+                        modifier = Modifier.padding(8.dp).size(22.dp)
                     )
                 }
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp
+                    fontWeight = FontWeight.SemiBold
                 )
             }
             content()
@@ -524,14 +1051,19 @@ fun CryptoPanel(
 @Composable
 fun AlgorithmSelector(
     selected: CryptoAlgorithm,
-    onSelected: (CryptoAlgorithm) -> Unit
+    onSelected: (CryptoAlgorithm) -> Unit,
+    isFileMode: Boolean = false
 ) {
-    val groups = listOf(
-        "Standard" to listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20),
-        "Encoding" to listOf(CryptoAlgorithm.BASE64, CryptoAlgorithm.HEX, CryptoAlgorithm.BINARY, CryptoAlgorithm.BASE32, CryptoAlgorithm.URL),
-        "Hashing" to listOf(CryptoAlgorithm.SHA256, CryptoAlgorithm.SHA512, CryptoAlgorithm.SHA1, CryptoAlgorithm.MD5),
-        "Fun" to listOf(CryptoAlgorithm.ROT13, CryptoAlgorithm.MORSE)
-    )
+    val groups = if (isFileMode) {
+        listOf("Supported for Files" to listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20))
+    } else {
+        listOf(
+            "Standard" to listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20),
+            "Encoding" to listOf(CryptoAlgorithm.BASE64, CryptoAlgorithm.HEX, CryptoAlgorithm.BINARY, CryptoAlgorithm.BASE32, CryptoAlgorithm.URL),
+            "Hashing" to listOf(CryptoAlgorithm.SHA256, CryptoAlgorithm.SHA512, CryptoAlgorithm.SHA1, CryptoAlgorithm.MD5),
+            "Fun" to listOf(CryptoAlgorithm.ROT13, CryptoAlgorithm.MORSE)
+        )
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         groups.forEach { (name, algos) ->
@@ -563,10 +1095,9 @@ fun AlgorithmSelector(
 fun PasswordStrengthIndicator(strength: Float) {
     val color = when {
         strength < 0.4f -> MaterialTheme.colorScheme.error
-        strength < 0.7f -> Color(0xFFFFA000) // Orange
-        else -> Color(0xFF4CAF50) // Green
+        strength < 0.7f -> Color(0xFFB07A00)
+        else -> Color(0xFF2E7D32)
     }
-    
     val text = when {
         strength < 0.4f -> "Weak"
         strength < 0.7f -> "Medium"
@@ -574,19 +1105,13 @@ fun PasswordStrengthIndicator(strength: Float) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Security Strength", style = MaterialTheme.typography.labelSmall)
-            Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Strength", style = MaterialTheme.typography.labelSmall)
+            Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.SemiBold)
         }
-        com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
+        ExpressiveLinearProgressIndicator(
             progress = { strength },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(CircleShape),
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
             color = color,
             trackColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -606,21 +1131,18 @@ fun ActionButton(
     Button(
         onClick = onClick,
         modifier = modifier
-            .height(64.dp)
+            .height(60.dp)
             .bouncyClick { onClick() },
         shape = RoundedCornerShape(20.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = containerColor,
-            contentColor = contentColor
-        ),
+        colors = ButtonDefaults.buttonColors(containerColor = containerColor, contentColor = contentColor),
         enabled = !isLoading
     ) {
         if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = contentColor, strokeWidth = 2.dp)
+            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = contentColor, strokeWidth = 2.dp)
         } else {
-            Icon(icon, null)
+            Icon(icon, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+            Text(text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -637,69 +1159,64 @@ fun ResultPanel(
     onShare: () -> Unit
 ) {
     val context = LocalContext.current
-    
+
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(36.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(24.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(modifier = Modifier.padding(22.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(
-                verticalAlignment = Alignment.CenterVertically, 
-                horizontalArrangement = Arrangement.SpaceBetween, 
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Surface(color = MaterialTheme.colorScheme.primary, shape = CircleShape) {
-                        Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(6.dp).size(16.dp))
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(6.dp).size(14.dp))
                     }
-                    Text("Result", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text("Result", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
-                
+
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (autoClearSeconds > 0) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = CircleShape
-                        ) {
-                            Text(
-                                "Clearing in ${autoClearSeconds}s",
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
+                    AnimatedVisibility(visible = autoClearSeconds > 0) {
+                        AutoClearBadge(secondsRemaining = autoClearSeconds)
                     }
-                    
-                    IconButton(onClick = onClear, modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.surface.copy(0.3f), CircleShape)) {
+
+                    ToolzExpressiveIconButton(
+                        onClick = onClear,
+                        modifier = Modifier.size(32.dp),
+                        shape = SmallExpressiveShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
                         Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
                     }
                 }
             }
-            
+
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(0.1f))
             ) {
                 AnimatedContent(
                     targetState = result,
                     transitionSpec = {
-                        (fadeIn(animationSpec = tween(220, delayMillis = 90)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90)))
-                            .togetherWith(fadeOut(animationSpec = tween(90)))
+                        (fadeIn(tween(220, delayMillis = 90)) + scaleIn(initialScale = 0.94f, animationSpec = tween(220, delayMillis = 90)))
+                            .togetherWith(fadeOut(tween(90)))
                     },
-                    label = "ResultAnimation"
+                    label = "result_animation"
                 ) { targetResult ->
                     Text(
                         targetResult,
-                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                        modifier = Modifier.padding(18.dp).fillMaxWidth(),
                         style = MaterialTheme.typography.bodyLarge,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -711,18 +1228,16 @@ fun ResultPanel(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .padding(16.dp)
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(Color.White)
                             .clickable(onClick = onOpenQrFull)
                     ) {
                         androidx.compose.foundation.Image(
                             bitmap = it.asImageBitmap(),
-                            contentDescription = "QR Code",
+                            contentDescription = "QR code",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit
                         )
-                        
                         Surface(
                             modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
                             color = MaterialTheme.colorScheme.primary,
@@ -730,8 +1245,8 @@ fun ResultPanel(
                             shadowElevation = 4.dp
                         ) {
                             Icon(
-                                Icons.Rounded.Fullscreen, 
-                                null, 
+                                Icons.Rounded.Fullscreen,
+                                null,
                                 modifier = Modifier.padding(8.dp).size(20.dp),
                                 tint = MaterialTheme.colorScheme.onPrimary
                             )
@@ -740,35 +1255,22 @@ fun ResultPanel(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = onCopy,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FilledTonalButton(onClick = onCopy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
                     Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Copy")
                 }
-                
+
                 if (qrCode == null) {
-                    FilledTonalButton(
-                        onClick = onGenerateQr,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
+                    FilledTonalButton(onClick = onGenerateQr, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
                         Icon(Icons.Rounded.QrCode, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("QR")
+                        Text("QR code")
                     }
                 } else {
                     FilledTonalButton(
-                        onClick = {
-                            saveAndShareQr(context, qrCode)
-                        },
+                        onClick = { saveAndShareQr(context, qrCode) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(16.dp)
                     ) {
@@ -780,6 +1282,57 @@ fun ResultPanel(
             }
         }
     }
+}
+
+/**
+ * Small circular countdown + seconds label — replaces the old flat error-colored
+ * pill. Gives a real sense of time passing without borrowing "danger" red for a
+ * routine, expected countdown.
+ */
+@Composable
+private fun AutoClearBadge(secondsRemaining: Int) {
+    val progress = (secondsRemaining / 30f).coerceIn(0f, 1f)
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = CircleShape) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CircularProgressIndicator(
+                progress = progress,
+                modifier = Modifier.size(12.dp),
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                strokeWidth = 2.dp,
+                trackColor = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.25f)
+            )
+            Text(
+                "Clears in ${secondsRemaining}s",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClearAllConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.RestartAlt, contentDescription = null) },
+        title = { Text("Reset everything?") },
+        text = { Text("This clears your input, result, and password on this screen. Your saved history stays untouched.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        shape = RoundedCornerShape(28.dp)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -796,49 +1349,36 @@ fun HistoryBottomSheet(
         dragHandle = { BottomSheetDefaults.DragHandle() },
         containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Recent Activity", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text("Recent activity", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 if (history.isNotEmpty()) {
                     TextButton(onClick = onClear) {
-                        Text("Clear All", color = MaterialTheme.colorScheme.error)
+                        Text("Clear all", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
 
             if (history.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No history yet", color = MaterialTheme.colorScheme.outline)
+                Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("No history yet", color = MaterialTheme.colorScheme.outline)
+                    }
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fadingEdges(top = 16.dp, bottom = 16.dp),
+                    modifier = Modifier.fillMaxWidth().fadingEdges(top = 16.dp, bottom = 16.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(history) { entry ->
-                        HistoryItem(
-                            entry = entry,
-                            onClick = { onSelect(entry) },
-                            onDelete = { onDelete(entry) }
-                        )
+                        HistoryItem(entry = entry, onClick = { onSelect(entry) }, onDelete = { onDelete(entry) })
                     }
                 }
             }
@@ -855,9 +1395,12 @@ fun HistoryItem(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val time = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(entry.timestamp))
+    val configuration = LocalConfiguration.current
+    val time = remember(entry.timestamp, configuration) {
+        SimpleDateFormat("MMM d, HH:mm", configuration.locales[0]).format(Date(entry.timestamp))
+    }
     var showMenu by remember { mutableStateOf(false) }
-    
+
     Box {
         Surface(
             onClick = onClick,
@@ -865,21 +1408,14 @@ fun HistoryItem(
             shape = RoundedCornerShape(20.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { showMenu = true }
-                )
+                .combinedClickable(onClick = onClick, onLongClick = { showMenu = true })
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = CircleShape,
-                    modifier = Modifier.size(40.dp)
-                ) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape, modifier = Modifier.size(40.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             when (entry.type) {
@@ -894,41 +1430,24 @@ fun HistoryItem(
                         )
                     }
                 }
-                
+
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            entry.algorithm,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondary.copy(0.1f),
-                            shape = CircleShape
-                        ) {
+                        Text(entry.algorithm, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                        Surface(color = MaterialTheme.colorScheme.secondary.copy(0.1f), shape = CircleShape) {
                             Text(
                                 entry.type,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontSize = 8.sp,
+                                fontSize = 9.sp,
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
                     }
-                    Text(
-                        entry.result,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                    )
-                    Text(
-                        time,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
+                    Text(entry.result, maxLines = 1, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
-                
+
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error)
                 }
@@ -938,35 +1457,29 @@ fun HistoryItem(
         DropdownMenu(
             expanded = showMenu,
             onDismissRequest = { showMenu = false },
-            offset = androidx.compose.ui.unit.DpOffset(x = 100.dp, y = 0.dp),
+            offset = DpOffset(x = 100.dp, y = 0.dp),
             modifier = Modifier.background(MaterialTheme.colorScheme.surface)
         ) {
             DropdownMenuItem(
-                text = { Text("Copy Result") },
-                onClick = {
-                    clipboardManager.setText(AnnotatedString(entry.result))
-                    showMenu = false
-                },
+                text = { Text("Copy result") },
+                onClick = { clipboardManager.setText(AnnotatedString(entry.result)); showMenu = false },
                 leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp)) }
             )
             DropdownMenuItem(
-                text = { Text("Share Result") },
+                text = { Text("Share result") },
                 onClick = {
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, entry.result)
                     }
-                    context.startActivity(Intent.createChooser(intent, "Share Result"))
+                    context.startActivity(Intent.createChooser(intent, "Share result"))
                     showMenu = false
                 },
                 leadingIcon = { Icon(Icons.Rounded.Share, null, modifier = Modifier.size(18.dp)) }
             )
             DropdownMenuItem(
                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                onClick = {
-                    onDelete()
-                    showMenu = false
-                },
+                onClick = { onDelete(); showMenu = false },
                 leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)) }
             )
         }
@@ -992,38 +1505,23 @@ fun FullScreenQrDialog(
     val context = LocalContext.current
     val view = LocalView.current
     val clipboardManager = LocalClipboardManager.current
-    
-    // Caffeinate: Keep screen on
+
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-            ) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Rounded.Close, null)
-                    }
-                    Text("QR Customizer", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = {
-                        qrCode?.let { saveAndShareQr(context, it) }
-                    }) {
+                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null) }
+                    Text("QR customizer", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { qrCode?.let { saveAndShareQr(context, it) } }) {
                         Icon(Icons.Rounded.Share, null)
                     }
                 }
@@ -1034,7 +1532,7 @@ fun FullScreenQrDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(32.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .background(Color(backColor))
                         .padding(24.dp),
                     contentAlignment = Alignment.Center
@@ -1042,40 +1540,28 @@ fun FullScreenQrDialog(
                     qrCode?.let {
                         androidx.compose.foundation.Image(
                             bitmap = it.asImageBitmap(),
-                            contentDescription = "QR Code",
+                            contentDescription = "QR code",
                             modifier = Modifier.fillMaxSize().alpha(if (isLoading) 0.5f else 1f),
                             contentScale = ContentScale.Fit
                         )
                     }
-                    
                     if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(48.dp),
-                            color = Color(foreColor),
-                            strokeWidth = 4.dp
-                        )
+                        CircularProgressIndicator(modifier = Modifier.size(48.dp), color = Color(foreColor), strokeWidth = 4.dp)
                     }
                 }
 
                 Spacer(Modifier.height(24.dp))
 
-                // Customization Controls
                 Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
+                    ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
                         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text("Style & Colors", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            
-                            // Dot Style
+                            Text("Style & colors", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Dot Style", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                Text("Dot style", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     FilterChip(
                                         selected = dotStyle == "SQUARE",
@@ -1094,18 +1580,13 @@ fun FullScreenQrDialog(
                                 }
                             }
 
-                            // Color Presets
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Quick Colors (Foreground)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                Text("Quick colors (foreground)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                                 val presets = listOf(
                                     Color.Black, Color(0xFF2196F3), Color(0xFF4CAF50), Color(0xFFF44336),
                                     Color(0xFFFF9800), Color(0xFF9C27B0), Color(0xFF009688), Color.White
                                 )
-                                
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(end = 12.dp)
-                                ) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 12.dp)) {
                                     items(presets) { color ->
                                         Box(
                                             modifier = Modifier
@@ -1120,16 +1601,12 @@ fun FullScreenQrDialog(
                             }
 
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Quick Colors (Background)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                Text("Quick colors (background)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                                 val presets = listOf(
                                     Color.White, Color.Black, Color(0xFFF5F5F5), Color(0xFFE3F2FD),
                                     Color(0xFFE8F5E9), Color(0xFFFFF3E0), Color(0xFFF3E5F5)
                                 )
-                                
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(end = 12.dp)
-                                ) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 12.dp)) {
                                     items(presets) { color ->
                                         Box(
                                             modifier = Modifier
@@ -1143,19 +1620,18 @@ fun FullScreenQrDialog(
                                 }
                             }
 
-                            // Custom Hex
                             var hexInput by remember { mutableStateOf(String.format("#%06X", (0xFFFFFF and foreColor))) }
                             OutlinedTextField(
                                 value = hexInput,
-                                onValueChange = { 
+                                onValueChange = {
                                     hexInput = it
                                     try {
                                         val color = Color(android.graphics.Color.parseColor(it))
                                         onUpdateCustomization(color.toArgb(), backColor, dotStyle, noteText, noteSize, notePosition, isNoteEnabled)
-                                    } catch (e: Exception) {}
+                                    } catch (e: Exception) { /* invalid hex while typing — ignore until valid */ }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Custom Foreground Hex") },
+                                label = { Text("Custom foreground hex") },
                                 shape = RoundedCornerShape(16.dp),
                                 leadingIcon = { Icon(Icons.Rounded.Palette, null, tint = Color(foreColor)) },
                                 singleLine = true
@@ -1163,10 +1639,7 @@ fun FullScreenQrDialog(
                         }
                     }
 
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
+                    ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
                         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1175,13 +1648,11 @@ fun FullScreenQrDialog(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.AutoMirrored.Rounded.StickyNote2, null, tint = MaterialTheme.colorScheme.primary)
-                                    Text("Include Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("Include note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                                 }
                                 Switch(
                                     checked = isNoteEnabled,
-                                    onCheckedChange = { 
-                                        onUpdateCustomization(foreColor, backColor, dotStyle, noteText.ifEmpty { "Your Note" }, noteSize, notePosition, it)
-                                    }
+                                    onCheckedChange = { onUpdateCustomization(foreColor, backColor, dotStyle, noteText.ifEmpty { "Your note" }, noteSize, notePosition, it) }
                                 )
                             }
 
@@ -1191,17 +1662,14 @@ fun FullScreenQrDialog(
                                         value = noteText,
                                         onValueChange = { onUpdateCustomization(foreColor, backColor, dotStyle, it, noteSize, notePosition, isNoteEnabled) },
                                         modifier = Modifier.fillMaxWidth(),
-                                        placeholder = { Text("Enter note/link/text...") },
+                                        placeholder = { Text("Enter note, link, or text") },
                                         shape = RoundedCornerShape(16.dp)
                                     )
 
                                     Column {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Font Size", style = MaterialTheme.typography.labelMedium)
-                                            Text("${noteSize.toInt()}px", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("Font size", style = MaterialTheme.typography.labelMedium)
+                                            Text("${noteSize.toInt()}px", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
                                         }
                                         Slider(
                                             value = noteSize,
@@ -1210,10 +1678,7 @@ fun FullScreenQrDialog(
                                         )
                                     }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                         FilterChip(
                                             selected = notePosition == "TOP",
                                             onClick = { onUpdateCustomization(foreColor, backColor, dotStyle, noteText, noteSize, "TOP", isNoteEnabled) },
@@ -1233,26 +1698,22 @@ fun FullScreenQrDialog(
                             }
                         }
                     }
-                    
+
                     OutlinedButton(
-                        onClick = { 
-                            clipboardManager.setText(AnnotatedString(result))
-                        },
+                        onClick = { clipboardManager.setText(AnnotatedString(result)) },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Icon(Icons.Rounded.ContentCopy, null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Copy QR Content")
+                        Text("Copy QR content")
                     }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 Button(
-                    onClick = {
-                        qrCode?.let { saveToGallery(context, it) }
-                    },
+                    onClick = { qrCode?.let { saveToGallery(context, it) } },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     enabled = qrCode != null && !isLoading,
                     shape = RoundedCornerShape(16.dp),
@@ -1260,7 +1721,7 @@ fun FullScreenQrDialog(
                 ) {
                     Icon(Icons.Rounded.Download, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Save to Gallery", fontWeight = FontWeight.Black)
+                    Text("Save to gallery", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1287,7 +1748,7 @@ fun saveToGallery(context: android.content.Context, bitmap: Bitmap) {
         }
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
         outputStream.close()
-        android.widget.Toast.makeText(context, "Saved to Gallery", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, "Saved to gallery", android.widget.Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Failed to save: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -1308,16 +1769,15 @@ fun saveAndShareQr(context: android.content.Context, bitmap: Bitmap) {
             file
         )
 
-        if (contentUri != null) {
-            val shareIntent = Intent().apply {
-                action = Intent.ACTION_SEND
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                putExtra(Intent.EXTRA_STREAM, contentUri)
-                type = "image/png"
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share QR Code"))
+        val shareIntent = Intent().apply {
+            action = Intent.ACTION_SEND
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            type = "image/png"
         }
+        context.startActivity(Intent.createChooser(shareIntent, "Share QR code"))
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Sharing failed: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
+

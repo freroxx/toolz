@@ -4,6 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.os.StatFs
+import android.provider.OpenableColumns
 import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -11,6 +16,8 @@ import com.frerox.toolz.util.CryptoManager
 import com.frerox.toolz.util.CryptoManager.CryptoAlgorithm
 import com.frerox.toolz.util.CryptoManager.CryptoFormat
 import com.frerox.toolz.util.CryptoManager.CryptoOperation
+import java.io.File
+import java.io.FileOutputStream
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,7 +57,14 @@ data class EncrypterUiState(
     val qrNotePosition: String = "BOTTOM",
     val isQrNoteEnabled: Boolean = false,
     val isManualSelectionActive: Boolean = false,
-    val isQrLoading: Boolean = false
+    val isQrLoading: Boolean = false,
+    val isFileMode: Boolean = false,
+    val isFilePermissionGranted: Boolean = false,
+    val isProcessingFile: Boolean = false,
+    val fileProcessingProgress: Float = 0f,
+    val fileProcessingStatus: String = "",
+    val lastTextAlgorithm: CryptoAlgorithm? = null,
+    val fileOperationIntent: CryptoOperation? = null
 )
 
 @HiltViewModel
@@ -68,6 +82,7 @@ class SmartEncrypterViewModel @Inject constructor(
     private var autoClearJob: Job? = null
     private var liveProcessJob: Job? = null
     private var qrGenerationJob: Job? = null
+    private var fileProcessJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -99,6 +114,8 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     private fun triggerLiveProcess() {
+        if (_uiState.value.isFileMode) return // Don't process text in file mode
+        
         liveProcessJob?.cancel()
         liveProcessJob = viewModelScope.launch {
             delay(500) // Debounce
@@ -109,9 +126,6 @@ class SmartEncrypterViewModel @Inject constructor(
                 } else {
                     encrypt()
                 }
-            } else {
-                // If not smart auto, we don't know if encrypt or decrypt is intended
-                // maybe just don't do anything or default to encrypt
             }
         }
     }
@@ -181,6 +195,51 @@ class SmartEncrypterViewModel @Inject constructor(
         _uiState.update { it.copy(isAlgorithmSectionExpanded = !it.isAlgorithmSectionExpanded) }
     }
 
+    fun toggleFileMode() {
+        // Cancel everything
+        qrGenerationJob?.cancel()
+        liveProcessJob?.cancel()
+        fileProcessJob?.cancel()
+        autoClearJob?.cancel()
+
+        val currentIsFileMode = _uiState.value.isFileMode
+        
+        _uiState.update { 
+            it.copy(
+                isFileMode = !currentIsFileMode,
+                inputText = "",
+                password = "",
+                resultText = "",
+                error = null,
+                fileProcessingStatus = "",
+                fileProcessingProgress = 0f,
+                isManualSelectionActive = false,
+                qrCode = null,
+                fileOperationIntent = null, // Always ask first when getting into file mode
+                lastTextAlgorithm = if (!currentIsFileMode) it.selectedAlgorithm else it.lastTextAlgorithm
+            )
+        }
+        
+        // Logical Switch
+        if (_uiState.value.isFileMode) {
+            // Switching to File Mode: Force stream-safe algorithm
+            if (!listOf(CryptoAlgorithm.AES, CryptoAlgorithm.CHACHA20).contains(_uiState.value.selectedAlgorithm)) {
+                onAlgorithmSelected(CryptoAlgorithm.AES)
+            }
+        } else {
+            // Switching back to Text Mode: Restore previous algorithm
+            _uiState.value.lastTextAlgorithm?.let { onAlgorithmSelected(it) }
+        }
+    }
+
+    fun setFileOperationIntent(operation: CryptoOperation?) {
+        _uiState.update { it.copy(fileOperationIntent = operation) }
+    }
+
+    fun updateFilePermissionStatus(granted: Boolean) {
+        _uiState.update { it.copy(isFilePermissionGranted = granted) }
+    }
+
     fun toggleAutoClear() {
         _uiState.update {
             val newState = !it.isAutoClearEnabled
@@ -190,6 +249,16 @@ class SmartEncrypterViewModel @Inject constructor(
             } else {
                 it.copy(isAutoClearEnabled = true)
             }
+        }
+    }
+
+    fun cancelFileProcess() {
+        fileProcessJob?.cancel()
+        _uiState.update { 
+            it.copy(
+                isProcessingFile = false,
+                fileProcessingStatus = "Operation cancelled"
+            )
         }
     }
 
@@ -214,8 +283,8 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     fun generateQr(debounce: Boolean = false) {
-        val result = _uiState.value.resultText
-        if (result.isBlank()) return
+        val state = _uiState.value
+        if (state.resultText.isBlank() || state.isFileMode) return
 
         qrGenerationJob?.cancel()
         qrGenerationJob = viewModelScope.launch(Dispatchers.Default) {
@@ -227,7 +296,7 @@ class SmartEncrypterViewModel @Inject constructor(
             
             val state = _uiState.value
             val qr = CryptoManager.generateQrCode(
-                result,
+                state.resultText,
                 1024,
                 state.qrForeColor,
                 state.qrBackColor,
@@ -408,5 +477,179 @@ class SmartEncrypterViewModel @Inject constructor(
             }
             _uiState.value = _uiState.value.copy(resultText = "", autoClearSeconds = 0)
         }
+    }
+
+    fun processFile(context: Context, uri: Uri, operation: CryptoOperation) {
+        val state = _uiState.value
+        if (state.password.isBlank()) {
+            _uiState.update { it.copy(error = "Password required for file encryption") }
+            return
+        }
+
+        fileProcessJob?.cancel()
+        fileProcessJob = viewModelScope.launch(Dispatchers.IO) {
+            var outputFile: File? = null
+            try {
+                _uiState.update { 
+                    it.copy(
+                        isProcessingFile = true, 
+                        fileProcessingProgress = 0f,
+                        fileProcessingStatus = if (operation == CryptoOperation.ENCRYPT) "Encrypting..." else "Decrypting..."
+                    )
+                }
+
+                val contentResolver = context.contentResolver
+                val totalSize = getFileSize(context, uri)
+                
+                if (totalSize <= 0) throw Exception("File is empty")
+                if (totalSize > 2L * 1024 * 1024 * 1024) throw Exception("File exceeds 2GB limit")
+
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val toolzDir = File(downloadsDir, "Toolz").apply { if (!exists()) mkdirs() }
+                
+                if (!hasEnoughSpace(toolzDir, (totalSize * 1.1).toLong())) {
+                    throw Exception("Not enough storage space")
+                }
+
+                val fileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
+                val baseOutputName = if (operation == CryptoOperation.ENCRYPT) {
+                    "$fileName.enc"
+                } else {
+                    fileName.removeSuffix(".enc")
+                }
+
+                outputFile = getUniqueOutputFile(toolzDir, baseOutputName)
+                
+                val success = contentResolver.openInputStream(uri)?.use { inputStream ->
+                    FileOutputStream(outputFile).use { outputStream ->
+                        when (state.selectedAlgorithm) {
+                            CryptoAlgorithm.AES -> {
+                                if (operation == CryptoOperation.ENCRYPT) {
+                                    CryptoManager.encryptStreamAes(inputStream, outputStream, state.password.toCharArray(), totalSize, { progress ->
+                                        _uiState.update { it.copy(fileProcessingProgress = progress) }
+                                    })
+                                } else {
+                                    CryptoManager.decryptStreamAes(inputStream, outputStream, state.password.toCharArray(), totalSize, { progress ->
+                                        _uiState.update { it.copy(fileProcessingProgress = progress) }
+                                    })
+                                }
+                            }
+                            CryptoAlgorithm.CHACHA20 -> {
+                                if (operation == CryptoOperation.ENCRYPT) {
+                                    CryptoManager.encryptStreamChaCha20(inputStream, outputStream, state.password.toCharArray(), totalSize, { progress ->
+                                        _uiState.update { it.copy(fileProcessingProgress = progress) }
+                                    })
+                                } else {
+                                    CryptoManager.decryptStreamChaCha20(inputStream, outputStream, state.password.toCharArray(), totalSize, { progress ->
+                                        _uiState.update { it.copy(fileProcessingProgress = progress) }
+                                    })
+                                }
+                            }
+                            else -> throw Exception("Algorithm ${state.selectedAlgorithm} doesn't support streaming")
+                        }
+                    }
+                } ?: throw Exception("Failed to open file streams")
+
+                if (success) {
+                    _uiState.update { 
+                        it.copy(
+                            isProcessingFile = false,
+                            fileProcessingStatus = "Saved: ${outputFile.name}",
+                            error = null
+                        )
+                    }
+                } else {
+                    throw Exception("Crypto operation failed")
+                }
+            } catch (e: Exception) {
+                // If it was cancelled, delete partial file
+                if (fileProcessJob?.isCancelled == true) {
+                    outputFile?.delete()
+                    _uiState.update { it.copy(isProcessingFile = false, fileProcessingStatus = "Operation cancelled") }
+                } else {
+                    _uiState.update { 
+                        it.copy(
+                            isProcessingFile = false,
+                            error = "File processing failed: ${e.message}"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun getUniqueOutputFile(dir: File, baseName: String): File {
+        var file = File(dir, baseName)
+        if (!file.exists()) return file
+
+        val nameWithoutExt = baseName.substringBeforeLast('.')
+        val ext = baseName.substringAfterLast('.', "")
+        val suffix = if (ext.isNotEmpty()) ".$ext" else ""
+        
+        var counter = 1
+        while (file.exists()) {
+            file = File(dir, "$nameWithoutExt($counter)$suffix")
+            counter++
+        }
+        return file
+    }
+
+    private fun hasEnoughSpace(dir: File, requiredBytes: Long): Boolean {
+        return try {
+            val stat = StatFs(dir.path)
+            val available = stat.availableBlocksLong * stat.blockSizeLong
+            available > requiredBytes
+        } catch (e: Exception) {
+            true // Fallback to try anyway if StatFs fails
+        }
+    }
+
+    fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = listOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
+        return String.format("%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+    }
+
+    fun suggestFileOperation(fileName: String): CryptoOperation {
+        return if (fileName.endsWith(".enc", ignoreCase = true)) {
+            CryptoOperation.DECRYPT
+        } else {
+            CryptoOperation.ENCRYPT
+        }
+    }
+
+    private fun getFileName(context: Context, uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) result = cursor.getString(index)
+                }
+            } finally {
+                cursor?.close()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != null && cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
+    }
+
+    private fun getFileSize(context: Context, uri: Uri): Long {
+        var size = 0L
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        if (cursor != null && cursor.moveToFirst()) {
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index != -1) size = cursor.getLong(index)
+            cursor.close()
+        }
+        return size
     }
 }
