@@ -62,6 +62,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var previousMusicVolume: Int? = null
     private var mutedPackage: String? = null
 
+    // Settings Cache
+    private var isFocusSessionActive = false
+    private var categoryMappings = emptyMap<String, String>()
+    private var appLimits = emptyMap<String, Long>()
+
     companion object {
         private const val TAG = "FocusFlowService"
         private val SYSTEM_UI_PACKAGES = setOf(
@@ -81,6 +86,28 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         refreshHomePackage()
         startPeriodicValidation()
+        observeSettings()
+    }
+
+    private fun observeSettings() {
+        serviceScope.launch {
+            settingsRepository.focusFlowSessionActive.collect { active ->
+                isFocusSessionActive = active
+                currentPackage?.let { validateAndLock(it) }
+            }
+        }
+        serviceScope.launch {
+            settingsRepository.appCategoryMappings.collect { mappings ->
+                categoryMappings = mappings
+                currentPackage?.let { validateAndLock(it) }
+            }
+        }
+        serviceScope.launch {
+            appLimitRepository.allLimits.collect { limits ->
+                appLimits = limits.associate { it.packageName to it.limitMillis }
+                currentPackage?.let { validateAndLock(it) }
+            }
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -168,35 +195,27 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
     private fun validateAndLock(packageName: String) {
         if (packageName == toolzPackage) return // Security: Toolz is immune
-        serviceScope.launch {
-            val limit = withContext(Dispatchers.IO) {
-                appLimitRepository.getLimitForApp(packageName)
-            }
-            val isSessionActive = settingsRepository.focusFlowSessionActive.first()
-            val categoryMappings = settingsRepository.appCategoryMappings.first()
-            
-            if (currentPackage != packageName) return@launch
 
-            val isDistraction = categoryMappings[packageName] == "Distraction" || 
-                                (categoryMappings[packageName] == null && isLikelyDistraction(packageName))
+        val limitMillis = appLimits[packageName]
+        val isSessionActive = isFocusSessionActive
+        
+        val isDistraction = categoryMappings[packageName] == "Distraction" || 
+                            (categoryMappings[packageName] == null && isLikelyDistraction(packageName))
 
-            val shouldLock = if (isSessionActive && isDistraction) {
-                true // Global block during focus session
-            } else if (limit != null && limit.isEnabled) {
-                val usageTime = withContext(Dispatchers.IO) { getTodayUsage(packageName) }
-                usageTime >= limit.limitMillis
-            } else {
-                false
-            }
+        val shouldLock = if (isSessionActive && isDistraction) {
+            true // Global block during focus session
+        } else if (limitMillis != null && limitMillis > 0) {
+            val usageTime = getTodayUsage(packageName)
+            usageTime >= limitMillis
+        } else {
+            false
+        }
 
-            withContext(Dispatchers.Main) {
-                if (shouldLock) {
-                    showOverlay(packageName, isSessionActive && isDistraction)
-                    enforceLockedApp(packageName)
-                } else if (overlayShowingForPackage == packageName) {
-                    hideOverlay()
-                }
-            }
+        if (shouldLock) {
+            showOverlay(packageName, isSessionActive && isDistraction)
+            enforceLockedApp(packageName)
+        } else if (overlayShowingForPackage == packageName) {
+            hideOverlay()
         }
     }
 
@@ -257,11 +276,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val endTime = System.currentTimeMillis()
 
         return try {
-            val stats = statsManager.queryAndAggregateUsageStats(startTime, endTime)
-            var usage = stats[packageName]?.totalTimeInForeground ?: 0L
+            // Use queryUsageStats for potentially more recent data than aggregated if available
+            val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+            var usage = stats.find { it.packageName == packageName }?.totalTimeInForeground ?: 0L
             
             // Critical Fix: Add time for the current ongoing session if it's the package we're checking
-            // UsageStatsManager only updates when activity changes or periodically (not real-time enough)
             if (packageName == currentPackage && currentPackageResumedTime > 0) {
                 val sessionDuration = endTime - currentPackageResumedTime
                 if (sessionDuration > 0) {
@@ -291,8 +310,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_FULLSCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
             PixelFormat.TRANSLUCENT
         ).apply {
