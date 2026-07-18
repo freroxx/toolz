@@ -477,6 +477,8 @@ object CryptoManager {
             }
             onProgress(1f)
             true
+        } catch (e: AEADBadTagException) {
+            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -521,6 +523,8 @@ object CryptoManager {
             }
             onProgress(1f)
             true
+        } catch (e: AEADBadTagException) {
+            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -564,6 +568,8 @@ object CryptoManager {
             }
             onProgress(1f)
             true
+        } catch (e: AEADBadTagException) {
+            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -608,6 +614,8 @@ object CryptoManager {
             }
             onProgress(1f)
             true
+        } catch (e: AEADBadTagException) {
+            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
             e.printStackTrace()
             false
