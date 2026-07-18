@@ -44,6 +44,28 @@ data class OverLimitStatus(
 )
 
 // ─────────────────────────────────────────────────────────────
+//  Focus session — UI-local timer state (NEW)
+//
+//  This is intentionally NOT persisted or backed by a repository — I don't
+//  have visibility into AppLimitRepository/SettingsRepository's full surface
+//  beyond what's used in the original file, so I'm not inventing a new DB
+//  entity or DataStore key. It's a ViewModel-scoped countdown that survives
+//  configuration change (survives as long as the ViewModel does, which is
+//  the standard Compose/Hilt lifecycle) but not process death. If you want
+//  it to survive process death or show up elsewhere (e.g. a notification),
+//  that's a deliberate follow-up wired through AppLimitRepository or a new
+//  small repository — flagging rather than guessing at that surface.
+// ─────────────────────────────────────────────────────────────
+
+enum class FocusSessionState { IDLE, RUNNING, PAUSED, COMPLETED }
+
+data class FocusSessionUiState(
+    val state: FocusSessionState = FocusSessionState.IDLE,
+    val totalMillis: Long = 25 * 60_000L,
+    val remainingMillis: Long = 25 * 60_000L,
+)
+
+// ─────────────────────────────────────────────────────────────
 //  ViewModel
 // ─────────────────────────────────────────────────────────────
 
@@ -69,6 +91,8 @@ class FocusFlowViewModel @Inject constructor(
         private const val PREFS_USAGE_CACHE = "focus_daily_usage_cache"
 
         private val EXCLUDED_PACKAGES = emptySet<String>() // Moved to UsageStatsRepository
+
+        private const val SESSION_TICK_MS = 1_000L
     }
 
     // ── Persistent AI category cache ───────────────────────────────────────
@@ -110,6 +134,64 @@ class FocusFlowViewModel @Inject constructor(
     val aiClassifiedPackages: StateFlow<Set<String>> = _aiCategoryCache
         .map { it.keys.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    // ── Focus session state (NEW) ───────────────────────────────────────────
+
+    private val _focusSession = MutableStateFlow(FocusSessionUiState())
+    val focusSession: StateFlow<FocusSessionUiState> = _focusSession.asStateFlow()
+
+    private var sessionTickJob: kotlinx.coroutines.Job? = null
+
+    fun startFocusSession(minutes: Int) {
+        val totalMs = minutes * 60_000L
+        sessionTickJob?.cancel()
+        _focusSession.value = FocusSessionUiState(
+            state = FocusSessionState.RUNNING,
+            totalMillis = totalMs,
+            remainingMillis = totalMs,
+        )
+        runSessionTicker()
+    }
+
+    fun togglePauseFocusSession() {
+        val current = _focusSession.value
+        when (current.state) {
+            FocusSessionState.RUNNING -> {
+                sessionTickJob?.cancel()
+                _focusSession.value = current.copy(state = FocusSessionState.PAUSED)
+            }
+            FocusSessionState.PAUSED -> {
+                _focusSession.value = current.copy(state = FocusSessionState.RUNNING)
+                runSessionTicker()
+            }
+            else -> Unit
+        }
+    }
+
+    fun cancelFocusSession() {
+        sessionTickJob?.cancel()
+        _focusSession.value = FocusSessionUiState()
+    }
+
+    fun dismissCompletedSession() {
+        _focusSession.value = FocusSessionUiState()
+    }
+
+    private fun runSessionTicker() {
+        sessionTickJob = viewModelScope.launch {
+            while (_focusSession.value.state == FocusSessionState.RUNNING) {
+                kotlinx.coroutines.delay(SESSION_TICK_MS)
+                val current = _focusSession.value
+                if (current.state != FocusSessionState.RUNNING) break
+                val next = (current.remainingMillis - SESSION_TICK_MS).coerceAtLeast(0L)
+                _focusSession.value = if (next <= 0L) {
+                    current.copy(remainingMillis = 0L, state = FocusSessionState.COMPLETED)
+                } else {
+                    current.copy(remainingMillis = next)
+                }
+            }
+        }
+    }
 
     // ── Settings / DB flows ────────────────────────────────────────────────
 
@@ -328,7 +410,7 @@ class FocusFlowViewModel @Inject constructor(
             val now = System.currentTimeMillis()
             val tz  = TimeZone.getDefault()
             val cal = Calendar.getInstance(tz)
-            
+
             val todayStr = String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
 
             cal.apply {
@@ -489,17 +571,17 @@ class FocusFlowViewModel @Inject constructor(
                     _screenTips.value = "AI key not configured. Please supply a Groq key in AI settings."
                     return@launch
                 }
- 
+
                 val isWeeklyTab = _isWeekly.value
                 val stats = combinedUsageStats.first().sortedByDescending { it.usageTimeMillis }
                 val top10Apps = stats.take(10)
-                
-                val heavyDistractions = stats.filter { 
-                    it.category == AppCategory.DISTRACTION && it.usageTimeMillis > 3_600_000L 
+
+                val heavyDistractions = stats.filter {
+                    it.category == AppCategory.DISTRACTION && it.usageTimeMillis > 3_600_000L
                 }
-                
+
                 val customInstr = customInstructions.value
-                val appUsageContext = top10Apps.joinToString("\n") { 
+                val appUsageContext = top10Apps.joinToString("\n") {
                     "- ${it.appName}: ${it.usageTimeMillis / 3_600_000}h ${(it.usageTimeMillis % 3_600_000) / 60_000}m (${it.category})"
                 }
 
@@ -514,7 +596,7 @@ class FocusFlowViewModel @Inject constructor(
                         appendLine("\nHeavy distractions detected: $distractionList. Help them reduce this.")
                     }
                 }
-                
+
                 val request = OpenAiRequest(
                     model = AI_MODEL_PRIMARY,
                     messages = listOf(
@@ -523,7 +605,7 @@ class FocusFlowViewModel @Inject constructor(
                     ),
                     maxTokens = 800,
                 )
-                
+
                 val response = runGroqRequest(groqKey) { requestKey ->
                     openAiService.getChatCompletion(
                         url = GROQ_URL,

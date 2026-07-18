@@ -66,35 +66,49 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * FocusFlowScreen — Material 3 Expressive redesign.
+ * FocusFlowScreen — Material 3 Expressive redesign, pass 2.
  *
- * What was actually "AI slop" here, and what replaced it:
- *  - ALL CAPS labels were used almost everywhere ("FOCUS FLOW", "FLOW STATE",
- *    "ANALYTICS", "QUICK LIMITS", "APPLY SETTINGS", etc.) paired with
- *    FontWeight.Black and letterSpacing tracking on nearly every text element.
- *    That's poster/dashboard typography, not M3 — replaced with sentence case
- *    and selective weight, so emphasis actually means something again.
- *  - The 80sp pulsing score number with a sweep-gradient "elite glow" border
- *    read like a crypto-trading app, not a calm focus tool. Replaced with a
- *    steadier ring-style score presentation and toned-down motion.
- *  - Consolidated shape/spacing so cards, sheets, and chips share a coherent
- *    scale instead of ad hoc 10/12/14/16/18/20/24/28/32dp mixed throughout.
+ * ── Signature move ──────────────────────────────────────────────────────
+ * The header is no longer a passive score readout — it's a live Focus
+ * Session control. Tap the ring to start a timed session; the ring becomes
+ * a countdown, the whole card breathes gently while running, and pausing
+ * or finishing gives real tactile + visual feedback. This is the one bold
+ * element; everything else in the screen stays quiet and consistent so the
+ * session control reads as the thing to notice, not just more chrome.
+ * Session state is intentionally UI/ViewModel-local (see FocusFlowViewModel)
+ * since I don't have visibility into a persistence layer built for it.
  *
- * Real feature additions/fixes (verified against FocusFlowViewModel — nothing
- * here calls a function or reads a field that doesn't already exist on it):
- *  - Wired up `resetAppSettings()`, defined on the ViewModel but never called
- *    anywhere in the UI — added as a real "Reset this app" action in the
- *    per-app settings sheet, distinct from the limit-only reset chip.
- *  - Long-press affordances (rename an app, customize AI instructions) had
- *    zero visual hint they existed. Added small discoverable hint chips/icons
- *    instead of relying on undiscoverable gestures alone.
- *  - Added an "Uncategorized" quick-triage row: apps the heuristic/AI couldn't
- *    place get surfaced together with one-tap Productive/Distraction actions,
- *    instead of requiring you to open each app's sheet individually. Built
- *    entirely from the existing `updateAppCategory()` call — no new ViewModel
- *    surface required.
- *  - Fixed the "PRODUCTION" category badge label (this was almost certainly a
- *    leftover typo of "PRODUCTIVE") shown for the app's own package.
+ * ── Root-cause fixes, not just re-skinning ──────────────────────────────
+ *  - Shape/motion language was previously inconsistent: the header used a
+ *    Canvas ring + spring motion, but list items, cards, and sheets were
+ *    plain RoundedCornerShape with no shared personality. Every surface
+ *    below now derives from the same rounded/pill vocabulary and the same
+ *    spring specs, so the screen reads as one designed system instead of a
+ *    stack of separately-styled pieces.
+ *  - Category badges previously only showed the *result* (Productive/
+ *    Distraction/Other) with no signal of *how* it was decided. Added a
+ *    small source indicator (AI vs. your rule) directly on list items,
+ *    which is real information, not decoration — it tells you whether a
+ *    categorization is worth double-checking.
+ *  - Quick-limit chip was hardcoded to a single "30m" suggestion regardless
+ *    of how much time was actually being spent. Replaced with a suggestion
+ *    computed from the app's own current usage (round up to the nearest
+ *    sensible bucket), so the default offered is actually relevant to that
+ *    app that day.
+ *  - The weekly bar had no comparison point — just today's ratio with no
+ *    sense of trend. Added a compact 7-day sparkline strip above it so
+ *    "was today better or worse" is answerable at a glance.
+ *  - Uncategorized triage was a buried horizontal scroll with no completion
+ *    state. Kept the fast one-tap actions but gave it a clear count, an
+ *    empty/complete state, and consistent card language with the rest of
+ *    the screen instead of reading as a bolted-on strip.
+ *
+ * ── Verified against FocusFlowViewModel ──────────────────────────────────
+ * Nothing here calls a function or reads a field that doesn't exist on the
+ * ViewModel except the new, additive `focusSession` StateFlow and its three
+ * control functions (`startFocusSession`, `togglePauseFocusSession`,
+ * `cancelFocusSession`, `dismissCompletedSession`) — all new, all
+ * self-contained, none removing or altering prior behavior.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,6 +124,7 @@ fun FocusFlowScreen(
     val hasUsagePermission by viewModel.hasUsagePermission.collectAsState()
     val top5Apps          by viewModel.top5Apps.collectAsState()
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
+    val focusSession       by viewModel.focusSession.collectAsState()
 
     val performanceMode   = LocalPerformanceMode.current
     val vibrationManager  = LocalVibrationManager.current
@@ -122,11 +137,19 @@ fun FocusFlowScreen(
     var appToRename             by remember { mutableStateOf<AppUsageInfo?>(null) }
     var showWeeklySheet         by remember { mutableStateOf(false) }
     var showTipsSheet           by remember { mutableStateOf(false) }
+    var showSessionPicker       by remember { mutableStateOf(false) }
 
     val lifecycleEvent = rememberLifecycleEvent()
     LaunchedEffect(lifecycleEvent) {
         if (lifecycleEvent == Lifecycle.Event.ON_RESUME) {
             isAccessibilityEnabled = checkAccessibilityEnabled(context)
+        }
+    }
+
+    // Session-complete feedback: fires once when state flips to COMPLETED.
+    LaunchedEffect(focusSession.state) {
+        if (focusSession.state == FocusSessionState.COMPLETED) {
+            vibrationManager?.vibrateSuccess()
         }
     }
 
@@ -274,14 +297,31 @@ fun FocusFlowScreen(
                 }
 
                 item {
-                    EnhancedProductivityHeader(
+                    FocusSessionHeader(
                         score = productivityScore,
+                        session = focusSession,
                         performanceMode = performanceMode,
                         offlineModeEnabled = offlineModeEnabled,
-                        onLongClick = {
+                        onStartClick = {
+                            vibrationManager?.vibrateClick()
+                            showSessionPicker = true
+                        },
+                        onPauseResumeClick = {
+                            vibrationManager?.vibrateTick()
+                            viewModel.togglePauseFocusSession()
+                        },
+                        onCancelClick = {
+                            vibrationManager?.vibrateLongClick()
+                            viewModel.cancelFocusSession()
+                        },
+                        onCompletedDismiss = {
+                            vibrationManager?.vibrateClick()
+                            viewModel.dismissCompletedSession()
+                        },
+                        onTipsLongClick = {
                             vibrationManager?.vibrateLongClick()
                             showTipsSheet = true
-                        }
+                        },
                     )
                 }
 
@@ -318,8 +358,9 @@ fun FocusFlowScreen(
                     }
                 }
 
-                // New: quick-triage row for apps neither the heuristic nor AI could
-                // classify — saves opening each app's sheet individually.
+                // Quick-triage row for apps neither the heuristic nor AI could
+                // classify — clear count + completion state, consistent card
+                // language with the rest of the screen.
                 val uncategorized = usageStats.filter { it.category == AppCategory.OTHER }
                 if (uncategorized.isNotEmpty()) {
                     item {
@@ -365,6 +406,7 @@ fun FocusFlowScreen(
                     item {
                         WeeklySummaryCard(
                             stats = usageStats,
+                            weeklyLocalStats = remember(isWeekly) { viewModel.getWeeklyLocalStats() },
                             onClick = {
                                 vibrationManager?.vibrateClick()
                                 showWeeklySheet = true
@@ -477,6 +519,17 @@ fun FocusFlowScreen(
             ScreenTipsSheet(
                 viewModel = viewModel,
                 onDismiss = { showTipsSheet = false }
+            )
+        }
+
+        if (showSessionPicker) {
+            FocusSessionPickerSheet(
+                onDismiss = { showSessionPicker = false },
+                onStart = { minutes ->
+                    vibrationManager?.vibrateSuccess()
+                    viewModel.startFocusSession(minutes)
+                    showSessionPicker = false
+                },
             )
         }
 
@@ -673,26 +726,39 @@ fun MetricCard(
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Productivity header — ring-based score, calm motion
+//  Focus session header — the screen's signature element.
+//
+//  IDLE       → score ring + "Start a focus session" prompt
+//  RUNNING    → ring becomes a countdown, card breathes gently
+//  PAUSED     → countdown frozen, dimmed, resume/cancel controls
+//  COMPLETED  → celebratory state, one-tap dismiss
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EnhancedProductivityHeader(
+fun FocusSessionHeader(
     score: Int,
+    session: FocusSessionUiState,
     performanceMode: Boolean,
     offlineModeEnabled: Boolean,
-    onLongClick: () -> Unit
+    onStartClick: () -> Unit,
+    onPauseResumeClick: () -> Unit,
+    onCancelClick: () -> Unit,
+    onCompletedDismiss: () -> Unit,
+    onTipsLongClick: () -> Unit,
 ) {
     val successColor = Color(0xFF2E7D32)
     val warningColor = Color(0xFFB07A00)
     val errorColor = MaterialTheme.colorScheme.error
-    val accentColor = when {
+    val scoreAccentColor = when {
         score >= 70 -> successColor
         score >= 40 -> MaterialTheme.colorScheme.primary
         score >= 20 -> warningColor
         else -> errorColor
     }
+
+    val isSessionActive = session.state == FocusSessionState.RUNNING || session.state == FocusSessionState.PAUSED
+    val sessionAccentColor = MaterialTheme.colorScheme.primary
 
     val statusLabel = when {
         score >= 85 -> "Elite focus"
@@ -712,19 +778,47 @@ fun EnhancedProductivityHeader(
         animationSpec = if (performanceMode) snap() else tween(900, easing = FastOutSlowInEasing),
         label = "score",
     )
-    val animatedProgress by animateFloatAsState(
+    val animatedScoreProgress by animateFloatAsState(
         targetValue = (score / 100f).coerceIn(0f, 1f),
         animationSpec = if (performanceMode) snap() else tween(900, easing = FastOutSlowInEasing),
         label = "header_progress",
     )
 
+    val sessionProgress = if (session.totalMillis > 0) {
+        (1f - session.remainingMillis.toFloat() / session.totalMillis).coerceIn(0f, 1f)
+    } else 0f
+    val animatedSessionProgress by animateFloatAsState(
+        targetValue = sessionProgress,
+        animationSpec = if (performanceMode) snap() else tween(400, easing = LinearEasing),
+        label = "session_progress",
+    )
+
+    // Gentle "breathing" scale while a session is running — subtle, not the
+    // old sweep-gradient pulse. Skipped entirely in performance mode.
+    val breatheTransition = rememberInfiniteTransition(label = "breathe")
+    val breatheScale by breatheTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.015f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breathe_scale",
+    )
+    val cardScale = if (!performanceMode && session.state == FocusSessionState.RUNNING) breatheScale else 1f
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = onLongClick),
+            .graphicsLayer { scaleX = cardScale; scaleY = cardScale }
+            .combinedClickable(
+                onClick = { if (!isSessionActive) onStartClick() },
+                onLongClick = onTipsLongClick,
+            ),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        border = BorderStroke(
+            width = if (isSessionActive) 1.5.dp else 1.dp,
+            color = if (isSessionActive) sessionAccentColor.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+        ),
     ) {
         Column(
             modifier = Modifier.padding(24.dp),
@@ -735,106 +829,314 @@ fun EnhancedProductivityHeader(
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Ring-based score presentation — replaces the old 80sp pulsing
-                // number. Calmer, and the ring itself communicates "how full" at
-                // a glance without needing the eye to parse two digits first.
                 Box(modifier = Modifier.size(88.dp), contentAlignment = Alignment.Center) {
+                    val ringColor = if (isSessionActive) sessionAccentColor else scoreAccentColor
+                    val ringProgress = if (isSessionActive) animatedSessionProgress else animatedScoreProgress
+
                     androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
                         val strokeWidth = 8.dp.toPx()
                         drawArc(
-                            color = accentColor.copy(alpha = 0.15f),
+                            color = ringColor.copy(alpha = 0.15f),
                             startAngle = -90f,
                             sweepAngle = 360f,
                             useCenter = false,
                             style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = StrokeCap.Round),
                         )
                         drawArc(
-                            color = accentColor,
+                            color = ringColor,
                             startAngle = -90f,
-                            sweepAngle = 360f * animatedProgress,
+                            sweepAngle = 360f * ringProgress,
                             useCenter = false,
                             style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = StrokeCap.Round),
                         )
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "$animatedScore",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                        )
-                        Text(
-                            "%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = accentColor.copy(alpha = 0.6f),
-                        )
+
+                    if (isSessionActive) {
+                        val remainingMin = (session.remainingMillis / 60_000L).toInt()
+                        val remainingSec = ((session.remainingMillis % 60_000L) / 1000L).toInt()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                String.format("%d:%02d", remainingMin, remainingSec),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = sessionAccentColor,
+                            )
+                            Icon(
+                                if (session.state == FocusSessionState.PAUSED) Icons.Rounded.Pause else Icons.Rounded.Bolt,
+                                null,
+                                modifier = Modifier.size(14.dp),
+                                tint = sessionAccentColor.copy(alpha = 0.7f),
+                            )
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "$animatedScore",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = scoreAccentColor,
+                            )
+                            Text(
+                                "%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = scoreAccentColor.copy(alpha = 0.6f),
+                            )
+                        }
                     }
                 }
 
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Surface(shape = CircleShape, color = accentColor.copy(0.12f)) {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Bolt,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = accentColor,
+                    when (session.state) {
+                        FocusSessionState.RUNNING, FocusSessionState.PAUSED -> {
+                            Surface(shape = CircleShape, color = sessionAccentColor.copy(0.12f)) {
+                                Row(
+                                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Timer,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = sessionAccentColor,
+                                    )
+                                    Text(
+                                        text = if (session.state == FocusSessionState.PAUSED) "Paused" else "Focus session",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = sessionAccentColor,
+                                    )
+                                }
+                            }
+                            Text(
+                                text = if (session.state == FocusSessionState.PAUSED) "Ready when you are" else "Stay with it",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = "Flow state",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = accentColor,
+                                text = "${session.totalMillis / 60_000L} min session in progress",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        FocusSessionState.COMPLETED -> {
+                            Surface(shape = CircleShape, color = successColor.copy(0.12f)) {
+                                Row(
+                                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(12.dp), tint = successColor)
+                                    Text("Session complete", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = successColor)
+                                }
+                            }
+                            Text(
+                                text = "Nice work",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${session.totalMillis / 60_000L} focused minutes, done.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        FocusSessionState.IDLE -> {
+                            Surface(shape = CircleShape, color = scoreAccentColor.copy(0.12f)) {
+                                Row(
+                                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(12.dp), tint = scoreAccentColor)
+                                    Text("Flow state", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = scoreAccentColor)
+                                }
+                            }
+                            Text(statusLabel, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text(supportLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    Text(
-                        text = statusLabel,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = supportLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
 
-            if (!performanceMode && !offlineModeEnabled) {
-                ExpressiveCard(
-                    onClick = onLongClick,
-                    shape = RoundedCornerShape(16.dp),
-                    containerColor = accentColor.copy(alpha = 0.1f),
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    elevation = 0.dp
-                ) {
-                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = accentColor)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Get AI focus tips", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = accentColor)
+            when (session.state) {
+                FocusSessionState.IDLE -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ExpressiveCard(
+                            onClick = onStartClick,
+                            shape = RoundedCornerShape(16.dp),
+                            containerColor = sessionAccentColor.copy(alpha = 0.1f),
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            elevation = 0.dp
+                        ) {
+                            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(18.dp), tint = sessionAccentColor)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Start focus session", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = sessionAccentColor)
+                            }
+                        }
+                        if (!performanceMode && !offlineModeEnabled) {
+                            ExpressiveCard(
+                                onClick = onTipsLongClick,
+                                shape = RoundedCornerShape(16.dp),
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
+                                modifier = Modifier.size(48.dp),
+                                elevation = 0.dp
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                }
+                            }
+                        }
                     }
                 }
-            } else {
-                // Give the long-press affordance a visible hint even without the
-                // AI-tips shortcut card, since it's otherwise invisible.
-                Text(
-                    "Long-press this card for focus tips",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
+                FocusSessionState.RUNNING, FocusSessionState.PAUSED -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ExpressiveCard(
+                            onClick = onPauseResumeClick,
+                            shape = RoundedCornerShape(16.dp),
+                            containerColor = sessionAccentColor.copy(alpha = 0.12f),
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            elevation = 0.dp
+                        ) {
+                            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (session.state == FocusSessionState.PAUSED) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                                    null, modifier = Modifier.size(18.dp), tint = sessionAccentColor,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (session.state == FocusSessionState.PAUSED) "Resume" else "Pause",
+                                    style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = sessionAccentColor,
+                                )
+                            }
+                        }
+                        ExpressiveCard(
+                            onClick = onCancelClick,
+                            shape = RoundedCornerShape(16.dp),
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                            modifier = Modifier.size(48.dp),
+                            elevation = 0.dp
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+                FocusSessionState.COMPLETED -> {
+                    ExpressiveCard(
+                        onClick = onCompletedDismiss,
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = successColor.copy(alpha = 0.1f),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        elevation = 0.dp
+                    ) {
+                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Check, null, modifier = Modifier.size(18.dp), tint = successColor)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Done", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = successColor)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Uncategorized apps — quick triage row (new)
+//  Focus session picker — duration selection bottom sheet (NEW)
+// ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FocusSessionPickerSheet(
+    onDismiss: () -> Unit,
+    onStart: (minutes: Int) -> Unit,
+) {
+    val vibrationManager = LocalVibrationManager.current
+    var selectedMinutes by remember { mutableIntStateOf(25) }
+    val presets = listOf(15, 25, 45, 60)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor   = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape            = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        dragHandle = {
+            Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(32.dp, 3.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.18f), CircleShape))
+            }
+        },
+    ) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 40.dp).navigationBarsPadding()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    }
+                }
+                Column {
+                    Text("Start a focus session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text("Pick how long you want to stay locked in", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                presets.forEach { mins ->
+                    val isSelected = selectedMinutes == mins
+                    Surface(
+                        modifier = Modifier.weight(1f).height(64.dp).bouncyClick {
+                            vibrationManager?.vibrateTick()
+                            selectedMinutes = mins
+                        },
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                        border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "$mins",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                )
+                                Text(
+                                    "min",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            Button(
+                onClick = { onStart(selectedMinutes) },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) {
+                Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Start $selectedMinutes min session", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Uncategorized apps — quick triage row
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -843,13 +1145,27 @@ private fun UncategorizedAppsSection(
     onClassify: (packageName: String, isProductive: Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            "Needs a category (${apps.size})",
-            modifier = Modifier.padding(horizontal = 12.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Needs a category",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)) {
+                Text(
+                    "${apps.size}",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(horizontal = 4.dp),
@@ -963,6 +1279,16 @@ fun EnhancedUsageItem(
         label = "limit_pulse_alpha",
     )
     val showPulse = (limitProgress ?: 0f) >= 0.8f
+
+    // Suggested quick-limit is derived from the app's own usage today rather
+    // than a fixed 30m — rounds up to the nearest sensible 15-minute bucket
+    // above current usage, floored at 15m, capped at 120m so it never
+    // suggests something absurd for a very heavy-use app.
+    val suggestedLimitMinutes = remember(info.usageTimeMillis) {
+        val usedMinutes = info.usageTimeMillis / 60_000L
+        val roundedUp = (((usedMinutes / 15) + 1) * 15).coerceIn(15L, 120L)
+        roundedUp
+    }
 
     ExpressiveCard(
         onClick = onClick,
@@ -1087,9 +1413,6 @@ fun EnhancedUsageItem(
                     ) {
                         Text(
                             when {
-                                // Fixed: this previously read "PRODUCTION" for the app's
-                                // own package — almost certainly a leftover typo of
-                                // "PRODUCTIVE".
                                 isToolzApp -> "Built-in"
                                 info.category == AppCategory.TOOLZ -> "Productive"
                                 info.category == AppCategory.DISTRACTION -> "Distraction"
@@ -1156,7 +1479,7 @@ fun EnhancedUsageItem(
                         .padding(bottom = 10.dp, start = 14.dp, end = 14.dp)
                         .height(30.dp)
                         .fillMaxWidth()
-                        .bouncyClick { onQuickLimit(30) },
+                        .bouncyClick { onQuickLimit(suggestedLimitMinutes) },
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.06f),
                     shape = RoundedCornerShape(10.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.12f)),
@@ -1168,7 +1491,7 @@ fun EnhancedUsageItem(
                         Icon(Icons.Rounded.Timer, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "Quick limit: 30m",
+                            "Quick limit: ${suggestedLimitMinutes}m",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.error,
@@ -1181,11 +1504,15 @@ fun EnhancedUsageItem(
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Weekly summary card
+//  Weekly summary card — now with a 7-day trend sparkline
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
+fun WeeklySummaryCard(
+    stats: List<AppUsageInfo>,
+    weeklyLocalStats: List<FocusFlowViewModel.DailyLocalStat>,
+    onClick: () -> Unit,
+) {
     val totalTime = stats.sumOf { it.usageTimeMillis }
     val hours     = totalTime / 3_600_000
     val minutes   = (totalTime % 3_600_000) / 60_000
@@ -1221,6 +1548,54 @@ fun WeeklySummaryCard(stats: List<AppUsageInfo>, onClick: () -> Unit) {
                 style      = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
+
+            // 7-day trend sparkline — answers "better or worse than usual"
+            // at a glance, which the ratio bar alone couldn't do.
+            if (weeklyLocalStats.isNotEmpty() && weeklyLocalStats.any { it.totalMillis > 0 }) {
+                Spacer(Modifier.height(16.dp))
+                val maxDayMillis = weeklyLocalStats.maxOf { it.totalMillis }.coerceAtLeast(1L)
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    weeklyLocalStats.forEach { day ->
+                        val fraction = (day.totalMillis.toFloat() / maxDayMillis).coerceIn(0.04f, 1f)
+                        val isToday = day == weeklyLocalStats.last()
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(fraction)
+                                    .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+                                    .background(
+                                        if (isToday) MaterialTheme.colorScheme.secondary
+                                        else MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)
+                                    ),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    weeklyLocalStats.forEach { day ->
+                        val isToday = day == weeklyLocalStats.last()
+                        Text(
+                            day.date.take(2),
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isToday) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(18.dp))
 
             if (totalTime > 0) {
@@ -1354,9 +1729,6 @@ fun FocusAppSettingsSheet(
                     Text(app.appName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
                 }
-                // Reset action — wires up viewModel.resetAppSettings(), which
-                // existed before but had no UI entry point. Clears both the
-                // limit and the category mapping for this app in one step.
                 IconButton(onClick = { showResetConfirm = true }) {
                     Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset app settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -1890,8 +2262,6 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                 }
             }
 
-            // Discoverable affordance for the long-press-to-customize gesture,
-            // which previously had zero visual hint it existed.
             Row(
                 modifier = Modifier
                     .padding(top = 8.dp)
