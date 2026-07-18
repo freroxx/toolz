@@ -119,12 +119,10 @@ fun SmartEncrypterScreen(
         activity?.intent?.let { intent ->
             if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
                 val uri = intent.data!!
-                if (uri.toString().lowercase().endsWith(".enc")) {
-                    viewModel.handleExternalUri(context, uri)
-                    // Clear intent so it doesn't trigger again on rotation
-                    intent.action = null
-                    intent.data = null
-                }
+                viewModel.handleExternalUri(context, uri)
+                // Clear intent so it doesn't trigger again on rotation
+                intent.action = null
+                intent.data = null
             }
         }
     }
@@ -842,13 +840,39 @@ private fun FileModePanel(
                             }
                         }
                         
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            FilePickerButton(label = "Photos", icon = Icons.Rounded.Collections, onClick = onPickPhotos, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.primaryContainer)
-                            FilePickerButton(label = "Files", icon = Icons.Rounded.Folder, onClick = onPickFiles, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                            FilePickerButton(label = "Advanced", icon = Icons.Rounded.AutoFixHigh, onClick = onPickAdvanced, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                        if (operation == CryptoOperation.DECRYPT) {
+                            ExpressiveCard(
+                                onClick = onPickFiles,
+                                modifier = Modifier.fillMaxWidth().height(140.dp),
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(32.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(0.2f))
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize().padding(20.dp),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.secondary, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Rounded.LockOpen, null, tint = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(28.dp))
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    Text("Attach .enc file", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Select the encrypted file to restore", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(0.7f))
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                FilePickerButton(label = "Photos", icon = Icons.Rounded.Collections, onClick = onPickPhotos, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                FilePickerButton(label = "Files", icon = Icons.Rounded.Folder, onClick = onPickFiles, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                                FilePickerButton(label = "Advanced", icon = Icons.Rounded.AutoFixHigh, onClick = onPickAdvanced, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                            }
                         }
                     } else {
                         // Ready Panel
