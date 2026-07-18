@@ -266,15 +266,32 @@ fun ToolzFloatingToolbar(
     val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
     val isFlashlightOn by flashlightRepository?.isOn?.collectAsState(false) ?: remember { mutableStateOf(false) }
 
-    val hasActiveService = musicState?.isPlaying == true ||
-                          timerState?.isRunning == true ||
-                          timerState?.isRinging == true ||
-                          (timerState?.remainingTime ?: 0L) > 0L ||
-                          stopwatchState?.isRunning == true ||
-                          pomodoroState?.isRunning == true ||
-                          recordingState?.isRecording == true ||
-                          isCaffeinated || isFlashlightOn ||
-                          stepsState?.isEnabledInSettings == true
+    val todoState by todoViewModel?.uiState?.collectAsState(null) ?: remember { mutableStateOf(null) }
+    val focusScore by focusViewModel?.productivityScore?.collectAsState(0) ?: remember { mutableStateOf(0) }
+    
+    val pillTodoEnabled by settingsRepository?.pillTodoEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillFocusEnabled by settingsRepository?.pillFocusEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillMusicEnabled by settingsRepository?.pillMusicEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillTimerEnabled by settingsRepository?.pillTimerEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillStopwatchEnabled by settingsRepository?.pillStopwatchEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillPomodoroEnabled by settingsRepository?.pillPomodoroEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillStepsEnabled by settingsRepository?.pillStepsEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillRecorderEnabled by settingsRepository?.pillRecorderEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillCaffeinateEnabled by settingsRepository?.pillCaffeinateEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillFlashlightEnabled by settingsRepository?.pillFlashlightEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+    val pillCatalogDownloadEnabled by settingsRepository?.pillCatalogDownloadEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
+
+    val hasActiveService = (pillMusicEnabled && (musicState?.isPlaying == true || musicState?.currentTrack != null)) ||
+                          (pillTimerEnabled && (timerState?.isRunning == true || timerState?.isRinging == true || (timerState?.remainingTime ?: 0L) > 0L)) ||
+                          (pillStopwatchEnabled && stopwatchState?.isRunning == true) ||
+                          (pillPomodoroEnabled && pomodoroState?.isRunning == true) ||
+                          (pillRecorderEnabled && (recordingState?.isRecording == true || recordingState?.isPaused == true)) ||
+                          (pillCaffeinateEnabled && isCaffeinated) || 
+                          (pillFlashlightEnabled && isFlashlightOn) ||
+                          (pillStepsEnabled && stepsState?.isEnabledInSettings == true) ||
+                          (pillCatalogDownloadEnabled && catalogState?.downloadingTracks?.isNotEmpty() == true) ||
+                          (pillTodoEnabled && todoState?.tasks?.isNotEmpty() == true) ||
+                          (pillFocusEnabled && focusScore > 0)
 
     val showPillContent = hasActiveService || fillThePill
 
