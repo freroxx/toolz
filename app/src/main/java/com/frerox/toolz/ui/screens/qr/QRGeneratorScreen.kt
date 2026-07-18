@@ -251,25 +251,6 @@ fun QRGeneratorScreen(
                     }
                 }
 
-                if (!isFullScreen && qrBitmap != null) {
-                    ToolzExpressiveIconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.updateInputText("")
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 36.dp, end = 36.dp)
-                            .size(36.dp),
-                        shape = SmallExpressiveShape,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
-                    }
-                }
             }
 
             if (!isFullScreen) {
