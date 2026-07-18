@@ -97,6 +97,18 @@
                 <category android:name="android.intent.category.OPENABLE" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>
+
+            <!-- Encrypter .enc Intent Filter -->
+            <intent-filter android:label="Decrypt with Toolz">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.enc" />
+                <data android:pathPattern=".*\\.ENC" />
+            </intent-filter>
         </activity>
 
         <service

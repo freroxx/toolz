@@ -609,6 +609,14 @@ fun ToolzNavHost(
                     pendingExternalRoute = Screen.PdfReader.route
                     return@LaunchedEffect
                 }
+
+                val isEnc = latestIntent.type == "application/octet-stream" || 
+                             uri.toString().lowercase().endsWith(".enc")
+                
+                if (isEnc) {
+                    pendingExternalRoute = Screen.SmartEncrypter.route
+                    return@LaunchedEffect
+                }
             }
         }
         
@@ -1008,8 +1016,14 @@ fun ToolzNavHost(
     }
 }
 private fun resolveExternalNavigationRoute(intent: Intent): String? {
-    if (intent.action == Intent.ACTION_VIEW && intent.type == "application/pdf" && intent.data != null) {
-        return Screen.PdfReader.route
+    if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+        val uri = intent.data!!
+        if (intent.type == "application/pdf" || uri.toString().lowercase().endsWith(".pdf")) {
+            return Screen.PdfReader.route
+        }
+        if (uri.toString().lowercase().endsWith(".enc")) {
+            return Screen.SmartEncrypter.route
+        }
     }
 
     if (intent.getBooleanExtra(MainActivity.EXTRA_SHOW_UPDATE, false) ||
