@@ -72,8 +72,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             "com.google.android.gms",
             "com.android.settings"
         )
-        private const val TOOLZ_PACKAGE = "com.frerox.toolz"
     }
+
+    private val toolzPackage: String get() = packageName
 
     override fun onCreate() {
         super.onCreate()
@@ -90,26 +91,19 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
         // Handle package change for precise tracking
         if (packageName != currentPackage) {
-            // Update usage for the package that is being left
-            currentPackage?.let { pkg ->
-                if (pkg != TOOLZ_PACKAGE && pkg != getHomePackage() && !SYSTEM_UI_PACKAGES.contains(pkg)) {
-                    // This is handled by UsageStatsManager naturally, 
-                    // but we keep track of currentPackage for our own validation
-                }
-            }
             currentPackage = packageName
             currentPackageResumedTime = System.currentTimeMillis()
         }
 
         // Ignore events from the overlay itself or Toolz UI
-        if (packageName == TOOLZ_PACKAGE && !className.contains("Activity") && !className.contains("MainActivity")) {
+        if (packageName == toolzPackage && !className.contains("Activity") && !className.contains("MainActivity")) {
             return
         }
 
         Log.d(TAG, "onAccessibilityEvent: $packageName / $className")
 
         // Handle "Safe" contexts
-        if (packageName == getHomePackage() || (packageName == TOOLZ_PACKAGE && (className.contains("Activity") || className.contains("MainActivity")))) {
+        if (packageName == getHomePackage() || (packageName == toolzPackage && (className.contains("Activity") || className.contains("MainActivity")))) {
             if (packageName == getHomePackage() && shouldKeepOverlayVisibleOnHome()) {
                 return
             }
@@ -125,7 +119,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         checkCaffeinate(packageName)
         
         // Only trigger clipboard check if WE are the ones becoming focused
-        if (packageName == TOOLZ_PACKAGE) {
+        if (packageName == toolzPackage) {
             // Check if standard access is needed. If Shizuku is authorized, 
             // the service handles it automatically without needing focus.
             if (!ShizukuHelper.isAuthorized()) {
@@ -165,7 +159,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             while (isActive) {
                 delay(1500)
                 val pkg = currentPackage
-                if (pkg != null && pkg != getHomePackage() && pkg != TOOLZ_PACKAGE && !SYSTEM_UI_PACKAGES.contains(pkg)) {
+                if (pkg != null && pkg != getHomePackage() && pkg != toolzPackage && !SYSTEM_UI_PACKAGES.contains(pkg)) {
                     validateAndLock(pkg)
                 }
             }
@@ -173,14 +167,22 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun validateAndLock(packageName: String) {
+        if (packageName == toolzPackage) return // Security: Toolz is immune
         serviceScope.launch {
             val limit = withContext(Dispatchers.IO) {
                 appLimitRepository.getLimitForApp(packageName)
             }
+            val isSessionActive = settingsRepository.focusFlowSessionActive.first()
+            val categoryMappings = settingsRepository.appCategoryMappings.first()
             
             if (currentPackage != packageName) return@launch
 
-            val shouldLock = if (limit != null && limit.isEnabled) {
+            val isDistraction = categoryMappings[packageName] == "Distraction" || 
+                                (categoryMappings[packageName] == null && isLikelyDistraction(packageName))
+
+            val shouldLock = if (isSessionActive && isDistraction) {
+                true // Global block during focus session
+            } else if (limit != null && limit.isEnabled) {
                 val usageTime = withContext(Dispatchers.IO) { getTodayUsage(packageName) }
                 usageTime >= limit.limitMillis
             } else {
@@ -189,13 +191,26 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
             withContext(Dispatchers.Main) {
                 if (shouldLock) {
-                    showOverlay(packageName)
+                    showOverlay(packageName, isSessionActive && isDistraction)
                     enforceLockedApp(packageName)
                 } else if (overlayShowingForPackage == packageName) {
                     hideOverlay()
                 }
             }
         }
+    }
+
+    private fun isLikelyDistraction(packageName: String): Boolean {
+        val lower = packageName.lowercase()
+        val keywords = setOf(
+            "facebook", "instagram", "tiktok", "youtube", "twitter", "x.android",
+            "snapchat", "netflix", "disney", "game", "pubg", "freefire", "reels",
+            "shorts", "twitch", "reddit", "pinterest", "tumblr", "spotify",
+            "soundcloud", "clash", "candy", "minecraft", "roblox", "brawl",
+            "among", "fortnite", "garena", "mlbb", "mobilelegends", "likee",
+            "kwai", "vigo", "helo", "moj", "roposo", "josh", "ludo", "carrom",
+        )
+        return keywords.any { lower.contains(it) }
     }
 
     private fun checkCaffeinate(packageName: String) {
@@ -260,10 +275,10 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun showOverlay(packageName: String) {
+    private fun showOverlay(packageName: String, isSessionBlock: Boolean = false) {
         if (isOverlayShowing && overlayShowingForPackage == packageName) return
         
-        Log.d(TAG, "Showing lock screen for: $packageName")
+        Log.d(TAG, "Showing lock screen for: $packageName (Session block: $isSessionBlock)")
 
         if (isOverlayShowing) {
             removeOverlayInternal()
@@ -296,7 +311,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             packageName
         }
-        view.findViewById<TextView>(R.id.tv_lock_message)?.text = "Time's up for $appName."
+        val message = if (isSessionBlock) {
+            "Focus session in progress. $appName is restricted."
+        } else {
+            "Time's up for $appName."
+        }
+        view.findViewById<TextView>(R.id.tv_lock_message)?.text = message
         
         view.isClickable = true
         view.isFocusable = true
