@@ -17,6 +17,9 @@ interface AppLimitDao {
     @Delete
     suspend fun deleteLimit(limit: AppLimit)
 
+    @Query("DELETE FROM app_limits")
+    suspend fun deleteAllLimits()
+
     @Query("SELECT * FROM app_limits")
     suspend fun getAllLimitsSync(): List<AppLimit>
 

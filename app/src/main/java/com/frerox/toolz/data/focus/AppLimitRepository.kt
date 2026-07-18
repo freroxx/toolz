@@ -15,4 +15,6 @@ class AppLimitRepository @Inject constructor(
     suspend fun setLimit(limit: AppLimit) = appLimitDao.insertLimit(limit)
 
     suspend fun removeLimit(limit: AppLimit) = appLimitDao.deleteLimit(limit)
+
+    suspend fun deleteAllLimits() = appLimitDao.deleteAllLimits()
 }

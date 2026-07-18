@@ -349,6 +349,9 @@ class SettingsRepository @Inject constructor(
     // Offline Mode
     private val OFFLINE_MODE_ENABLED = booleanPreferencesKey("offline_mode_enabled")
 
+    // Focus Flow Session Active (Blocks distractions)
+    private val FOCUS_FLOW_SESSION_ACTIVE = booleanPreferencesKey("focus_flow_session_active")
+
     // AI Clipboard Monitoring
     private val AI_CLIPBOARD_MONITORING = booleanPreferencesKey("ai_clipboard_monitoring")
 
@@ -384,6 +387,8 @@ class SettingsRepository @Inject constructor(
     }
 
     val offlineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_ENABLED] ?: false }
+
+    val focusFlowSessionActive: Flow<Boolean> = dataStore.data.map { it[FOCUS_FLOW_SESSION_ACTIVE] ?: false }
 
     val stepGoal: Flow<Int> = dataStore.data.map { 
         try {
@@ -819,6 +824,13 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun clearFocusMappings() {
+        dataStore.edit { pref ->
+            pref.remove(APP_CATEGORY_MAPPINGS)
+            pref.remove(APP_NAME_MAPPINGS)
+        }
+    }
+
     // Pomodoro Setters
     suspend fun setPomodoroWorkMinutes(minutes: Int) { dataStore.edit { it[POMODORO_WORK_MINUTES] = minutes } }
     suspend fun setPomodoroShortBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_SHORT_BREAK_MINUTES] = minutes } }
@@ -1059,6 +1071,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setOfflineModeEnabled(enabled: Boolean) {
         dataStore.edit { it[OFFLINE_MODE_ENABLED] = enabled }
+    }
+
+    suspend fun setFocusFlowSessionActive(active: Boolean) {
+        dataStore.edit { it[FOCUS_FLOW_SESSION_ACTIVE] = active }
     }
 
     suspend fun setLastLoadingTime(timestamp: Long) {
