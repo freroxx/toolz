@@ -160,18 +160,7 @@ Toolz includes a built-in updater that checks GitHub releases and update manifes
 
 ### Optional: AI Provider Keys
 
-Toolz runs core utilities without AI keys, but AI features work best with your own provider keys.
-
-Create a `.env` file in the project root if you want to bake default keys into your build:
-
-```env
-GEMINI_DEFAULT=
-CHATGPT_DEFAULT=
-GROQ_DEFAULT=
-OPENROUTER_DEFAULT=
-CLAUDE_DEFAULT=
-DEEPSEEK_DEFAULT=
-```
+Toolz runs core utilities without AI API keys, but AI features work best with your own provider keys.
 
 ### Build Steps
 
