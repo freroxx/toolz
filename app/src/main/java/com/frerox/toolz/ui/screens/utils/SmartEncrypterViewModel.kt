@@ -257,13 +257,16 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     fun handleExternalUri(context: Context, uri: Uri) {
+        val fileName = getFileName(context, uri) ?: "unknown_file.enc"
+        val isEncFile = fileName.lowercase().endsWith(".enc")
+        
         // Force file mode and decrypt intent for external .enc files
         _uiState.update { 
             it.copy(
                 isFileMode = true,
-                fileOperationIntent = CryptoOperation.DECRYPT,
+                fileOperationIntent = if (isEncFile) CryptoOperation.DECRYPT else CryptoOperation.ENCRYPT,
                 selectedFileUri = uri,
-                selectedFileName = getFileName(context, uri),
+                selectedFileName = fileName,
                 selectedFileSize = getFileSize(context, uri),
                 processedFile = null,
                 error = null
@@ -276,14 +279,19 @@ class SmartEncrypterViewModel @Inject constructor(
     }
 
     fun onFileSelected(context: Context, uri: Uri) {
+        val fileName = getFileName(context, uri)
+        val suggestedOp = if (fileName != null) suggestFileOperation(fileName) else null
+        
         _uiState.update {
             it.copy(
                 selectedFileUri = uri,
-                selectedFileName = getFileName(context, uri),
+                selectedFileName = fileName,
                 selectedFileSize = getFileSize(context, uri),
                 fileProcessingStatus = "",
                 processedFile = null,
-                error = null
+                error = if (it.fileOperationIntent == CryptoOperation.DECRYPT && suggestedOp == CryptoOperation.ENCRYPT) {
+                    "Warning: This file doesn't look like an .enc file"
+                } else null
             )
         }
     }
@@ -606,13 +614,16 @@ class SmartEncrypterViewModel @Inject constructor(
                 }
 
                 val baseOutputName = if (operation == CryptoOperation.ENCRYPT) {
-                    if (fileName.endsWith(".enc", ignoreCase = true)) fileName else "$fileName.enc"
+                    if (fileName.lowercase().endsWith(".enc")) fileName else "$fileName.enc"
                 } else {
-                    // Remove .enc safely
-                    if (fileName.endsWith(".enc", ignoreCase = true)) {
+                    // Remove .enc safely, ensuring we don't just leave a blank name or a weird one
+                    if (fileName.lowercase().endsWith(".enc")) {
                         fileName.substring(0, fileName.length - 4)
                     } else {
-                        fileName
+                        // If it doesn't end in .enc but we're decrypting, 
+                        // it might be a malformed intent or manual rename.
+                        // Append .dec as safety if we can't determine extension
+                        if (!fileName.contains(".")) "$fileName.dec" else fileName
                     }
                 }
 

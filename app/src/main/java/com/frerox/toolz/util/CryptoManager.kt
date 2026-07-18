@@ -458,21 +458,22 @@ object CryptoManager {
             cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
             val countingInput = CountingInputStream(input)
-            val cipherOutputStream = CipherOutputStream(output, cipher)
-            val buffer = ByteArray(64 * 1024)
-            var bytesRead: Int
+            CipherOutputStream(output, cipher).use { cipherOutputStream ->
+                val buffer = ByteArray(64 * 1024)
+                var bytesRead: Int
 
-            while (countingInput.read(buffer).also { bytesRead = it } != -1) {
-                cipherOutputStream.write(buffer, 0, bytesRead)
-                if (totalSize > 0) {
-                    onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
+                while (countingInput.read(buffer).also { bytesRead = it } != -1) {
+                    cipherOutputStream.write(buffer, 0, bytesRead)
+                    if (totalSize > 0) {
+                        onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
+                    }
                 }
+                cipherOutputStream.flush()
             }
-            cipherOutputStream.flush()
-            cipherOutputStream.close()
             onProgress(1f)
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
@@ -501,21 +502,22 @@ object CryptoManager {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
-            val cipherInputStream = CipherInputStream(countingInput, cipher)
-            val buffer = ByteArray(64 * 1024)
-            var bytesRead: Int
+            CipherInputStream(countingInput, cipher).use { cipherInputStream ->
+                val buffer = ByteArray(64 * 1024)
+                var bytesRead: Int
 
-            while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
-                output.write(buffer, 0, bytesRead)
-                if (totalSize > 0) {
-                    onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    if (totalSize > 0) {
+                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                    }
                 }
+                output.flush()
             }
-            output.flush()
-            cipherInputStream.close()
             onProgress(1f)
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
@@ -543,21 +545,22 @@ object CryptoManager {
             cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(nonce))
 
             val countingInput = CountingInputStream(input)
-            val cipherOutputStream = CipherOutputStream(output, cipher)
-            val buffer = ByteArray(64 * 1024)
-            var bytesRead: Int
+            CipherOutputStream(output, cipher).use { cipherOutputStream ->
+                val buffer = ByteArray(64 * 1024)
+                var bytesRead: Int
 
-            while (countingInput.read(buffer).also { bytesRead = it } != -1) {
-                cipherOutputStream.write(buffer, 0, bytesRead)
-                if (totalSize > 0) {
-                    onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
+                while (countingInput.read(buffer).also { bytesRead = it } != -1) {
+                    cipherOutputStream.write(buffer, 0, bytesRead)
+                    if (totalSize > 0) {
+                        onProgress(0.01f + (countingInput.bytesRead.toFloat() / totalSize) * 0.98f)
+                    }
                 }
+                cipherOutputStream.flush()
             }
-            cipherOutputStream.flush()
-            cipherOutputStream.close()
             onProgress(1f)
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
@@ -586,21 +589,22 @@ object CryptoManager {
             val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonce))
 
-            val cipherInputStream = CipherInputStream(countingInput, cipher)
-            val buffer = ByteArray(64 * 1024)
-            var bytesRead: Int
+            CipherInputStream(countingInput, cipher).use { cipherInputStream ->
+                val buffer = ByteArray(64 * 1024)
+                var bytesRead: Int
 
-            while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
-                output.write(buffer, 0, bytesRead)
-                if (totalSize > 0) {
-                    onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    if (totalSize > 0) {
+                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                    }
                 }
+                output.flush()
             }
-            output.flush()
-            cipherInputStream.close()
             onProgress(1f)
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
