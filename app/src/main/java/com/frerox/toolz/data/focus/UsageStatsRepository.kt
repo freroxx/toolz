@@ -139,6 +139,19 @@ class UsageStatsRepository @Inject constructor(
         }.sortedByDescending { it.usageTimeMillis }
     }
 
+    /**
+     * Queries the total foreground usage for ALL apps in a specific time range.
+     * Useful for filling analytics chart bars.
+     */
+    fun queryTotalUsageInRange(startMs: Long, endMs: Long): Long {
+        return try {
+            val stats = usageStatsManager.queryAndAggregateUsageStats(startMs, endMs)
+            stats.values.sumOf { it.totalTimeInForeground }
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
     private fun isExcluded(packageName: String): Boolean {
         if (packageName in EXCLUDED_PACKAGES) return true
         if (EXCLUDED_PREFIXES.any { packageName.startsWith(it) }) return true
