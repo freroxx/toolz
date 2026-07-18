@@ -74,6 +74,15 @@ class SettingsViewModel @Inject constructor(
     val fillThePillEnabled = repository.fillThePillEnabled
     val pillTodoEnabled = repository.pillTodoEnabled
     val pillFocusEnabled = repository.pillFocusEnabled
+    val pillMusicEnabled = repository.pillMusicEnabled
+    val pillTimerEnabled = repository.pillTimerEnabled
+    val pillStopwatchEnabled = repository.pillStopwatchEnabled
+    val pillPomodoroEnabled = repository.pillPomodoroEnabled
+    val pillStepsEnabled = repository.pillStepsEnabled
+    val pillRecorderEnabled = repository.pillRecorderEnabled
+    val pillCaffeinateEnabled = repository.pillCaffeinateEnabled
+    val pillFlashlightEnabled = repository.pillFlashlightEnabled
+    val pillCatalogDownloadEnabled = repository.pillCatalogDownloadEnabled
     val liveVpnNotifications = repository.liveVpnNotifications
     val liveDnsNotifications = repository.liveDnsNotifications
     val caffeinateAutoSummaryNotification = repository.caffeinateAutoSummaryNotification
@@ -153,6 +162,15 @@ class SettingsViewModel @Inject constructor(
     fun setFillThePillEnabled(enabled: Boolean) = viewModelScope.launch { repository.setFillThePillEnabled(enabled) }
     fun setPillTodoEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillTodoEnabled(enabled) }
     fun setPillFocusEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillFocusEnabled(enabled) }
+    fun setPillMusicEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillMusicEnabled(enabled) }
+    fun setPillTimerEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillTimerEnabled(enabled) }
+    fun setPillStopwatchEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillStopwatchEnabled(enabled) }
+    fun setPillPomodoroEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillPomodoroEnabled(enabled) }
+    fun setPillStepsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillStepsEnabled(enabled) }
+    fun setPillRecorderEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillRecorderEnabled(enabled) }
+    fun setPillCaffeinateEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillCaffeinateEnabled(enabled) }
+    fun setPillFlashlightEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillFlashlightEnabled(enabled) }
+    fun setPillCatalogDownloadEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPillCatalogDownloadEnabled(enabled) }
     fun setBackupFrequency(freq: String) = viewModelScope.launch { 
         repository.setBackupFrequency(freq)
         scheduleBackup(freq)

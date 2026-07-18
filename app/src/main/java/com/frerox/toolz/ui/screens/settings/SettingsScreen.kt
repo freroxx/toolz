@@ -94,7 +94,19 @@ fun SettingsScreen(
     val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
     val pillTodoEnabled by viewModel.pillTodoEnabled.collectAsState(initial = true)
     val pillFocusEnabled by viewModel.pillFocusEnabled.collectAsState(initial = true)
+    val pillMusicEnabled by viewModel.pillMusicEnabled.collectAsState(initial = true)
+    val pillTimerEnabled by viewModel.pillTimerEnabled.collectAsState(initial = true)
+    val pillStopwatchEnabled by viewModel.pillStopwatchEnabled.collectAsState(initial = true)
+    val pillPomodoroEnabled by viewModel.pillPomodoroEnabled.collectAsState(initial = true)
+    val pillStepsEnabled by viewModel.pillStepsEnabled.collectAsState(initial = true)
+    val pillRecorderEnabled by viewModel.pillRecorderEnabled.collectAsState(initial = true)
+    val pillCaffeinateEnabled by viewModel.pillCaffeinateEnabled.collectAsState(initial = true)
+    val pillFlashlightEnabled by viewModel.pillFlashlightEnabled.collectAsState(initial = true)
+    val pillCatalogDownloadEnabled by viewModel.pillCatalogDownloadEnabled.collectAsState(initial = true)
+
     val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = false)
+
+    var showPillTweaksPopup by remember { mutableStateOf(false) }
 
     val userName by viewModel.userName.collectAsState(initial = "")
     var userNameInput by remember { mutableStateOf("") }
@@ -231,6 +243,13 @@ fun SettingsScreen(
             },
             shape = RoundedCornerShape(40.dp),
             containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showPillTweaksPopup) {
+        PillTweaksPopup(
+            viewModel = viewModel,
+            onDismiss = { showPillTweaksPopup = false }
         )
     }
 
@@ -621,19 +640,15 @@ fun SettingsScreen(
                                         checked = fillThePillEnabled,
                                         onCheckedChange = { viewModel.setFillThePillEnabled(it) }
                                     )
-                                    SettingsToggleItem(
-                                        title = "Task Progress",
-                                        subtitle = "Track active tasks on overlay",
-                                        icon = Icons.Rounded.TaskAlt,
-                                        checked = pillTodoEnabled,
-                                        onCheckedChange = { viewModel.setPillTodoEnabled(it) }
-                                    )
-                                    SettingsToggleItem(
-                                        title = "Focus Score",
-                                        subtitle = "View productivity on overlay",
-                                        icon = Icons.Rounded.Toll,
-                                        checked = pillFocusEnabled,
-                                        onCheckedChange = { viewModel.setPillFocusEnabled(it) }
+
+                                    SettingsItem(
+                                        title = "Pill Tweaks",
+                                        subtitle = "Configure overlay extensions",
+                                        icon = Icons.Rounded.Tune,
+                                        onClick = {
+                                            vibrationManager?.vibrateClick()
+                                            showPillTweaksPopup = true
+                                        }
                                     )
                                 }
                             }
@@ -1691,6 +1706,174 @@ fun SettingsToggleItem(
                 onCheckedChange = onCheckedChange,
                 enabled = enabled
             )
+        }
+    }
+}
+
+@Composable
+fun PillTweaksPopup(
+    viewModel: SettingsViewModel,
+    onDismiss: () -> Unit
+) {
+    val vibrationManager = LocalVibrationManager.current
+
+    val pillMusicEnabled by viewModel.pillMusicEnabled.collectAsState(initial = true)
+    val pillTimerEnabled by viewModel.pillTimerEnabled.collectAsState(initial = true)
+    val pillStopwatchEnabled by viewModel.pillStopwatchEnabled.collectAsState(initial = true)
+    val pillPomodoroEnabled by viewModel.pillPomodoroEnabled.collectAsState(initial = true)
+    val pillStepsEnabled by viewModel.pillStepsEnabled.collectAsState(initial = true)
+    val pillRecorderEnabled by viewModel.pillRecorderEnabled.collectAsState(initial = true)
+    val pillTodoEnabled by viewModel.pillTodoEnabled.collectAsState(initial = true)
+    val pillCaffeinateEnabled by viewModel.pillCaffeinateEnabled.collectAsState(initial = true)
+    val pillFlashlightEnabled by viewModel.pillFlashlightEnabled.collectAsState(initial = true)
+    val pillFocusEnabled by viewModel.pillFocusEnabled.collectAsState(initial = true)
+    val pillCatalogDownloadEnabled by viewModel.pillCatalogDownloadEnabled.collectAsState(initial = true)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.85f)
+                .padding(vertical = 24.dp),
+            shape = RoundedCornerShape(48.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "PILL TWEAKS",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp
+                        )
+                        @Suppress("DEPRECATION")
+                        Text(
+                            "Overlay Extensions",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            onDismiss()
+                        },
+                        modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Rounded.Close, null)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    SettingsToggleItem(
+                        title = "Music Player",
+                        subtitle = "Playback status and controls",
+                        icon = Icons.Rounded.MusicNote,
+                        checked = pillMusicEnabled,
+                        onCheckedChange = { viewModel.setPillMusicEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Timer",
+                        subtitle = "Active countdowns",
+                        icon = Icons.Rounded.Timer,
+                        checked = pillTimerEnabled,
+                        onCheckedChange = { viewModel.setPillTimerEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Stopwatch",
+                        subtitle = "Elapsed time tracking",
+                        icon = Icons.Rounded.AvTimer,
+                        checked = pillStopwatchEnabled,
+                        onCheckedChange = { viewModel.setPillStopwatchEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Pomodoro",
+                        subtitle = "Focus session progress",
+                        icon = Icons.Rounded.AvTimer,
+                        checked = pillPomodoroEnabled,
+                        onCheckedChange = { viewModel.setPillPomodoroEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Step Tracker",
+                        subtitle = "Daily activity and goal",
+                        icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                        checked = pillStepsEnabled,
+                        onCheckedChange = { viewModel.setPillStepsEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Voice Recorder",
+                        subtitle = "Active recording status",
+                        icon = Icons.Rounded.Mic,
+                        checked = pillRecorderEnabled,
+                        onCheckedChange = { viewModel.setPillRecorderEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Task Progress",
+                        subtitle = "Upcoming task reminders",
+                        icon = Icons.Rounded.TaskAlt,
+                        checked = pillTodoEnabled,
+                        onCheckedChange = { viewModel.setPillTodoEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Focus Score",
+                        subtitle = "Productivity meter",
+                        icon = Icons.Rounded.Toll,
+                        checked = pillFocusEnabled,
+                        onCheckedChange = { viewModel.setPillFocusEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Caffeinate",
+                        subtitle = "Screen awake status",
+                        icon = Icons.Rounded.Coffee,
+                        checked = pillCaffeinateEnabled,
+                        onCheckedChange = { viewModel.setPillCaffeinateEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Flashlight",
+                        subtitle = "Torch and strobe status",
+                        icon = Icons.Rounded.FlashlightOn,
+                        checked = pillFlashlightEnabled,
+                        onCheckedChange = { viewModel.setPillFlashlightEnabled(it) }
+                    )
+                    SettingsToggleItem(
+                        title = "Downloads",
+                        subtitle = "Catalog track download progress",
+                        icon = Icons.Rounded.Download,
+                        checked = pillCatalogDownloadEnabled,
+                        onCheckedChange = { viewModel.setPillCatalogDownloadEnabled(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                ToolzExpressiveButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = ExtraLargeExpressiveShape
+                ) {
+                    @Suppress("DEPRECATION")
+                    Text("DONE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     }
 }

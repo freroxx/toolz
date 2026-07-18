@@ -264,6 +264,15 @@ class SettingsRepository @Inject constructor(
     private val FILL_THE_PILL_ENABLED = booleanPreferencesKey("fill_the_pill_enabled")
     private val PILL_TODO_ENABLED = booleanPreferencesKey("pill_todo_enabled")
     private val PILL_FOCUS_ENABLED = booleanPreferencesKey("pill_focus_enabled")
+    private val PILL_MUSIC_ENABLED = booleanPreferencesKey("pill_music_enabled")
+    private val PILL_TIMER_ENABLED = booleanPreferencesKey("pill_timer_enabled")
+    private val PILL_STOPWATCH_ENABLED = booleanPreferencesKey("pill_stopwatch_enabled")
+    private val PILL_POMODORO_ENABLED = booleanPreferencesKey("pill_pomodoro_enabled")
+    private val PILL_STEPS_ENABLED = booleanPreferencesKey("pill_steps_enabled")
+    private val PILL_RECORDER_ENABLED = booleanPreferencesKey("pill_recorder_enabled")
+    private val PILL_CAFFEINATE_ENABLED = booleanPreferencesKey("pill_caffeinate_enabled")
+    private val PILL_FLASHLIGHT_ENABLED = booleanPreferencesKey("pill_flashlight_enabled")
+    private val PILL_CATALOG_DOWNLOAD_ENABLED = booleanPreferencesKey("pill_catalog_download_enabled")
     private val BACKUP_FREQUENCY = stringPreferencesKey("backup_frequency")
     private val AUTO_BACKUP_CUSTOM_DAYS = intPreferencesKey("auto_backup_custom_days")
 
@@ -608,6 +617,15 @@ class SettingsRepository @Inject constructor(
     val fillThePillEnabled: Flow<Boolean> = dataStore.data.map { it[FILL_THE_PILL_ENABLED] ?: false }
     val pillTodoEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TODO_ENABLED] ?: true }
     val pillFocusEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FOCUS_ENABLED] ?: true }
+    val pillMusicEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_MUSIC_ENABLED] ?: true }
+    val pillTimerEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_TIMER_ENABLED] ?: true }
+    val pillStopwatchEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_STOPWATCH_ENABLED] ?: true }
+    val pillPomodoroEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_POMODORO_ENABLED] ?: true }
+    val pillStepsEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_STEPS_ENABLED] ?: true }
+    val pillRecorderEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_RECORDER_ENABLED] ?: true }
+    val pillCaffeinateEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_CAFFEINATE_ENABLED] ?: true }
+    val pillFlashlightEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_FLASHLIGHT_ENABLED] ?: true }
+    val pillCatalogDownloadEnabled: Flow<Boolean> = dataStore.data.map { it[PILL_CATALOG_DOWNLOAD_ENABLED] ?: true }
     val backupFrequency: Flow<String> = dataStore.data.map { it[BACKUP_FREQUENCY] ?: "Never" }
     val autoBackupCustomDays: Flow<Int> = dataStore.data.map { 
         try {
@@ -887,6 +905,15 @@ class SettingsRepository @Inject constructor(
     suspend fun setFillThePillEnabled(enabled: Boolean) { dataStore.edit { it[FILL_THE_PILL_ENABLED] = enabled } }
     suspend fun setPillTodoEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TODO_ENABLED] = enabled } }
     suspend fun setPillFocusEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FOCUS_ENABLED] = enabled } }
+    suspend fun setPillMusicEnabled(enabled: Boolean) { dataStore.edit { it[PILL_MUSIC_ENABLED] = enabled } }
+    suspend fun setPillTimerEnabled(enabled: Boolean) { dataStore.edit { it[PILL_TIMER_ENABLED] = enabled } }
+    suspend fun setPillStopwatchEnabled(enabled: Boolean) { dataStore.edit { it[PILL_STOPWATCH_ENABLED] = enabled } }
+    suspend fun setPillPomodoroEnabled(enabled: Boolean) { dataStore.edit { it[PILL_POMODORO_ENABLED] = enabled } }
+    suspend fun setPillStepsEnabled(enabled: Boolean) { dataStore.edit { it[PILL_STEPS_ENABLED] = enabled } }
+    suspend fun setPillRecorderEnabled(enabled: Boolean) { dataStore.edit { it[PILL_RECORDER_ENABLED] = enabled } }
+    suspend fun setPillCaffeinateEnabled(enabled: Boolean) { dataStore.edit { it[PILL_CAFFEINATE_ENABLED] = enabled } }
+    suspend fun setPillFlashlightEnabled(enabled: Boolean) { dataStore.edit { it[PILL_FLASHLIGHT_ENABLED] = enabled } }
+    suspend fun setPillCatalogDownloadEnabled(enabled: Boolean) { dataStore.edit { it[PILL_CATALOG_DOWNLOAD_ENABLED] = enabled } }
     suspend fun setBackupFrequency(freq: String) { dataStore.edit { it[BACKUP_FREQUENCY] = freq } }
     suspend fun setAutoBackupCustomDays(days: Int) { dataStore.edit { it[AUTO_BACKUP_CUSTOM_DAYS] = days } }
 
