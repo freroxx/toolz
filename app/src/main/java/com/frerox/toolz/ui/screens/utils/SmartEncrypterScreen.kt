@@ -113,24 +113,32 @@ fun SmartEncrypterScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showPermissionSheet by remember { mutableStateOf(false) }
 
+    // Handle External Intent (Open With...)
+    val activity = context as? androidx.appcompat.app.AppCompatActivity
+    LaunchedEffect(Unit) {
+        activity?.intent?.let { intent ->
+            if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+                val uri = intent.data!!
+                if (uri.toString().lowercase().endsWith(".enc")) {
+                    viewModel.handleExternalUri(context, uri)
+                    // Clear intent so it doesn't trigger again on rotation
+                    intent.action = null
+                    intent.data = null
+                }
+            }
+        }
+    }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        uri?.let { 
-            uiState.fileOperationIntent?.let { op ->
-                viewModel.processFile(context, it, op)
-            }
-        }
+        uri?.let { viewModel.onFileSelected(context, it) }
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        uri?.let { 
-            uiState.fileOperationIntent?.let { op ->
-                viewModel.processFile(context, it, op)
-            }
-        }
+        uri?.let { viewModel.onFileSelected(context, it) }
     }
 
     // Permission check
@@ -242,17 +250,17 @@ fun SmartEncrypterScreen(
                 ) { isFileMode ->
                     if (isFileMode) {
                         FileModePanel(
-                            hasPermission = uiState.isFilePermissionGranted,
-                            operation = uiState.fileOperationIntent,
-                            isRenamerEnabled = uiState.isRenamerEnabled,
-                            customFileName = uiState.customFileName,
+                            uiState = uiState,
+                            viewModel = viewModel,
                             onGrantClick = { showPermissionSheet = true },
                             onPickPhotos = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
                             onPickFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
                             onPickAdvanced = { filePickerLauncher.launch(arrayOf("*/*")) },
                             onChangeOperation = { viewModel.setFileOperationIntent(null) },
                             onToggleRenamer = viewModel::toggleRenamer,
-                            onCustomNameChange = viewModel::onCustomFileNameChanged
+                            onCustomNameChange = viewModel::onCustomFileNameChanged,
+                            onContinue = { viewModel.processFile(context) },
+                            onClear = viewModel::clearFileSelection
                         )
                     } else {
                         CryptoPanel(
@@ -494,12 +502,12 @@ fun SmartEncrypterScreen(
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            ExpressiveLinearProgressIndicator(
+                            ToolzWavyLinearProgressIndicator(
                                 progress = { uiState.fileProcessingProgress },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape)
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -508,11 +516,17 @@ fun SmartEncrypterScreen(
                             ) {
                                 Text(
                                     "${(uiState.fileProcessingProgress * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
-                                TextButton(onClick = viewModel::cancelFileProcess) {
-                                    Text("Cancel", color = MaterialTheme.colorScheme.error)
+                                ToolzOutlinedExpressiveButton(
+                                    onClick = viewModel::cancelFileProcess,
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Icon(Icons.Rounded.Cancel, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Cancel")
                                 }
                             }
                         }
@@ -522,53 +536,97 @@ fun SmartEncrypterScreen(
 
             item {
                 AnimatedVisibility(
-                    visible = uiState.isFileMode && !uiState.isProcessingFile && uiState.fileProcessingStatus.contains("Saved"),
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
+                    visible = uiState.isFileMode && !uiState.isProcessingFile && uiState.processedFile != null,
+                    enter = fadeIn() + scaleIn(initialScale = 0.9f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.9f)
                 ) {
                     val context = LocalContext.current
+                    val processedFile = uiState.processedFile
+                    
                     ExpressiveCard(
-                        onClick = {
-                            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                            val toolzDir = File(downloadsDir, "Toolz")
-                            val fileName = uiState.fileProcessingStatus.substringAfter("Saved: ").trim()
-                            val file = File(toolzDir, fileName)
-                            
-                            if (file.exists()) {
-                                val uri = androidx.core.content.FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file
-                                )
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                try {
-                                    context.startActivity(Intent.createChooser(intent, "Open file"))
-                                } catch (e: Exception) {
-                                    android.widget.Toast.makeText(context, "Cannot open file", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(0.4f)
+                        onClick = {},
+                        containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp),
+                        shape = RoundedCornerShape(32.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(0.2f))
                     ) {
-                        Row(
-                            modifier = Modifier.padding(20.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.secondary, CircleShape),
-                                contentAlignment = Alignment.Center
+                        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
                             ) {
-                                Icon(Icons.Rounded.InsertDriveFile, null, tint = MaterialTheme.colorScheme.onSecondary)
+                                Box(
+                                    modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.CheckCircle, 
+                                        null, 
+                                        tint = MaterialTheme.colorScheme.primary, 
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Success!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        processedFile?.name ?: "File saved", 
+                                        style = MaterialTheme.typography.bodyMedium, 
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
                             }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Success", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text(uiState.fileProcessingStatus, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        processedFile?.let { file ->
+                                            val uri = androidx.core.content.FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+                                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            try { context.startActivity(Intent.createChooser(intent, "Open with")) } catch (e: Exception) {}
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1.5f),
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Open File")
+                                }
+                                
+                                ToolzTonalExpressiveIconButton(
+                                    onClick = {
+                                        processedFile?.let { file ->
+                                            val uri = androidx.core.content.FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+                                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                                type = context.contentResolver.getType(uri) ?: "*/*"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(Intent.createChooser(intent, "Share via"))
+                                        }
+                                    },
+                                    modifier = Modifier.size(60.dp),
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Share, null)
+                                }
+
+                                ToolzOutlinedExpressiveIconButton(
+                                    onClick = viewModel::clearFileSelection,
+                                    modifier = Modifier.size(60.dp),
+                                    colors = IconButtonDefaults.outlinedIconButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Icon(Icons.Rounded.DeleteSweep, null)
+                                }
                             }
-                            Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
                         }
                     }
                 }
@@ -712,25 +770,34 @@ private fun FormatBadge(format: CryptoFormat) {
 
 @Composable
 private fun FileModePanel(
-    hasPermission: Boolean,
-    operation: CryptoOperation?,
-    isRenamerEnabled: Boolean,
-    customFileName: String,
+    uiState: EncrypterUiState,
+    viewModel: SmartEncrypterViewModel,
     onGrantClick: () -> Unit,
     onPickPhotos: () -> Unit,
     onPickFiles: () -> Unit,
     onPickAdvanced: () -> Unit,
     onChangeOperation: () -> Unit,
     onToggleRenamer: () -> Unit,
-    onCustomNameChange: (String) -> Unit
+    onCustomNameChange: (String) -> Unit,
+    onContinue: () -> Unit,
+    onClear: () -> Unit
 ) {
+    val operation = uiState.fileOperationIntent
+    val hasPermission = uiState.isFilePermissionGranted
+    val isRenamerEnabled = uiState.isRenamerEnabled
+    val customFileName = uiState.customFileName
+    val selectedFileUri = uiState.selectedFileUri
+
     CryptoPanel(
-        title = "File ${operation?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Encrypter"}",
-        icon = if (operation == CryptoOperation.DECRYPT) Icons.Rounded.NoEncryption else Icons.Rounded.EnhancedEncryption
+        title = if (selectedFileUri == null) "File ${operation?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Encrypter"}" else "Ready to Process",
+        icon = when {
+            selectedFileUri != null -> Icons.Rounded.TaskAlt
+            operation == CryptoOperation.DECRYPT -> Icons.Rounded.NoEncryption
+            else -> Icons.Rounded.EnhancedEncryption
+        }
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!hasPermission) {
-                // ... same permission card ...
                 ExpressiveCard(
                     onClick = onGrantClick,
                     containerColor = MaterialTheme.colorScheme.errorContainer.copy(0.3f),
@@ -758,47 +825,51 @@ private fun FileModePanel(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Select content to ${operation?.name?.lowercase()}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        TextButton(onClick = onChangeOperation) {
-                            Text("Change Action", style = MaterialTheme.typography.labelSmall)
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (selectedFileUri == null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Select content to ${operation?.name?.lowercase()}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(onClick = onChangeOperation) {
+                                Text("Change Action", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
-                    }
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        FilePickerButton(
-                            label = "Photos",
-                            icon = Icons.Rounded.Collections,
-                            onClick = onPickPhotos,
-                            modifier = Modifier.weight(1f),
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                        )
-                        FilePickerButton(
-                            label = "Files",
-                            icon = Icons.Rounded.Folder,
-                            onClick = onPickFiles,
-                            modifier = Modifier.weight(1f),
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                        FilePickerButton(
-                            label = "Advanced",
-                            icon = Icons.Rounded.AutoFixHigh,
-                            onClick = onPickAdvanced,
-                            modifier = Modifier.weight(1f),
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            FilePickerButton(label = "Photos", icon = Icons.Rounded.Collections, onClick = onPickPhotos, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            FilePickerButton(label = "Files", icon = Icons.Rounded.Folder, onClick = onPickFiles, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                            FilePickerButton(label = "Advanced", icon = Icons.Rounded.AutoFixHigh, onClick = onPickAdvanced, modifier = Modifier.weight(1f), containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                        }
+                    } else {
+                        // Ready Panel
+                        ExpressiveCard(
+                            onClick = {},
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.3f),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Description, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(uiState.selectedFileName ?: "Unknown File", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text("Size: ${viewModel.formatFileSize(uiState.selectedFileSize)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(onClick = onClear) {
+                                    Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
                     }
 
                     // Renamer Toggle
@@ -828,9 +899,30 @@ private fun FileModePanel(
                                     placeholder = { Text("Enter new file name") },
                                     shape = RoundedCornerShape(16.dp),
                                     textStyle = MaterialTheme.typography.bodySmall,
-                                    singleLine = true
+                                    singleLine = true,
+                                    isError = isRenamerEnabled && customFileName.isBlank()
                                 )
                             }
+                        }
+                    }
+
+                    if (selectedFileUri != null) {
+                        val canContinue = !isRenamerEnabled || customFileName.isNotBlank()
+                        ToolzExpressiveButton(
+                            onClick = { if (canContinue) onContinue() },
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (canContinue) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (canContinue) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f)
+                            )
+                        ) {
+                            Icon(if (operation == CryptoOperation.DECRYPT) Icons.Rounded.LockOpen else Icons.Rounded.Lock, null)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Confirm & ${operation?.name?.lowercase()?.replaceFirstChar { it.uppercase() }}", fontWeight = FontWeight.Bold)
+                        }
+                        
+                        if (isRenamerEnabled && customFileName.isBlank()) {
+                            Text("Output name cannot be empty", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.CenterHorizontally))
                         }
                     }
                     
