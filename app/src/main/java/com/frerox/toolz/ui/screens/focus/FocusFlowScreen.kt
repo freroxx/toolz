@@ -36,7 +36,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -195,7 +194,7 @@ fun FocusFlowScreen(
                         else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)
                     ),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp), // Refined spacing
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 if (!hasUsagePermission) {
                     item {
@@ -245,9 +244,21 @@ fun FocusFlowScreen(
                 }
 
                 item {
-                    val totalTime = usageStats.sumOf { it.usageTimeMillis }
+                    val weeklyStats = remember(isWeekly, usageStats) { viewModel.getWeeklyLocalStats() }
+                    val totalTime = if (isWeekly) {
+                        weeklyStats.sumOf { it.totalMillis }
+                    } else {
+                        usageStats.sumOf { it.usageTimeMillis }
+                    }
                     val hours     = totalTime / 3_600_000
                     val minutes   = (totalTime % 3_600_000) / 60_000
+                    
+                    val appsCount = if (isWeekly) {
+                        // Sum of unique packages across all days in weekly stats or just usageStats.size
+                        usageStats.size 
+                    } else {
+                        usageStats.size
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -262,7 +273,7 @@ fun FocusFlowScreen(
                         )
                         MetricCard(
                             label    = "Apps used",
-                            value    = "${usageStats.size}",
+                            value    = "$appsCount",
                             icon     = Icons.Rounded.Apps,
                             color    = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.weight(1f),
@@ -344,11 +355,10 @@ fun FocusFlowScreen(
                         if (weekly) {
                             WeeklySummaryCard(
                                 stats = usageStats,
-                                weeklyLocalStats = remember(isWeekly) { viewModel.getWeeklyLocalStats() },
+                                weeklyLocalStats = viewModel.getWeeklyLocalStats(),
                                 onClick = { showWeeklySheet = true }
                             )
                         } else {
-                            // Optionally show nothing or a daily summary if needed, but for now we keep it simple
                             Spacer(Modifier.height(0.dp))
                         }
                     }
@@ -1153,7 +1163,6 @@ fun EnhancedUsageItem(
     val minutes = (info.usageTimeMillis % 3_600_000) / 60_000
     val timeStr = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
     val isOverLimit = info.limitMillis != null && info.usageTimeMillis >= info.limitMillis
-    val performanceMode = LocalPerformanceMode.current
 
     val limitProgress = info.limitMillis
         ?.takeIf { it > 0L }
@@ -1419,6 +1428,7 @@ fun WeeklySummaryCard(
                     weeklyLocalStats.forEach { day ->
                         val isToday = day == weeklyLocalStats.last()
                         val targetFraction = (day.totalMillis.toFloat() / maxDayMillis).coerceIn(0.04f, 1f)
+
                         val animatedFraction by animateFloatAsState(
                             targetValue = targetFraction,
                             animationSpec = spring(stiffness = Spring.StiffnessLow),
@@ -1766,7 +1776,7 @@ fun ScrollableNumberPicker(
                 kotlin.math.abs((it.offset + it.size / 2) - center)
             } ?: return@LaunchedEffect
             val index = closest.index
-            if (index in items.indices && items[index] != selectedItem) { // Fix: Infinite vibration
+            if (index in items.indices && items[index] != selectedItem) {
                 onItemSelected(items[index])
                 listState.animateScrollToItem(index)
                 haptic.tick()
@@ -1847,7 +1857,6 @@ fun WeeklyDetailedSheet(
     usageStats: List<AppUsageInfo>, // Pass usageStats to trigger updates
     onDismiss: () -> Unit,
 ) {
-    // Corrected reactive stats
     val stats by produceState<List<FocusFlowViewModel.DailyLocalStat>>(emptyList(), usageStats) {
         value = viewModel.getWeeklyLocalStats()
     }
