@@ -64,7 +64,9 @@ data class EncrypterUiState(
     val fileProcessingProgress: Float = 0f,
     val fileProcessingStatus: String = "",
     val lastTextAlgorithm: CryptoAlgorithm? = null,
-    val fileOperationIntent: CryptoOperation? = null
+    val fileOperationIntent: CryptoOperation? = null,
+    val isRenamerEnabled: Boolean = false,
+    val customFileName: String = ""
 )
 
 @HiltViewModel
@@ -215,7 +217,9 @@ class SmartEncrypterViewModel @Inject constructor(
                 fileProcessingProgress = 0f,
                 isManualSelectionActive = false,
                 qrCode = null,
-                fileOperationIntent = null, // Always ask first when getting into file mode
+                fileOperationIntent = null,
+                isRenamerEnabled = false,
+                customFileName = "",
                 lastTextAlgorithm = if (!currentIsFileMode) it.selectedAlgorithm else it.lastTextAlgorithm
             )
         }
@@ -234,6 +238,14 @@ class SmartEncrypterViewModel @Inject constructor(
 
     fun setFileOperationIntent(operation: CryptoOperation?) {
         _uiState.update { it.copy(fileOperationIntent = operation) }
+    }
+
+    fun toggleRenamer() {
+        _uiState.update { it.copy(isRenamerEnabled = !it.isRenamerEnabled) }
+    }
+
+    fun onCustomFileNameChanged(name: String) {
+        _uiState.update { it.copy(customFileName = name) }
     }
 
     fun updateFilePermissionStatus(granted: Boolean) {
@@ -511,9 +523,16 @@ class SmartEncrypterViewModel @Inject constructor(
                     throw Exception("Not enough storage space")
                 }
 
-                val fileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
+                val originalFileName = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
+                
+                val fileName = if (state.isRenamerEnabled && state.customFileName.isNotBlank()) {
+                    state.customFileName
+                } else {
+                    originalFileName
+                }
+
                 val baseOutputName = if (operation == CryptoOperation.ENCRYPT) {
-                    "$fileName.enc"
+                    if (fileName.endsWith(".enc")) fileName else "$fileName.enc"
                 } else {
                     fileName.removeSuffix(".enc")
                 }

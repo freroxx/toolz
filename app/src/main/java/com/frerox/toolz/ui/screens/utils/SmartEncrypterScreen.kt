@@ -244,11 +244,15 @@ fun SmartEncrypterScreen(
                         FileModePanel(
                             hasPermission = uiState.isFilePermissionGranted,
                             operation = uiState.fileOperationIntent,
+                            isRenamerEnabled = uiState.isRenamerEnabled,
+                            customFileName = uiState.customFileName,
                             onGrantClick = { showPermissionSheet = true },
                             onPickPhotos = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
                             onPickFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
                             onPickAdvanced = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            onChangeOperation = { viewModel.setFileOperationIntent(null) }
+                            onChangeOperation = { viewModel.setFileOperationIntent(null) },
+                            onToggleRenamer = viewModel::toggleRenamer,
+                            onCustomNameChange = viewModel::onCustomFileNameChanged
                         )
                     } else {
                         CryptoPanel(
@@ -522,18 +526,29 @@ fun SmartEncrypterScreen(
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
+                    val context = LocalContext.current
                     ExpressiveCard(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                                val toolzDir = File(downloadsDir, "Toolz")
-                                setDataAndType(Uri.fromFile(toolzDir), "resource/folder")
-                            }
-                            try {
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                // Fallback to just opening downloads if folder view fails
-                                try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.externalstorage.documents/document/primary:Download/Toolz"))) } catch (ex: Exception) {}
+                            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                            val toolzDir = File(downloadsDir, "Toolz")
+                            val fileName = uiState.fileProcessingStatus.substringAfter("Saved: ").trim()
+                            val file = File(toolzDir, fileName)
+                            
+                            if (file.exists()) {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file
+                                )
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                try {
+                                    context.startActivity(Intent.createChooser(intent, "Open file"))
+                                } catch (e: Exception) {
+                                    android.widget.Toast.makeText(context, "Cannot open file", android.widget.Toast.LENGTH_SHORT).show()
+                                }
                             }
                         },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(0.4f)
@@ -547,13 +562,13 @@ fun SmartEncrypterScreen(
                                 modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.secondary, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Rounded.FolderZip, null, tint = MaterialTheme.colorScheme.onSecondary)
+                                Icon(Icons.Rounded.InsertDriveFile, null, tint = MaterialTheme.colorScheme.onSecondary)
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Success", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text(uiState.fileProcessingStatus, style = MaterialTheme.typography.bodyMedium)
+                                Text(uiState.fileProcessingStatus, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                             }
-                            Icon(Icons.Rounded.ArrowForwardIos, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
                         }
                     }
                 }
@@ -699,11 +714,15 @@ private fun FormatBadge(format: CryptoFormat) {
 private fun FileModePanel(
     hasPermission: Boolean,
     operation: CryptoOperation?,
+    isRenamerEnabled: Boolean,
+    customFileName: String,
     onGrantClick: () -> Unit,
     onPickPhotos: () -> Unit,
     onPickFiles: () -> Unit,
     onPickAdvanced: () -> Unit,
-    onChangeOperation: () -> Unit
+    onChangeOperation: () -> Unit,
+    onToggleRenamer: () -> Unit,
+    onCustomNameChange: (String) -> Unit
 ) {
     CryptoPanel(
         title = "File ${operation?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Encrypter"}",
@@ -711,6 +730,7 @@ private fun FileModePanel(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!hasPermission) {
+                // ... same permission card ...
                 ExpressiveCard(
                     onClick = onGrantClick,
                     containerColor = MaterialTheme.colorScheme.errorContainer.copy(0.3f),
@@ -750,7 +770,7 @@ private fun FileModePanel(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         TextButton(onClick = onChangeOperation) {
-                            Text("Change Mode", style = MaterialTheme.typography.labelSmall)
+                            Text("Change Action", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                     
@@ -779,6 +799,39 @@ private fun FileModePanel(
                             modifier = Modifier.weight(1f),
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer
                         )
+                    }
+
+                    // Renamer Toggle
+                    ExpressiveCard(
+                        onClick = onToggleRenamer,
+                        containerColor = if (isRenamerEnabled) MaterialTheme.colorScheme.primaryContainer.copy(0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(0.3f),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Rounded.DriveFileRenameOutline, null, modifier = Modifier.size(18.dp), tint = if (isRenamerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Custom output name", style = MaterialTheme.typography.labelLarge)
+                                }
+                                Switch(checked = isRenamerEnabled, onCheckedChange = { onToggleRenamer() }, modifier = Modifier.scale(0.7f))
+                            }
+                            
+                            AnimatedVisibility(visible = isRenamerEnabled) {
+                                OutlinedTextField(
+                                    value = customFileName,
+                                    onValueChange = onCustomNameChange,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("Enter new file name") },
+                                    shape = RoundedCornerShape(16.dp),
+                                    textStyle = MaterialTheme.typography.bodySmall,
+                                    singleLine = true
+                                )
+                            }
+                        }
                     }
                     
                     Text(
