@@ -16,6 +16,10 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import java.io.InputStream
+import java.io.OutputStream
+import javax.crypto.CipherInputStream
+import javax.crypto.CipherOutputStream
 
 object CryptoManager {
     private const val AES_KEY_SIZE = 256
@@ -425,6 +429,172 @@ object CryptoManager {
         if (password.any { it.isUpperCase() }) score += 0.2f
         if (password.any { !it.isLetterOrDigit() }) score += 0.2f
         return score
+    }
+
+    /**
+     * Streaming AES-256-GCM Encryption
+     */
+    fun encryptStreamAes(
+        input: InputStream,
+        output: OutputStream,
+        password: CharArray,
+        totalSize: Long,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        return try {
+            val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
+            val iv = ByteArray(IV_SIZE).apply { SecureRandom().nextBytes(this) }
+            
+            output.write(salt)
+            output.write(iv)
+
+            val key = deriveKey(password, salt, AES_KEY_SIZE)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
+
+            val cipherOutputStream = CipherOutputStream(output, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
+            var totalBytesRead = 0L
+
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                cipherOutputStream.write(buffer, 0, bytesRead)
+                totalBytesRead += bytesRead
+                if (totalSize > 0) {
+                    onProgress(totalBytesRead.toFloat() / totalSize)
+                }
+            }
+            cipherOutputStream.flush()
+            cipherOutputStream.close()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Streaming AES-256-GCM Decryption
+     */
+    fun decryptStreamAes(
+        input: InputStream,
+        output: OutputStream,
+        password: CharArray,
+        totalSize: Long,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        return try {
+            val salt = ByteArray(SALT_SIZE)
+            val iv = ByteArray(IV_SIZE)
+            
+            if (input.read(salt) != SALT_SIZE || input.read(iv) != IV_SIZE) {
+                return false
+            }
+
+            val key = deriveKey(password, salt, AES_KEY_SIZE)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
+
+            val cipherInputStream = CipherInputStream(input, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
+            var totalBytesRead = (SALT_SIZE + IV_SIZE).toLong()
+
+            while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+                output.write(buffer, 0, bytesRead)
+                totalBytesRead += bytesRead
+                if (totalSize > 0) {
+                    onProgress(totalBytesRead.toFloat() / totalSize)
+                }
+            }
+            output.flush()
+            cipherInputStream.close()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Streaming ChaCha20-Poly1305 Encryption
+     */
+    fun encryptStreamChaCha20(
+        input: InputStream,
+        output: OutputStream,
+        password: CharArray,
+        totalSize: Long,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        return try {
+            val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
+            val nonce = ByteArray(NONCE_SIZE).apply { SecureRandom().nextBytes(this) }
+            
+            output.write(salt)
+            output.write(nonce)
+
+            val key = deriveKey(password, salt, CHACHA20_KEY_SIZE)
+            val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(nonce))
+
+            val cipherOutputStream = CipherOutputStream(output, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
+            var totalBytesRead = 0L
+
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                cipherOutputStream.write(buffer, 0, bytesRead)
+                totalBytesRead += bytesRead
+                if (totalSize > 0) {
+                    onProgress(totalBytesRead.toFloat() / totalSize)
+                }
+            }
+            cipherOutputStream.flush()
+            cipherOutputStream.close()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Streaming ChaCha20-Poly1305 Decryption
+     */
+    fun decryptStreamChaCha20(
+        input: InputStream,
+        output: OutputStream,
+        password: CharArray,
+        totalSize: Long,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        return try {
+            val salt = ByteArray(SALT_SIZE)
+            val nonce = ByteArray(NONCE_SIZE)
+            
+            if (input.read(salt) != SALT_SIZE || input.read(nonce) != NONCE_SIZE) {
+                return false
+            }
+
+            val key = deriveKey(password, salt, CHACHA20_KEY_SIZE)
+            val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonce))
+
+            val cipherInputStream = CipherInputStream(input, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
+            var totalBytesRead = (SALT_SIZE + NONCE_SIZE).toLong()
+
+            while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+                output.write(buffer, 0, bytesRead)
+                totalBytesRead += bytesRead
+                if (totalSize > 0) {
+                    onProgress(totalBytesRead.toFloat() / totalSize)
+                }
+            }
+            output.flush()
+            cipherInputStream.close()
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun generateQrCode(
