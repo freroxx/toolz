@@ -300,7 +300,7 @@ class PomodoroViewModel @Inject constructor(
                 $currentQuotes
             """.trimIndent()
 
-            val models = listOf("llama-3.1-8b-instant", "gpt-oss-20b")
+            val models = listOf("openai/gpt-oss-20b", "llama-3.1-8b-instant")
             for (modelName in models) {
                 try {
                     val resp = withContext(Dispatchers.IO) {
