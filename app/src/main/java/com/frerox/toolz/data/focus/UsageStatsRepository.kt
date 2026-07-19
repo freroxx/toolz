@@ -152,6 +152,26 @@ class UsageStatsRepository @Inject constructor(
         }
     }
 
+    /**
+     * Robust aggregate usage for a specific package today.
+     */
+    fun queryPackageUsageToday(packageName: String): Long {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startMs = calendar.timeInMillis
+        val endMs = System.currentTimeMillis()
+
+        return try {
+            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startMs, endMs)
+            stats.find { it.packageName == packageName }?.totalTimeInForeground ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
     private fun isExcluded(packageName: String): Boolean {
         if (packageName in EXCLUDED_PACKAGES) return true
         if (EXCLUDED_PREFIXES.any { packageName.startsWith(it) }) return true
