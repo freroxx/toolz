@@ -60,7 +60,7 @@
             android:layout_marginTop="64dp"
             android:backgroundTint="#FFFFFF"
             android:textColor="#000000"
-            android:text="RETURN TO DASHBOARD"
+            android:text="RETURN TO FOCUS FLOW"
             android:textStyle="bold"
             android:textSize="14sp"
             android:letterSpacing="0.1" />
