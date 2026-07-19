@@ -2,7 +2,6 @@
 
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityManager
-import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -47,6 +46,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    @Inject
+    lateinit var usageRepository: com.frerox.toolz.data.focus.UsageStatsRepository
+
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var isOverlayShowing = false
@@ -66,6 +68,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var isFocusSessionActive = false
     private var categoryMappings = emptyMap<String, String>()
     private var appLimits = emptyMap<String, Long>()
+    private var aiCategoryMappings = emptyMap<String, String>()
 
     companion object {
         private const val TAG = "FocusFlowService"
@@ -83,6 +86,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "FocusFlowAccessibilityService created")
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         refreshHomePackage()
         startPeriodicValidation()
@@ -92,20 +96,47 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private fun observeSettings() {
         serviceScope.launch {
             settingsRepository.focusFlowSessionActive.collect { active ->
+                Log.d(TAG, "Settings: focusFlowSessionActive = $active")
                 isFocusSessionActive = active
                 currentPackage?.let { validateAndLock(it) }
             }
         }
         serviceScope.launch {
             settingsRepository.appCategoryMappings.collect { mappings ->
+                Log.d(TAG, "Settings: categoryMappings size = ${mappings.size}")
                 categoryMappings = mappings
                 currentPackage?.let { validateAndLock(it) }
             }
         }
         serviceScope.launch {
             appLimitRepository.allLimits.collect { limits ->
+                Log.d(TAG, "Settings: appLimits size = ${limits.size}")
                 appLimits = limits.associate { it.packageName to it.limitMillis }
                 currentPackage?.let { validateAndLock(it) }
+            }
+        }
+        // Load AI categories from SharedPreferences
+        serviceScope.launch {
+            while(isActive) {
+                try {
+                    val prefs = getSharedPreferences("focus_ai_category_cache", Context.MODE_PRIVATE)
+                    val jsonStr = prefs.getString("categories_json", null)
+                    if (jsonStr != null) {
+                        val json = org.json.JSONObject(jsonStr)
+                        val newAiMappings = mutableMapOf<String, String>()
+                        json.keys().forEach { pkg ->
+                            newAiMappings[pkg] = json.getString(pkg)
+                        }
+                        if (newAiMappings != aiCategoryMappings) {
+                            Log.d(TAG, "Settings: aiCategoryMappings updated, size = ${newAiMappings.size}")
+                            aiCategoryMappings = newAiMappings
+                            currentPackage?.let { validateAndLock(it) }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error loading AI categories", e)
+                }
+                delay(30000) // Every 30s is enough for cache
             }
         }
     }
@@ -116,8 +147,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         val packageName = event.packageName?.toString() ?: return
         val className = event.className?.toString() ?: ""
 
+        Log.d(TAG, "onAccessibilityEvent: $packageName / $className")
+
         // Handle package change for precise tracking
         if (packageName != currentPackage) {
+            Log.d(TAG, "Package changed: $currentPackage -> $packageName")
             currentPackage = packageName
             currentPackageResumedTime = System.currentTimeMillis()
         }
@@ -127,13 +161,13 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             return
         }
 
-        Log.d(TAG, "onAccessibilityEvent: $packageName / $className")
-
         // Handle "Safe" contexts
-        if (packageName == getHomePackage() || (packageName == toolzPackage && (className.contains("Activity") || className.contains("MainActivity")))) {
-            if (packageName == getHomePackage() && shouldKeepOverlayVisibleOnHome()) {
+        if (isHomePackage(packageName) || (packageName == toolzPackage && (className.contains("Activity") || className.contains("MainActivity")))) {
+            if (isHomePackage(packageName) && shouldKeepOverlayVisibleOnHome()) {
+                Log.d(TAG, "Keeping overlay visible on Home")
                 return
             }
+            Log.d(TAG, "Hiding overlay because of safe context: $packageName")
             hideOverlay()
             return
         }
@@ -169,24 +203,28 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
     }
 
+    private var homePackages = setOf<String>()
+
     private fun refreshHomePackage() {
         val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
-        val res = packageManager.resolveActivity(intent, 0)
-        cachedHomePackage = res?.activityInfo?.packageName
+        val resolveInfos = packageManager.queryIntentActivities(intent, 0)
+        homePackages = resolveInfos.map { it.activityInfo.packageName }.toSet()
+        Log.d(TAG, "Refreshed home packages: $homePackages")
+        cachedHomePackage = resolveInfos.firstOrNull()?.activityInfo?.packageName
     }
 
-    private fun getHomePackage(): String? {
-        if (cachedHomePackage == null) refreshHomePackage()
-        return cachedHomePackage
+    private fun isHomePackage(packageName: String): Boolean {
+        if (homePackages.isEmpty()) refreshHomePackage()
+        return homePackages.contains(packageName)
     }
 
     private fun startPeriodicValidation() {
         validationJob?.cancel()
         validationJob = serviceScope.launch {
             while (isActive) {
-                delay(1500)
+                delay(500) // Fast check
                 val pkg = currentPackage
-                if (pkg != null && pkg != getHomePackage() && pkg != toolzPackage && !SYSTEM_UI_PACKAGES.contains(pkg)) {
+                if (pkg != null && !isHomePackage(pkg) && pkg != toolzPackage && !SYSTEM_UI_PACKAGES.contains(pkg)) {
                     validateAndLock(pkg)
                 }
             }
@@ -194,19 +232,27 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun validateAndLock(packageName: String) {
-        if (packageName == toolzPackage) return // Security: Toolz is immune
+        if (packageName == toolzPackage) {
+            hideOverlay()
+            return
+        }
 
         val limitMillis = appLimits[packageName]
         val isSessionActive = isFocusSessionActive
         
         val isDistraction = categoryMappings[packageName] == "Distraction" || 
-                            (categoryMappings[packageName] == null && isLikelyDistraction(packageName))
+                            aiCategoryMappings[packageName] == "DISTRACTION" ||
+                            (categoryMappings[packageName] == null && aiCategoryMappings[packageName] == null && isLikelyDistraction(packageName))
 
+        val usageTime = getTodayUsage(packageName)
+        
         val shouldLock = if (isSessionActive && isDistraction) {
-            true // Global block during focus session
+            Log.d(TAG, "validateAndLock: Blocking $packageName due to focus session")
+            true 
         } else if (limitMillis != null && limitMillis > 0) {
-            val usageTime = getTodayUsage(packageName)
-            usageTime >= limitMillis
+            val locked = usageTime >= limitMillis
+            if (locked) Log.d(TAG, "validateAndLock: Blocking $packageName due to limit ($usageTime >= $limitMillis)")
+            locked
         } else {
             false
         }
@@ -214,8 +260,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         if (shouldLock) {
             showOverlay(packageName, isSessionActive && isDistraction)
             enforceLockedApp(packageName)
-        } else if (overlayShowingForPackage == packageName) {
-            hideOverlay()
+        } else {
+            if (isOverlayShowing && overlayShowingForPackage == packageName) {
+                Log.d(TAG, "hiding overlay for $packageName because shouldLock is false (usage: $usageTime)")
+                hideOverlay()
+            }
         }
     }
 
@@ -266,23 +315,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun getTodayUsage(packageName: String): Long {
-        val statsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        val startTime = calendar.timeInMillis
-        val endTime = System.currentTimeMillis()
-
         return try {
-            // Use queryUsageStats for potentially more recent data than aggregated if available
-            val stats = statsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
-            var usage = stats.find { it.packageName == packageName }?.totalTimeInForeground ?: 0L
-            
-            // Critical Fix: Add time for the current ongoing session if it's the package we're checking
+            var usage = usageRepository.queryPackageUsageToday(packageName)
+            // Add current session if it's the package we're checking
             if (packageName == currentPackage && currentPackageResumedTime > 0) {
-                val sessionDuration = endTime - currentPackageResumedTime
+                val sessionDuration = System.currentTimeMillis() - currentPackageResumedTime
                 if (sessionDuration > 0) {
                     usage += sessionDuration
                 }
@@ -295,79 +332,89 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun showOverlay(packageName: String, isSessionBlock: Boolean = false) {
-        if (isOverlayShowing && overlayShowingForPackage == packageName) return
+        // Only skip if already showing for THIS package AND the view is actually there
+        if (isOverlayShowing && overlayShowingForPackage == packageName && overlayView?.isAttachedToWindow == true) {
+            Log.d(TAG, "showOverlay: Already showing for $packageName")
+            return
+        }
         
         Log.d(TAG, "Showing lock screen for: $packageName (Session block: $isSessionBlock)")
-
-        if (isOverlayShowing) {
-            removeOverlayInternal()
-        }
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_FULLSCREEN or
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.CENTER
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
-
-        val inflater = LayoutInflater.from(this)
-        val view = inflater.inflate(R.layout.layout_focus_lock, null)
         
-        val appName = try {
-            val ai = packageManager.getApplicationInfo(packageName, 0)
-            packageManager.getApplicationLabel(ai).toString()
-        } catch (e: Exception) {
-            packageName
-        }
-        val message = if (isSessionBlock) {
-            "Focus session in progress. $appName is restricted."
-        } else {
-            "Time's up for $appName."
-        }
-        view.findViewById<TextView>(R.id.tv_lock_message)?.text = message
-        
-        view.isClickable = true
-        view.isFocusable = true
-        view.isFocusableInTouchMode = true
-        view.setOnKeyListener { _, keyCode, _ ->
-            if (keyCode == KeyEvent.KEYCODE_BACK) {
-                true // Blocked
-            } else {
-                false
-            }
-        }
+        // Ensure we're on the main thread for UI
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                // Clean up any stale overlay
+                removeOverlayInternal()
 
-        view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
-            hideOverlay()
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Dashboard.route)
-            }
-            startActivity(intent)
-        }
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, // Allow key events
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.CENTER
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                }
 
-        try {
-            windowManager?.addView(view, params)
-            overlayView = view
-            isOverlayShowing = true
-            overlayShowingForPackage = packageName
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to add window overlay", e)
+                val inflater = LayoutInflater.from(this@FocusFlowAccessibilityService)
+                val view = inflater.inflate(R.layout.layout_focus_lock, null)
+                
+                val appName = try {
+                    val ai = packageManager.getApplicationInfo(packageName, 0)
+                    packageManager.getApplicationLabel(ai).toString()
+                } catch (e: Exception) {
+                    packageName
+                }
+                val message = if (isSessionBlock) {
+                    "Focus session in progress. $appName is restricted."
+                } else {
+                    "Time's up for $appName."
+                }
+                view.findViewById<TextView>(R.id.tv_lock_message)?.text = message
+                
+                view.isClickable = true
+                view.isFocusable = true
+                view.isFocusableInTouchMode = true
+                view.setOnKeyListener { _, keyCode, _ ->
+                    if (keyCode == KeyEvent.KEYCODE_BACK) {
+                        Log.d(TAG, "Overlay: Back button blocked")
+                        true // Blocked
+                    } else {
+                        false
+                    }
+                }
+
+                view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
+                    Log.d(TAG, "Overlay: Exit button clicked")
+                    hideOverlay()
+                    val intent = Intent(this@FocusFlowAccessibilityService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.FocusFlow.route)
+                    }
+                    startActivity(intent)
+                }
+
+                windowManager?.addView(view, params)
+                overlayView = view
+                isOverlayShowing = true
+                overlayShowingForPackage = packageName
+                Log.d(TAG, "Overlay successfully added for $packageName")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to add window overlay", e)
+            }
         }
     }
 
     private fun hideOverlay() {
         if (isOverlayShowing) {
-            Log.d(TAG, "Hiding overlay")
+            Log.d(TAG, "Hiding overlay for $overlayShowingForPackage")
             removeOverlayInternal()
             isOverlayShowing = false
             overlayShowingForPackage = null
@@ -389,13 +436,16 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun enforceLockedApp(packageName: String) {
+        if (blockedPackagePendingDismissal == packageName) return // Already enforcing
+        Log.d(TAG, "Enforcing block for $packageName")
         blockedPackagePendingDismissal = packageName
         muteLockedAppAudio(packageName)
 
         backgroundStopJob?.cancel()
         backgroundStopJob = serviceScope.launch {
+            Log.d(TAG, "Performing Global Action HOME")
             performGlobalAction(GLOBAL_ACTION_HOME)
-            delay(250)
+            delay(500)
             stopLockedAppInBackground(packageName)
         }
     }
