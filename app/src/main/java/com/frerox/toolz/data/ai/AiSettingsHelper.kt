@@ -12,7 +12,7 @@ object AiSettingsHelper {
     fun getRecommendedModel(provider: String): String = when (provider) {
         "Gemini" -> "gemini-3.5-flash"
         "ChatGPT" -> "gpt-5.6-terra"
-        "Groq" -> "llama-3.3-70b-versatile"
+        "Groq" -> "openai/gpt-oss-20b"
         "Claude" -> "claude-sonnet-5"
         "DeepSeek" -> "deepseek-v4-flash"
         "OpenRouter" -> "anthropic/claude-sonnet-5"
@@ -45,13 +45,18 @@ object AiSettingsHelper {
             "gpt-4o-mini"
         )
         "Groq" -> listOf(
-            "gpt-oss-120b",
-            "gpt-oss-20b",
+            "meta-llama/llama-4-behemoth-288b",
+            "meta-llama/llama-4-maverick-17b",
+            "meta-llama/llama-4-scout-17b",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
-            "llama-3.2-90b-vision-preview",
-            "llama-3.2-11b-vision-preview",
-            "deepseek-r1-distill-llama-70b",
+            "deepseek/deepseek-r1-distill-70b",
+            "qwen/qwen3.6-27b",
+            "qwen/qwen3-vl-32b-instruct",
+            "mistral/mistral-saba-24b",
+            "openai/gpt-oss-safeguard-20b",
             "mixtral-8x7b-32768"
         )
         "Claude" -> listOf(
