@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -73,6 +74,7 @@ fun FocusFlowScreen(
     val aiClassifiedPkgs  by viewModel.aiClassifiedPackages.collectAsState()
     val hasUsagePermission by viewModel.hasUsagePermission.collectAsState()
     val top5Apps          by viewModel.top5Apps.collectAsState()
+    val blockedApps       by viewModel.blockedApps.collectAsState()
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
     val focusSession       by viewModel.focusSession.collectAsState()
 
@@ -193,8 +195,8 @@ fun FocusFlowScreen(
                         if (performanceMode) Modifier
                         else Modifier.fadingEdges(top = 16.dp, bottom = 16.dp)
                     ),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 if (!hasUsagePermission) {
                     item {
@@ -226,6 +228,7 @@ fun FocusFlowScreen(
                     FocusSessionHeader(
                         score = productivityScore,
                         session = focusSession,
+                        blockedApps = blockedApps,
                         performanceMode = performanceMode,
                         offlineModeEnabled = offlineModeEnabled,
                         onStartClick = { showSessionPicker = true },
@@ -340,13 +343,15 @@ fun FocusFlowScreen(
                     AnimatedContent(
                         targetState = isWeekly,
                         transitionSpec = {
+                            val spec = tween<IntOffset>(durationMillis = 600, easing = FastOutSlowInEasing)
+                            val fadeSpec = tween<Float>(durationMillis = 500)
                             if (targetState) {
-                                (slideInHorizontally(animationSpec = spring(stiffness = Spring.StiffnessLow)) { it } + fadeIn()).togetherWith(
-                                    slideOutHorizontally(animationSpec = spring(stiffness = Spring.StiffnessLow)) { -it } + fadeOut()
+                                (slideInHorizontally(animationSpec = spec) { it } + fadeIn(fadeSpec)).togetherWith(
+                                    slideOutHorizontally(animationSpec = spec) { -it } + fadeOut(fadeSpec)
                                 )
                             } else {
-                                (slideInHorizontally(animationSpec = spring(stiffness = Spring.StiffnessLow)) { -it } + fadeIn()).togetherWith(
-                                    slideOutHorizontally(animationSpec = spring(stiffness = Spring.StiffnessLow)) { it } + fadeOut()
+                                (slideInHorizontally(animationSpec = spec) { -it } + fadeIn(fadeSpec)).togetherWith(
+                                    slideOutHorizontally(animationSpec = spec) { it } + fadeOut(fadeSpec)
                                 )
                             }.using(SizeTransform(clip = false))
                         },
@@ -359,7 +364,10 @@ fun FocusFlowScreen(
                                 onClick = { showWeeklySheet = true }
                             )
                         } else {
-                            Spacer(Modifier.height(0.dp))
+                            DailyBreakdownCard(
+                                stats = usageStats,
+                                score = productivityScore
+                            )
                         }
                     }
                 }
@@ -711,6 +719,7 @@ fun MetricCard(
 fun FocusSessionHeader(
     score: Int,
     session: FocusSessionUiState,
+    blockedApps: List<AppUsageInfo>,
     performanceMode: Boolean,
     offlineModeEnabled: Boolean,
     onStartClick: () -> Unit,
@@ -914,6 +923,40 @@ fun FocusSessionHeader(
                                 )
                                 Text(statusLabel, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                                 Text(supportLabel, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+
+                if (isSessionActive && blockedApps.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.Block, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.error)
+                            Text("Restricted apps (${blockedApps.size})", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(blockedApps.take(10)) { app ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), SquircleShape)
+                                        .padding(6.dp)
+                                ) {
+                                    AppIcon(packageName = app.packageName, modifier = Modifier.fillMaxSize())
+                                }
+                            }
+                            if (blockedApps.size > 10) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), SquircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("+${blockedApps.size - 10}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1162,7 +1205,6 @@ fun EnhancedUsageItem(
     val hours = info.usageTimeMillis / 3_600_000
     val minutes = (info.usageTimeMillis % 3_600_000) / 60_000
     val timeStr = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
-    val isOverLimit = info.limitMillis != null && info.usageTimeMillis >= info.limitMillis
 
     val limitProgress = info.limitMillis
         ?.takeIf { it > 0L }
@@ -1186,14 +1228,14 @@ fun EnhancedUsageItem(
         onLongClick = onLongClick,
         modifier = modifier.fillMaxWidth().expressivePressScale(interactionSource),
         shape = SquircleShape,
-        containerColor = if (isOverLimit) {
+        containerColor = if (info.isBlocked) {
             MaterialTheme.colorScheme.error.copy(alpha = 0.05f)
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
         },
         border = BorderStroke(
-            width = if (isOverLimit) 1.5.dp else 1.dp,
-            color = if (isOverLimit) {
+            width = if (info.isBlocked) 1.5.dp else 1.dp,
+            color = if (info.isBlocked) {
                 MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
             } else {
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
@@ -1203,16 +1245,26 @@ fun EnhancedUsageItem(
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Surface(
                     shape = SquircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.size(50.dp),
+                    color = if (info.isBlocked) MaterialTheme.colorScheme.error.copy(0.1f) else MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.size(44.dp),
                 ) {
-                    AppIcon(packageName = info.packageName, modifier = Modifier.padding(10.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        AppIcon(packageName = info.packageName, modifier = Modifier.padding(8.dp))
+                        if (info.isBlocked) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.error.copy(0.2f))
+                            )
+                            Icon(Icons.Rounded.Lock, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
 
                 Column(Modifier.weight(1f)) {
@@ -1223,7 +1275,7 @@ fun EnhancedUsageItem(
                         Text(
                             info.appName,
                             fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1235,20 +1287,21 @@ fun EnhancedUsageItem(
                                 shape = CircleShape,
                                 modifier = Modifier.padding(start = 2.dp)
                             ) {
-                                Text("AI", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, fontSize = 8.sp)
+                                Text("AI", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold, fontSize = 7.sp)
                             }
                         }
                     }
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(1.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (info.limitMillis != null) {
-                            Icon(Icons.Rounded.Timer, null, modifier = Modifier.size(11.dp), tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Rounded.Timer, null, modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(3.dp))
                             Text(
                                 "Limit ${info.limitMillis / 60_000}m",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Medium,
+                                fontSize = 10.sp
                             )
                         } else {
                             Text(
@@ -1257,6 +1310,7 @@ fun EnhancedUsageItem(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                fontSize = 10.sp
                             )
                         }
                     }
@@ -1269,10 +1323,10 @@ fun EnhancedUsageItem(
                     Text(
                         timeStr,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (isOverLimit) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (info.isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(2.dp))
                     val catColor = when {
                         isToolzApp -> MaterialTheme.colorScheme.tertiary
                         info.category == AppCategory.TOOLZ -> MaterialTheme.colorScheme.primary
@@ -1291,9 +1345,9 @@ fun EnhancedUsageItem(
                                 info.category == AppCategory.DISTRACTION -> "Distract"
                                 else -> "Other"
                             },
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             color = catColor
                         )
@@ -1304,8 +1358,8 @@ fun EnhancedUsageItem(
             if (info.limitMillis != null && limitProgress != null) {
                 val limitMinutes = info.limitMillis / 60_000
                 Column(
-                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1322,7 +1376,7 @@ fun EnhancedUsageItem(
                             text = "${(limitProgress * 100).toInt().coerceAtMost(120)}%",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (isOverLimit) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (info.isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     ToolzWavyLinearProgressIndicator(
@@ -1339,7 +1393,7 @@ fun EnhancedUsageItem(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -1366,6 +1420,84 @@ fun EnhancedUsageItem(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyBreakdownCard(
+    stats: List<AppUsageInfo>,
+    score: Int
+) {
+    val totalTime = stats.sumOf { it.usageTimeMillis }
+    val toolzTime = stats.filter { it.category == AppCategory.TOOLZ }.sumOf { it.usageTimeMillis }
+    val distractionTime = stats.filter { it.category == AppCategory.DISTRACTION }.sumOf { it.usageTimeMillis }
+    val otherTime = (totalTime - toolzTime - distractionTime).coerceAtLeast(0)
+
+    val toolzFraction = if (totalTime > 0) toolzTime.toFloat() / totalTime else 0f
+    val distractionFraction = if (totalTime > 0) distractionTime.toFloat() / totalTime else 0f
+    val otherFraction = if (totalTime > 0) otherTime.toFloat() / totalTime else 0f
+
+    ExpressiveCard(
+        onClick = {},
+        modifier = Modifier.fillMaxWidth(),
+        shape = BouncyShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+        elevation = 0.dp
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.PieChart, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Text(
+                        "Daily distribution",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    shape = CapsuleShape,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        "$score% Productive",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .clip(CapsuleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.3f))
+            ) {
+                if (toolzFraction > 0f) {
+                    Box(Modifier.fillMaxHeight().weight(toolzFraction).background(MaterialTheme.colorScheme.primary))
+                }
+                if (distractionFraction > 0f) {
+                    Box(Modifier.fillMaxHeight().weight(distractionFraction).background(MaterialTheme.colorScheme.error))
+                }
+                if (otherFraction > 0f) {
+                    Box(Modifier.fillMaxHeight().weight(otherFraction).background(MaterialTheme.colorScheme.outlineVariant.copy(0.3f)))
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                LegendItem("Focus", MaterialTheme.colorScheme.primary)
+                LegendItem("Distract", MaterialTheme.colorScheme.error)
+                LegendItem("Other", MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }

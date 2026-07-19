@@ -259,7 +259,7 @@ class FocusFlowViewModel @Inject constructor(
      * first line of defence against overlay flicker.
      */
     val combinedUsageStats: Flow<List<AppUsageInfo>> = combine(
-        _rawStats, _appLimits, userMappings, appNameMappings, _aiCategoryCache,
+        _rawStats, _appLimits, userMappings, appNameMappings, _aiCategoryCache
     ) { stats, limits, mappings, nameMap, aiCache ->
 
         val pm       = context.packageManager
@@ -289,17 +289,28 @@ class FocusFlowViewModel @Inject constructor(
                 aiCache.containsKey(stat.packageName) -> aiCache.getValue(stat.packageName)
                 else -> guessCategory(stat.packageName)
             }
+
             stat.copy(
                 appName     = nameMap[stat.packageName] ?: stat.appName,
                 limitMillis = limit?.limitMillis,
                 category    = category,
             )
-        }.sortedByDescending { it.usageTimeMillis }
+        }
+    }.combine(_focusSession) { stats, session ->
+        stats.map { stat ->
+            val isOverLimit = stat.limitMillis != null && stat.limitMillis > 0 && stat.todayUsageTimeMillis >= stat.limitMillis
+            val isSessionBlocked = session.state == FocusSessionState.RUNNING && stat.category == AppCategory.DISTRACTION
 
+            stat.copy(isBlocked = isOverLimit || isSessionBlocked)
+        }.sortedByDescending { it.usageTimeMillis }
     }.distinctUntilChanged()
 
     val top5Apps: StateFlow<List<AppUsageInfo>> = combinedUsageStats
         .map { it.take(5) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val blockedApps: StateFlow<List<AppUsageInfo>> = combinedUsageStats
+        .map { stats -> stats.filter { it.isBlocked } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -488,9 +499,13 @@ class FocusFlowViewModel @Inject constructor(
 
             val usageList = withContext(Dispatchers.IO) {
                 if (_isWeekly.value) {
-                    usageRepository.queryWeeklyByAggregate(startTime, now)
+                    val weekly = usageRepository.queryWeeklyByAggregate(startTime, now)
+                    weekly.map { info ->
+                        info.copy(todayUsageTimeMillis = usageRepository.queryPackageUsageToday(info.packageName))
+                    }
                 } else {
-                    usageRepository.queryDailyByEvents(startTime, now)
+                    val daily = usageRepository.queryDailyByEvents(startTime, now)
+                    daily.map { it.copy(todayUsageTimeMillis = it.usageTimeMillis) }
                 }
             }
 
