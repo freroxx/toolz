@@ -100,6 +100,7 @@ class WebSearchRepository @Inject constructor(
                     }
                     "CONTROLD"          -> doh("https://freedns.controld.com/p1")
                     "CLEANBROWSING"     -> doh("https://doh.cleanbrowsing.org/doh/family-filter/")
+                    "CLEANBROWSING_SECURITY" -> doh("https://doh.cleanbrowsing.org/doh/security-filter/")
                     "CUSTOM"            -> {
                         val url = if (customDns.startsWith("http")) {
                             customDns
@@ -112,7 +113,10 @@ class WebSearchRepository @Inject constructor(
                     }
                     else                -> Dns.SYSTEM
                 }
-            } catch (_: Exception) { Dns.SYSTEM }
+            } catch (e: Exception) { 
+                e.printStackTrace()
+                Dns.SYSTEM 
+            }
         }
 
         val client = baseClient.newBuilder()
@@ -234,6 +238,7 @@ class WebSearchRepository @Inject constructor(
     suspend fun search(query: String, offset: Int = 0): List<SearchResult> = withContext(Dispatchers.IO) {
         val rawAdBlockEnabled = settingsRepository.searchAdBlockEnabled.first()
         val dnsProvider       = settingsRepository.searchDnsProvider.first()
+        // Only disable in-app blocking if NextDNS is taking care of it
         val adBlockEnabled    = rawAdBlockEnabled && dnsProvider != "NEXTDNS"
         
         val engine            = settingsRepository.searchEngine.first()
