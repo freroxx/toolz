@@ -1,6 +1,7 @@
 package com.frerox.toolz.data.browser
 
 import java.net.URI
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Hello gang lol, so here's the ad block list I made (i didn't use ai, i mean just a little bit)
@@ -749,20 +750,17 @@ object AdBlockList {
         "zz.com"
     )
 
-    private val customBlockedDomains: HashSet<String> = hashSetOf()
-    private val allowlistedDomains: HashSet<String> = hashSetOf()
-    private val importedDomains: HashSet<String> = hashSetOf()
+    private val customBlockedDomains = AtomicReference<Set<String>>(emptySet())
+    private val allowlistedDomains = AtomicReference<Set<String>>(emptySet())
+    private val importedDomains = AtomicReference<Set<String>>(emptySet())
 
     fun updateCustomLists(blocked: Set<String>, allowed: Set<String>) {
-        customBlockedDomains.clear()
-        customBlockedDomains.addAll(blocked.map { it.lowercase() })
-        allowlistedDomains.clear()
-        allowlistedDomains.addAll(allowed.map { it.lowercase() })
+        customBlockedDomains.set(blocked.map { it.lowercase() }.toSet())
+        allowlistedDomains.set(allowed.map { it.lowercase() }.toSet())
     }
 
     fun updateImportedList(domains: Set<String>) {
-        importedDomains.clear()
-        importedDomains.addAll(domains.map { it.lowercase() })
+        importedDomains.set(domains.map { it.lowercase() }.toSet())
     }
 
     // ────────────────────────────────────────────────────────── Path patterns
@@ -833,13 +831,13 @@ object AdBlockList {
             val path = uri.path?.lowercase() ?: ""
 
             // Check allowlist first (highest priority)
-            if (domainMatches(host, allowlistedDomains)) return false
+            if (domainMatches(host, allowlistedDomains.get())) return false
 
             // Check custom blocklist (additive)
-            if (domainMatches(host, customBlockedDomains)) return true
+            if (domainMatches(host, customBlockedDomains.get())) return true
 
             // Check imported blocklists (additive)
-            if (domainMatches(host, importedDomains)) return true
+            if (domainMatches(host, importedDomains.get())) return true
 
             // Check default blocklists (additive)
             if (domainBlocked(host)) return true
@@ -847,16 +845,19 @@ object AdBlockList {
             false
         } catch (_: Exception) {
             val lower = url.lowercase()
-            // Robust fallback check for circular dependency cases
-            if (allowlistedDomains.isNotEmpty() && allowlistedDomains.any { lower.contains(it) }) return false
-            if (customBlockedDomains.isNotEmpty() && customBlockedDomains.any { lower.contains(it) }) return true
-            if (importedDomains.isNotEmpty() && importedDomains.any { lower.contains(it) }) return true
+            val allowed = allowlistedDomains.get()
+            val custom = customBlockedDomains.get()
+            val imported = importedDomains.get()
+
+            if (allowed.isNotEmpty() && allowed.any { lower.contains(it) }) return false
+            if (custom.isNotEmpty() && custom.any { lower.contains(it) }) return true
+            if (imported.isNotEmpty() && imported.any { lower.contains(it) }) return true
             
             domains.any { lower.contains(it) } || blockedPaths.any { lower.contains(it) }
         }
     }
 
-    fun totalCount(): Int = domains.size + customBlockedDomains.size + importedDomains.size
+    fun totalCount(): Int = domains.size + customBlockedDomains.get().size + importedDomains.get().size
 
     /**
      * Segment‑based lookup that respects public suffixes (prevents over‑blocking).
@@ -864,7 +865,7 @@ object AdBlockList {
      */
     fun domainBlocked(host: String): Boolean = domainMatches(host, domains)
 
-    private fun domainMatches(host: String, targetSet: HashSet<String>): Boolean {
+    private fun domainMatches(host: String, targetSet: Set<String>): Boolean {
         if (targetSet.contains(host)) return true
 
         val parts = host.split('.')
