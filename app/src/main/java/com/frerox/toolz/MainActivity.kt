@@ -742,9 +742,34 @@ fun ToolzNavHost(
             SearchScreen(
                 onBackClick = { navController.popBackStack() },
                 onResultClick = { url ->
-                    navController.navigate(Screen.Browser.createRoute(url))
+                    if (url == Screen.AdBlockSettings.route) {
+                        navController.navigate(Screen.AdBlockSettings.route)
+                    } else {
+                        navController.navigate(Screen.Browser.createRoute(url))
+                    }
                 },
                 onManageTabs = { navController.navigate(Screen.TabManagement.route) }
+            )
+        }
+
+        composable(Screen.AdBlockSettings.route) {
+            com.frerox.toolz.ui.screens.search.AdBlockSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToNextDnsSetup = { url ->
+                    navController.navigate(Screen.NextDnsSetup.createRoute(url))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.NextDnsSetup.route,
+            arguments = listOf(navArgument("url") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val url = backStackEntry.arguments?.getString("url") ?: ""
+            val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
+            com.frerox.toolz.ui.screens.search.NextDnsSetupScreen(
+                url = decodedUrl,
+                onBack = { navController.popBackStack() }
             )
         }
 
