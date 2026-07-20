@@ -232,7 +232,10 @@ class WebSearchRepository @Inject constructor(
     // ─── Main Search ──────────────────────────────────────────────────────────
 
     suspend fun search(query: String, offset: Int = 0): List<SearchResult> = withContext(Dispatchers.IO) {
-        val adBlockEnabled    = settingsRepository.searchAdBlockEnabled.first()
+        val rawAdBlockEnabled = settingsRepository.searchAdBlockEnabled.first()
+        val dnsProvider       = settingsRepository.searchDnsProvider.first()
+        val adBlockEnabled    = rawAdBlockEnabled && dnsProvider != "NEXTDNS"
+        
         val engine            = settingsRepository.searchEngine.first()
         val safeSearch        = settingsRepository.searchSafeSearch.first()
         val region            = settingsRepository.searchRegion.first()
