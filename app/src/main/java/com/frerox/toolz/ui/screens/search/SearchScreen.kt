@@ -1280,6 +1280,30 @@ private fun SearchEngineSheet(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        Surface(
+                            modifier = Modifier.size(40.dp),
+                            shape = CircleShape,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f)
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    when(key) {
+                                        "GOOGLE" -> Icons.Rounded.Search
+                                        "BRAVE" -> Icons.Rounded.Shield
+                                        "DUCKDUCKGO" -> Icons.Rounded.VisibilityOff
+                                        "ECOSIA" -> Icons.Rounded.Park
+                                        "SWISSCOWS" -> Icons.Rounded.FamilyRestroom
+                                        "STARTPAGE" -> Icons.Rounded.Lock
+                                        else -> Icons.Rounded.Language
+                                    },
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 name,
