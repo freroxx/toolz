@@ -127,8 +127,12 @@ fun WebViewScreen(
         viewModel.ensureTabExists(url)
     }
 
-    BackHandler(enabled = canGoBack) {
-        webView?.goBack()
+    BackHandler {
+        if (webView?.canGoBack() == true) {
+            webView?.goBack()
+        } else {
+            onBack()
+        }
     }
 
     // Handle Tab change
