@@ -835,24 +835,28 @@ object AdBlockList {
             // Check allowlist first (highest priority)
             if (domainMatches(host, allowlistedDomains)) return false
 
-            // Check custom blocklist
+            // Check custom blocklist (additive)
             if (domainMatches(host, customBlockedDomains)) return true
 
-            // Check imported blocklists
+            // Check imported blocklists (additive)
             if (domainMatches(host, importedDomains)) return true
 
-            // Check default blocklists
+            // Check default blocklists (additive)
             if (domainBlocked(host)) return true
             if (pathBlocked(path)) return true
             false
         } catch (_: Exception) {
             val lower = url.lowercase()
-            if (allowlistedDomains.any { lower.contains(it) }) return false
-            if (customBlockedDomains.any { lower.contains(it) }) return true
-            if (importedDomains.any { lower.contains(it) }) return true
+            // Robust fallback check for circular dependency cases
+            if (allowlistedDomains.isNotEmpty() && allowlistedDomains.any { lower.contains(it) }) return false
+            if (customBlockedDomains.isNotEmpty() && customBlockedDomains.any { lower.contains(it) }) return true
+            if (importedDomains.isNotEmpty() && importedDomains.any { lower.contains(it) }) return true
+            
             domains.any { lower.contains(it) } || blockedPaths.any { lower.contains(it) }
         }
     }
+
+    fun totalCount(): Int = domains.size + customBlockedDomains.size + importedDomains.size
 
     /**
      * Segment‑based lookup that respects public suffixes (prevents over‑blocking).
