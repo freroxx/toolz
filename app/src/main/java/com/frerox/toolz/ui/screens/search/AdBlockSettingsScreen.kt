@@ -1,6 +1,7 @@
 package com.frerox.toolz.ui.screens.search
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,10 +55,166 @@ fun AdBlockSettingsScreen(
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
+            // ── Import Popular Lists ──────────────────────────────────────────
+            item {
+                SettingsSection(
+                    title = "Import Popular Lists",
+                    icon = Icons.Rounded.CloudDownload
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Community Blocklists",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (uiState.importedDomainCount > 0) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        "${uiState.importedDomainCount} domains blocked",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            "Sync high-quality community-maintained blocklists for maximum protection.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            AdBlockSettingsViewModel.POPULAR_LISTS.forEach { (id, _) ->
+                                val enabled = uiState.enabledImportedLists.contains(id)
+                                val label = when(id) {
+                                    "OISD_BASIC" -> "OISD Basic (Recommended)"
+                                    "ADGUARD_BASE" -> "AdGuard DNS Filter"
+                                    "STEVENBLACK" -> "StevenBlack Unified"
+                                    "EASYLIST" -> "EasyList"
+                                    "NOTRACK" -> "NoTrack Tracking"
+                                    else -> id.lowercase().replaceFirstChar(Char::uppercase)
+                                }
+                                
+                                val description = when(id) {
+                                    "OISD_BASIC" -> "High reliability, low false positives"
+                                    "ADGUARD_BASE" -> "Comprehensive ads + tracking"
+                                    "STEVENBLACK" -> "Adware + malware + telemetry"
+                                    "EASYLIST" -> "Primary web ad filter"
+                                    "NOTRACK" -> "Focus on privacy and telemetry"
+                                    else -> ""
+                                }
+                                
+                                Surface(
+                                    onClick = { viewModel.toggleImportedList(id) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (enabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                    border = if (!enabled) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            if (enabled) Icons.Rounded.CheckCircle else Icons.Rounded.AddCircleOutline,
+                                            null,
+                                            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                label,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = if (enabled) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            if (description.isNotEmpty()) {
+                                                Text(
+                                                    description,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = { viewModel.syncImportedLists(uiState.enabledImportedLists) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !uiState.isFetching && uiState.enabledImportedLists.isNotEmpty(),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            if (uiState.isFetching) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                Spacer(Modifier.width(10.dp))
+                                Text("Fetching...")
+                            } else {
+                                Icon(Icons.Rounded.Sync, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Sync Enabled Lists")
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── NextDNS Section ───────────────────────────────────────────────
             item {
-                SettingsSection(title = "NextDNS Integration", icon = Icons.Rounded.Dns) {
+                SettingsSection(
+                    title = "NextDNS Integration", 
+                    icon = Icons.Rounded.Dns,
+                    trailing = {
+                        Switch(
+                            checked = uiState.isNextDnsEnabled,
+                            onCheckedChange = { viewModel.applyNextDnsConfig() }
+                        )
+                    }
+                ) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Status:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            val (color, label) = when (uiState.nextDnsHealth) {
+                                NextDnsHealth.CONNECTED -> Color(0xFF4CAF50) to "Connected"
+                                NextDnsHealth.NOT_LINKED -> Color(0xFFFFC107) to "Not Linked"
+                                NextDnsHealth.ERROR -> Color(0xFFF44336) to "Error"
+                                NextDnsHealth.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to "Checking..."
+                            }
+                            
+                            Surface(
+                                color = color.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    label,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = color,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         Text(
                             "Connect your NextDNS account to use your own custom blocklists and analytics.",
                             style = MaterialTheme.typography.bodyMedium,
@@ -67,28 +224,45 @@ fun AdBlockSettingsScreen(
                         Button(
                             onClick = { onNavigateToNextDnsSetup("https://my.nextdns.io") },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors()
                         ) {
                             Icon(Icons.Rounded.OpenInBrowser, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Open NextDNS Setup")
+                            Text("Setup on NextDNS.io")
                         }
 
-                        OutlinedTextField(
-                            value = uiState.nextDnsId,
-                            onValueChange = viewModel::setNextDnsId,
-                            label = { Text("NextDNS Configuration ID") },
-                            placeholder = { Text("e.g. abcdef") },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            singleLine = true
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = uiState.nextDnsId,
+                                onValueChange = viewModel::setNextDnsId,
+                                label = { Text("NextDNS Configuration ID") },
+                                placeholder = { Text("e.g. abcdef") },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                singleLine = true
+                            )
+                            
+                            IconButton(
+                                onClick = { viewModel.applyNextDnsConfig() },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (uiState.isNextDnsEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier.size(56.dp).padding(top = 8.dp),
+                                enabled = uiState.nextDnsId.isNotBlank()
+                            ) {
+                                Icon(if (uiState.isNextDnsEnabled) Icons.Rounded.CheckCircle else Icons.Rounded.Check, null)
+                            }
+                        }
 
                         OutlinedTextField(
                             value = uiState.nextDnsUrl,
                             onValueChange = viewModel::setNextDnsUrl,
-                            label = { Text("Custom DoH URL") },
-                            placeholder = { Text("https://dns.nextdns.io/abcdef") },
+                            label = { Text("Custom DoH Hostname") },
+                            placeholder = { Text("e.g. 221e93.dns.nextdns.io") },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             singleLine = true
@@ -170,17 +344,20 @@ fun AdBlockSettingsScreen(
 private fun SettingsSection(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    trailing: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.width(12.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            trailing?.invoke()
         }
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
         ) {
             Box(modifier = Modifier.padding(20.dp)) {
                 content()
