@@ -83,24 +83,24 @@ class WebSearchRepository @Inject constructor(
         val dns: Dns = withContext(Dispatchers.IO) {
             try {
                 when (provider) {
-                    "ADGUARD"           -> doh("https://dns.adguard-dns.com/dns-query")
-                    "ADGUARD_FAMILY"    -> doh("https://dns-family.adguard-dns.com/dns-query")
-                    "CLOUDFLARE"        -> doh("https://cloudflare-dns.com/dns-query")
-                    "CLOUDFLARE_FAMILY" -> doh("https://family.cloudflare-dns.com/dns-query")
-                    "GOOGLE"            -> doh("https://dns.google/dns-query")
-                    "QUAD9"             -> doh("https://dns.quad9.net/dns-query")
-                    "OPENDNS"           -> doh("https://doh.opendns.com/dns-query")
+                    "ADGUARD"           -> doh("https://dns.adguard-dns.com/dns-query", "94.140.14.14")
+                    "ADGUARD_FAMILY"    -> doh("https://dns-family.adguard-dns.com/dns-query", "94.140.14.15")
+                    "CLOUDFLARE"        -> doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1")
+                    "CLOUDFLARE_FAMILY" -> doh("https://family.cloudflare-dns.com/dns-query", "1.1.1.3")
+                    "GOOGLE"            -> doh("https://dns.google/dns-query", "8.8.8.8", "8.8.4.4")
+                    "QUAD9"             -> doh("https://dns.quad9.net/dns-query", "9.9.9.9")
+                    "OPENDNS"           -> doh("https://doh.opendns.com/dns-query", "208.67.222.222")
                     "NEXTDNS"           -> {
                         val url = if (nextDnsId.isNotBlank()) {
                             "https://dns.nextdns.io/$nextDnsId"
                         } else {
                             "https://dns.nextdns.io/dns-query"
                         }
-                        doh(url)
+                        doh(url, "45.90.28.0", "45.90.30.0")
                     }
-                    "CONTROLD"          -> doh("https://freedns.controld.com/p1")
-                    "CLEANBROWSING"     -> doh("https://doh.cleanbrowsing.org/doh/family-filter/")
-                    "CLEANBROWSING_SECURITY" -> doh("https://doh.cleanbrowsing.org/doh/security-filter/")
+                    "CONTROLD"          -> doh("https://freedns.controld.com/p1", "76.76.2.0")
+                    "CLEANBROWSING"     -> doh("https://doh.cleanbrowsing.org/doh/family-filter/", "185.228.168.168")
+                    "CLEANBROWSING_SECURITY" -> doh("https://doh.cleanbrowsing.org/doh/security-filter/", "185.228.168.168")
                     "CUSTOM"            -> {
                         val url = if (customDns.startsWith("http")) {
                             customDns
@@ -129,8 +129,18 @@ class WebSearchRepository @Inject constructor(
         return client
     }
 
-    private fun doh(url: String): Dns =
-        DnsOverHttps.Builder().client(baseClient).url(url.toHttpUrl()).build()
+    private fun doh(url: String, vararg bootstrapIps: String): Dns {
+        val builder = DnsOverHttps.Builder()
+            .client(baseClient)
+            .url(url.toHttpUrl())
+        
+        if (bootstrapIps.isNotEmpty()) {
+            val ips = bootstrapIps.map { java.net.InetAddress.getByName(it) }
+            builder.bootstrapDnsHosts(ips)
+        }
+        
+        return builder.build()
+    }
 
     // ─── Engine cooldown (CAPTCHA / 429 resilience) ───────────────────────────
 
