@@ -108,10 +108,10 @@ class AdBlockSettingsViewModel @Inject constructor(
         
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Use a separate client for health probe with standard User-Agent
+                // Use a separate client for health probe with standard User-Agent and cache buster
                 val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
                 
                 val timestamp = System.currentTimeMillis()
@@ -124,6 +124,7 @@ class AdBlockSettingsViewModel @Inject constructor(
                 val response = client.newCall(request).execute()
                 val content = response.body.string()
                 
+                // Parse NextDNS probe JSON
                 val isOk = content.contains("\"status\": \"ok\"")
                 val isUnconfigured = content.contains("\"status\": \"unconfigured\"")
                 val hasConfig = content.contains("\"configuration\": \"$id\"")
@@ -168,7 +169,10 @@ class AdBlockSettingsViewModel @Inject constructor(
                 val allDomains = mutableSetOf<String>()
                 
                 enabledLists.forEach { id ->
-                    val url = POPULAR_LISTS[id] ?: return@forEach
+                    val url = when(id) {
+                        "OISD_BASIC" -> "https://small.oisd.nl/domains"
+                        else -> POPULAR_LISTS[id]
+                    } ?: return@forEach
                     val domains = fetchAndParseList(url)
                     allDomains.addAll(domains)
                 }
@@ -179,6 +183,7 @@ class AdBlockSettingsViewModel @Inject constructor(
                     file.writeText(allDomains.joinToString("\n"))
                 }
                 
+                // CRITICAL: Ensure singleton is updated immediately
                 AdBlockList.updateImportedList(allDomains)
                 settingsRepository.setSearchAdBlockImportedCount(allDomains.size)
             } catch (e: Exception) {
