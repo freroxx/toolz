@@ -108,15 +108,16 @@ class AdBlockSettingsViewModel @Inject constructor(
         
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Use a separate client for health probe to avoid circular DNS resolution
+                // Use a separate client for health probe with standard User-Agent
                 val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
                 
                 val timestamp = System.currentTimeMillis()
                 val request = okhttp3.Request.Builder()
                     .url("https://test.nextdns.io/?_=$timestamp")
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
                     .header("Cache-Control", "no-cache")
                     .build()
                 
