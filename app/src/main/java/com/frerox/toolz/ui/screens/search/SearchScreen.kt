@@ -92,6 +92,10 @@ fun SearchScreen(
             onAutofillToggle    = viewModel::toggleAutofill,
             onPresetSelect      = viewModel::setSecurityPreset,
             onDnsProviderSelect = viewModel::setDnsProvider,
+            onCustomizeAdBlock  = {
+                showSecuritySheet = false
+                onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+            }
         )
     }
 
@@ -1054,6 +1058,7 @@ private fun SecuritySheet(
     onAutofillToggle: (Boolean) -> Unit,
     onPresetSelect: (String) -> Unit,
     onDnsProviderSelect: (String) -> Unit,
+    onCustomizeAdBlock: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1087,8 +1092,23 @@ private fun SecuritySheet(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             Spacer(Modifier.height(4.dp))
 
-            SettingsToggleRow("Ad & tracker blocking", "200+ blocked domains", adBlockEnabled, onAdBlockToggle,
-                leadingIcon = { Icon(Icons.Rounded.Shield, null, Modifier.size(20.dp), tint = if (adBlockEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
+            Column {
+                SettingsToggleRow("Ad & tracker blocking", "200+ blocked domains", adBlockEnabled, onAdBlockToggle,
+                    leadingIcon = { Icon(Icons.Rounded.Shield, null, Modifier.size(20.dp), tint = if (adBlockEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
+                
+                AnimatedVisibility(visible = adBlockEnabled) {
+                    TextButton(
+                        onClick = onCustomizeAdBlock,
+                        modifier = Modifier.padding(start = 54.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Customize blocklists", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
             SettingsToggleRow("Incognito mode", "No history saved", isIncognito, onIncognitoToggle,
                 leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(20.dp), tint = if (isIncognito) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
             SettingsToggleRow("Password autofill", "Biometric verification", autofillEnabled, onAutofillToggle,

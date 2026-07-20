@@ -26,6 +26,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 import com.frerox.toolz.data.browser.BrowserDownloadManager
 import com.frerox.toolz.data.browser.DownloadItem
+import com.frerox.toolz.data.browser.AdBlockList
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 
 @HiltViewModel
 class WebViewViewModel @Inject constructor(
@@ -61,6 +65,14 @@ class WebViewViewModel @Inject constructor(
     val downloads = downloadManager.downloads
 
     init {
+        // Ensure ad block lists are synced
+        combine(
+            settingsRepository.searchAdBlockBlocklists,
+            settingsRepository.searchAdBlockAllowlists
+        ) { blocked, allowed ->
+            AdBlockList.updateCustomLists(blocked, allowed)
+        }.launchIn(viewModelScope)
+
         // Ensure there's at least one tab if we are in browser
         if (tabManager.tabs.value.isEmpty()) {
             // We'll let the Screen call addTab with the initial URL if needed
