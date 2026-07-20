@@ -49,6 +49,7 @@ fun SearchScreen(
     var showSearchSettings     by remember { mutableStateOf(false) }
     var showSecuritySheet      by remember { mutableStateOf(false) }
     var showDnsSheet           by remember { mutableStateOf(false) }
+    var showEngineSheet        by remember { mutableStateOf(false) }
     var showAddQuickLink       by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showBookmarksAll       by remember { mutableStateOf(false) }
@@ -67,7 +68,7 @@ fun SearchScreen(
         SearchSettingsSheet(
             onDismiss           = { showSearchSettings = false },
             currentEngine       = uiState.searchEngine,
-            onEngineSelect      = { viewModel.setSearchEngine(it); showSearchSettings = false },
+            onEngineClick       = { showEngineSheet = true; showSearchSettings = false },
             adBlockEnabled      = uiState.adBlockEnabled,
             onAdBlockToggle     = viewModel::toggleAdBlock,
             currentDns          = uiState.dnsProvider,
@@ -78,6 +79,14 @@ fun SearchScreen(
             onIncognitoToggle   = { viewModel.toggleIncognito(!uiState.isIncognito) },
             autofillEnabled     = uiState.searchAutofillEnabled,
             onAutofillToggle    = viewModel::toggleAutofill,
+        )
+    }
+
+    if (showEngineSheet) {
+        SearchEngineSheet(
+            onDismiss      = { showEngineSheet = false },
+            currentEngine  = uiState.searchEngine,
+            onEngineSelect = { viewModel.setSearchEngine(it); showEngineSheet = false }
         )
     }
 
@@ -92,7 +101,7 @@ fun SearchScreen(
             onIncognitoToggle   = viewModel::toggleIncognito,
             onAutofillToggle    = viewModel::toggleAutofill,
             onPresetSelect      = viewModel::setSecurityPreset,
-            onDnsProviderSelect = viewModel::setDnsProvider,
+            onDnsClick          = { showDnsSheet = true; showSecuritySheet = false },
             onCustomizeAdBlock  = {
                 showSecuritySheet = false
                 onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
@@ -252,8 +261,8 @@ fun SearchScreen(
                 modifier       = Modifier.fillMaxWidth(),
                 shape          = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
                 color          = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 12.dp,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
             ) {
                 Column(
                     modifier = Modifier
@@ -910,7 +919,7 @@ private fun ResultsPage(
 private fun SearchSettingsSheet(
     onDismiss: () -> Unit,
     currentEngine: String,
-    onEngineSelect: (String) -> Unit,
+    onEngineClick: () -> Unit,
     adBlockEnabled: Boolean,
     onAdBlockToggle: (Boolean) -> Unit,
     currentDns: String,
@@ -942,29 +951,46 @@ private fun SearchSettingsSheet(
             )
             Spacer(Modifier.height(8.dp))
 
-            // Engine
-            Text(
-                "Search engine",
-                style  = MaterialTheme.typography.labelLarge,
-                color  = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement   = Arrangement.spacedBy(8.dp),
+            // Engine Selection Card
+            Surface(
+                onClick        = onEngineClick,
+                shape          = RoundedCornerShape(20.dp),
+                color          = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier       = Modifier.fillMaxWidth(),
             ) {
-                listOf(
-                    "DUCKDUCKGO" to "DuckDuckGo",
-                    "BRAVE" to "Brave",
-                    "GOOGLE" to "Google",
-                    "BING" to "Bing",
-                    "META" to "All engines",
-                ).forEach { (key, label) ->
-                    SelectableFilterChip(
-                        label    = label,
-                        selected = currentEngine == key,
-                        onClick  = { onEngineSelect(key) },
+                Row(
+                    modifier              = Modifier.padding(16.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        color    = MaterialTheme.colorScheme.secondaryContainer,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Search, null,
+                                modifier = Modifier.size(20.dp),
+                                tint     = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Search Engine",
+                            style      = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            currentEngine.lowercase().replaceFirstChar(Char::uppercase),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Icon(
+                        Icons.Rounded.ChevronRight, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     )
                 }
             }
@@ -1093,7 +1119,7 @@ private fun SecuritySheet(
     onIncognitoToggle: (Boolean) -> Unit,
     onAutofillToggle: (Boolean) -> Unit,
     onPresetSelect: (String) -> Unit,
-    onDnsProviderSelect: (String) -> Unit,
+    onDnsClick: () -> Unit,
     onCustomizeAdBlock: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -1151,11 +1177,129 @@ private fun SecuritySheet(
                 leadingIcon = { Icon(Icons.Rounded.Key, null, Modifier.size(20.dp), tint = if (autofillEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
 
             Spacer(Modifier.height(12.dp))
-            Text("DNS Provider", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("SYSTEM" to "System", "ADGUARD" to "AdGuard", "CLOUDFLARE" to "Cloudflare", "QUAD9" to "Quad9", "NEXTDNS" to "NextDNS").forEach { (k, l) ->
-                    SelectableFilterChip(l, currentProvider == k, { onDnsProviderSelect(k) })
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Spacer(Modifier.height(4.dp))
+
+            // DNS Selection Card
+            Surface(
+                onClick        = onDnsClick,
+                shape          = RoundedCornerShape(20.dp),
+                color          = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier       = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier              = Modifier.padding(16.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        color    = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Dns, null,
+                                modifier = Modifier.size(20.dp),
+                                tint     = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "DNS Provider",
+                            style      = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            currentProvider.lowercase().replaceFirstChar(Char::uppercase),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Icon(
+                        Icons.Rounded.ChevronRight, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchEngineSheet(
+    onDismiss: () -> Unit,
+    currentEngine: String,
+    onEngineSelect: (String) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape            = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor   = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Search Engine", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Choose your preferred search engine", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+
+            val engines = listOf(
+                "DUCKDUCKGO" to ("DuckDuckGo" to "Privacy-focused, no tracking"),
+                "BRAVE"      to ("Brave" to "Fast, private results"),
+                "GOOGLE"     to ("Google" to "World's most popular search"),
+                "BING"       to ("Bing" to "Microsoft's search engine"),
+                "STARTPAGE"  to ("Startpage" to "Google results with total privacy"),
+                "SWISSCOWS"  to ("Swisscows" to "Family-friendly, private search"),
+                "ECOSIA"     to ("Ecosia" to "Plants trees while you search"),
+                "META"       to ("All Engines" to "Combined results from multiple sources"),
+            )
+
+            engines.forEach { (key, pair) ->
+                val (name, desc) = pair
+                val selected = currentEngine == key
+                Surface(
+                    onClick        = { onEngineSelect(key) },
+                    shape          = RoundedCornerShape(16.dp),
+                    color          = if (selected) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier       = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier              = Modifier.padding(14.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                name,
+                                style      = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color      = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                desc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (selected) {
+                            Icon(
+                                Icons.Rounded.CheckCircle, null,
+                                modifier = Modifier.size(20.dp),
+                                tint     = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
                 }
             }
         }
