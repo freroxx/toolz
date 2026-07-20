@@ -194,7 +194,7 @@ fun SecurityStatusRow(
         Row(
             modifier              = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SecurityDot(color = if (isProtected) Color(0xFF4CAF50) else Color(0xFFF44336))
             
