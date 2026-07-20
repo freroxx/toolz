@@ -76,8 +76,8 @@ fun SearchPill(
     )
 
     Surface(
-        modifier      = modifier.height(48.dp),
-        shape         = RoundedCornerShape(24.dp),
+        modifier      = modifier.height(56.dp),
+        shape         = RoundedCornerShape(28.dp),
         color         = containerColor,
         border        = if (active) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
         tonalElevation = if (active) 0.dp else 2.dp,
@@ -181,42 +181,62 @@ fun SecurityStatusRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isNextDns = dnsProvider == "NEXTDNS"
+    val isProtected = adBlockEnabled || isNextDns
+
     Surface(
         onClick        = onClick,
         modifier       = modifier.fillMaxWidth(),
-        shape          = RoundedCornerShape(14.dp),
+        shape          = RoundedCornerShape(28.dp),
         color          = MaterialTheme.colorScheme.surfaceContainerLow,
+        border         = if (isProtected) BorderStroke(1.2.dp, Color(0xFF4CAF50).copy(alpha = 0.35f)) else null,
+        tonalElevation = 1.dp
     ) {
         Row(
-            modifier              = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            SecurityDot(color = if (adBlockEnabled) Color(0xFF4CAF50) else Color(0xFFF44336))
+            SecurityDot(color = if (isProtected) Color(0xFF4CAF50) else Color(0xFFF44336))
+            
             Text(
-                "Ad Block",
+                text = if (isNextDns) "NextDNS Protection" else "Ad Block Enabled",
                 style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (isProtected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            )
+
+            VerticalDivider(modifier = Modifier.height(14.dp).width(1.dp).alpha(0.15f))
+
+            Icon(
+                if (isNextDns) Icons.Rounded.Dns else Icons.Rounded.Shield,
+                null,
+                modifier = Modifier.size(16.dp),
+                tint = if (isProtected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                dnsProvider.lowercase().replaceFirstChar(Char::uppercase),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            SecurityDot(color = Color(0xFF2196F3))
-            Text(
-                dnsProvider.take(10).lowercase().replaceFirstChar(Char::uppercase),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+
             if (isIncognito) {
                 SecurityDot(color = MaterialTheme.colorScheme.tertiary)
                 Text(
-                    "Incognito",
+                    "Private",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            
             Spacer(Modifier.weight(1f))
+            
             Icon(
                 Icons.Rounded.ChevronRight, null,
-                modifier = Modifier.size(14.dp),
-                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                modifier = Modifier.size(16.dp),
+                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
             )
         }
     }
