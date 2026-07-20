@@ -180,6 +180,7 @@ fun SecurityStatusRow(
     isIncognito: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    latency: Long? = null,
 ) {
     val isNextDns = dnsProvider == "NEXTDNS"
     val isProtected = adBlockEnabled || isNextDns
@@ -189,13 +190,11 @@ fun SecurityStatusRow(
         modifier       = modifier.fillMaxWidth(),
         shape          = RoundedCornerShape(28.dp),
         color          = MaterialTheme.colorScheme.surfaceContainerLow,
-        border         = if (isProtected) BorderStroke(1.2.dp, Color(0xFF4CAF50).copy(alpha = 0.35f)) else null,
-        tonalElevation = 1.dp
     ) {
         Row(
-            modifier              = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SecurityDot(color = if (isProtected) Color(0xFF4CAF50) else Color(0xFFF44336))
             
@@ -206,7 +205,7 @@ fun SecurityStatusRow(
                 color = if (isProtected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
 
-            VerticalDivider(modifier = Modifier.height(14.dp).width(1.dp).alpha(0.15f))
+            VerticalDivider(modifier = Modifier.height(14.dp).width(1.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
             Icon(
                 if (isNextDns) Icons.Rounded.Dns else Icons.Rounded.Shield,
@@ -215,12 +214,29 @@ fun SecurityStatusRow(
                 tint = if (isProtected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Text(
-                dnsProvider.lowercase().replaceFirstChar(Char::uppercase),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    dnsProvider.lowercase().replaceFirstChar(Char::uppercase),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                
+                if (latency != null) {
+                    val color = when {
+                        latency < 50  -> Color(0xFF4CAF50)
+                        latency < 150 -> Color(0xFFFFC107)
+                        else          -> Color(0xFFF44336)
+                    }
+                    Text(
+                        "${latency}ms",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = color.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(horizontal = 4.dp).background(color.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                    )
+                }
+            }
 
             if (isIncognito) {
                 SecurityDot(color = MaterialTheme.colorScheme.tertiary)
