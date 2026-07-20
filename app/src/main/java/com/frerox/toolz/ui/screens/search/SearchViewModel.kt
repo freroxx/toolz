@@ -55,8 +55,11 @@ data class SearchSettingsState(
     val customEngineUrl:       String        = "",
     val searchAutofillEnabled: Boolean       = true,
     val userName:              String        = "",
+    val nextDnsId:             String        = "",
     val tabs:                  List<TabEntry> = emptyList(),
     val activeTabId:           String?       = null,
+    val dnsBenchmarks:         Map<String, Long?> = emptyMap(),
+    val isBenchmarkingDns:     Boolean       = false,
 )
 
 // ─── Fast-changing query state (changes on every keystroke) ──────────────────
@@ -96,10 +99,15 @@ data class SearchUiState(
     val customEngineUrl:       String       = "",
     val searchAutofillEnabled: Boolean      = true,
     val userName:              String       = "",
+    val nextDnsId:             String       = "",
 
     // Tabs
     val tabs:        List<TabEntry> = emptyList(),
     val activeTabId: String?        = null,
+    
+    // DNS Benchmarking
+    val dnsBenchmarks:     Map<String, Long?> = emptyMap(),
+    val isBenchmarkingDns: Boolean = false,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -110,6 +118,7 @@ class SearchViewModel @Inject constructor(
     private val repository:        WebSearchRepository,
     private val settingsRepository: SettingsRepository,
     private val tabManager:        TabManager,
+    private val dnsEngine:         com.frerox.toolz.util.network.DnsEngine,
 ) : ViewModel() {
 
     // ── Split flows ───────────────────────────────────────────────────────────
@@ -145,8 +154,11 @@ class SearchViewModel @Inject constructor(
             customEngineUrl      = s.customEngineUrl,
             searchAutofillEnabled = s.searchAutofillEnabled,
             userName             = s.userName,
+            nextDnsId            = s.nextDnsId,
             tabs                 = s.tabs,
             activeTabId          = s.activeTabId,
+            dnsBenchmarks        = s.dnsBenchmarks,
+            isBenchmarkingDns    = s.isBenchmarkingDns,
         )
     }.stateIn(
         scope       = viewModelScope,
@@ -176,14 +188,16 @@ class SearchViewModel @Inject constructor(
                 settingsRepository.searchAdBlockEnabled,
                 settingsRepository.searchDnsProvider,
                 settingsRepository.searchCustomDns,
-            ) { name, incognito, adBlock, dns, customDns ->
+                settingsRepository.searchNextDnsId,
+            ) { args: Array<Any?> ->
                 _settings.update {
                     it.copy(
-                        userName       = name,
-                        isIncognito    = incognito,
-                        adBlockEnabled = adBlock,
-                        dnsProvider    = dns,
-                        customDns      = customDns,
+                        userName       = args[0] as String,
+                        isIncognito    = args[1] as Boolean,
+                        adBlockEnabled = args[2] as Boolean,
+                        dnsProvider    = args[3] as String,
+                        customDns      = args[4] as String,
+                        nextDnsId      = args[5] as String,
                     )
                 }
             }.catch { /* non-fatal */ }.collect {}
@@ -353,6 +367,45 @@ class SearchViewModel @Inject constructor(
     fun setCustomEngineUrl(url: String)   = launch { settingsRepository.setSearchCustomEngineUrl(url) }
     fun removeRecentDns(dns: String)      = launch { settingsRepository.removeRecentDns(dns) }
     fun dismissFirstTime()                = launch { settingsRepository.setSearchFirstTime(false) }
+
+    fun runDnsBenchmark() {
+        if (_settings.value.isBenchmarkingDns) return
+        _settings.update { it.copy(isBenchmarkingDns = true, dnsBenchmarks = emptyMap()) }
+        
+        viewModelScope.launch {
+            val providers = dnsEngine.providerLibrary()
+            val results = mutableMapOf<String, Long?>()
+            
+            providers.forEach { provider ->
+                val latency = dnsEngine.checkSingleLatency(provider.addresses.first())
+                results[provider.id] = latency
+                _settings.update { it.copy(dnsBenchmarks = results.toMap()) }
+            }
+            _settings.update { it.copy(isBenchmarkingDns = false) }
+        }
+    }
+
+    fun applyFastestDns() {
+        viewModelScope.launch {
+            _settings.update { it.copy(isBenchmarkingDns = true) }
+            val providers = dnsEngine.providerLibrary()
+            var fastest: com.frerox.toolz.data.network.DnsProvider? = null
+            var minLatency = Long.MAX_VALUE
+            
+            providers.forEach { provider ->
+                val latency = dnsEngine.checkSingleLatency(provider.addresses.first())
+                if (latency != null && latency < minLatency) {
+                    minLatency = latency
+                    fastest = provider
+                }
+            }
+            
+            fastest?.let { 
+                settingsRepository.setDnsProvider(it.id.uppercase())
+            }
+            _settings.update { it.copy(isBenchmarkingDns = false) }
+        }
+    }
 
     fun setSecurityPreset(preset: String) = viewModelScope.launch {
         when (preset) {

@@ -104,8 +104,21 @@ fun SearchScreen(
             onDismiss           = { showDnsSheet = false },
             currentProvider     = uiState.dnsProvider,
             customDns           = uiState.customDns,
-            onProviderSelect    = { viewModel.setDnsProvider(it) },
+            onProviderSelect    = { provider ->
+                if (provider == "NEXTDNS" && uiState.nextDnsId.isBlank()) {
+                    // Show warning/redirection
+                    showSearchSettings = false
+                    showDnsSheet = false
+                    onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+                } else {
+                    viewModel.setDnsProvider(provider)
+                }
+            },
             onCustomDnsChange   = viewModel::setCustomDns,
+            benchmarks          = uiState.dnsBenchmarks,
+            isBenchmarking      = uiState.isBenchmarkingDns,
+            onRunBenchmark      = { viewModel.runDnsBenchmark() },
+            onApplyFastest      = { viewModel.applyFastestDns() }
         )
     }
 
@@ -215,7 +228,7 @@ fun SearchScreen(
             // Top chrome: status bar padding + search pill + security row
             Surface(
                 modifier       = Modifier.fillMaxWidth(),
-                shape          = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                shape          = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
                 color          = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
                 shadowElevation = 12.dp,
@@ -1126,7 +1139,7 @@ private fun SecuritySheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun DnsSheet(
     onDismiss: () -> Unit,
@@ -1134,6 +1147,10 @@ private fun DnsSheet(
     customDns: String,
     onProviderSelect: (String) -> Unit,
     onCustomDnsChange: (String) -> Unit,
+    benchmarks: Map<String, Long?> = emptyMap(),
+    isBenchmarking: Boolean = false,
+    onRunBenchmark: () -> Unit = {},
+    onApplyFastest: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1146,25 +1163,90 @@ private fun DnsSheet(
                 .padding(horizontal = 24.dp)
                 .navigationBarsPadding()
                 .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("DNS over HTTPS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Encrypt DNS lookups to prevent tracking", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("DNS over HTTPS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Encrypt DNS lookups to prevent tracking", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                
+                IconButton(
+                    onClick = onRunBenchmark,
+                    enabled = !isBenchmarking,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors()
+                ) {
+                    if (isBenchmarking) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Rounded.Speed, "Benchmark")
+                    }
+                }
+            }
+            
+            Spacer(Modifier.height(8.dp))
+
+            // Fastest / Auto Option
+            Surface(
+                onClick        = onApplyFastest,
+                shape          = RoundedCornerShape(20.dp),
+                color          = if (isBenchmarking) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) 
+                                 else MaterialTheme.colorScheme.primaryContainer,
+                modifier       = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier              = Modifier.padding(16.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Auto (Fastest)",
+                            style      = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color      = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            "Automatically switch to the lowest latency provider",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                    if (isBenchmarking) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
 
             val providers = listOf(
                 "SYSTEM"            to ("System default"  to "No encryption"),
                 "ADGUARD"           to ("AdGuard"         to "Ad + tracking protection"),
-                "ADGUARD_FAMILY"    to ("AdGuard Family"  to "Adult content filter"),
-                "CLOUDFLARE"        to ("Cloudflare 1.1.1.1" to "Fast, privacy-focused"),
-                "CLOUDFLARE_FAMILY" to ("Cloudflare Family" to "Malware + adult filter"),
+                "CLOUDFLARE"        to ("Cloudflare"      to "Fast, privacy-focused"),
+                "GOOGLE"            -> ("Google Public"   to "Reliable global anycast"),
                 "QUAD9"             to ("Quad9"           to "Security-focused"),
                 "NEXTDNS"           to ("NextDNS"         to "Customisable filtering"),
+                "MULLVAD_EXTENDED"  to ("Mullvad Extended" to "Aggressive ad blocking"),
+                "CONTROLD"          to ("Control D"       to "Flexible filtering"),
                 "CUSTOM"            to ("Custom URL"      to "Your own DoH resolver"),
             )
+            
             providers.forEach { (key, pair) ->
                 val (name, desc) = pair
                 val selected = currentProvider == key
+                val latency = benchmarks[key.lowercase()]
+                
                 Surface(
                     onClick        = { onProviderSelect(key) },
                     shape          = RoundedCornerShape(16.dp),
@@ -1173,18 +1255,35 @@ private fun DnsSheet(
                     modifier       = Modifier.fillMaxWidth(),
                 ) {
                     Row(
-                        modifier              = Modifier.padding(14.dp),
+                        modifier              = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                name,
-                                style      = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                                color      = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurface,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    name,
+                                    style      = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else MaterialTheme.colorScheme.onSurface,
+                                )
+                                
+                                if (latency != null) {
+                                    val color = when {
+                                        latency < 50  -> Color(0xFF4CAF50)
+                                        latency < 150 -> Color(0xFFFFC107)
+                                        else          -> Color(0xFFF44336)
+                                    }
+                                    Text(
+                                        "${latency}ms",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = color,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).background(color.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                    )
+                                }
+                            }
                             Text(
                                 desc,
                                 style = MaterialTheme.typography.bodySmall,
@@ -1204,12 +1303,12 @@ private fun DnsSheet(
             }
 
             if (currentProvider == "CUSTOM") {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value         = customDns,
                     onValueChange = onCustomDnsChange,
-                    label         = { Text("DoH URL") },
-                    placeholder   = { Text("https://dns.example.com/dns-query") },
+                    label         = { Text("DoH URL or Hostname") },
+                    placeholder   = { Text("e.g. dns.example.com") },
                     singleLine    = true,
                     shape         = RoundedCornerShape(16.dp),
                     modifier      = Modifier.fillMaxWidth(),
