@@ -55,6 +55,7 @@ fun SearchScreen(
     var longPressedResult      by remember { mutableStateOf<SearchResult?>(null) }
     var editingBookmark        by remember { mutableStateOf<BookmarkEntry?>(null) }
     var editingQuickLink       by remember { mutableStateOf<QuickLinkEntry?>(null) }
+    var showNextDnsWarning     by remember { mutableStateOf(false) }
 
     // Whether the suggestion/history dropdown is visible
     val showDropdown = uiState.isActive &&
@@ -106,10 +107,7 @@ fun SearchScreen(
             customDns           = uiState.customDns,
             onProviderSelect    = { provider ->
                 if (provider == "NEXTDNS" && uiState.nextDnsId.isBlank()) {
-                    // Show warning/redirection
-                    showSearchSettings = false
-                    showDnsSheet = false
-                    onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+                    showNextDnsWarning = true
                 } else {
                     viewModel.setDnsProvider(provider)
                 }
@@ -204,6 +202,30 @@ fun SearchScreen(
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("URL", result.url))
                 longPressedResult = null
             },
+        )
+    }
+
+    if (showNextDnsWarning) {
+        AlertDialog(
+            onDismissRequest = { showNextDnsWarning = false },
+            icon = { Icon(Icons.Rounded.NotificationImportant, null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("NextDNS Not Configured") },
+            text = { Text("To use NextDNS, you must first provide your Configuration ID in the Ad Block settings.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showNextDnsWarning = false
+                        showDnsSheet = false
+                        showSearchSettings = false
+                        onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Go to Setup") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNextDnsWarning = false }) { Text("Cancel") }
+            },
+            shape = RoundedCornerShape(28.dp)
         )
     }
 
@@ -302,6 +324,7 @@ fun SearchScreen(
                             adBlockEnabled = uiState.adBlockEnabled,
                             dnsProvider    = uiState.dnsProvider,
                             isIncognito    = uiState.isIncognito,
+                            latency        = uiState.dnsBenchmarks[uiState.dnsProvider.lowercase()],
                             onClick        = { showSecuritySheet = true },
                         )
                     }
@@ -1231,19 +1254,25 @@ private fun DnsSheet(
             Spacer(Modifier.height(8.dp))
 
             val providers = listOf(
-                "SYSTEM"            to ("System default"  to "No encryption"),
-                "ADGUARD"           to ("AdGuard"         to "Ad + tracking protection"),
-                "CLOUDFLARE"        to ("Cloudflare"      to "Fast, privacy-focused"),
-                "GOOGLE"            -> ("Google Public"   to "Reliable global anycast"),
-                "QUAD9"             to ("Quad9"           to "Security-focused"),
-                "NEXTDNS"           to ("NextDNS"         to "Customisable filtering"),
+                "SYSTEM"            to ("System default" to "No encryption"),
+                "ADGUARD"           to ("AdGuard" to "Ad + tracking protection"),
+                "ADGUARD_FAMILY"    to ("AdGuard Family" to "Adult content filter"),
+                "CLOUDFLARE"        to ("Cloudflare" to "Fast, privacy-focused"),
+                "CLOUDFLARE_FAMILY" to ("Cloudflare Family" to "Malware + adult filter"),
+                "GOOGLE"            to ("Google Public" to "Reliable global anycast"),
+                "QUAD9"             to ("Quad9" to "Security-focused"),
+                "NEXTDNS"           to ("NextDNS" to "Customisable filtering"),
                 "MULLVAD_EXTENDED"  to ("Mullvad Extended" to "Aggressive ad blocking"),
-                "CONTROLD"          to ("Control D"       to "Flexible filtering"),
-                "CUSTOM"            to ("Custom URL"      to "Your own DoH resolver"),
+                "CONTROLD"          to ("Control D" to "Flexible filtering"),
+                "CLEANBROWSING_SECURITY" to ("CleanBrowsing" to "Hardened security filter"),
+                "CUSTOM"            to ("Custom URL" to "Your own DoH resolver"),
             )
             
-            providers.forEach { (key, pair) ->
-                val (name, desc) = pair
+            providers.forEach { entry ->
+                val key = entry.first
+                val pair = entry.second
+                val name = pair.first
+                val desc = pair.second
                 val selected = currentProvider == key
                 val latency = benchmarks[key.lowercase()]
                 
