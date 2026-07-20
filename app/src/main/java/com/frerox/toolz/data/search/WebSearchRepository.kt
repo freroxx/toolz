@@ -73,7 +73,8 @@ class WebSearchRepository @Inject constructor(
     private suspend fun getDnsClient(): OkHttpClient {
         val provider  = settingsRepository.searchDnsProvider.first()
         val customDns = settingsRepository.searchCustomDns.first()
-        val key = DnsClientCacheKey(provider, customDns)
+        val nextDnsId = settingsRepository.searchNextDnsId.first()
+        val key = DnsClientCacheKey(provider, customDns + nextDnsId)
 
         dnsClientCache.get()?.let { (cached, client) ->
             if (cached == key) return client
@@ -89,10 +90,26 @@ class WebSearchRepository @Inject constructor(
                     "GOOGLE"            -> doh("https://dns.google/dns-query")
                     "QUAD9"             -> doh("https://dns.quad9.net/dns-query")
                     "OPENDNS"           -> doh("https://doh.opendns.com/dns-query")
-                    "NEXTDNS"           -> doh("https://dns.nextdns.io/dns-query")
+                    "NEXTDNS"           -> {
+                        val url = if (nextDnsId.isNotBlank()) {
+                            "https://dns.nextdns.io/$nextDnsId"
+                        } else {
+                            "https://dns.nextdns.io/dns-query"
+                        }
+                        doh(url)
+                    }
                     "CONTROLD"          -> doh("https://freedns.controld.com/p1")
                     "CLEANBROWSING"     -> doh("https://doh.cleanbrowsing.org/doh/family-filter/")
-                    "CUSTOM"            -> if (customDns.startsWith("http")) doh(customDns) else Dns.SYSTEM
+                    "CUSTOM"            -> {
+                        val url = if (customDns.startsWith("http")) {
+                            customDns
+                        } else if (customDns.isNotBlank()) {
+                            "https://$customDns/dns-query"
+                        } else {
+                            ""
+                        }
+                        if (url.startsWith("http")) doh(url) else Dns.SYSTEM
+                    }
                     else                -> Dns.SYSTEM
                 }
             } catch (_: Exception) { Dns.SYSTEM }
@@ -655,17 +672,23 @@ class WebSearchRepository @Inject constructor(
 
     suspend fun fetchWebsiteContent(url: String): String = withContext(Dispatchers.IO) {
         try {
-            val client   = getDnsClient()
-            val request  = buildRequest(url)
-            val response = withRetry { client.newCall(request).execute() }
-            if (!response.isSuccessful) return@withContext "Error: HTTP ${response.code}"
-            val html = response.body?.string() ?: return@withContext "Error: Empty response"
+            val html = fetchWebsiteContentRaw(url) ?: return@withContext "Error: Empty response"
             val doc  = Jsoup.parse(html, url)
             doc.select("script,style,nav,footer,header,aside,.ads,.sidebar,#cookie-banner").remove()
             val text = (doc.select("article,main,.content,.post-content,#content,.article-body")
                 .firstOrNull() ?: doc.body())?.text() ?: ""
             if (text.length > 4_000) text.take(4_000) + "… [truncated]" else text
         } catch (e: Exception) { "Error: ${e.message}" }
+    }
+
+    suspend fun fetchWebsiteContentRaw(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val client   = getDnsClient()
+            val request  = buildRequest(url)
+            val response = withRetry { client.newCall(request).execute() }
+            if (!response.isSuccessful) return@withContext null
+            response.body?.string()
+        } catch (e: Exception) { null }
     }
 
     // ─── DAO wrappers ────────────────────────────────────────────────────────
