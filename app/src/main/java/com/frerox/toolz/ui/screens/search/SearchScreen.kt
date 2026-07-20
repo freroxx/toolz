@@ -1262,8 +1262,11 @@ private fun SearchEngineSheet(
                 "META"       to ("All Engines" to "Combined results from multiple sources"),
             )
 
-            engines.forEach { (key, pair) ->
-                val (name, desc) = pair
+            engines.forEach { entry ->
+                val key = entry.first
+                val pair = entry.second
+                val name = pair.first
+                val desc = pair.second
                 val selected = currentEngine == key
                 Surface(
                     onClick        = { onEngineSelect(key) },
