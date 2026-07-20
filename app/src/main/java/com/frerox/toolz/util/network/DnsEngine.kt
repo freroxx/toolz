@@ -112,6 +112,26 @@ class DnsEngine @Inject constructor() {
             badge = "Flexible"
         ),
         DnsProvider(
+            id = "mullvad_extended",
+            name = "Mullvad Extended",
+            addresses = listOf("194.242.2.3", "194.242.2.4"),
+            hostname = "extended.dns.mullvad.net",
+            dohUrl = "https://extended.dns.mullvad.net/dns-query",
+            categories = setOf(DnsCategory.PRIVACY, DnsCategory.SECURITY),
+            description = "Privacy resolver with aggressive ad and tracker blocking.",
+            badge = "Full Block"
+        ),
+        DnsProvider(
+            id = "cleanbrowsing_security",
+            name = "CleanBrowsing Security",
+            addresses = listOf("185.228.168.168", "185.228.169.168"),
+            hostname = "security-filter-dns.cleanbrowsing.org",
+            dohUrl = "https://doh.cleanbrowsing.org/doh/security-filter/",
+            categories = setOf(DnsCategory.SECURITY),
+            description = "Filters malware, phishing, and other malicious sites.",
+            badge = "Hardened"
+        ),
+        DnsProvider(
             id = "comodo",
             name = "Comodo Secure DNS",
             addresses = listOf("8.26.56.26", "8.20.247.20"),
