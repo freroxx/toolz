@@ -749,6 +749,22 @@ object AdBlockList {
         "zz.com"
     )
 
+    private val customBlockedDomains: HashSet<String> = hashSetOf()
+    private val allowlistedDomains: HashSet<String> = hashSetOf()
+    private val importedDomains: HashSet<String> = hashSetOf()
+
+    fun updateCustomLists(blocked: Set<String>, allowed: Set<String>) {
+        customBlockedDomains.clear()
+        customBlockedDomains.addAll(blocked.map { it.lowercase() })
+        allowlistedDomains.clear()
+        allowlistedDomains.addAll(allowed.map { it.lowercase() })
+    }
+
+    fun updateImportedList(domains: Set<String>) {
+        importedDomains.clear()
+        importedDomains.addAll(domains.map { it.lowercase() })
+    }
+
     // ────────────────────────────────────────────────────────── Path patterns
     private val blockedPaths: Set<String> = setOf(
         "/pagead/", "/ads/", "/ad.", "/ad-", "/adserv", "/adsystem",
@@ -816,11 +832,24 @@ object AdBlockList {
             val host = uri.host?.lowercase() ?: return false
             val path = uri.path?.lowercase() ?: ""
 
+            // Check allowlist first (highest priority)
+            if (domainMatches(host, allowlistedDomains)) return false
+
+            // Check custom blocklist
+            if (domainMatches(host, customBlockedDomains)) return true
+
+            // Check imported blocklists
+            if (domainMatches(host, importedDomains)) return true
+
+            // Check default blocklists
             if (domainBlocked(host)) return true
             if (pathBlocked(path)) return true
             false
         } catch (_: Exception) {
             val lower = url.lowercase()
+            if (allowlistedDomains.any { lower.contains(it) }) return false
+            if (customBlockedDomains.any { lower.contains(it) }) return true
+            if (importedDomains.any { lower.contains(it) }) return true
             domains.any { lower.contains(it) } || blockedPaths.any { lower.contains(it) }
         }
     }
@@ -829,8 +858,10 @@ object AdBlockList {
      * Segment‑based lookup that respects public suffixes (prevents over‑blocking).
      * Example: "example.co.uk" will not block "co.uk" because "co.uk" is a public suffix.
      */
-    fun domainBlocked(host: String): Boolean {
-        if (domains.contains(host)) return true
+    fun domainBlocked(host: String): Boolean = domainMatches(host, domains)
+
+    private fun domainMatches(host: String, targetSet: HashSet<String>): Boolean {
+        if (targetSet.contains(host)) return true
 
         val parts = host.split('.')
         if (parts.size < 2) return false
@@ -841,7 +872,7 @@ object AdBlockList {
             current = "${parts[i]}.$current"
             // Do not check suffixes that are only a public suffix (e.g. "co.uk" alone)
             if (publicSuffixes.contains(current)) continue
-            if (domains.contains(current)) return true
+            if (targetSet.contains(current)) return true
         }
         return false
     }
