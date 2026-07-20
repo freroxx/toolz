@@ -101,6 +101,8 @@ fun AdBlockSettingsScreen(
                                     "ADGUARD_BASE" -> "AdGuard DNS Filter"
                                     "STEVENBLACK" -> "StevenBlack Unified"
                                     "EASYLIST" -> "EasyList"
+                                    "FANBOY_ANNOYANCE" -> "Fanboy's Annoyance"
+                                    "LIGHTSWITCH" -> "Lightswitch"
                                     "NOTRACK" -> "NoTrack Tracking"
                                     else -> id.lowercase().replaceFirstChar(Char::uppercase)
                                 }
@@ -110,6 +112,8 @@ fun AdBlockSettingsScreen(
                                     "ADGUARD_BASE" -> "Comprehensive ads + tracking"
                                     "STEVENBLACK" -> "Adware + malware + telemetry"
                                     "EASYLIST" -> "Primary web ad filter"
+                                    "FANBOY_ANNOYANCE" -> "Blocks popups, cookie banners & widgets"
+                                    "LIGHTSWITCH" -> "Aggressive telemetry & tracking blocker"
                                     "NOTRACK" -> "Focus on privacy and telemetry"
                                     else -> ""
                                 }
@@ -177,7 +181,7 @@ fun AdBlockSettingsScreen(
                     trailing = {
                         Switch(
                             checked = uiState.isNextDnsEnabled,
-                            onCheckedChange = { viewModel.applyNextDnsConfig() }
+                            onCheckedChange = viewModel::toggleNextDns
                         )
                     }
                 ) {

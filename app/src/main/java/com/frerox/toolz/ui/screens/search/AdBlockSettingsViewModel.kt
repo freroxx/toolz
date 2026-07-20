@@ -31,6 +31,7 @@ data class AdBlockSettingsUiState(
 class AdBlockSettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val repository: com.frerox.toolz.data.search.WebSearchRepository,
+    private val dnsEngine: com.frerox.toolz.util.network.DnsEngine,
     private val application: android.app.Application
 ) : ViewModel() {
 
@@ -107,16 +108,33 @@ class AdBlockSettingsViewModel @Inject constructor(
         
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Use a standard probe or check if the custom endpoint is reachable
-                val content = repository.fetchWebsiteContentRaw("https://test.nextdns.io")
-                if (content?.contains("\"status\": \"ok\"") == true) {
-                    _nextDnsHealth.value = NextDnsHealth.CONNECTED
-                } else if (content?.contains("unconfigured") == true) {
-                    _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
-                } else {
-                    _nextDnsHealth.value = NextDnsHealth.ERROR
+                // Use a separate client for health probe to avoid circular DNS resolution
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                
+                val timestamp = System.currentTimeMillis()
+                val request = okhttp3.Request.Builder()
+                    .url("https://test.nextdns.io/?_=$timestamp")
+                    .header("Cache-Control", "no-cache")
+                    .build()
+                
+                val response = client.newCall(request).execute()
+                val content = response.body.string()
+                
+                val isOk = content.contains("\"status\": \"ok\"")
+                val isUnconfigured = content.contains("\"status\": \"unconfigured\"")
+                val hasConfig = content.contains("\"configuration\": \"$id\"")
+                
+                when {
+                    isOk && hasConfig -> _nextDnsHealth.value = NextDnsHealth.CONNECTED
+                    isOk && !hasConfig -> _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
+                    isUnconfigured -> _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
+                    else -> _nextDnsHealth.value = NextDnsHealth.ERROR
                 }
             } catch (e: Exception) {
+                e.printStackTrace()
                 _nextDnsHealth.value = NextDnsHealth.ERROR
             }
         }
@@ -207,14 +225,38 @@ class AdBlockSettingsViewModel @Inject constructor(
             "ADGUARD_BASE" to "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
             "STEVENBLACK" to "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
             "EASYLIST" to "https://easylist.to/easylist/easylist.txt",
+            "FANBOY_ANNOYANCE" to "https://secure.fanboy.co.nz/fanboy-annoyance.txt",
+            "LIGHTSWITCH" to "https://raw.githubusercontent.com/the-asf/lightswitch/master/blocklist.txt",
             "NOTRACK" to "https://raw.githubusercontent.com/quidsup/notrack/master/trackers.txt"
         )
     }
 
-    fun applyNextDnsConfig() {
+    fun toggleNextDns(enabled: Boolean) {
         viewModelScope.launch {
-            settingsRepository.setDnsProvider("NEXTDNS")
+            if (enabled) {
+                settingsRepository.setDnsProvider("NEXTDNS")
+            } else {
+                // If disabling NextDNS, switch to the fastest alternative
+                _isFetching.value = true // Show loading while benchmarking
+                val providers = dnsEngine.providerLibrary().filter { it.id != "nextdns" }
+                var fastestId = "CLOUDFLARE"
+                var minLatency = Long.MAX_VALUE
+                
+                providers.forEach { p ->
+                    val lat = dnsEngine.checkSingleLatency(p.addresses.first())
+                    if (lat != null && lat < minLatency) {
+                        minLatency = lat
+                        fastestId = p.id.uppercase()
+                    }
+                }
+                settingsRepository.setDnsProvider(fastestId)
+                _isFetching.value = false
+            }
         }
+    }
+
+    fun applyNextDnsConfig() {
+        toggleNextDns(true)
     }
 
     fun addBlockedDomain(domain: String) {
