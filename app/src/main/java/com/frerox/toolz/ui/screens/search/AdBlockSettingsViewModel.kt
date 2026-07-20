@@ -200,23 +200,28 @@ class AdBlockSettingsViewModel @Inject constructor(
             val domains = mutableSetOf<String>()
             
             response.lineSequence().forEach { line: String ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) return@forEach
+                var trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
                 
+                // Remove trailing comments
+                if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
+                if (trimmed.contains("!")) trimmed = trimmed.substringBefore("!").trim()
+
                 // Handle hosts format: 0.0.0.0 domain.com
                 if (trimmed.startsWith("0.0.0.0") || trimmed.startsWith("127.0.0.1")) {
                     val parts = trimmed.split(Regex("\\s+"))
                     if (parts.size >= 2) {
-                        domains.add(parts[1].lowercase())
+                        val d = parts[1].lowercase()
+                        if (d != "localhost" && d.contains(".")) domains.add(d)
                     }
-                } else if (!trimmed.contains(" ") && trimmed.contains(".")) {
-                    // Assume it's a simple domain list
-                    domains.add(trimmed.lowercase())
-                }
-                // (Optional) Handle AdBlock format like ||domain.com^
-                else if (trimmed.startsWith("||") && trimmed.endsWith("^")) {
+                } else if (trimmed.startsWith("||") && trimmed.endsWith("^")) {
+                    // AdBlock format like ||domain.com^
                     val domain = trimmed.substring(2, trimmed.length - 1)
-                    domains.add(domain.lowercase())
+                    if (domain.contains(".")) domains.add(domain.lowercase())
+                } else if (!trimmed.contains(" ") && trimmed.contains(".")) {
+                    // Simple domain list or wildcard-less AdBlock
+                    val clean = trimmed.removePrefix("||").removeSuffix("^").removeSuffix("/")
+                    if (clean.contains(".")) domains.add(clean.lowercase())
                 }
             }
             domains
@@ -227,7 +232,7 @@ class AdBlockSettingsViewModel @Inject constructor(
 
     companion object {
         val POPULAR_LISTS = mapOf(
-            "OISD_BASIC" to "https://small.oisd.nl/",
+            "OISD_BASIC" to "https://small.oisd.nl/domains",
             "ADGUARD_BASE" to "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
             "STEVENBLACK" to "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
             "EASYLIST" to "https://easylist.to/easylist/easylist.txt",
