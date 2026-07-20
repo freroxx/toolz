@@ -211,14 +211,24 @@ class DnsEngine @Inject constructor() {
 
     suspend fun benchmarkProvider(
         provider: DnsProvider,
-        samplesPerProvider: Int = 4,
-        timeoutMs: Int = 1200
+        samplesPerProvider: Int = 3,
+        timeoutMs: Int = 1500
     ): DnsBenchmarkResult = withContext(Dispatchers.IO) {
+        // Initial warm-up ping
+        measureLatency(provider.addresses.first(), timeoutMs = timeoutMs)
+        
         val samples = (0 until samplesPerProvider).map {
             measureLatency(provider.addresses.first(), timeoutMs = timeoutMs)
         }
-        val successfulSamples = samples.filterNotNull()
-        val latency = successfulSamples.averageOrNull()?.toLong()
+        val successfulSamples = samples.filterNotNull().sorted()
+        
+        // Use median for robustness
+        val latency = if (successfulSamples.isNotEmpty()) {
+            successfulSamples[successfulSamples.size / 2]
+        } else {
+            null
+        }
+
         val jitter = if (successfulSamples.size > 1) {
             successfulSamples.zipWithNext { a, b -> abs(a - b) }.averageOrNull()?.toLong()
         } else {
@@ -238,8 +248,13 @@ class DnsEngine @Inject constructor() {
         )
     }
 
-    suspend fun checkSingleLatency(address: String, timeoutMs: Int = 1200): Long? =
-        withContext(Dispatchers.IO) { measureLatency(address, timeoutMs = timeoutMs) }
+    suspend fun checkSingleLatency(address: String, timeoutMs: Int = 1500): Long? =
+        withContext(Dispatchers.IO) {
+            // Take 3 samples and return median
+            val samples = (0 until 3).map { measureLatency(address, timeoutMs = timeoutMs) }
+            val valid = samples.filterNotNull().sorted()
+            if (valid.isNotEmpty()) valid[valid.size / 2] else null
+        }
 
     private fun measureLatency(
         address: String,
