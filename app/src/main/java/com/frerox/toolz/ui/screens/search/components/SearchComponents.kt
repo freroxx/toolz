@@ -576,10 +576,7 @@ fun SuggestionRow(
     }
 }
 
-// ══════════════════════════════════════════════════════════
-//  HISTORY ROW  — with optional substring highlight
-// ══════════════════════════════════════════════════════════
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HistoryRow(
     query: String,
@@ -592,23 +589,22 @@ fun HistoryRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onSearch)
-            .padding(start = 20.dp, end = 4.dp, top = 13.dp, bottom = 13.dp),
-        verticalAlignment     = Alignment.CenterVertically,
+            .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Icon(
             Icons.Rounded.History, null,
             modifier = Modifier.size(18.dp),
-            tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
         )
 
-        // Bold-highlight the matching substring
         val annotated = remember(query, highlightQuery) {
             buildAnnotatedString {
                 if (highlightQuery.isBlank()) {
                     append(query)
                 } else {
-                    val lower    = query.lowercase()
+                    val lower = query.lowercase()
                     val startIdx = lower.indexOf(highlightQuery.lowercase())
                     if (startIdx >= 0) {
                         append(query.substring(0, startIdx))
@@ -626,18 +622,143 @@ fun HistoryRow(
         Text(
             annotated,
             modifier = Modifier.weight(1f),
-            style    = MaterialTheme.typography.bodyMedium,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+
+        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Rounded.Close, null,
                 modifier = Modifier.size(16.dp),
-                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             )
         }
+    }
+}
+
+@Composable
+fun RecentSearchSection(
+    history: List<com.frerox.toolz.data.search.SearchHistoryEntry>,
+    onSearch: (String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SectionHeader(
+            title = "Recent searches",
+            actionLabel = if (history.isNotEmpty()) "Clear all" else null,
+            onAction = onClearAll,
+        )
+
+        if (history.isEmpty()) {
+            EmptyHistory()
+        } else {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                history.take(12).forEach { entry ->
+                    RecentSearchChip(
+                        query = entry.query,
+                        onClick = { onSearch(entry.query) },
+                        onDelete = { onDelete(entry.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentSearchChip(
+    query: String,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptic = LocalHapticFeedback.current
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Rounded.History,
+                null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+            Text(
+                text = query,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDelete()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    null,
+                    modifier = Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyHistory(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Surface(
+            modifier = Modifier.size(72.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.ManageSearch, null,
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+        Text(
+            "Start your first search",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
