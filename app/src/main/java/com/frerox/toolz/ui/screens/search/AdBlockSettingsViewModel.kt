@@ -2,7 +2,6 @@ package com.frerox.toolz.ui.screens.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.frerox.toolz.data.browser.AdBlockList
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +31,7 @@ class AdBlockSettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val repository: com.frerox.toolz.data.search.WebSearchRepository,
     private val dnsEngine: com.frerox.toolz.util.network.DnsEngine,
-    private val application: android.app.Application
+    private val adBlockManager: com.frerox.toolz.util.network.AdBlockManager,
 ) : ViewModel() {
 
     private val _isFetching = MutableStateFlow(false)
@@ -67,9 +66,6 @@ class AdBlockSettingsViewModel @Inject constructor(
         val idInput = args[9] as? String
         val urlInput = args[10] as? String
 
-        // Sync singleton for custom lists
-        AdBlockList.updateCustomLists(blocked, allowed)
-        
         AdBlockSettingsUiState(
             blocklists = blocked,
             allowlists = allowed,
@@ -84,9 +80,7 @@ class AdBlockSettingsViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AdBlockSettingsUiState())
 
     init {
-        // Load existing imported domains from file on startup
         viewModelScope.launch {
-            loadImportedDomains()
             checkDnsHealth()
         }
         
@@ -142,16 +136,6 @@ class AdBlockSettingsViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadImportedDomains() {
-        withContext(Dispatchers.IO) {
-            val file = File(application.filesDir, "imported_blocklist.txt")
-            if (file.exists()) {
-                val domains = file.readLines().toSet()
-                AdBlockList.updateImportedList(domains)
-            }
-        }
-    }
-
     fun toggleImportedList(listId: String) {
         viewModelScope.launch {
             val current = uiState.value.enabledImportedLists
@@ -166,26 +150,7 @@ class AdBlockSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _isFetching.value = true
             try {
-                val allDomains = mutableSetOf<String>()
-                
-                enabledLists.forEach { id ->
-                    val url = when(id) {
-                        "OISD_BASIC" -> "https://small.oisd.nl/domains"
-                        else -> POPULAR_LISTS[id]
-                    } ?: return@forEach
-                    val domains = fetchAndParseList(url)
-                    allDomains.addAll(domains)
-                }
-                
-                // Save to file
-                withContext(Dispatchers.IO) {
-                    val file = File(application.filesDir, "imported_blocklist.txt")
-                    file.writeText(allDomains.joinToString("\n"))
-                }
-                
-                // CRITICAL: Ensure singleton is updated immediately
-                AdBlockList.updateImportedList(allDomains)
-                settingsRepository.setSearchAdBlockImportedCount(allDomains.size)
+                adBlockManager.syncImportedLists(enabledLists, ::fetchAndParseList)
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -207,21 +172,35 @@ class AdBlockSettingsViewModel @Inject constructor(
                 if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
                 if (trimmed.contains("!")) trimmed = trimmed.substringBefore("!").trim()
 
-                // Handle hosts format: 0.0.0.0 domain.com
-                if (trimmed.startsWith("0.0.0.0") || trimmed.startsWith("127.0.0.1")) {
-                    val parts = trimmed.split(Regex("\\s+"))
-                    if (parts.size >= 2) {
-                        val d = parts[1].lowercase()
-                        if (d != "localhost" && d.contains(".")) domains.add(d)
+                // Preserve @@ for exceptions
+                val isException = trimmed.startsWith("@@")
+                val rule = if (isException) trimmed.substring(2) else trimmed
+
+                when {
+                    // hosts format: 0.0.0.0 domain.com or 127.0.0.1 domain.com
+                    rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1") -> {
+                        val parts = rule.split(Regex("\\s+"))
+                        if (parts.size >= 2) {
+                            val d = parts[1].lowercase()
+                            if (d != "localhost" && d.contains(".")) {
+                                domains.add(if (isException) "@@$d" else d)
+                            }
+                        }
                     }
-                } else if (trimmed.startsWith("||") && trimmed.endsWith("^")) {
-                    // AdBlock format like ||domain.com^
-                    val domain = trimmed.substring(2, trimmed.length - 1)
-                    if (domain.contains(".")) domains.add(domain.lowercase())
-                } else if (!trimmed.contains(" ") && trimmed.contains(".")) {
+                    // AdBlock format: ||domain.com^
+                    rule.startsWith("||") && rule.endsWith("^") -> {
+                        val domain = rule.substring(2, rule.length - 1)
+                        if (domain.contains(".")) {
+                            domains.add(if (isException) "@@$domain" else domain.lowercase())
+                        }
+                    }
                     // Simple domain list or wildcard-less AdBlock
-                    val clean = trimmed.removePrefix("||").removeSuffix("^").removeSuffix("/")
-                    if (clean.contains(".")) domains.add(clean.lowercase())
+                    !rule.contains(" ") && rule.contains(".") -> {
+                        val clean = rule.removePrefix("||").removeSuffix("^").removeSuffix("/")
+                        if (clean.contains(".")) {
+                            domains.add(if (isException) "@@$clean" else clean.lowercase())
+                        }
+                    }
                 }
             }
             domains
