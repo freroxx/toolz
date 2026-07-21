@@ -54,6 +54,7 @@ class WebSearchRepository @Inject constructor(
     private val searchDao:          SearchDao,
     private val settingsRepository: SettingsRepository,
     private val moshi:              Moshi,
+    private val adBlockManager:     com.frerox.toolz.util.network.AdBlockManager,
 ) {
     val history    = searchDao.getRecentHistory()
     val bookmarks  = searchDao.getBookmarks()
@@ -248,8 +249,9 @@ class WebSearchRepository @Inject constructor(
     suspend fun search(query: String, offset: Int = 0): List<SearchResult> = withContext(Dispatchers.IO) {
         val rawAdBlockEnabled = settingsRepository.searchAdBlockEnabled.first()
         val dnsProvider       = settingsRepository.searchDnsProvider.first()
-        // Only disable in-app blocking if NextDNS is taking care of it
-        val adBlockEnabled    = rawAdBlockEnabled && dnsProvider != "NEXTDNS"
+        val nextDnsId         = settingsRepository.searchNextDnsId.first()
+        // Only disable in-app blocking if NextDNS is taking care of it AND it is configured
+        val adBlockEnabled    = rawAdBlockEnabled && (dnsProvider != "NEXTDNS" || nextDnsId.isBlank())
         
         val engine            = settingsRepository.searchEngine.first()
         val safeSearch        = settingsRepository.searchSafeSearch.first()
@@ -261,6 +263,8 @@ class WebSearchRepository @Inject constructor(
         val safeSearchDDG    = if (safeSearch) "&kp=1" else "&kp=-1"
         val safeSearchGoogle = if (safeSearch) "&safe=active" else "&safe=off"
         val safeSearchBing   = if (safeSearch) "&adlt=strict" else "&adlt=off"
+        val safeSearchBrave  = if (safeSearch) "&safesearch=active" else "&safesearch=off"
+        val safeSearchEcosia = if (safeSearch) "&safesearch=1" else "&safesearch=0"
         val regionParam      = if (region.isNotBlank() && region != "wt-wt") "&kl=$region" else ""
 
         val mainEngines = when (engine) {
@@ -278,6 +282,7 @@ class WebSearchRepository @Inject constructor(
                 eng to fetchFromEngine(
                     eng, encodedQuery, offset, offsetParam,
                     safeSearchDDG, safeSearchGoogle, safeSearchBing,
+                    safeSearchBrave, safeSearchEcosia,
                     regionParam, customUrlTemplate, client, adBlockEnabled,
                 )
             }
@@ -293,6 +298,7 @@ class WebSearchRepository @Inject constructor(
                     val altResults = fetchFromEngine(
                         altEng, encodedQuery, offset, offsetParam,
                         safeSearchDDG, safeSearchGoogle, safeSearchBing,
+                        safeSearchBrave, safeSearchEcosia,
                         regionParam, customUrlTemplate, client, adBlockEnabled,
                     )
                     if (altResults.isNotEmpty()) {
@@ -352,6 +358,8 @@ class WebSearchRepository @Inject constructor(
         safeSearchDDG: String,
         safeSearchGoogle: String,
         safeSearchBing: String,
+        safeSearchBrave: String,
+        safeSearchEcosia: String,
         regionParam: String,
         customUrlTemplate: String,
         client: OkHttpClient,
@@ -366,10 +374,19 @@ class WebSearchRepository @Inject constructor(
                 "https://www.google.com/search?q=$encodedQuery&num=100",
             )
             "BRAVE" -> listOf(
-                "https://search.brave.com/search?q=$encodedQuery&source=web",
+                "https://search.brave.com/search?q=$encodedQuery&source=web$safeSearchBrave",
             )
             "BING" -> listOf(
                 "https://www.bing.com/search?q=$encodedQuery&first=$offset$safeSearchBing",
+            )
+            "ECOSIA" -> listOf(
+                "https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia",
+            )
+            "SWISSCOWS" -> listOf(
+                "https://swisscows.com/web?query=$encodedQuery",
+            )
+            "STARTPAGE" -> listOf(
+                "https://www.startpage.com/do/search?query=$encodedQuery",
             )
             "CUSTOM" -> listOf(
                 if (customUrlTemplate.contains("{query}"))
@@ -413,10 +430,13 @@ class WebSearchRepository @Inject constructor(
 
                 val doc = Jsoup.parse(html, tryUrl)
                 val parsed = when (eng) {
-                    "GOOGLE" -> parseGoogleResults(doc, adBlockEnabled)
-                    "BRAVE"  -> parseBraveResults(doc, adBlockEnabled)
-                    "BING"   -> parseBingResults(doc, adBlockEnabled)
-                    else     -> parseDuckDuckGoResults(doc, adBlockEnabled)
+                    "GOOGLE"    -> parseGoogleResults(doc, adBlockEnabled)
+                    "BRAVE"     -> parseBraveResults(doc, adBlockEnabled)
+                    "BING"      -> parseBingResults(doc, adBlockEnabled)
+                    "ECOSIA"    -> parseEcosiaResults(doc, adBlockEnabled)
+                    "SWISSCOWS" -> parseSwisscowsResults(doc, adBlockEnabled)
+                    "STARTPAGE" -> parseStartpageResults(doc, adBlockEnabled)
+                    else        -> parseDuckDuckGoResults(doc, adBlockEnabled, eng)
                 }
                 if (parsed.isNotEmpty()) return parsed
             } catch (_: Exception) { continue }
@@ -441,8 +461,13 @@ class WebSearchRepository @Inject constructor(
 
     // ─── DuckDuckGo parser (enriched) ────────────────────────────────────────
 
-    private fun parseDuckDuckGoResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+    private fun parseDuckDuckGoResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        engineLabel: String = "DDG"
+    ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+        val source = if (engineLabel == "CUSTOM") "WEB" else engineLabel
 
         // HTML version
         doc.select(".results .result, #links .result, .result").forEachIndexed { rank, el ->
@@ -466,7 +491,7 @@ class WebSearchRepository @Inject constructor(
                 snippet    = cleanSnippet,
                 url        = cleanUrl,
                 displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
-                source     = "DDG",
+                source     = source,
                 date       = date,
                 breadcrumb = breadcrumb,
                 engineRank = rank,
@@ -492,7 +517,7 @@ class WebSearchRepository @Inject constructor(
                             snippet    = cleanSnippet,
                             url        = cleanUrl,
                             displayUrl = safeHost(cleanUrl),
-                            source     = "DDG",
+                            source     = source,
                             date       = date,
                             engineRank = rank++,
                         )
@@ -500,6 +525,89 @@ class WebSearchRepository @Inject constructor(
                 }
                 i += 4
             }
+        }
+        return results
+    }
+
+    // ─── Ecosia parser ───────────────────────────────────────────────────────
+
+    private fun parseEcosiaResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        doc.select(".result, .results-wrapper .result").forEachIndexed { rank, el ->
+            val titleEl   = el.select("a.result-title, .result-title").firstOrNull() ?: return@forEachIndexed
+            val linkEl    = el.select("a.result-url, .result-url").firstOrNull()
+            val snippetEl = el.select(".result-snippet, .snippet").firstOrNull()
+
+            val cleanUrl = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+
+            val snippetText = snippetEl?.text()?.trim() ?: ""
+            val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+
+            results += SearchResult(
+                title      = titleEl.text().trim(),
+                snippet    = cleanSnippet,
+                url        = cleanUrl,
+                displayUrl = linkEl?.text()?.trim() ?: safeHost(cleanUrl),
+                source     = "Ecosia",
+                date       = date,
+                engineRank = rank,
+            )
+        }
+        return results
+    }
+
+    // ─── Swisscows parser ────────────────────────────────────────────────────
+
+    private fun parseSwisscowsResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        doc.select(".article, .web-results .article").forEachIndexed { rank, el ->
+            val titleEl   = el.select("h2 a, .title a").firstOrNull() ?: return@forEachIndexed
+            val snippetEl = el.select(".content, .snippet").firstOrNull()
+
+            val cleanUrl = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+
+            val snippetText = snippetEl?.text()?.trim() ?: ""
+            val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+
+            results += SearchResult(
+                title      = titleEl.text().trim(),
+                snippet    = cleanSnippet,
+                url        = cleanUrl,
+                displayUrl = safeHost(cleanUrl),
+                source     = "Swisscows",
+                date       = date,
+                engineRank = rank,
+            )
+        }
+        return results
+    }
+
+    // ─── Startpage parser ────────────────────────────────────────────────────
+
+    private fun parseStartpageResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        doc.select(".result, .w-gl__result").forEachIndexed { rank, el ->
+            val titleEl   = el.select(".result__title a, h3 a").firstOrNull() ?: return@forEachIndexed
+            val snippetEl = el.select(".result__snippet, .snippet").firstOrNull()
+            val urlEl     = el.select(".result__url, .url").firstOrNull()
+
+            val cleanUrl = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+
+            val snippetText = snippetEl?.text()?.trim() ?: ""
+            val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+
+            results += SearchResult(
+                title      = titleEl.text().trim(),
+                snippet    = cleanSnippet,
+                url        = cleanUrl,
+                displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
+                source     = "Startpage",
+                date       = date,
+                engineRank = rank,
+            )
         }
         return results
     }
