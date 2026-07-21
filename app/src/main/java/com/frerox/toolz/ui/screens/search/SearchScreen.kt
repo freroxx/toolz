@@ -16,7 +16,6 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -104,7 +103,7 @@ fun SearchScreen(
             onDnsClick          = { showDnsSheet = true; showSecuritySheet = false },
             onCustomizeAdBlock  = {
                 showSecuritySheet = false
-                onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+                onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
             }
         )
     }
@@ -226,7 +225,7 @@ fun SearchScreen(
                         showNextDnsWarning = false
                         showDnsSheet = false
                         showSearchSettings = false
-                        onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockSettings.route)
+                        onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Go to Setup") }
@@ -636,28 +635,13 @@ private fun HomePage(
         }
 
         // ── Recent history ────────────────────────────────
-        if (history.isNotEmpty()) {
-            item(key = "historyHeader") {
-                SectionHeader(
-                    title       = "Recent searches",
-                    actionLabel = "Clear all",
-                    onAction    = onClearHistory,
-                )
-            }
-            items(history.take(6), key = { "h_${it.id}" }) { entry ->
-                HistoryRow(
-                    query    = entry.query,
-                    onSearch = { onSearch(entry.query) },
-                    onDelete = { onDeleteHistory(entry.id) },
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                )
-            }
-        } else {
-            item(key = "emptyHistory") {
-                EmptyHistory()
-            }
+        item(key = "history") {
+            RecentSearchSection(
+                history = history,
+                onSearch = onSearch,
+                onDelete = onDeleteHistory,
+                onClearAll = onClearHistory
+            )
         }
     }
 }
@@ -733,41 +717,6 @@ private fun QuickLinksSection(
     }
 }
 
-// ══════════════════════════════════════════════════════════
-//  EMPTY HISTORY
-// ══════════════════════════════════════════════════════════
-
-@Composable
-private fun EmptyHistory() {
-    Column(
-        modifier            = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Surface(
-            modifier = Modifier.size(72.dp),
-            shape    = RoundedCornerShape(24.dp),
-            color    = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.ManageSearch, null,
-                    modifier = Modifier.size(32.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                )
-            }
-        }
-        Text(
-            "Start your first search",
-            style      = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            color      = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign  = TextAlign.Center,
-        )
-    }
-}
 
 // ══════════════════════════════════════════════════════════
 //  RESULTS PAGE
