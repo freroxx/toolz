@@ -66,7 +66,7 @@ sealed class Screen(val route: String) {
     object NetworkPowerSuite : Screen("network_power_suite")
     object WifiTweaks : Screen("wifi_tweaks")
     object Search : Screen("search")
-    object AdBlockSettings : Screen("ad_block_settings")
+    object AdBlockConfig : Screen("ad_block_settings")
     object NextDnsSetup : Screen("next_dns_setup?url={url}") {
         fun createRoute(url: String) = "next_dns_setup?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
     }
