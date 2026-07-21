@@ -742,8 +742,8 @@ fun ToolzNavHost(
             SearchScreen(
                 onBackClick = { navController.popBackStack() },
                 onResultClick = { url ->
-                    if (url == Screen.AdBlockSettings.route) {
-                        navController.navigate(Screen.AdBlockSettings.route)
+                    if (url == Screen.AdBlockConfig.route) {
+                        navController.navigate(Screen.AdBlockConfig.route)
                     } else {
                         navController.navigate(Screen.Browser.createRoute(url))
                     }
@@ -752,7 +752,7 @@ fun ToolzNavHost(
             )
         }
 
-        composable(Screen.AdBlockSettings.route) {
+        composable(Screen.AdBlockConfig.route) {
             com.frerox.toolz.ui.screens.search.AdBlockSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onNavigateToNextDnsSetup = { url ->
