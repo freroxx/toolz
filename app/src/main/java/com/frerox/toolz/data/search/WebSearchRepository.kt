@@ -419,7 +419,10 @@ class WebSearchRepository @Inject constructor(
                 SearchCategory.VIDEOS -> listOf("https://www.bing.com/videos/search?q=$encodedQuery&first=$offset$safeSearchBing")
                 else -> listOf("https://www.bing.com/search?q=$encodedQuery&first=$offset$safeSearchBing")
             }
-            "ECOSIA" -> listOf("https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia")
+            "ECOSIA" -> when(category) {
+                SearchCategory.NEWS -> listOf("https://www.ecosia.org/news?q=$encodedQuery")
+                else -> listOf("https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia")
+            }
             "SWISSCOWS" -> listOf("https://swisscows.com/web?query=$encodedQuery")
             "STARTPAGE" -> listOf("https://www.startpage.com/do/search?query=$encodedQuery")
             "CUSTOM" -> listOf(
@@ -429,14 +432,19 @@ class WebSearchRepository @Inject constructor(
                     "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam"
             )
             else -> when(category) {
-                SearchCategory.IMAGES -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=images&iax=images$offsetParam$safeSearchDDG$regionParam")
-                SearchCategory.NEWS   -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=news&ia=news$offsetParam$safeSearchDDG$regionParam")
-                SearchCategory.VIDEOS -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=videos&ia=videos$offsetParam$safeSearchDDG$regionParam")
-                else -> listOf(
-                    // HTML version with no=1 requests more results per page
-                    "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam&no=1",
-                    "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam",
+                // DDG HTML news: ia=news returns a working news page
+                SearchCategory.NEWS -> listOf(
+                    "https://html.duckduckgo.com/html/?q=$encodedQuery&ia=news$safeSearchDDG$regionParam",
+                    "https://html.duckduckgo.com/html/?q=$encodedQuery+news&iar=news$safeSearchDDG$regionParam",
                 )
+                else -> {
+                    // DDG HTML pagination: &s= is page-based (0, 30, 60, ...)
+                    // offset is absolute result count, convert to DDG page offset
+                    val ddgOffset = if (offset > 0) "&s=${(offset / 30) * 30}" else ""
+                    listOf(
+                        "https://html.duckduckgo.com/html/?q=$encodedQuery$ddgOffset$safeSearchDDG$regionParam",
+                    )
+                }
             }
         }
 
@@ -560,47 +568,39 @@ class WebSearchRepository @Inject constructor(
 
         // Category-specific parsing
         if (category == SearchCategory.NEWS) {
-            // DDG news results appear under .result--news or .result.result--news-link
-            val newsEls = doc.select(".result--news, .result__body")
+            // DDG news: same HTML as web results, but with ia=news the content is news-focused.
+            // Try .result--news first (some DDG versions use it), then fall back to all results.
+            val newsSpecific = doc.select(".result--news, .results--news .result")
                 .filter { !it.hasClass("result--ad") }
+
+            val newsEls = newsSpecific.ifEmpty {
+                // Standard web result elements — DDG news uses the same DOM with news content
+                doc.select("#links .result").filter {
+                    !it.hasClass("result--ad") &&
+                    !it.hasClass("result--more") &&
+                    it.select(".result__a").isNotEmpty()
+                }
+            }
+
             newsEls.forEachIndexed { rank, el ->
                 val titleEl   = el.select(".result__a, .result__title a").firstOrNull() ?: return@forEachIndexed
                 val snippetEl = el.select(".result__snippet").firstOrNull()
                 val urlEl     = el.select(".result__url").firstOrNull()
                 val rawUrl    = titleEl.attr("href")
                 val cleanUrl  = cleanDuckDuckGoUrl(rawUrl)
-                if (cleanUrl.isBlank() || cleanUrl.startsWith("/")) return@forEachIndexed
+                if (cleanUrl.isBlank() || cleanUrl.startsWith("/") || cleanUrl.startsWith("//duckduckgo")) return@forEachIndexed
                 if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
                 val snippetText = snippetEl?.text()?.trim() ?: ""
                 val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
                 results += SearchResult(
-                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
-                    snippet = cleanSnippet, url = cleanUrl,
+                    title      = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet    = cleanSnippet.ifBlank { snippetText },
+                    url        = cleanUrl,
                     displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
-                    source = source, date = date, engineRank = rank,
+                    source     = source,
+                    date       = date,
+                    engineRank = rank,
                 )
-            }
-            // Fallback: same HTML but news results use regular result selectors with date snippets
-            if (results.isEmpty()) {
-                doc.select("#links .result").filter { !it.hasClass("result--ad") && !it.hasClass("result--more") }
-                    .forEachIndexed { rank, el ->
-                        val titleEl = el.select(".result__a").firstOrNull() ?: return@forEachIndexed
-                        val snippetEl = el.select(".result__snippet").firstOrNull()
-                        val urlEl = el.select(".result__url").firstOrNull()
-                        val rawUrl = titleEl.attr("href")
-                        val cleanUrl = cleanDuckDuckGoUrl(rawUrl)
-                        if (cleanUrl.isBlank() || cleanUrl.startsWith("/")) return@forEachIndexed
-                        if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
-                        val snippetText = snippetEl?.text()?.trim() ?: ""
-                        val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
-                        if (date == null) return@forEachIndexed  // News results should have dates
-                        results += SearchResult(
-                            title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
-                            snippet = cleanSnippet, url = cleanUrl,
-                            displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
-                            source = source, date = date, engineRank = rank,
-                        )
-                    }
             }
             return results
         }
