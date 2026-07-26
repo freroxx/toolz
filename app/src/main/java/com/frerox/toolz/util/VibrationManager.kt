@@ -95,6 +95,14 @@ class VibrationManager @Inject constructor(
         )
     }
 
+    fun vibrateNavigation() {
+        if (!canVibrate) return
+        if (isFullStrength) {
+            if (vibratePredefined(VibrationEffect.EFFECT_TICK)) return
+        }
+        vibrateOneShot(durationMs = 15L, amp = (amplitude * 0.55f).toInt().coerceIn(1, 255))
+    }
+
     fun vibrate(durationMs: Long = 20L) {
         if (!canVibrate) return
         vibrateOneShot(durationMs, amplitude)
