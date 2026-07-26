@@ -24,15 +24,29 @@ class AdBlockManager @Inject constructor(
     init {
         // Startup Sequence: Fast & Guaranteed
         scope.launch {
-            // 1. Load disk-based rules first
+            // 1. Load disk-based rules first (fast, from cache)
             loadImportedDomains()
             
             // 2. Load current custom settings (one-shot)
             val customBlocked = settingsRepository.searchAdBlockBlocklists.first()
             val customAllowed = settingsRepository.searchAdBlockAllowlists.first()
             AdBlockList.updateCustomLists(customBlocked, customAllowed)
+
+            // 3. Background-sync imported lists if enabled and cache is stale (>24h)
+            val enabledLists = settingsRepository.searchEnabledImportedLists.first()
+            if (enabledLists.isNotEmpty()) {
+                val file = File(application.filesDir, "imported_blocklist.txt")
+                val isStale = !file.exists() || (System.currentTimeMillis() - file.lastModified()) > 86_400_000L
+                if (isStale) {
+                    try {
+                        syncImportedLists(enabledLists) { url -> fetchListFromNetwork(url) }
+                    } catch (e: Exception) {
+                        android.util.Log.w("AdBlockManager", "Startup sync failed", e)
+                    }
+                }
+            }
             
-            // 3. Observe changes for live updates
+            // 4. Observe changes for live updates
             combine(
                 settingsRepository.searchAdBlockBlocklists,
                 settingsRepository.searchAdBlockAllowlists
@@ -41,6 +55,63 @@ class AdBlockManager @Inject constructor(
             }.collect {}
         }
     }
+
+    /**
+     * Fetches a blocklist from network with a long timeout for large lists.
+     * Used for both startup sync and user-triggered sync.
+     */
+    suspend fun fetchListFromNetwork(url: String): Set<String> = withContext(Dispatchers.IO) {
+        try {
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("Accept", "text/plain, application/octet-stream, */*")
+                .header("User-Agent", "Mozilla/5.0 (compatible; AdBlockSync/1.0)")
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext emptySet()
+            val body = response.body?.string() ?: return@withContext emptySet()
+            parseBlocklistText(body)
+        } catch (e: Exception) {
+            android.util.Log.e("AdBlockManager", "Failed to fetch $url", e)
+            emptySet()
+        }
+    }
+
+    /**
+     * Parses raw blocklist text (hosts, ABP, plain domain) into a Set<String>.
+     */
+    fun parseBlocklistText(text: String): Set<String> {
+        val domains = mutableSetOf<String>()
+        text.lineSequence().forEach { line ->
+            var trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
+            if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
+            val isException = trimmed.startsWith("@@")
+            val rule = if (isException) trimmed.substring(2) else trimmed
+            val domain = when {
+                rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1") -> {
+                    rule.split(Regex("\\s+")).getOrNull(1)?.lowercase()?.trim() ?: return@forEach
+                }
+                rule.startsWith("||") -> {
+                    val end = rule.indexOfAny(charArrayOf('^', '$', '/'))
+                    if (end != -1) rule.substring(2, end) else rule.substring(2)
+                }
+                !rule.contains(" ") && rule.contains(".") -> {
+                    rule.removePrefix("||").substringBefore("^").substringBefore("$").substringBefore("/").trim()
+                }
+                else -> return@forEach
+            }.lowercase().trim()
+            if (domain.contains(".") && domain != "localhost") {
+                domains.add(if (isException) "@@$domain" else domain)
+            }
+        }
+        return domains
+    }
+
 
     private suspend fun loadImportedDomains() {
         val file = File(application.filesDir, "imported_blocklist.txt")
