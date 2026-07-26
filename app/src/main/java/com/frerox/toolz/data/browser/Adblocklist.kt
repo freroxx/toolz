@@ -57,8 +57,54 @@ object AdBlockList {
 
     private val rawCustomBlocked = AtomicReference<Set<String>>(emptySet())
     private val rawImported      = AtomicReference<Set<String>>(emptySet())
+    
+    @Volatile
+    private var isEngineReady = false
 
     init { refreshIndex() }
+
+    /**
+     * Cleans adblock-style markers and URL schemes from a rule to get a pure domain or path fragment.
+     */
+    private fun cleanRule(rule: String): String {
+        var cleaned = rule.trim().lowercase()
+        if (cleaned.isEmpty()) return ""
+
+        // Strip exception marker
+        if (cleaned.startsWith("@@")) {
+            cleaned = cleaned.substring(2)
+        }
+        // Strip adblock domain anchor
+        if (cleaned.startsWith("||")) {
+            cleaned = cleaned.substring(2)
+        }
+        // Strip URL scheme if present
+        if (cleaned.startsWith("http://")) {
+            cleaned = cleaned.substring(7)
+        } else if (cleaned.startsWith("https://")) {
+            cleaned = cleaned.substring(8)
+        }
+        // Strip adblock separator / options
+        if (cleaned.contains("^")) {
+            cleaned = cleaned.substringBefore("^")
+        }
+        if (cleaned.contains("$")) {
+            cleaned = cleaned.substringBefore("$")
+        }
+        // Strip trailing slash if it's a domain-only rule
+        if (cleaned.endsWith("/") && !cleaned.substring(0, cleaned.length - 1).contains("/")) {
+            cleaned = cleaned.removeSuffix("/")
+        }
+        return cleaned.trim()
+    }
+
+    private fun log(tag: String, msg: String) {
+        try {
+            android.util.Log.d(tag, msg)
+        } catch (_: Exception) {
+            println("[$tag] $msg")
+        }
+    }
 
     /**
      * Re-categorizes all rules into domain-only and path-patterns for optimal matching.
@@ -69,21 +115,22 @@ object AdBlockList {
         val patterns = mutableSetOf<String>()
 
         allRules.forEach {
-            val lower = it.lowercase().trim()
-            if (lower.isEmpty()) return@forEach
-            if (lower.contains("/")) patterns.add(lower)
-            else domains.add(lower)
+            val cleaned = cleanRule(it)
+            if (cleaned.isEmpty()) return@forEach
+            if (cleaned.contains("/")) patterns.add(cleaned)
+            else domains.add(cleaned)
         }
 
         activeDomains.set(domains)
         activePatterns.set(patterns)
+        isEngineReady = true
         
-        android.util.Log.d("AdBlockList", "Engine Ready: ${domains.size} domains, ${patterns.size} patterns active")
+        log("AdBlockList", "Engine Ready: ${domains.size} domains, ${patterns.size} patterns active")
     }
 
     fun updateCustomLists(blocked: Set<String>, allowed: Set<String>) {
-        rawCustomBlocked.set(blocked.map { it.lowercase() }.toSet())
-        allowlist.set(allowed.map { it.lowercase() }.toSet())
+        rawCustomBlocked.set(blocked.map { cleanRule(it) }.toSet())
+        allowlist.set(allowed.map { cleanRule(it) }.toSet())
         refreshIndex()
     }
 
@@ -94,9 +141,9 @@ object AdBlockList {
         rules.forEach { 
             val lower = it.lowercase().trim()
             if (lower.startsWith("@@")) {
-                exceptions.add(lower.removePrefix("@@").removePrefix("||").removeSuffix("^"))
+                exceptions.add(cleanRule(lower))
             } else {
-                blocked.add(lower)
+                blocked.add(cleanRule(lower))
             }
         }
         
@@ -108,7 +155,7 @@ object AdBlockList {
     // ────────────────────────────────────────────────────────── Core Logic
 
     fun isBlocked(url: String): Boolean {
-        if (url.isBlank()) return false
+        if (!isEngineReady || url.isBlank()) return false
         
         // Normalize URL
         val cleanUrl = when {
@@ -169,7 +216,7 @@ object AdBlockList {
     }
 
     private fun hit(type: String, target: String): Boolean {
-        android.util.Log.d("AdBlockList", "Rule Hit [$type]: $target")
+        log("AdBlockList", "Rule Hit [$type]: $target")
         return true
     }
 
