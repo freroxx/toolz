@@ -473,6 +473,91 @@ fun SearchResultCard(
 }
 
 // ══════════════════════════════════════════════════════════
+//  SYNTHETIC CATEGORY CARD (Images / Videos)
+// ══════════════════════════════════════════════════════════
+
+/**
+ * Full-width card shown for Image and Video category results.
+ * Since search engines render these in JavaScript, we provide
+ * a direct "open in browser" link to the native search UI.
+ */
+@Composable
+fun SyntheticCategoryCard(
+    result: SearchResult,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val accentColor = sourceAccentColor(result.source)
+    val isVideo     = result.url.contains("video") || result.url.contains("vid=")
+
+    ExpressiveCard(
+        onClick        = onClick,
+        modifier       = modifier.fillMaxWidth(),
+        shape          = RoundedCornerShape(24.dp),
+        containerColor = accentColor.copy(alpha = 0.08f),
+        contentColor   = MaterialTheme.colorScheme.onSurface,
+        elevation      = 0.dp,
+    ) {
+        Column(
+            modifier            = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = accentColor.copy(alpha = 0.18f),
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isVideo) Icons.Rounded.OndemandVideo else Icons.Rounded.Image,
+                            contentDescription = null,
+                            tint     = accentColor,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        result.title,
+                        style      = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color      = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        result.displayUrl,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accentColor.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
+            Text(
+                result.snippet,
+                style      = MaterialTheme.typography.bodySmall,
+                color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 18.sp,
+            )
+
+            ToolzExpressiveButton(
+                onClick  = onClick,
+                modifier = Modifier.fillMaxWidth(),
+                shape    = RoundedCornerShape(16.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = accentColor),
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open ${if (isVideo) "Videos" else "Images"} in Browser")
+            }
+        }
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════
 //  SHIMMER SKELETON  — pixel-matched to SearchResultCard
 // ══════════════════════════════════════════════════════════
 

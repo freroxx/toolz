@@ -278,6 +278,16 @@ class WebSearchRepository @Inject constructor(
             else     -> listOf(engine)
         }
 
+        // For image/video categories, return a synthetic result immediately
+        // (all engines use JS-heavy rendering for images/videos that Jsoup cannot parse)
+        if (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) {
+            val eng = if (engine == "META") "DUCKDUCKGO" else engine
+            return@withContext syntheticCategoryResult(
+                eng, query, category,
+                safeSearchDDG, safeSearchGoogle, safeSearchBing, safeSearchBrave,
+            )
+        }
+
         val client = getDnsClient()
         val resultsByEngine = mutableMapOf<String, List<SearchResult>>()
 
@@ -468,10 +478,54 @@ class WebSearchRepository @Inject constructor(
                     "STARTPAGE" -> parseStartpageResults(doc, adBlockEnabled)
                     else        -> parseDuckDuckGoResults(doc, adBlockEnabled, eng, category)
                 }
+                android.util.Log.d("Search", "[$eng] category=$category parsed=${parsed.size} from $tryUrl")
                 if (parsed.isNotEmpty()) return parsed
             } catch (_: Exception) { continue }
         }
         return emptyList()
+    }
+
+    /**
+     * Builds a synthetic "open in search engine" result for image/video categories.
+     * These categories use JavaScript-heavy rendering that Jsoup cannot parse.
+     * The result opens the engine's native image/video search URL in the WebView.
+     */
+    private fun syntheticCategoryResult(
+        eng: String,
+        query: String,
+        category: SearchCategory,
+        safeSearchDDG: String,
+        safeSearchGoogle: String,
+        safeSearchBing: String,
+        safeSearchBrave: String,
+    ): List<SearchResult> {
+        val encodedQ = try { URLEncoder.encode(query, StandardCharsets.UTF_8.name()) } catch (_: Exception) { query }
+        val (source, url, label) = when {
+            category == SearchCategory.IMAGES -> when (eng) {
+                "GOOGLE"   -> Triple("Google",     "https://www.google.com/search?q=$encodedQ&tbm=isch$safeSearchGoogle",            "Google Images")
+                "BRAVE"    -> Triple("Brave",      "https://search.brave.com/images?q=$encodedQ$safeSearchBrave",                    "Brave Images")
+                "BING"     -> Triple("Bing",       "https://www.bing.com/images/search?q=$encodedQ$safeSearchBing",                  "Bing Images")
+                "ECOSIA"   -> Triple("Ecosia",     "https://www.ecosia.org/images?q=$encodedQ",                                     "Ecosia Images")
+                else       -> Triple("DuckDuckGo", "https://duckduckgo.com/?q=$encodedQ&ia=images&iax=images$safeSearchDDG",        "DuckDuckGo Images")
+            }
+            category == SearchCategory.VIDEOS -> when (eng) {
+                "GOOGLE"   -> Triple("Google",     "https://www.google.com/search?q=$encodedQ&tbm=vid$safeSearchGoogle",             "Google Videos")
+                "BRAVE"    -> Triple("Brave",      "https://search.brave.com/videos?q=$encodedQ$safeSearchBrave",                   "Brave Videos")
+                "BING"     -> Triple("Bing",       "https://www.bing.com/videos/search?q=$encodedQ$safeSearchBing",                 "Bing Videos")
+                else       -> Triple("DuckDuckGo", "https://duckduckgo.com/?q=$encodedQ&ia=videos&iax=videos$safeSearchDDG",        "DuckDuckGo Videos")
+            }
+            else -> return emptyList()
+        }
+        return listOf(
+            SearchResult(
+                title      = "Open $label for \"$query\"",
+                snippet    = "Tap to view $label results in the browser — full image/video browsing experience.",
+                url        = url,
+                displayUrl = url.removePrefix("https://").substringBefore("/"),
+                source     = source,
+                engineRank = 0,
+            )
+        )
     }
 
     // ─── Request builder ─────────────────────────────────────────────────────
