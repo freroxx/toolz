@@ -28,6 +28,8 @@ import javax.inject.Singleton
 
 // ─── Enriched SearchResult ────────────────────────────────────────────────────
 
+enum class SearchCategory { ALL, IMAGES, NEWS, VIDEOS }
+
 @Immutable
 @JsonClass(generateAdapter = true)
 data class SearchResult(
@@ -35,12 +37,13 @@ data class SearchResult(
     val snippet:    String,
     val url:        String,
     val displayUrl: String,
-    val source:     String  = "WEB",
+    val source:     String       = "WEB",
     // New enriched fields (all optional — zero migration cost)
-    val date:       String? = null,   // "Jun 12, 2025" or "3 days ago"
-    val breadcrumb: String? = null,   // "Site › Section › Page"
-    val imageUrl:   String? = null,   // OG image if present
-    val engineRank: Int     = 0,      // original position in the engine results
+    val date:       String?      = null,   // "Jun 12, 2025" or "3 days ago"
+    val breadcrumb: String?      = null,   // "Site › Section › Page"
+    val imageUrl:   String?      = null,   // OG image if present
+    val engineRank: Int          = 0,      // original position in the engine results
+    val engines:    List<String> = emptyList(), // Engine sources for META consensus badges
 )
 
 // ─── DNS client cache ─────────────────────────────────────────────────────────
@@ -246,12 +249,13 @@ class WebSearchRepository @Inject constructor(
 
     // ─── Main Search ──────────────────────────────────────────────────────────
 
-    suspend fun search(query: String, offset: Int = 0): List<SearchResult> = withContext(Dispatchers.IO) {
+    suspend fun search(
+        query: String,
+        offset: Int = 0,
+        category: SearchCategory = SearchCategory.ALL
+    ): List<SearchResult> = withContext(Dispatchers.IO) {
         val rawAdBlockEnabled = settingsRepository.searchAdBlockEnabled.first()
-        val dnsProvider       = settingsRepository.searchDnsProvider.first()
-        val nextDnsId         = settingsRepository.searchNextDnsId.first()
-        // Only disable in-app blocking if NextDNS is taking care of it AND it is configured
-        val adBlockEnabled    = rawAdBlockEnabled && (dnsProvider != "NEXTDNS" || nextDnsId.isBlank())
+        val adBlockEnabled    = rawAdBlockEnabled
         
         val engine            = settingsRepository.searchEngine.first()
         val safeSearch        = settingsRepository.searchSafeSearch.first()
@@ -259,7 +263,8 @@ class WebSearchRepository @Inject constructor(
         val customUrlTemplate = settingsRepository.searchCustomEngineUrl.first()
 
         val encodedQuery     = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
-        val offsetParam      = if (offset > 0) "&s=$offset&dc=$offset&v=l" else ""
+        // DDG HTML pagination uses &s= (result start position). &dc= and &v=l break pagination.
+        val offsetParam      = if (offset > 0) "&s=$offset" else ""
         val safeSearchDDG    = if (safeSearch) "&kp=1" else "&kp=-1"
         val safeSearchGoogle = if (safeSearch) "&safe=active" else "&safe=off"
         val safeSearchBing   = if (safeSearch) "&adlt=strict" else "&adlt=off"
@@ -284,6 +289,7 @@ class WebSearchRepository @Inject constructor(
                     safeSearchDDG, safeSearchGoogle, safeSearchBing,
                     safeSearchBrave, safeSearchEcosia,
                     regionParam, customUrlTemplate, client, adBlockEnabled,
+                    category,
                 )
             }
         }
@@ -300,6 +306,7 @@ class WebSearchRepository @Inject constructor(
                         safeSearchDDG, safeSearchGoogle, safeSearchBing,
                         safeSearchBrave, safeSearchEcosia,
                         regionParam, customUrlTemplate, client, adBlockEnabled,
+                        category,
                     )
                     if (altResults.isNotEmpty()) {
                         resultsByEngine[altEng] = altResults
@@ -309,7 +316,7 @@ class WebSearchRepository @Inject constructor(
             }
         }
 
-        // ── META relevance scoring — replaces naive round-robin ──────────────
+        // ── META relevance scoring & Consensus Badge tagging ─────────────────
         val final = mutableListOf<SearchResult>()
 
         if (engine == "META") {
@@ -317,7 +324,14 @@ class WebSearchRepository @Inject constructor(
             val urlToAppearances = mutableMapOf<String, MutableList<Pair<String, Int>>>()
             for ((eng, list) in resultsByEngine) {
                 list.forEachIndexed { rank, result ->
-                    urlToAppearances.getOrPut(result.url) { mutableListOf() }.add(eng to rank)
+                    val canonicalEng = when(eng) {
+                        "DUCKDUCKGO" -> "DuckDuckGo"
+                        "GOOGLE" -> "Google"
+                        "BRAVE" -> "Brave"
+                        "BING" -> "Bing"
+                        else -> eng.lowercase().replaceFirstChar { it.uppercase() }
+                    }
+                    urlToAppearances.getOrPut(result.url) { mutableListOf() }.add(canonicalEng to rank)
                 }
             }
 
@@ -327,7 +341,9 @@ class WebSearchRepository @Inject constructor(
             val scored = resultsByEngine.values.flatten()
                 .distinctBy { it.url }
                 .map { result ->
-                    val appearances  = urlToAppearances[result.url] ?: emptyList()
+                    val appearances = urlToAppearances[result.url] ?: emptyList()
+                    val engineNames = appearances.map { it.first }.distinct()
+                    
                     // Rank score: 1/(rank+1) summed across engines
                     val rankScore    = appearances.sumOf { (_, rank) -> 1.0 / (rank + 1) }
                     // Consensus bonus: appears in 2+ engines
@@ -336,7 +352,9 @@ class WebSearchRepository @Inject constructor(
                     val snippet      = if (result.snippet.isNotBlank()) 1.1 else 1.0
                     // Date bonus: fresh content floats up slightly
                     val freshness    = if (result.date != null) 1.05 else 1.0
-                    Scored(result, rankScore * consensus * snippet * freshness)
+                    
+                    val enrichedResult = result.copy(engines = engineNames)
+                    Scored(enrichedResult, rankScore * consensus * snippet * freshness)
                 }
                 .sortedByDescending { it.score }
 
@@ -345,7 +363,7 @@ class WebSearchRepository @Inject constructor(
             resultsByEngine.values.forEach { final.addAll(it) }
         }
 
-        final.distinctBy { it.url }.take(50)
+        final.distinctBy { it.url }.take(500)
     }
 
     // ─── Engine fetcher ───────────────────────────────────────────────────────
@@ -364,40 +382,52 @@ class WebSearchRepository @Inject constructor(
         customUrlTemplate: String,
         client: OkHttpClient,
         adBlockEnabled: Boolean,
+        category: SearchCategory = SearchCategory.ALL,
     ): List<SearchResult> {
         if (!isEngineAvailable(eng)) return emptyList()
 
         val urls = when (eng) {
-            "GOOGLE" -> listOf(
-                "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle",
-                "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle&gbv=1",
-                "https://www.google.com/search?q=$encodedQuery&num=100",
-            )
-            "BRAVE" -> listOf(
-                "https://search.brave.com/search?q=$encodedQuery&source=web$safeSearchBrave",
-            )
-            "BING" -> listOf(
-                "https://www.bing.com/search?q=$encodedQuery&first=$offset$safeSearchBing",
-            )
-            "ECOSIA" -> listOf(
-                "https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia",
-            )
-            "SWISSCOWS" -> listOf(
-                "https://swisscows.com/web?query=$encodedQuery",
-            )
-            "STARTPAGE" -> listOf(
-                "https://www.startpage.com/do/search?query=$encodedQuery",
-            )
+            "GOOGLE" -> when(category) {
+                SearchCategory.IMAGES -> listOf("https://www.google.com/search?q=$encodedQuery&tbm=isch&start=$offset$safeSearchGoogle")
+                SearchCategory.NEWS -> listOf("https://www.google.com/search?q=$encodedQuery&tbm=nws&start=$offset$safeSearchGoogle")
+                SearchCategory.VIDEOS -> listOf("https://www.google.com/search?q=$encodedQuery&tbm=vid&start=$offset$safeSearchGoogle")
+                else -> listOf(
+                    "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle",
+                    "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle&gbv=1",
+                    "https://www.google.com/search?q=$encodedQuery&num=100",
+                )
+            }
+            "BRAVE" -> when(category) {
+                SearchCategory.IMAGES -> listOf("https://search.brave.com/images?q=$encodedQuery$safeSearchBrave")
+                SearchCategory.NEWS -> listOf("https://search.brave.com/news?q=$encodedQuery$safeSearchBrave")
+                SearchCategory.VIDEOS -> listOf("https://search.brave.com/videos?q=$encodedQuery$safeSearchBrave")
+                else -> listOf("https://search.brave.com/search?q=$encodedQuery&source=web$safeSearchBrave")
+            }
+            "BING" -> when(category) {
+                SearchCategory.IMAGES -> listOf("https://www.bing.com/images/search?q=$encodedQuery&first=$offset$safeSearchBing")
+                SearchCategory.NEWS -> listOf("https://www.bing.com/news/search?q=$encodedQuery&first=$offset$safeSearchBing")
+                SearchCategory.VIDEOS -> listOf("https://www.bing.com/videos/search?q=$encodedQuery&first=$offset$safeSearchBing")
+                else -> listOf("https://www.bing.com/search?q=$encodedQuery&first=$offset$safeSearchBing")
+            }
+            "ECOSIA" -> listOf("https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia")
+            "SWISSCOWS" -> listOf("https://swisscows.com/web?query=$encodedQuery")
+            "STARTPAGE" -> listOf("https://www.startpage.com/do/search?query=$encodedQuery")
             "CUSTOM" -> listOf(
                 if (customUrlTemplate.contains("{query}"))
                     customUrlTemplate.replace("{query}", encodedQuery)
                 else
                     "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam"
             )
-            else -> listOf(
-                "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam",
-                "https://duckduckgo.com/lite/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam",
-            )
+            else -> when(category) {
+                SearchCategory.IMAGES -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=images&iax=images$offsetParam$safeSearchDDG$regionParam")
+                SearchCategory.NEWS   -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=news&ia=news$offsetParam$safeSearchDDG$regionParam")
+                SearchCategory.VIDEOS -> listOf("https://html.duckduckgo.com/html/?q=$encodedQuery&iar=videos&ia=videos$offsetParam$safeSearchDDG$regionParam")
+                else -> listOf(
+                    // HTML version with no=1 requests more results per page
+                    "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam&no=1",
+                    "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam",
+                )
+            }
         }
 
         for (tryUrl in urls) {
@@ -430,13 +460,13 @@ class WebSearchRepository @Inject constructor(
 
                 val doc = Jsoup.parse(html, tryUrl)
                 val parsed = when (eng) {
-                    "GOOGLE"    -> parseGoogleResults(doc, adBlockEnabled)
-                    "BRAVE"     -> parseBraveResults(doc, adBlockEnabled)
-                    "BING"      -> parseBingResults(doc, adBlockEnabled)
-                    "ECOSIA"    -> parseEcosiaResults(doc, adBlockEnabled)
+                    "GOOGLE"    -> parseGoogleResults(doc, adBlockEnabled, category)
+                    "BRAVE"     -> parseBraveResults(doc, adBlockEnabled, category)
+                    "BING"      -> parseBingResults(doc, adBlockEnabled, category)
+                    "ECOSIA"    -> parseEcosiaResults(doc, adBlockEnabled, category)
                     "SWISSCOWS" -> parseSwisscowsResults(doc, adBlockEnabled)
                     "STARTPAGE" -> parseStartpageResults(doc, adBlockEnabled)
-                    else        -> parseDuckDuckGoResults(doc, adBlockEnabled, eng)
+                    else        -> parseDuckDuckGoResults(doc, adBlockEnabled, eng, category)
                 }
                 if (parsed.isNotEmpty()) return parsed
             } catch (_: Exception) { continue }
@@ -464,30 +494,110 @@ class WebSearchRepository @Inject constructor(
     private fun parseDuckDuckGoResults(
         doc: org.jsoup.nodes.Document,
         adBlockEnabled: Boolean,
-        engineLabel: String = "DDG"
+        engineLabel: String = "DDG",
+        category: SearchCategory = SearchCategory.ALL,
     ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
-        val source = if (engineLabel == "CUSTOM") "WEB" else engineLabel
+        val source = when (engineLabel.uppercase()) {
+            "CUSTOM"      -> "WEB"
+            "DUCKDUCKGO"  -> "DuckDuckGo"
+            else          -> engineLabel
+        }
 
-        // HTML version
-        doc.select(".results .result, #links .result, .result").forEachIndexed { rank, el ->
-            val titleEl   = el.select(".result__a, a.result__title, .result-link").first() ?: return@forEachIndexed
-            val snippetEl = el.select(".result__snippet, .result-snippet").first()
-            val urlEl     = el.select(".result__url, .result-url").first()
+        // Category-specific parsing
+        if (category == SearchCategory.NEWS) {
+            // DDG news results appear under .result--news or .result.result--news-link
+            val newsEls = doc.select(".result--news, .result__body")
+                .filter { !it.hasClass("result--ad") }
+            newsEls.forEachIndexed { rank, el ->
+                val titleEl   = el.select(".result__a, .result__title a").firstOrNull() ?: return@forEachIndexed
+                val snippetEl = el.select(".result__snippet").firstOrNull()
+                val urlEl     = el.select(".result__url").firstOrNull()
+                val rawUrl    = titleEl.attr("href")
+                val cleanUrl  = cleanDuckDuckGoUrl(rawUrl)
+                if (cleanUrl.isBlank() || cleanUrl.startsWith("/")) return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
+                    source = source, date = date, engineRank = rank,
+                )
+            }
+            // Fallback: same HTML but news results use regular result selectors with date snippets
+            if (results.isEmpty()) {
+                doc.select("#links .result").filter { !it.hasClass("result--ad") && !it.hasClass("result--more") }
+                    .forEachIndexed { rank, el ->
+                        val titleEl = el.select(".result__a").firstOrNull() ?: return@forEachIndexed
+                        val snippetEl = el.select(".result__snippet").firstOrNull()
+                        val urlEl = el.select(".result__url").firstOrNull()
+                        val rawUrl = titleEl.attr("href")
+                        val cleanUrl = cleanDuckDuckGoUrl(rawUrl)
+                        if (cleanUrl.isBlank() || cleanUrl.startsWith("/")) return@forEachIndexed
+                        if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                        val snippetText = snippetEl?.text()?.trim() ?: ""
+                        val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+                        if (date == null) return@forEachIndexed  // News results should have dates
+                        results += SearchResult(
+                            title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                            snippet = cleanSnippet, url = cleanUrl,
+                            displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
+                            source = source, date = date, engineRank = rank,
+                        )
+                    }
+            }
+            return results
+        }
+
+        if (category == SearchCategory.IMAGES) {
+            // DDG HTML image search embeds image links differently — try to extract them
+            doc.select(".tile--img, .result--images .tile, .module--carousel .result__a")
+                .forEachIndexed { rank, el ->
+                    val linkEl    = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                    val titleEl   = el.select(".tile__title, .result__title, img[alt]").firstOrNull()
+                    val imgEl     = el.select("img").firstOrNull()
+                    val rawUrl    = linkEl.attr("href")
+                    val cleanUrl  = cleanDuckDuckGoUrl(rawUrl).takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                    if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                    val title     = titleEl?.text()?.trim() ?: imgEl?.attr("alt")?.trim() ?: safeHost(cleanUrl)
+                    val imageUrl  = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
+                    results += SearchResult(
+                        title = title.ifBlank { safeHost(cleanUrl) }, snippet = "",
+                        url = cleanUrl, displayUrl = safeHost(cleanUrl),
+                        source = source, imageUrl = imageUrl, engineRank = rank,
+                    )
+                }
+            if (results.isNotEmpty()) return results
+        }
+
+        // DDG Web (ALL) — tight selector, exclude ads/junk
+        val resultEls = doc.select("#links .result")
+            .filter { el ->
+                !el.hasClass("result--ad") &&
+                !el.hasClass("result--more") &&
+                !el.hasClass("result--news-link") &&
+                !el.hasClass("result--related") &&
+                el.select(".result__a").isNotEmpty()
+            }
+
+        resultEls.forEachIndexed { rank, el ->
+            val titleEl   = el.select(".result__a").first() ?: return@forEachIndexed
+            val snippetEl = el.select(".result__snippet").first()
+            val urlEl     = el.select(".result__url").first()
 
             val rawUrl   = titleEl.attr("href")
             val cleanUrl = cleanDuckDuckGoUrl(rawUrl)
-            if (cleanUrl.isBlank() || (cleanUrl.startsWith("/") && !cleanUrl.startsWith("//"))) return@forEachIndexed
+            if (cleanUrl.isBlank() || cleanUrl.startsWith("/") || cleanUrl.startsWith("//duckduckgo.com")) return@forEachIndexed
             if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
 
             val snippetText = snippetEl?.text()?.trim() ?: ""
             val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
-
-            // Breadcrumb from display URL element
             val breadcrumb = urlEl?.text()?.trim()?.ifBlank { null }
 
             results += SearchResult(
-                title      = titleEl.text().trim(),
+                title      = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
                 snippet    = cleanSnippet,
                 url        = cleanUrl,
                 displayUrl = urlEl?.text()?.trim() ?: safeHost(cleanUrl),
@@ -498,7 +608,7 @@ class WebSearchRepository @Inject constructor(
             )
         }
 
-        // Lite/table fallback
+        // Lite/table fallback — only if HTML version returned nothing
         if (results.isEmpty()) {
             val rows = doc.select("table tr")
             var i = 0; var rank = 0
@@ -531,8 +641,33 @@ class WebSearchRepository @Inject constructor(
 
     // ─── Ecosia parser ───────────────────────────────────────────────────────
 
-    private fun parseEcosiaResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+    private fun parseEcosiaResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        category: SearchCategory = SearchCategory.ALL,
+    ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+
+        if (category == SearchCategory.NEWS) {
+            doc.select(".news-result, .news_result, article").forEachIndexed { rank, el ->
+                val titleEl   = el.select("a.result-title, .news-title, h3, h2").firstOrNull() ?: return@forEachIndexed
+                val cleanUrl  = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetEl = el.select(".result-snippet, .snippet, p").firstOrNull()
+                val dateEl    = el.select(".date, time").firstOrNull()
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (parsedDate, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Ecosia",
+                    date = dateEl?.text()?.trim() ?: parsedDate, engineRank = rank,
+                )
+            }
+            if (results.isNotEmpty()) return results
+        }
+
+        // Web / fallback
         doc.select(".result, .results-wrapper .result").forEachIndexed { rank, el ->
             val titleEl   = el.select("a.result-title, .result-title").firstOrNull() ?: return@forEachIndexed
             val linkEl    = el.select("a.result-url, .result-url").firstOrNull()
@@ -614,9 +749,112 @@ class WebSearchRepository @Inject constructor(
 
     // ─── Google parser (enriched) ────────────────────────────────────────────
 
-    private fun parseGoogleResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+    private fun parseGoogleResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        category: SearchCategory = SearchCategory.ALL,
+    ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
 
+        // ── Google Images ──────────────────────────────────────────────────────
+        if (category == SearchCategory.IMAGES) {
+            // Google Images: results live in divs with jsname="dTDiAc" or class "isv-r"
+            val imgSelectors = listOf("div.isv-r", "div[jsname='dTDiAc']", "div[data-id]", "div.rg_el")
+            for (sel in imgSelectors) {
+                val els = doc.select(sel)
+                if (els.isEmpty()) continue
+                els.forEachIndexed { rank, el ->
+                    val linkEl  = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                    val imgEl   = el.select("img").firstOrNull()
+                    val title   = el.select(".VFACy, h3, img[alt]").firstOrNull()?.text()?.trim()
+                        ?: imgEl?.attr("alt")?.trim() ?: return@forEachIndexed
+                    val rawHref = linkEl.attr("href")
+                    val pageUrl = if (rawHref.startsWith("/imgres")) {
+                        rawHref.substringAfter("imgurl=").substringBefore("&").decodeUrl()
+                    } else if (rawHref.startsWith("http")) rawHref
+                    else return@forEachIndexed
+                    if (adBlockEnabled && AdBlockList.isBlocked(pageUrl)) return@forEachIndexed
+                    val imgSrc  = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
+                    results += SearchResult(
+                        title = title, snippet = "", url = pageUrl,
+                        displayUrl = safeHost(pageUrl), source = "Google",
+                        imageUrl = imgSrc, engineRank = rank,
+                    )
+                }
+                if (results.isNotEmpty()) break
+            }
+            return results
+        }
+
+        // ── Google News ───────────────────────────────────────────────────────
+        if (category == SearchCategory.NEWS) {
+            val newsSelectors = listOf(
+                "div.SoaBEf", "div.nChh6e", "div.JJZKK",
+                "div.v7W49e", "article", "div.dbsr",
+            )
+            for (sel in newsSelectors) {
+                val els = doc.select(sel)
+                if (els.isEmpty()) continue
+                els.forEachIndexed { rank, el ->
+                    val linkEl    = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                    val titleEl   = el.select("div[role='heading'], .mCBkyc, .nDgy9d, h3, h4").firstOrNull() ?: return@forEachIndexed
+                    val snippetEl = el.select(".GI74Re, .Y3v8qd, .st").firstOrNull()
+                    val dateEl    = el.select(".OSrXXb, time, .ZE0LJd").firstOrNull()
+                    val rawUrl    = linkEl.attr("href")
+                    val cleanUrl  = if (rawUrl.startsWith("/url?q="))
+                        rawUrl.removePrefix("/url?q=").substringBefore("&").decodeUrl()
+                    else rawUrl.takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                    if (cleanUrl.contains("google.com")) return@forEachIndexed
+                    if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                    val snippetText = snippetEl?.text()?.trim() ?: ""
+                    val (parsedDate, cleanSnippet) = extractDateFromSnippet(snippetText)
+                    results += SearchResult(
+                        title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                        snippet = cleanSnippet, url = cleanUrl,
+                        displayUrl = safeHost(cleanUrl), source = "Google",
+                        date = dateEl?.text()?.trim() ?: parsedDate, engineRank = rank,
+                    )
+                }
+                if (results.isNotEmpty()) break
+            }
+            return results
+        }
+
+        // ── Google Videos ─────────────────────────────────────────────────────
+        if (category == SearchCategory.VIDEOS) {
+            val vidSelectors = listOf("div.g-blk", "div.dXiKIc", "div[class*='video']", "div.g")
+            for (sel in vidSelectors) {
+                val els = doc.select(sel).filter { el ->
+                    el.select("a[href]").any { a ->
+                        val h = a.attr("href")
+                        h.contains("youtube.com") || h.contains("vimeo.com") || h.contains("video")
+                    }
+                }
+                if (els.isEmpty()) continue
+                els.forEachIndexed { rank, el ->
+                    val linkEl    = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                    val titleEl   = el.select("h3, .LC20lb").firstOrNull() ?: return@forEachIndexed
+                    val snippetEl = el.select(".st, .VwiC3b").firstOrNull()
+                    val rawUrl    = linkEl.attr("href")
+                    val cleanUrl  = if (rawUrl.startsWith("/url?q="))
+                        rawUrl.removePrefix("/url?q=").substringBefore("&").decodeUrl()
+                    else rawUrl.takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                    if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                    val snippetText = snippetEl?.text()?.trim() ?: ""
+                    val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+                    results += SearchResult(
+                        title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                        snippet = cleanSnippet, url = cleanUrl,
+                        displayUrl = safeHost(cleanUrl), source = "Google",
+                        date = date, engineRank = rank,
+                    )
+                }
+                if (results.isNotEmpty()) break
+            }
+            return results
+        }
+
+        // ── Google Web (ALL) ──────────────────────────────────────────────────
         val selectors = listOf(
             "div.g, div[data-sokoban-feature], div.srKDX",
             "div.MjjYud, div.kvH3C, div.WwS67c",
@@ -705,8 +943,74 @@ class WebSearchRepository @Inject constructor(
 
     // ─── Brave parser (enriched) ─────────────────────────────────────────────
 
-    private fun parseBraveResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+    private fun parseBraveResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        category: SearchCategory = SearchCategory.ALL,
+    ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+
+        // ── Brave Images ─────────────────────────────────────────────────────
+        if (category == SearchCategory.IMAGES) {
+            doc.select(".image-result, .image_result, article.svelte-1vwkijb, div.image")
+                .forEachIndexed { rank, el ->
+                    val linkEl   = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                    val imgEl    = el.select("img").firstOrNull()
+                    val title    = el.select(".title, h3, img[alt]").firstOrNull()?.text()?.trim()
+                        ?: imgEl?.attr("alt")?.trim() ?: return@forEachIndexed
+                    val cleanUrl = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                    if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                    val imgSrc   = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
+                    results += SearchResult(
+                        title = title, snippet = "", url = cleanUrl,
+                        displayUrl = safeHost(cleanUrl), source = "Brave",
+                        imageUrl = imgSrc, engineRank = rank,
+                    )
+                }
+            return results
+        }
+
+        // ── Brave News ───────────────────────────────────────────────────────
+        if (category == SearchCategory.NEWS) {
+            doc.select(".news-result, article.svelte, .card").forEachIndexed { rank, el ->
+                val titleEl   = el.select("a.result-header, h3, h2").firstOrNull() ?: return@forEachIndexed
+                val cleanUrl  = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetEl = el.select(".description, .snippet, p").firstOrNull()
+                val dateEl    = el.select(".age, time, .date").firstOrNull()
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (parsedDate, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Brave",
+                    date = dateEl?.text()?.trim() ?: parsedDate, engineRank = rank,
+                )
+            }
+            return results
+        }
+
+        // ── Brave Videos ─────────────────────────────────────────────────────
+        if (category == SearchCategory.VIDEOS) {
+            doc.select(".video-result, .video_result, article").forEachIndexed { rank, el ->
+                val linkEl    = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                val titleEl   = el.select(".title, h3, h2").firstOrNull() ?: return@forEachIndexed
+                val cleanUrl  = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetEl = el.select(".description, p").firstOrNull()
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Brave",
+                    date = date, engineRank = rank,
+                )
+            }
+            return results
+        }
+
+        // ── Brave Web (ALL) ──────────────────────────────────────────────────
         doc.select(".snippet, #results .snippet").forEachIndexed { rank, el ->
             val titleEl   = el.select(".snippet-title, .title, h2").firstOrNull() ?: return@forEachIndexed
             val linkEl    = el.select("a.url, a[href]").firstOrNull() ?: return@forEachIndexed
@@ -739,8 +1043,78 @@ class WebSearchRepository @Inject constructor(
 
     // ─── Bing parser (enriched) ──────────────────────────────────────────────
 
-    private fun parseBingResults(doc: org.jsoup.nodes.Document, adBlockEnabled: Boolean): List<SearchResult> {
+    private fun parseBingResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        category: SearchCategory = SearchCategory.ALL,
+    ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+
+        // ── Bing Images ──────────────────────────────────────────────────────
+        if (category == SearchCategory.IMAGES) {
+            doc.select("div.imgpt, div.dg_b, div.iuscp, li.dgControl_item").forEachIndexed { rank, el ->
+                val linkEl   = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                val imgEl    = el.select("img").firstOrNull()
+                val title    = el.select(".infn, .inflnk, img[alt]").firstOrNull()?.text()?.trim()
+                    ?: imgEl?.attr("alt")?.trim() ?: return@forEachIndexed
+                val rawUrl   = linkEl.attr("href")
+                // Bing image links are /images/search?view=detailV2&... — extract the real URL
+                val cleanUrl = if (rawUrl.contains("mediaurl="))
+                    rawUrl.substringAfter("mediaurl=").substringBefore("&").decodeUrl()
+                else rawUrl.takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val imgSrc   = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
+                results += SearchResult(
+                    title = title, snippet = "", url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Bing",
+                    imageUrl = imgSrc, engineRank = rank,
+                )
+            }
+            return results
+        }
+
+        // ── Bing News ─────────────────────────────────────────────────────────
+        if (category == SearchCategory.NEWS) {
+            doc.select("div.newsAnswerArticle, div.news-card, .news-result, li.news_divid").forEachIndexed { rank, el ->
+                val titleEl   = el.select("a.title, a.news-card-title, h3 a, h4 a").firstOrNull() ?: return@forEachIndexed
+                val cleanUrl  = titleEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetEl = el.select(".snippet, .news-card-body, p").firstOrNull()
+                val dateEl    = el.select(".source, time, .age").firstOrNull()
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (parsedDate, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Bing",
+                    date = dateEl?.text()?.trim() ?: parsedDate,
+                    breadcrumb = safeHost(cleanUrl), engineRank = rank,
+                )
+            }
+            return results
+        }
+
+        // ── Bing Videos ───────────────────────────────────────────────────────
+        if (category == SearchCategory.VIDEOS) {
+            doc.select("li.dg_u, div.mc_vtvc, div.dg_b").forEachIndexed { rank, el ->
+                val linkEl    = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                val titleEl   = el.select(".mc_vtvc_title, .tl, .tilte, h3").firstOrNull() ?: return@forEachIndexed
+                val cleanUrl  = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+                val snippetEl = el.select(".mc_vtvc_meta_block, .dur").firstOrNull()
+                val snippetText = snippetEl?.text()?.trim() ?: ""
+                val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+                results += SearchResult(
+                    title = titleEl.text().trim().takeIf { it.isNotBlank() } ?: return@forEachIndexed,
+                    snippet = cleanSnippet, url = cleanUrl,
+                    displayUrl = safeHost(cleanUrl), source = "Bing",
+                    date = date, engineRank = rank,
+                )
+            }
+            return results
+        }
+
+        // ── Bing Web (ALL) ───────────────────────────────────────────────────
         doc.select("li.b_algo, div.b_algo").forEachIndexed { rank, el ->
             val titleEl   = el.select("h2 a, h3 a").firstOrNull() ?: return@forEachIndexed
             val snippetEl = el.select("p, div.b_caption p, .b_algoSlug").firstOrNull()
@@ -815,6 +1189,34 @@ class WebSearchRepository @Inject constructor(
             if (!response.isSuccessful) return@withContext null
             response.body?.string()
         } catch (e: Exception) { null }
+    }
+
+    /**
+     * Dedicated fetcher for blocklist text files.
+     * Uses a generous 60 s read timeout (EasyList ~2 MB) and requests plain text.
+     * Bypasses the DNS-routed client to avoid DoH overhead on large downloads.
+     */
+    suspend fun fetchBlocklistRaw(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (compatible; AdBlockFetcher/1.0)")
+                .header("Accept", "text/plain, text/*, */*;q=0.8")
+                .header("Cache-Control", "no-cache")
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+            response.body?.string()
+        } catch (e: Exception) {
+            android.util.Log.e("WebSearchRepository", "fetchBlocklistRaw failed for $url", e)
+            null
+        }
     }
 
     // ─── DAO wrappers ────────────────────────────────────────────────────────
