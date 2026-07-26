@@ -862,15 +862,29 @@ private fun ResultsPage(
             items = uiState.results,
             key   = { index, result -> "${result.url}_$index" },
         ) { index, result ->
-            SearchResultCard(
-                result      = result,
-                onClick     = { onResultClick(result) },
-                onLongClick = { onLongPress(result) },
-                modifier    = Modifier.animateItem(
-                    fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
-                    placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
-                ),
-            )
+            // Inline WebView for image/video category
+            if ((uiState.category == SearchCategory.IMAGES || uiState.category == SearchCategory.VIDEOS)
+                && result.url.length > 10) {
+                InlineSearchWebView(
+                    result          = result,
+                    category        = uiState.category,
+                    onOpenInBrowser = { url -> onResultClick(SearchResult(result.title, result.snippet, url, result.displayUrl, result.source)) },
+                    modifier        = Modifier.animateItem(
+                        fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                        placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                    ),
+                )
+            } else {
+                SearchResultCard(
+                    result      = result,
+                    onClick     = { onResultClick(result) },
+                    onLongClick = { onLongPress(result) },
+                    modifier    = Modifier.animateItem(
+                        fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                        placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                    ),
+                )
+            }
         }
 
         // Footer
@@ -890,7 +904,7 @@ private fun ResultsPage(
                         )
                     }
                 }
-                uiState.canLoadMore && uiState.results.size >= 100 -> {
+                uiState.canLoadMore && uiState.results.isNotEmpty() -> {
                     Column(
                         modifier            = Modifier
                             .fillMaxWidth()
