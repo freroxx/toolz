@@ -159,58 +159,11 @@ class AdBlockSettingsViewModel @Inject constructor(
         }
     }
 
-    private suspend fun fetchAndParseList(url: String): Set<String> = withContext(Dispatchers.IO) {
-        try {
-            // fetchBlocklistRaw uses 60s timeout + text/plain Accept to handle large lists (EasyList ~2 MB)
-            val response = repository.fetchBlocklistRaw(url) ?: return@withContext emptySet()
-            val domains = mutableSetOf<String>()
-            
-            response.lineSequence().forEach { line: String ->
-                var trimmed = line.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
-                
-                // Remove trailing comments
-                if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
-                if (trimmed.contains("!")) trimmed = trimmed.substringBefore("!").trim()
-
-                // Preserve @@ for exceptions temporarily, we'll strip them in the engine
-                val isException = trimmed.startsWith("@@")
-                val rule = if (isException) trimmed.substring(2) else trimmed
-
-                when {
-                    // hosts format: 0.0.0.0 domain.com or 127.0.0.1 domain.com
-                    rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1") -> {
-                        val parts = rule.split(Regex("\\s+"))
-                        if (parts.size >= 2) {
-                            val d = parts[1].lowercase().trim().removePrefix("||").removeSuffix("^")
-                            if (d != "localhost" && d.contains(".")) {
-                                domains.add(if (isException) "@@$d" else d)
-                            }
-                        }
-                    }
-                    // AdBlock format: ||domain.com^ or ||domain.com^$third-party
-                    rule.startsWith("||") -> {
-                        val endIdx = rule.indexOfAny(charArrayOf('^', '$', '/'))
-                        val domain = if (endIdx != -1) rule.substring(2, endIdx) else rule.substring(2)
-                        val clean = domain.trim().lowercase()
-                        if (clean.contains(".")) {
-                            domains.add(if (isException) "@@$clean" else clean)
-                        }
-                    }
-                    // Simple domain list or wildcard-less AdBlock
-                    !rule.contains(" ") && rule.contains(".") -> {
-                        val clean = rule.removePrefix("||").substringBefore("^").substringBefore("$").substringBefore("/").trim().lowercase()
-                        if (clean.contains(".")) {
-                            domains.add(if (isException) "@@$clean" else clean)
-                        }
-                    }
-                }
-            }
-            domains
-        } catch (e: Exception) {
-            emptySet()
-        }
+    private suspend fun fetchAndParseList(url: String): Set<String> {
+        // Delegate to AdBlockManager which has the canonical fetch+parse logic
+        return adBlockManager.fetchListFromNetwork(url)
     }
+
 
     companion object {
         val POPULAR_LISTS = mapOf(
