@@ -161,7 +161,8 @@ class AdBlockSettingsViewModel @Inject constructor(
 
     private suspend fun fetchAndParseList(url: String): Set<String> = withContext(Dispatchers.IO) {
         try {
-            val response = repository.fetchWebsiteContentRaw(url) ?: return@withContext emptySet()
+            // fetchBlocklistRaw uses 60s timeout + text/plain Accept to handle large lists (EasyList ~2 MB)
+            val response = repository.fetchBlocklistRaw(url) ?: return@withContext emptySet()
             val domains = mutableSetOf<String>()
             
             response.lineSequence().forEach { line: String ->
@@ -172,7 +173,7 @@ class AdBlockSettingsViewModel @Inject constructor(
                 if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
                 if (trimmed.contains("!")) trimmed = trimmed.substringBefore("!").trim()
 
-                // Preserve @@ for exceptions
+                // Preserve @@ for exceptions temporarily, we'll strip them in the engine
                 val isException = trimmed.startsWith("@@")
                 val rule = if (isException) trimmed.substring(2) else trimmed
 
@@ -181,24 +182,26 @@ class AdBlockSettingsViewModel @Inject constructor(
                     rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1") -> {
                         val parts = rule.split(Regex("\\s+"))
                         if (parts.size >= 2) {
-                            val d = parts[1].lowercase()
+                            val d = parts[1].lowercase().trim().removePrefix("||").removeSuffix("^")
                             if (d != "localhost" && d.contains(".")) {
                                 domains.add(if (isException) "@@$d" else d)
                             }
                         }
                     }
-                    // AdBlock format: ||domain.com^
-                    rule.startsWith("||") && rule.endsWith("^") -> {
-                        val domain = rule.substring(2, rule.length - 1)
-                        if (domain.contains(".")) {
-                            domains.add(if (isException) "@@$domain" else domain.lowercase())
+                    // AdBlock format: ||domain.com^ or ||domain.com^$third-party
+                    rule.startsWith("||") -> {
+                        val endIdx = rule.indexOfAny(charArrayOf('^', '$', '/'))
+                        val domain = if (endIdx != -1) rule.substring(2, endIdx) else rule.substring(2)
+                        val clean = domain.trim().lowercase()
+                        if (clean.contains(".")) {
+                            domains.add(if (isException) "@@$clean" else clean)
                         }
                     }
                     // Simple domain list or wildcard-less AdBlock
                     !rule.contains(" ") && rule.contains(".") -> {
-                        val clean = rule.removePrefix("||").removeSuffix("^").removeSuffix("/")
+                        val clean = rule.removePrefix("||").substringBefore("^").substringBefore("$").substringBefore("/").trim().lowercase()
                         if (clean.contains(".")) {
-                            domains.add(if (isException) "@@$clean" else clean.lowercase())
+                            domains.add(if (isException) "@@$clean" else clean)
                         }
                     }
                 }
