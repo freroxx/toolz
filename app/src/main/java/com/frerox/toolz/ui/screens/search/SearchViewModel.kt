@@ -17,20 +17,33 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.frerox.toolz.data.search.SearchCategory
 import javax.inject.Inject
+
+// ─── Math Evaluation Result ──────────────────────────────────────────────────
+
+@Immutable
+data class MathResult(
+    val expression: String,
+    val result:     String
+)
 
 // ─── Sealed error hierarchy ───────────────────────────────────────────────────
 
 sealed class SearchError {
     data object NoResults    : SearchError()
+    data object Offline      : SearchError()
+    data object DnsError     : SearchError()
     data object NetworkError : SearchError()
     data object RateLimited  : SearchError()
     data class  Unknown(val message: String) : SearchError()
 
     fun userMessage(): String = when (this) {
         is NoResults    -> "Try different keywords or check your spelling."
+        is Offline      -> "You are currently offline. Check your network or return to dashboard."
+        is DnsError     -> "DNS resolution failed. Check your DNS provider settings."
         is NetworkError -> "Please check your internet connection and try again."
-        is RateLimited  -> "Too many requests. Please wait a moment and try again."
+        is RateLimited  -> "Too many requests / CAPTCHA detected. Try switching engines."
         is Unknown      -> message.takeIf { it.isNotBlank() } ?: "An unexpected error occurred."
     }
 }
@@ -66,26 +79,30 @@ data class SearchSettingsState(
 
 @Immutable
 data class SearchQueryState(
-    val query:       String             = "",
-    val suggestions: List<String>       = emptyList(),
-    val phase:       SearchPhase        = SearchPhase.Idle,
-    val results:     List<SearchResult> = emptyList(),
-    val error:       SearchError?       = null,
-    val canLoadMore: Boolean            = false,
-    val isActive:    Boolean            = false,
+    val query:            String             = "",
+    val suggestions:      List<String>       = emptyList(),
+    val phase:            SearchPhase        = SearchPhase.Idle,
+    val results:          List<SearchResult> = emptyList(),
+    val error:            SearchError?       = null,
+    val canLoadMore:      Boolean            = false,
+    val isActive:         Boolean            = false,
+    val category:         SearchCategory     = SearchCategory.ALL,
+    val mathResult:       MathResult?        = null,
 )
 
 // ─── Combined UI state (backward-compat — remove once screens are fully migrated) ──
 
 @Immutable
 data class SearchUiState(
-    val query:       String             = "",
-    val results:     List<SearchResult> = emptyList(),
-    val suggestions: List<String>       = emptyList(),
-    val phase:       SearchPhase        = SearchPhase.Idle,
-    val error:       SearchError?       = null,
-    val canLoadMore: Boolean            = false,
-    val isActive:    Boolean            = false,
+    val query:            String             = "",
+    val results:          List<SearchResult> = emptyList(),
+    val suggestions:      List<String>       = emptyList(),
+    val phase:            SearchPhase        = SearchPhase.Idle,
+    val error:            SearchError?       = null,
+    val canLoadMore:      Boolean            = false,
+    val isActive:         Boolean            = false,
+    val category:         SearchCategory     = SearchCategory.ALL,
+    val mathResult:       MathResult?        = null,
 
     // Settings
     val adBlockEnabled:        Boolean      = true,
@@ -119,7 +136,20 @@ class SearchViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val tabManager:        TabManager,
     private val dnsEngine:         com.frerox.toolz.util.network.DnsEngine,
+    private val offlineManager:    com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
+
+    // ─── Search LRU Cache (Last 5 searches) ───────────────────────────────────
+
+    private val searchCache = object : java.util.LinkedHashMap<Pair<String, SearchCategory>, List<SearchResult>>(5, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, SearchCategory>, List<SearchResult>>?): Boolean {
+            return size > 5
+        }
+    }
+
+    // ─── Offline state (cached as StateFlow for synchronous .value access) ───
+
+    private val _isOffline = MutableStateFlow(false)
 
     // ── Split flows ───────────────────────────────────────────────────────────
 
@@ -130,47 +160,46 @@ class SearchViewModel @Inject constructor(
     val queryState: StateFlow<SearchQueryState> = _query.asStateFlow()
 
     // ── Backward-compat combined flow ─────────────────────────────────────────
-    // Only recomputes when either _settings or _query emit a new value.
-    // Because _settings rarely changes, fast typing only triggers _query updates —
-    // components that only read settings fields skip recomposition entirely.
 
     val uiState: StateFlow<SearchUiState> = combine(_settings, _query) { s, q ->
         SearchUiState(
-            query                = q.query,
-            results              = q.results,
-            suggestions          = q.suggestions,
-            phase                = q.phase,
-            error                = q.error,
-            canLoadMore          = q.canLoadMore,
-            isActive             = q.isActive,
-            adBlockEnabled       = s.adBlockEnabled,
-            dnsProvider          = s.dnsProvider,
-            customDns            = s.customDns,
-            recentDns            = s.recentDns,
-            isIncognito          = s.isIncognito,
-            searchEngine         = s.searchEngine,
-            safeSearch           = s.safeSearch,
-            region               = s.region,
-            customEngineUrl      = s.customEngineUrl,
+            query                 = q.query,
+            results               = q.results,
+            suggestions           = q.suggestions,
+            phase                 = q.phase,
+            error                 = q.error,
+            canLoadMore           = q.canLoadMore,
+            isActive              = q.isActive,
+            category              = q.category,
+            mathResult            = q.mathResult,
+            adBlockEnabled        = s.adBlockEnabled,
+            dnsProvider           = s.dnsProvider,
+            customDns             = s.customDns,
+            recentDns             = s.recentDns,
+            isIncognito           = s.isIncognito,
+            searchEngine          = s.searchEngine,
+            safeSearch            = s.safeSearch,
+            region                = s.region,
+            customEngineUrl       = s.customEngineUrl,
             searchAutofillEnabled = s.searchAutofillEnabled,
-            userName             = s.userName,
-            nextDnsId            = s.nextDnsId,
-            tabs                 = s.tabs,
-            activeTabId          = s.activeTabId,
-            dnsBenchmarks        = s.dnsBenchmarks,
-            isBenchmarkingDns    = s.isBenchmarkingDns,
+            userName              = s.userName,
+            nextDnsId             = s.nextDnsId,
+            tabs                  = s.tabs,
+            activeTabId           = s.activeTabId,
+            dnsBenchmarks         = s.dnsBenchmarks,
+            isBenchmarkingDns     = s.isBenchmarkingDns,
         )
     }.stateIn(
-        scope       = viewModelScope,
-        started     = SharingStarted.WhileSubscribed(5_000),
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = SearchUiState(),
     )
 
-    // ── DAO-backed flows (stable, no Hilt needed in composable) ───────────────
+    // ── DAO-backed flows ───────────────────────────────────────────────────────
 
-    val history    = repository.history
-    val bookmarks  = repository.bookmarks
-    val quickLinks = repository.quickLinks
+    val history     = repository.history
+    val bookmarks   = repository.bookmarks
+    val quickLinks  = repository.quickLinks
     val isFirstTime = settingsRepository.searchFirstTime
 
     // ── Coroutine job handles ─────────────────────────────────────────────────
@@ -178,7 +207,7 @@ class SearchViewModel @Inject constructor(
     private var suggestionJob: Job? = null
     private var searchJob: Job?     = null
 
-    // ── Init: collect all settings into _settings ─────────────────────────────
+    // ── Init ──────────────────────────────────────────────────────────────────
 
     init {
         viewModelScope.launch {
@@ -234,16 +263,27 @@ class SearchViewModel @Inject constructor(
                 _settings.update { it.copy(tabs = tabs, activeTabId = activeId) }
             }.catch { }.collect {}
         }
+
+        // Live offline monitoring — convert to StateFlow so onSearch can check .value synchronously
+        viewModelScope.launch {
+            offlineManager.offlineState.collect { offlineState ->
+                val nowOffline = offlineState == com.frerox.toolz.util.OfflineState.OFFLINE
+                _isOffline.value = nowOffline
+                if (nowOffline && _query.value.results.isEmpty() && _query.value.query.isNotBlank()) {
+                    _query.update { it.copy(error = SearchError.Offline, phase = SearchPhase.Results) }
+                }
+            }
+        }
     }
 
-    // ─── Query / Suggestions ──────────────────────────────────────────────────
+    // ─── Query / Suggestions / Math Evaluation ───────────────────────────────
 
     fun onQueryChange(newQuery: String) {
-        // Only update the fast-changing query flow — settings composables unaffected
-        _query.update { it.copy(query = newQuery, error = null) }
+        val mathRes = tryEvaluateMath(newQuery)
+        _query.update { it.copy(query = newQuery, error = null, mathResult = mathRes) }
 
         suggestionJob?.cancel()
-        if (newQuery.length >= 2) {
+        if (newQuery.length >= 2 && mathRes == null) {
             suggestionJob = viewModelScope.launch {
                 delay(280)
                 val suggestions = runCatching { repository.fetchSuggestions(newQuery) }
@@ -255,18 +295,84 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    private fun tryEvaluateMath(query: String): MathResult? {
+        val trimmed = query.trim()
+        if (trimmed.length < 3) return null
+        val mathCharsRegex = Regex("""^[0-9\s\+\-\*\/\^\(\)\.\%]+$|^sqrt\([0-9\.\s]+\)$""", RegexOption.IGNORE_CASE)
+        if (!mathCharsRegex.matches(trimmed)) return null
+        if (!trimmed.any { it.isDigit() }) return null
+        if (!trimmed.any { it in "+-*/^%" } && !trimmed.startsWith("sqrt", ignoreCase = true)) return null
+
+        return try {
+            val sanitized = trimmed.replace("%", "/100")
+            val expr = net.objecthunter.exp4j.ExpressionBuilder(sanitized).build()
+            val valResult = expr.evaluate()
+            if (valResult.isNaN() || valResult.isInfinite()) return null
+            val formatted = if (valResult % 1.0 == 0.0) valResult.toLong().toString() else "%.6f".format(valResult).trimEnd('0').trimEnd('.')
+            MathResult(expression = trimmed, result = formatted)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun setSearchCategory(category: SearchCategory) {
+        if (_query.value.category == category) return
+        _query.update { it.copy(category = category) }
+        val q = _query.value.query
+        if (q.isNotEmpty()) {
+            onSearch(q, category)
+        }
+    }
+
     // ─── Search ───────────────────────────────────────────────────────────────
 
-    fun onSearch(query: String) {
+    fun onSearch(query: String, category: SearchCategory = _query.value.category) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) { clearSearch(); return }
 
         suggestionJob?.cancel()
         searchJob?.cancel()
 
+        // 1. Instant Cache Lookup
+        val cacheKey = trimmed to category
+        val cachedResults = synchronized(searchCache) { searchCache[cacheKey] }
+        if (cachedResults != null && cachedResults.isNotEmpty()) {
+            _query.update {
+                it.copy(
+                    query       = trimmed,
+                    category    = category,
+                    phase       = SearchPhase.Results,
+                    isActive    = false,
+                    error       = null,
+                    results     = cachedResults,
+                    suggestions = emptyList(),
+                    canLoadMore = cachedResults.size >= 10,
+                )
+            }
+            return
+        }
+
+        // 2. Real-time Offline Check
+        if (_isOffline.value) {
+            _query.update {
+                it.copy(
+                    query       = trimmed,
+                    category    = category,
+                    phase       = SearchPhase.Results,
+                    isActive    = false,
+                    error       = SearchError.Offline,
+                    results     = emptyList(),
+                    suggestions = emptyList(),
+                    canLoadMore = false,
+                )
+            }
+            return
+        }
+
         _query.update {
             it.copy(
                 query       = trimmed,
+                category    = category,
                 phase       = SearchPhase.Loading,
                 isActive    = false,
                 error       = null,
@@ -281,12 +387,16 @@ class SearchViewModel @Inject constructor(
                 runCatching { repository.addHistory(trimmed) }
             }
 
-            runCatching { repository.search(trimmed) }
+            runCatching { repository.search(trimmed, 0, category) }
                 .onSuccess { results ->
+                    if (results.isNotEmpty()) {
+                        synchronized(searchCache) { searchCache[cacheKey] = results }
+                    }
                     _query.update {
                         it.copy(
                             results     = results,
                             phase       = SearchPhase.Results,
+                            // Always allow load-more when we have results — engines always have more pages
                             canLoadMore = results.isNotEmpty(),
                             error       = if (results.isEmpty()) SearchError.NoResults else null,
                         )
@@ -315,7 +425,7 @@ class SearchViewModel @Inject constructor(
         _query.update { it.copy(phase = SearchPhase.LoadingMore) }
 
         viewModelScope.launch {
-            runCatching { repository.search(q.query, q.results.size) }
+            runCatching { repository.search(q.query, q.results.size, q.category) }
                 .onSuccess { newResults ->
                     if (newResults.isEmpty()) {
                         _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
@@ -325,7 +435,8 @@ class SearchViewModel @Inject constructor(
                             it.copy(
                                 results     = combined,
                                 phase       = SearchPhase.Results,
-                                canLoadMore = combined.size < 500 && newResults.isNotEmpty(),
+                                // Keep allowing load-more unless we hit the 500 cap or engine returned nothing
+                                canLoadMore = combined.size < 500,
                             )
                         }
                     }
@@ -333,6 +444,7 @@ class SearchViewModel @Inject constructor(
                 .onFailure { _query.update { it.copy(phase = SearchPhase.Results) } }
         }
     }
+
 
     // ─── UI state helpers ─────────────────────────────────────────────────────
 
@@ -465,7 +577,7 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch { runCatching { block() } }
 
     private fun mapThrowableToError(t: Throwable): SearchError = when {
-        t is java.net.UnknownHostException   -> SearchError.NetworkError
+        t is java.net.UnknownHostException   -> SearchError.DnsError
         t is java.net.SocketTimeoutException -> SearchError.NetworkError
         t is javax.net.ssl.SSLException      -> SearchError.NetworkError
         t.message?.contains("429") == true   -> SearchError.RateLimited

@@ -1,5 +1,10 @@
 package com.frerox.toolz.ui.screens.search
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -21,9 +26,11 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
+import com.frerox.toolz.data.search.SearchCategory
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.ui.screens.search.components.*
+import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.Calendar
 
 // ══════════════════════════════════════════════════════════
@@ -37,12 +44,13 @@ fun SearchScreen(
     onManageTabs: () -> Unit,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
-    val uiState     by viewModel.uiState.collectAsState()
-    val history     by viewModel.history.collectAsState(initial = emptyList())
-    val bookmarks   by viewModel.bookmarks.collectAsState(initial = emptyList())
-    val quickLinks  by viewModel.quickLinks.collectAsState(initial = emptyList())
-    val isFirstTime by viewModel.isFirstTime.collectAsState(initial = false)
-    val context     = LocalContext.current
+    val uiState          by viewModel.uiState.collectAsState()
+    val history          by viewModel.history.collectAsState(initial = emptyList())
+    val bookmarks        by viewModel.bookmarks.collectAsState(initial = emptyList())
+    val quickLinks       by viewModel.quickLinks.collectAsState(initial = emptyList())
+    val isFirstTime      by viewModel.isFirstTime.collectAsState(initial = false)
+    val context          = LocalContext.current
+    val vibrationManager = LocalVibrationManager.current
 
     // Sheet / dialog flags
     var showSearchSettings     by remember { mutableStateOf(false) }
@@ -347,13 +355,14 @@ fun SearchScreen(
                     bookmarks       = bookmarks,
                     quickLinks      = quickLinks,
                     onResultClick   = { result ->
+                        vibrationManager?.vibrateNavigation()
                         viewModel.openTab(result.url)
                         onResultClick(result.url)
                     },
                     onLongPress     = { longPressedResult = it },
                     onLoadMore      = viewModel::loadMore,
                     onBackClick     = onBackClick,
-                    onUrlOpen       = { url -> viewModel.openTab(url); onResultClick(url) },
+                    onUrlOpen       = { url -> vibrationManager?.vibrateNavigation(); viewModel.openTab(url); onResultClick(url) },
                     onAddQuickLink  = { showAddQuickLink = true },
                     onEditQuickLink = { editingQuickLink = it },
                     onEditBookmark  = { editingBookmark = it },
@@ -363,6 +372,19 @@ fun SearchScreen(
                     onSeeAllBookmarks = { showBookmarksAll = true },
                     onRetry         = viewModel::retrySearch,
                     onSearch        = viewModel::onSearch,
+                    onReturnToDashboard = onBackClick,
+                    onOpenDnsSettings = { showDnsSheet = true },
+                    onOpenEngineSettings = { showEngineSheet = true },
+                    onCategorySelected = viewModel::setSearchCategory,
+                    onCopyMathResult = { result ->
+                        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clip.setPrimaryClip(ClipData.newPlainText("Math Result", result))
+                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    },
+                    onOpenCalculator = {
+                        vibrationManager?.vibrateNavigation()
+                        onResultClick(com.frerox.toolz.ui.navigation.Screen.Calculator.route)
+                    },
                 )
 
                 // Floating tab pill — bottom-center
@@ -506,13 +528,30 @@ private fun PageContent(
     onSeeAllBookmarks: () -> Unit,
     onRetry: () -> Unit,
     onSearch: (String) -> Unit,
+    onReturnToDashboard: () -> Unit = {},
+    onOpenDnsSettings: () -> Unit = {},
+    onOpenEngineSettings: () -> Unit = {},
+    onCategorySelected: (SearchCategory) -> Unit = {},
+    onCopyMathResult: (String) -> Unit = {},
+    onOpenCalculator: () -> Unit = {},
 ) {
+    val vibrationManager = LocalVibrationManager.current
     val screenState = when {
         uiState.phase == SearchPhase.Loading                               -> "loading"
         uiState.results.isNotEmpty()                                       -> "results"
         uiState.phase == SearchPhase.Results && uiState.error != null      -> "error"
         uiState.phase == SearchPhase.Results && uiState.results.isEmpty()  -> "error"
         else                                                               -> "home"
+    }
+
+    // Haptic on search results arrival
+    LaunchedEffect(uiState.phase, uiState.error) {
+        when {
+            uiState.phase == SearchPhase.Results && uiState.error == null && uiState.results.isNotEmpty() ->
+                vibrationManager?.vibrateSuccess()
+            uiState.phase == SearchPhase.Results && uiState.error != null ->
+                vibrationManager?.vibrateError()
+        }
     }
 
     Crossfade(
@@ -525,21 +564,46 @@ private fun PageContent(
                 SearchShimmer()
             }
 
-            "error" -> Box(Modifier.fillMaxSize()) {
-                ErrorState(
-                    title   = if (uiState.error != null) "Search error" else "No results",
-                    message = uiState.error?.userMessage() ?: "Nothing found for \"${uiState.query}\"",
-                    onRetry = onRetry,
-                    modifier = Modifier.align(Alignment.Center),
-                )
+            "error" -> {
+                val errorType = when (uiState.error) {
+                    is SearchError.Offline     -> ErrorType.OFFLINE
+                    is SearchError.DnsError    -> ErrorType.DNS_ERROR
+                    is SearchError.NetworkError -> ErrorType.NETWORK_ERROR
+                    is SearchError.RateLimited -> ErrorType.RATE_LIMITED
+                    is SearchError.NoResults   -> ErrorType.NO_RESULTS
+                    else                       -> ErrorType.GENERIC
+                }
+                val errorTitle = when (uiState.error) {
+                    is SearchError.Offline      -> "You're Offline"
+                    is SearchError.DnsError     -> "DNS Resolution Failed"
+                    is SearchError.RateLimited  -> "Rate Limited"
+                    is SearchError.NoResults    -> "No Results Found"
+                    is SearchError.NetworkError -> "Connection Error"
+                    else                        -> "Search Error"
+                }
+                Box(Modifier.fillMaxSize()) {
+                    ErrorState(
+                        title               = errorTitle,
+                        message             = uiState.error?.userMessage() ?: "Nothing found for \"${uiState.query}\"",
+                        onRetry             = onRetry,
+                        errorType           = errorType,
+                        onReturnToDashboard = onReturnToDashboard,
+                        onOpenDnsSettings   = onOpenDnsSettings,
+                        onOpenEngineSettings = onOpenEngineSettings,
+                        modifier            = Modifier.align(Alignment.Center),
+                    )
+                }
             }
 
             "results" -> ResultsPage(
-                uiState      = uiState,
-                onResultClick = onResultClick,
-                onLongPress  = onLongPress,
-                onLoadMore   = onLoadMore,
-                onBackClick  = onBackClick,
+                uiState            = uiState,
+                onResultClick      = onResultClick,
+                onLongPress        = onLongPress,
+                onLoadMore         = onLoadMore,
+                onBackClick        = onBackClick,
+                onCategorySelected = onCategorySelected,
+                onCopyMathResult   = onCopyMathResult,
+                onOpenCalculator   = onOpenCalculator,
             )
 
             else -> HomePage(
@@ -729,6 +793,9 @@ private fun ResultsPage(
     onLongPress: (SearchResult) -> Unit,
     onLoadMore: () -> Unit,
     onBackClick: () -> Unit,
+    onCategorySelected: (SearchCategory) -> Unit = {},
+    onCopyMathResult: (String) -> Unit = {},
+    onOpenCalculator: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
@@ -758,12 +825,36 @@ private fun ResultsPage(
         ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // Category filter chips
+        item(key = "categoryChips") {
+            SearchCategoryChips(
+                selectedCategory   = uiState.category,
+                onCategorySelected = onCategorySelected,
+                modifier           = Modifier.animateItem(),
+            )
+        }
+
+        // Instant math result card
+        uiState.mathResult?.let { math ->
+            item(key = "mathResult") {
+                InstantMathCard(
+                    mathResult       = math,
+                    onCopy           = onCopyMathResult,
+                    onOpenCalculator = onOpenCalculator,
+                    modifier         = Modifier.animateItem(
+                        fadeInSpec = tween(250),
+                        placementSpec = spring(Spring.DampingRatioLowBouncy),
+                    ),
+                )
+            }
+        }
+
         item(key = "resultsCount") {
             Text(
                 "${uiState.results.size} results",
                 style    = MaterialTheme.typography.labelSmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp).animateItem(),
             )
         }
 
