@@ -54,14 +54,7 @@ class WebViewViewModel @Inject constructor(
         _autofillSuccess.value = false
     }
 
-    val adBlockEnabled = combine(
-        settingsRepository.searchAdBlockEnabled,
-        settingsRepository.searchDnsProvider,
-        settingsRepository.searchNextDnsId
-    ) { enabled, provider, nextDnsId ->
-        // Backup app-blocking: Stay enabled if NextDNS is selected but NOT configured
-        enabled && (provider != "NEXTDNS" || nextDnsId.isBlank())
-    }
+    val adBlockEnabled = settingsRepository.searchAdBlockEnabled
     val dnsProvider = settingsRepository.searchDnsProvider
     val customDns = settingsRepository.searchCustomDns
 
