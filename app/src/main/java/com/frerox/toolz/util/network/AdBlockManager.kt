@@ -60,28 +60,50 @@ class AdBlockManager @Inject constructor(
     }
 
     suspend fun syncImportedLists(enabledLists: Set<String>, fetcher: suspend (String) -> Set<String>) {
+        if (enabledLists.isEmpty()) {
+            withContext(Dispatchers.IO) {
+                File(application.filesDir, "imported_blocklist.txt").delete()
+            }
+            AdBlockList.updateImportedList(emptySet())
+            settingsRepository.setSearchAdBlockImportedCount(0)
+            return
+        }
+
         val allRules = mutableSetOf<String>()
+        var successCount = 0
         android.util.Log.d("AdBlockManager", "Sync: Processing ${enabledLists.size} lists")
         
         enabledLists.forEach { id ->
             val url = com.frerox.toolz.ui.screens.search.AdBlockSettingsViewModel.POPULAR_LISTS[id] ?: return@forEach
             try {
                 val rules = fetcher(url)
-                allRules.addAll(rules)
+                if (rules.isNotEmpty()) {
+                    allRules.addAll(rules)
+                    successCount++
+                }
             } catch (e: Exception) {
                 android.util.Log.e("AdBlockManager", "Sync failed for list $id", e)
             }
         }
         
-        // Save to file
-        withContext(Dispatchers.IO) {
-            val file = File(application.filesDir, "imported_blocklist.txt")
-            file.writeText(allRules.joinToString("\n"))
+        // Only persist and update if at least one list was successfully fetched
+        // or if we explicitly enabled lists that returned nothing (unlikely for ad block lists)
+        if (successCount > 0 || allRules.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val file = File(application.filesDir, "imported_blocklist.txt")
+                    file.writeText(allRules.joinToString("\n"))
+                    
+                    // Update singleton & DataStore count
+                    AdBlockList.updateImportedList(allRules)
+                    settingsRepository.setSearchAdBlockImportedCount(allRules.size)
+                    android.util.Log.d("AdBlockManager", "Sync: Success. ${allRules.size} rules active.")
+                } catch (e: Exception) {
+                    android.util.Log.e("AdBlockManager", "Failed to save sync results", e)
+                }
+            }
+        } else {
+            android.util.Log.w("AdBlockManager", "Sync: No rules fetched. local cache preserved.")
         }
-        
-        // Update singleton & DataStore count
-        AdBlockList.updateImportedList(allRules)
-        settingsRepository.setSearchAdBlockImportedCount(allRules.size)
-        android.util.Log.d("AdBlockManager", "Sync: Success. ${allRules.size} rules active.")
     }
 }
