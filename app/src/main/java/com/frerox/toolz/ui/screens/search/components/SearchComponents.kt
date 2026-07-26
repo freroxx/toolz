@@ -32,7 +32,10 @@ import androidx.compose.ui.unit.*
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.search.SearchResult
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import kotlinx.coroutines.delay
 
 // ══════════════════════════════════════════════════════════
@@ -276,20 +279,27 @@ private fun sourceAccentColor(source: String): Color {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val alpha  = if (isDark) 0.85f else 1f
     return when (source.uppercase()) {
-        "GOOGLE"            -> Color(0xFF4285F4).copy(alpha = alpha)
-        "DDG", "DUCKDUCKGO" -> Color(0xFFDE5833).copy(alpha = alpha)
-        "BRAVE"             -> Color(0xFFFF6000).copy(alpha = alpha)
-        "BING"              -> Color(0xFF008272).copy(alpha = alpha)
-        else                -> MaterialTheme.colorScheme.primary.copy(alpha = alpha)
+        "GOOGLE"               -> Color(0xFF4285F4).copy(alpha = alpha)
+        "DDG", "DUCKDUCKGO"   -> Color(0xFFDE5833).copy(alpha = alpha)
+        "BRAVE"                -> Color(0xFFFF6000).copy(alpha = alpha)
+        "BING"                 -> Color(0xFF008272).copy(alpha = alpha)
+        "ECOSIA"               -> Color(0xFF2B8A2B).copy(alpha = alpha)
+        "SWISSCOWS"            -> Color(0xFFD9253E).copy(alpha = alpha)
+        "STARTPAGE"            -> Color(0xFF3F4EAE).copy(alpha = alpha)
+        else                   -> MaterialTheme.colorScheme.primary.copy(alpha = alpha)
     }
 }
 
 private fun sourceLabel(source: String): String = when (source.uppercase()) {
-    "GOOGLE"            -> "Google"
-    "DDG", "DUCKDUCKGO" -> "DDG"
-    "BRAVE"             -> "Brave"
-    "BING"              -> "Bing"
-    else                -> source.take(8)
+    "GOOGLE"               -> "Google"
+    "DDG", "DUCKDUCKGO"   -> "DuckDuckGo"
+    "BRAVE"                -> "Brave"
+    "BING"                 -> "Bing"
+    "ECOSIA"               -> "Ecosia"
+    "SWISSCOWS"            -> "Swisscows"
+    "STARTPAGE"            -> "Startpage"
+    "WEB"                  -> "Web"
+    else                   -> source.take(10).replaceFirstChar { it.uppercase() }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -373,18 +383,33 @@ fun SearchResultCard(
                         modifier = Modifier.weight(1f),
                     )
 
-                    // Engine badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = accentColor.copy(alpha = 0.12f),
-                    ) {
-                        Text(
-                            text       = sourceLabel(result.source),
-                            style      = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            color      = accentColor,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                        )
+                    // Engine / Consensus badge
+                    if (result.engines.size >= 2) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        ) {
+                            Text(
+                                text       = "Found on ${result.engines.joinToString(", ")}",
+                                style      = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                color      = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold,
+                                modifier   = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = accentColor.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                text       = sourceLabel(result.source),
+                                style      = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                color      = accentColor,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier   = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
 
@@ -962,7 +987,7 @@ fun FaviconDisplay(url: String, modifier: Modifier = Modifier) {
 //  ERROR / EMPTY STATE  — animated with breathing rings
 // ══════════════════════════════════════════════════════════
 
-enum class ErrorType { NO_RESULTS, NETWORK_ERROR, RATE_LIMITED, GENERIC }
+enum class ErrorType { NO_RESULTS, OFFLINE, DNS_ERROR, NETWORK_ERROR, RATE_LIMITED, GENERIC }
 
 @Composable
 fun ErrorState(
@@ -970,107 +995,151 @@ fun ErrorState(
     message: String,
     onRetry: () -> Unit,
     errorType: ErrorType = ErrorType.GENERIC,
+    onReturnToDashboard: (() -> Unit)? = null,
+    onOpenDnsSettings: (() -> Unit)? = null,
+    onOpenEngineSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val breathe = rememberInfiniteTransition(label = "breathe")
-    val iconScale by breathe.animateFloat(
-        initialValue  = 0.90f,
-        targetValue   = 1.08f,
-        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label         = "iconScale",
-    )
-    val ringAlpha by breathe.animateFloat(
-        initialValue  = 0.15f,
-        targetValue   = 0.40f,
-        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label         = "ringAlpha",
-    )
-
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
     AnimatedVisibility(
-        visible = visible,
-        enter   = fadeIn(tween(400)) + scaleIn(tween(400, easing = FastOutSlowInEasing)),
+        visible  = visible,
+        enter    = fadeIn(tween(300)) + slideInVertically(tween(350, easing = FastOutSlowInEasing)) { it / 4 },
         modifier = modifier,
     ) {
         Column(
             modifier            = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 40.dp, vertical = 48.dp),
+                .padding(horizontal = 20.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Layered pulsing rings
+            // Animated icon cluster
+            val breathe = rememberInfiniteTransition(label = "breathe")
+            val pulse by breathe.animateFloat(
+                initialValue  = 0.92f,
+                targetValue   = 1.06f,
+                animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label         = "pulse",
+            )
+
             Box(
                 contentAlignment = Alignment.Center,
-                modifier         = Modifier.size(128.dp),
+                modifier         = Modifier.size(110.dp),
             ) {
-                // Outer ring
+                // Outer halo
                 Box(
                     modifier = Modifier
-                        .size(128.dp)
-                        .scale(iconScale * 0.92f)
-                        .background(errorContainerFor(errorType).copy(alpha = ringAlpha * 0.6f), CircleShape),
-                )
-                // Mid ring
-                Box(
-                    modifier = Modifier
-                        .size(92.dp)
-                        .background(errorContainerFor(errorType).copy(alpha = 0.28f), CircleShape),
+                        .size(110.dp)
+                        .scale(pulse)
+                        .background(
+                            errorContainerFor(errorType).copy(alpha = 0.18f),
+                            CircleShape,
+                        ),
                 )
                 // Icon surface
                 Surface(
                     shape    = CircleShape,
-                    color    = errorContainerFor(errorType).copy(alpha = 0.62f),
-                    modifier = Modifier.size(64.dp).scale(iconScale),
+                    color    = errorContainerFor(errorType).copy(alpha = 0.55f),
+                    modifier = Modifier.size(68.dp).scale(pulse * 0.97f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector        = iconFor(errorType),
                             contentDescription = null,
-                            modifier           = Modifier.size(28.dp),
+                            modifier           = Modifier.size(30.dp),
                             tint               = errorTintFor(errorType),
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(28.dp))
-
-            Text(
-                title,
-                style      = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color      = MaterialTheme.colorScheme.onSurface,
-                textAlign  = TextAlign.Center,
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            Text(
-                message,
-                style      = MaterialTheme.typography.bodyMedium,
-                color      = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign  = TextAlign.Center,
-                lineHeight = 22.sp,
-            )
-
-            Spacer(Modifier.height(32.dp))
-
-            Button(
-                onClick = onRetry,
-                shape   = RoundedCornerShape(16.dp),
-                colors  = ButtonDefaults.buttonColors(
-                    containerColor = if (errorType == ErrorType.NETWORK_ERROR)
-                        MaterialTheme.colorScheme.error
-                    else
-                        MaterialTheme.colorScheme.primary,
-                ),
+            // Title + message inside an ExpressiveCard
+            ExpressiveCard(
+                onClick          = {},
+                modifier         = Modifier.fillMaxWidth(),
+                shape            = RoundedCornerShape(28.dp),
+                containerColor   = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor     = MaterialTheme.colorScheme.onSurface,
+                elevation        = 0.dp,
             ) {
-                Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(retryLabelFor(errorType))
+                Column(
+                    modifier            = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        title,
+                        style      = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color      = MaterialTheme.colorScheme.onSurface,
+                        textAlign  = TextAlign.Center,
+                    )
+                    Text(
+                        message,
+                        style      = MaterialTheme.typography.bodySmall,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign  = TextAlign.Center,
+                        lineHeight = 20.sp,
+                    )
+                }
+            }
+
+            // Action buttons
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier            = Modifier.fillMaxWidth(),
+            ) {
+                // Primary contextual action
+                when {
+                    errorType == ErrorType.OFFLINE && onReturnToDashboard != null -> {
+                        ToolzExpressiveButton(
+                            onClick  = onReturnToDashboard,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape    = RoundedCornerShape(20.dp),
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Go home")
+                        }
+                    }
+                    errorType == ErrorType.DNS_ERROR && onOpenDnsSettings != null -> {
+                        ToolzExpressiveButton(
+                            onClick  = onOpenDnsSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape    = RoundedCornerShape(20.dp),
+                        ) {
+                            Icon(Icons.Rounded.Dns, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Fix DNS settings")
+                        }
+                    }
+                    errorType == ErrorType.RATE_LIMITED && onOpenEngineSettings != null -> {
+                        ToolzExpressiveButton(
+                            onClick  = onOpenEngineSettings,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape    = RoundedCornerShape(20.dp),
+                        ) {
+                            Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Switch search engine")
+                        }
+                    }
+                    else -> {}
+                }
+
+                // Retry / secondary action
+                ToolzOutlinedExpressiveButton(
+                    onClick  = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(20.dp),
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(retryLabelFor(errorType))
+                }
             }
         }
     }
@@ -1078,30 +1147,33 @@ fun ErrorState(
 
 @Composable
 private fun errorContainerFor(type: ErrorType): Color = when (type) {
-    ErrorType.NETWORK_ERROR -> MaterialTheme.colorScheme.errorContainer
-    ErrorType.RATE_LIMITED  -> MaterialTheme.colorScheme.tertiaryContainer
+    ErrorType.OFFLINE, ErrorType.NETWORK_ERROR -> MaterialTheme.colorScheme.errorContainer
+    ErrorType.DNS_ERROR, ErrorType.RATE_LIMITED -> MaterialTheme.colorScheme.tertiaryContainer
     ErrorType.NO_RESULTS    -> MaterialTheme.colorScheme.secondaryContainer
     else                    -> MaterialTheme.colorScheme.surfaceContainerHigh
 }
 
 @Composable
 private fun errorTintFor(type: ErrorType): Color = when (type) {
-    ErrorType.NETWORK_ERROR -> MaterialTheme.colorScheme.error
-    ErrorType.RATE_LIMITED  -> MaterialTheme.colorScheme.tertiary
+    ErrorType.OFFLINE, ErrorType.NETWORK_ERROR -> MaterialTheme.colorScheme.error
+    ErrorType.DNS_ERROR, ErrorType.RATE_LIMITED -> MaterialTheme.colorScheme.tertiary
     ErrorType.NO_RESULTS    -> MaterialTheme.colorScheme.secondary
     else                    -> MaterialTheme.colorScheme.onSurface
 }
 
 private fun iconFor(type: ErrorType) = when (type) {
-    ErrorType.NETWORK_ERROR -> Icons.Rounded.WifiOff
+    ErrorType.OFFLINE, ErrorType.NETWORK_ERROR -> Icons.Rounded.CloudOff
+    ErrorType.DNS_ERROR     -> Icons.Rounded.Dns
     ErrorType.RATE_LIMITED  -> Icons.Rounded.HourglassEmpty
     ErrorType.NO_RESULTS    -> Icons.Rounded.SearchOff
     else                    -> Icons.Rounded.ErrorOutline
 }
 
 private fun retryLabelFor(type: ErrorType): String = when (type) {
+    ErrorType.OFFLINE       -> "Retry connection"
     ErrorType.NETWORK_ERROR -> "Check connection"
-    ErrorType.RATE_LIMITED  -> "Try again later"
+    ErrorType.DNS_ERROR     -> "Retry DNS query"
+    ErrorType.RATE_LIMITED  -> "Try again"
     else                    -> "Try again"
 }
 
@@ -1545,3 +1617,133 @@ fun Modifier.fadingEdges(fadeSize: Dp = 24.dp): Modifier = this
             blendMode = BlendMode.DstIn,
         )
     }
+
+// ══════════════════════════════════════════════════════════
+//  INSTANT MATH UTILITY CARD
+// ══════════════════════════════════════════════════════════
+
+@Composable
+fun InstantMathCard(
+    mathResult: com.frerox.toolz.ui.screens.search.MathResult,
+    onCopy: (String) -> Unit,
+    onOpenCalculator: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    com.frerox.toolz.ui.components.ExpressiveCard(
+        onClick = onOpenCalculator,
+        modifier = modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Rounded.Calculate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "Instant Calculation",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                ) {
+                    Text(
+                        text = "Local",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Text(
+                text = "${mathResult.expression} = ${mathResult.result}",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                com.frerox.toolz.ui.components.ToolzExpressiveButton(
+                    onClick = onOpenCalculator,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Calculate, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open Calculator")
+                }
+
+                com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton(
+                    onClick = { onCopy(mathResult.result) },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy")
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════
+//  SEARCH CATEGORY FILTER CHIPS
+// ══════════════════════════════════════════════════════════
+
+@Composable
+fun SearchCategoryChips(
+    selectedCategory: com.frerox.toolz.data.search.SearchCategory,
+    onCategorySelected: (com.frerox.toolz.data.search.SearchCategory) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp)
+    ) {
+        items(com.frerox.toolz.data.search.SearchCategory.entries.toTypedArray()) { cat ->
+            val isSelected = cat == selectedCategory
+            val label = when (cat) {
+                com.frerox.toolz.data.search.SearchCategory.ALL -> "All"
+                com.frerox.toolz.data.search.SearchCategory.IMAGES -> "Images"
+                com.frerox.toolz.data.search.SearchCategory.NEWS -> "News"
+                com.frerox.toolz.data.search.SearchCategory.VIDEOS -> "Videos"
+            }
+            val icon = when (cat) {
+                com.frerox.toolz.data.search.SearchCategory.ALL -> Icons.Rounded.Search
+                com.frerox.toolz.data.search.SearchCategory.IMAGES -> Icons.Rounded.Image
+                com.frerox.toolz.data.search.SearchCategory.NEWS -> Icons.Rounded.Newspaper
+                com.frerox.toolz.data.search.SearchCategory.VIDEOS -> Icons.Rounded.OndemandVideo
+            }
+
+            ExpressiveFilterChip(
+                selected = isSelected,
+                onClick = { onCategorySelected(cat) },
+                label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+                leadingIcon = {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+            )
+        }
+    }
+}
