@@ -346,7 +346,9 @@ class SearchViewModel @Inject constructor(
                     error       = null,
                     results     = cachedResults,
                     suggestions = emptyList(),
-                    canLoadMore = cachedResults.size >= 10,
+                    canLoadMore = category != SearchCategory.IMAGES && 
+                                 category != SearchCategory.VIDEOS && 
+                                 cachedResults.isNotEmpty(),
                 )
             }
             return
@@ -397,7 +399,10 @@ class SearchViewModel @Inject constructor(
                             results     = results,
                             phase       = SearchPhase.Results,
                             // Always allow load-more when we have results — engines always have more pages
-                            canLoadMore = results.isNotEmpty(),
+                            // Except for media categories which are currently synthetic single-page
+                            canLoadMore = category != SearchCategory.IMAGES && 
+                                         category != SearchCategory.VIDEOS && 
+                                         results.isNotEmpty(),
                             error       = if (results.isEmpty()) SearchError.NoResults else null,
                         )
                     }
