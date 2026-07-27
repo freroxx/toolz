@@ -64,6 +64,7 @@ import com.frerox.toolz.ui.screens.search.components.FloatingSearchDock
 import com.frerox.toolz.ui.screens.search.components.PrivacyFaviconImage
 import com.frerox.toolz.ui.screens.search.components.SearchPill
 import com.frerox.toolz.ui.screens.search.components.safeHostFromUrl
+import com.frerox.toolz.util.network.AdBlockWebViewClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -266,23 +267,18 @@ fun WebViewScreen(
                                 showDownloadsSheet = true
                             }
 
-                            webViewClient = object : WebViewClient() {
-
-                                override fun onPageStarted(
-                                    view: WebView?, u: String?, favicon: Bitmap?
-                                ) {
-                                    super.onPageStarted(view, u, favicon)
+                            webViewClient = object : AdBlockWebViewClient(
+                                adBlockEnabled = { adBlockEnabled },
+                                onPageStarted = { u ->
                                     isLoading = true
                                     u?.let { currentUrl = it; viewModel.updateTab(url = it) }
-                                }
-
-                                override fun onPageFinished(view: WebView?, u: String?) {
-                                    super.onPageFinished(view, u)
+                                },
+                                onPageFinished = { u ->
                                     isLoading    = false
                                     isRefreshing = false
-                                    canGoBack    = view?.canGoBack()    ?: false
-                                    canGoForward = view?.canGoForward() ?: false
-                                    view?.title?.let { t ->
+                                    canGoBack    = canGoBack()
+                                    canGoForward = canGoForward()
+                                    title?.let { t ->
                                         pageTitle = t
                                         viewModel.updateTab(title = t)
                                     }
@@ -290,7 +286,7 @@ fun WebViewScreen(
                                     u?.let { finishedUrl ->
                                         scope.launch {
                                             delay(1000) // Wait for dynamic content
-                                            view?.evaluateJavascript(
+                                            evaluateJavascript(
                                                 """
                                                 (function(){
                                                   function isVisible(el) {
@@ -335,63 +331,39 @@ fun WebViewScreen(
                                     }
                                     // Capture tab preview
                                     val tabId = activeTabId
-                                    if (view != null && tabId != null) {
+                                    if (tabId != null) {
                                         scope.launch {
                                             delay(800)
                                             runCatching {
                                                 val bmp = Bitmap.createBitmap(
-                                                    view.width.coerceAtLeast(1),
-                                                    (view.height * 0.5f).toInt().coerceAtLeast(1),
+                                                    width.coerceAtLeast(1),
+                                                    (height * 0.5f).toInt().coerceAtLeast(1),
                                                     Bitmap.Config.ARGB_8888,
                                                 )
-                                                view.draw(Canvas(bmp))
+                                                draw(Canvas(bmp))
                                                 viewModel.saveTabPreview(tabId, bmp)
                                             }
                                         }
                                     }
-                                }
-
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView?, request: WebResourceRequest?
-                                ): Boolean {
-                                    val reqUrl = request?.url?.toString() ?: return false
-                                    return when {
-                                        reqUrl.startsWith("tel:") ||
-                                                reqUrl.startsWith("mailto:") ||
-                                                reqUrl.startsWith("intent:") -> {
-                                            runCatching {
-                                                context.startActivity(
-                                                    Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl))
-                                                )
+                                },
+                                shouldOverrideUrl = { reqUrl ->
+                                    if (reqUrl != null) {
+                                        when {
+                                            reqUrl.startsWith("tel:") ||
+                                                    reqUrl.startsWith("mailto:") ||
+                                                    reqUrl.startsWith("intent:") -> {
+                                                runCatching {
+                                                    context.startActivity(
+                                                        Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl))
+                                                    )
+                                                }
+                                                true
                                             }
-                                            true
+                                            else -> false
                                         }
-                                        else -> false
-                                    }
+                                    } else false
                                 }
-
-                                override fun shouldInterceptRequest(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                ) : WebResourceResponse? {
-                                    if (!adBlockEnabled) {
-                                        return super.shouldInterceptRequest(view, request)
-                                    }
-                                    val reqUrl = request?.url?.toString()
-                                        ?: return super.shouldInterceptRequest(view, request)
-
-                                    return if (AdBlockList.isBlocked(reqUrl)) {
-                                        // Return silent empty 200 — avoids JS network errors
-                                        WebResourceResponse(
-                                            "text/plain", "UTF-8", 200, "OK",
-                                            mapOf("Cache-Control" to "no-store"),
-                                            "".byteInputStream(),
-                                        )
-                                    } else {
-                                        super.shouldInterceptRequest(view, request)
-                                    }
-                                }
-
+                            ) {
                                 override fun onReceivedError(
                                     view: WebView?,
                                     request: WebResourceRequest?,
