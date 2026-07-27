@@ -24,10 +24,13 @@ class AdBlockManager @Inject constructor(
     init {
         // Startup Sequence: Fast & Guaranteed
         scope.launch {
-            // 1. Load disk-based rules first (fast, from cache)
+            // 1. Ensure engine is ready with static rules immediately
+            AdBlockList.refreshIndex()
+
+            // 2. Load disk-based rules (persistent community lists)
             loadImportedDomains()
             
-            // 2. Load current custom settings (one-shot)
+            // 3. Load current custom settings
             val customBlocked = settingsRepository.searchAdBlockBlocklists.first()
             val customAllowed = settingsRepository.searchAdBlockAllowlists.first()
             AdBlockList.updateCustomLists(customBlocked, customAllowed)
