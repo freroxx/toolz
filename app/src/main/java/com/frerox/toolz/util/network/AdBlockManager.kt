@@ -119,14 +119,21 @@ class AdBlockManager @Inject constructor(
             withContext(Dispatchers.IO) {
                 try {
                     val domains = file.readLines().toSet()
-                    AdBlockList.updateImportedList(domains)
-                    android.util.Log.d("AdBlockManager", "Persistence: Loaded ${domains.size} rules from disk")
+                    if (domains.isNotEmpty()) {
+                        AdBlockList.updateImportedList(domains)
+                        android.util.Log.d("AdBlockManager", "Persistence: Loaded ${domains.size} rules from disk")
+                    } else {
+                        android.util.Log.w("AdBlockManager", "Persistence: imported_blocklist.txt is empty")
+                        AdBlockList.refreshIndex()
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("AdBlockManager", "Failed to load persistence", e)
+                    AdBlockList.refreshIndex()
                 }
             }
         } else {
-            AdBlockList.refreshIndex() // Ensure static rules are ready at least
+            android.util.Log.d("AdBlockManager", "Persistence: No imported_blocklist.txt found. Using static rules.")
+            AdBlockList.refreshIndex()
         }
     }
 
