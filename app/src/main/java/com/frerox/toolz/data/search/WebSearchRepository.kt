@@ -438,9 +438,9 @@ class WebSearchRepository @Inject constructor(
                     "https://html.duckduckgo.com/html/?q=$encodedQuery+news&iar=news$safeSearchDDG$regionParam",
                 )
                 else -> {
-                    // DDG HTML pagination: &s= is page-based (0, 30, 60, ...)
-                    // offset is absolute result count, convert to DDG page offset
-                    val ddgOffset = if (offset > 0) "&s=${(offset / 30) * 30}" else ""
+                    // DDG HTML pagination: &s= is result offset (0, 30, 60, ...)
+                    // Use offset directly to ensure we get next results even if previous page was partially filtered
+                    val ddgOffset = if (offset > 0) "&s=$offset" else ""
                     listOf(
                         "https://html.duckduckgo.com/html/?q=$encodedQuery$ddgOffset$safeSearchDDG$regionParam",
                     )
