@@ -54,14 +54,15 @@ object AdBlockList {
     )
 
     // ────────────────────────────────────────────────────────── Dynamic Indexes
-    private val activeDomains  = AtomicReference<Set<String>>(emptySet())
-    private val activePatterns = AtomicReference<List<Regex>>(emptyList())
-    private val exceptionRules = AtomicReference<Set<String>>(emptySet())
-    private val exceptionPatterns = AtomicReference<List<Regex>>(emptyList())
-    private val allowlist      = AtomicReference<Set<String>>(emptySet())
+    private val activeDomains         = AtomicReference<Set<String>>(emptySet())
+    private val activePatterns        = AtomicReference<List<Regex>>(emptyList())
+    private val exceptionRules        = AtomicReference<Set<String>>(emptySet())
+    private val exceptionPatterns     = AtomicReference<List<Regex>>(emptyList())
+    private val allowlist             = AtomicReference<Set<String>>(emptySet())
 
-    private val rawCustomBlocked = AtomicReference<Set<String>>(emptySet())
-    private val rawImported      = AtomicReference<Set<String>>(emptySet())
+    private val rawCustomBlocked      = AtomicReference<Set<String>>(emptySet())
+    private val rawImported           = AtomicReference<Set<String>>(emptySet())
+    private val rawImportedExceptions = AtomicReference<Set<String>>(emptySet())
     
     @Volatile
     private var isEngineReady = false
@@ -76,38 +77,56 @@ object AdBlockList {
         var cleaned = rule.trim().lowercase()
         if (cleaned.isEmpty()) return null
 
-        // Ignore CSS rules / element hiding
-        if (cleaned.contains("##") || cleaned.contains("#?#") || cleaned.contains("#@#")) {
+        // Ignore CSS rules / element hiding / procedural filters
+        if (cleaned.contains("##") || cleaned.contains("#?#") || 
+            cleaned.contains("#@#") || cleaned.contains("#$#")) {
             return null
         }
 
-        // Strip exception marker for parsing pattern
+        // Strip exception marker
         if (cleaned.startsWith("@@")) {
             cleaned = cleaned.substring(2)
         }
-        
-        // Strip adblock domain anchor
+
+        // Strip leading pipe anchors or domain anchors (|http://, |https://, ||domain)
         if (cleaned.startsWith("||")) {
             cleaned = cleaned.substring(2)
+        } else if (cleaned.startsWith("|")) {
+            cleaned = cleaned.substring(1)
         }
-        
+
         // Strip URL scheme if present
         if (cleaned.startsWith("http://")) {
             cleaned = cleaned.substring(7)
         } else if (cleaned.startsWith("https://")) {
             cleaned = cleaned.substring(8)
+        } else if (cleaned.startsWith("ws://")) {
+            cleaned = cleaned.substring(5)
+        } else if (cleaned.startsWith("wss://")) {
+            cleaned = cleaned.substring(6)
         }
-        
-        // Strip adblock separator / options (e.g. $third-party, ^)
-        // We keep '*' for regex conversion later
+
+        // Strip scheme again if rule was `http://||domain`
+        if (cleaned.startsWith("||")) {
+            cleaned = cleaned.substring(2)
+        }
+
+        // Strip adblock options (e.g. $third-party, $script, $image, $domain=...)
         if (cleaned.contains("$")) {
             cleaned = cleaned.substringBefore("$")
         }
+
+        // Strip caret separator ^
         if (cleaned.contains("^")) {
             cleaned = cleaned.substringBefore("^")
         }
 
-        // Strip trailing slash if it's a domain-only rule
+        // Strip trailing pipe anchor |
+        if (cleaned.endsWith("|")) {
+            cleaned = cleaned.substring(0, cleaned.length - 1)
+        }
+
+        // Strip trailing slash for domain-only rules (e.g. `domain.com/` -> `domain.com`)
         if (cleaned.endsWith("/") && !cleaned.substring(0, cleaned.length - 1).contains("/")) {
             cleaned = cleaned.removeSuffix("/")
         }
@@ -136,9 +155,8 @@ object AdBlockList {
 
         allRules.forEach {
             val cleaned = cleanRule(it) ?: return@forEach
-            // Ignore extremely short patterns (e.g. "ad") that cause massive false positives
-            // unless they contain structural markers like / or *
-            if (cleaned.length < 4 && !cleaned.contains("/") && !cleaned.contains("*")) return@forEach
+            // Ignore extremely short plain text patterns (<4 chars without structural markers)
+            if (cleaned.length < 4 && !cleaned.contains("/") && !cleaned.contains("*") && !cleaned.contains(".")) return@forEach
 
             if (cleaned.contains("/") || cleaned.contains("*") || cleaned.contains("?")) {
                 patterns.add(toRegex(cleaned))
@@ -147,12 +165,13 @@ object AdBlockList {
             }
         }
         
-        // Exceptions need to be categorized too
-        exceptionRules.get().forEach { 
-            if (it.contains("/") || it.contains("*") || it.contains("?")) {
-                excPatterns.add(toRegex(it))
+        // Categorize exceptions cleanly from rawImportedExceptions
+        rawImportedExceptions.get().forEach { 
+            val cleaned = cleanRule(it) ?: return@forEach
+            if (cleaned.contains("/") || cleaned.contains("*") || cleaned.contains("?")) {
+                excPatterns.add(toRegex(cleaned))
             } else {
-                excRules.add(it)
+                excRules.add(cleaned)
             }
         }
 
@@ -167,17 +186,13 @@ object AdBlockList {
 
     private fun toRegex(pattern: String): Regex {
         // Convert ABP-style pattern to Regex
-        // 1. Break by wildcards
         val parts = pattern.split("*", "?")
-        // 2. Escape each part literally
         val escapedParts = parts.map { Regex.escape(it) }
-        // 3. Join with .* (for *) and . (for ?) - we simplify both to .* for safety in this version
         val regexStr = escapedParts.joinToString(".*")
         
         return try {
             Regex(regexStr, RegexOption.IGNORE_CASE)
         } catch (_: Exception) {
-            // Fallback to literal if compilation fails
             Regex(Regex.escape(pattern), RegexOption.IGNORE_CASE)
         }
     }
@@ -203,7 +218,7 @@ object AdBlockList {
         }
         
         rawImported.set(blocked)
-        exceptionRules.set(exceptions) // This is temporary, refreshIndex will re-categorize
+        rawImportedExceptions.set(exceptions)
         refreshIndex()
     }
 
@@ -275,7 +290,9 @@ object AdBlockList {
     )
 
     private val publicSuffixes: Set<String> = setOf(
-        "com", "org", "net", "edu", "gov", "mil", "int", "co.uk", "co.jp", "co.kr", "io", "me"
+        "com", "org", "net", "edu", "gov", "mil", "int", "io", "me", "ai", "app", "dev",
+        "co.uk", "org.uk", "me.uk", "gov.uk", "ac.uk", "co.jp", "co.kr", "com.au", "net.au",
+        "org.au", "com.br", "com.cn", "com.de", "com.fr", "info", "biz", "tv", "cc", "top", "xyz"
     )
 
     fun totalCount(): Int = activeDomains.get().size + activePatterns.get().size

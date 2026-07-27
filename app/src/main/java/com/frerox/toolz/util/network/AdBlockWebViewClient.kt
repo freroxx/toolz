@@ -42,13 +42,6 @@ open class AdBlockWebViewClient(
 
     private fun intercept(view: WebView?, url: String): WebResourceResponse? {
         if (url.isBlank() || url.startsWith("data:") || url.startsWith("blob:")) return null
-        
-        // SAME-ROOT PROTECTION: Never block resources from the same root domain as the current page.
-        // This ensures Brave/Google Search assets are NEVER blocked, even if hosted on different subdomains.
-        val pageUrl = currentPageUrl
-        if (pageUrl != null && DomainUtils.isSameRootDomain(pageUrl, url)) {
-            return null 
-        }
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
             android.util.Log.d("AdBlock", "Blocked: $url")

@@ -26,9 +26,9 @@ class AdBlockManager @Inject constructor(
          * Bump this version whenever the parser logic changes in a way that
          * makes previously cached data invalid. On mismatch the cache file
          * is treated as stale and a fresh network sync is performed.
-         * v2 — fixed CSS element-hiding rule contamination in parseBlocklistText.
+         * v3 — comprehensive hosts (IPv4/v6, multi-domain lines) & ABP rule parser.
          */
-        private const val CACHE_VERSION = 2
+        private const val CACHE_VERSION = 3
         private const val VERSION_HEADER = "#cache-version=$CACHE_VERSION"
         private const val CACHE_FILE = "imported_blocklist.txt"
     }
@@ -105,49 +105,61 @@ class AdBlockManager @Inject constructor(
      *
      * Correctly handles:
      *  - Plain domain lists (one domain per line)
-     *  - Hosts file format (0.0.0.0 domain or 127.0.0.1 domain)
+     *  - Hosts file format (0.0.0.0, 127.0.0.1, ::1, ::) including multi-domain lines
      *  - ABP network rules (||domain^, ||domain^$options, @@||exception^)
      *  - ABP exception rules (@@||safesite.com^)
      *
-     * Explicitly skips (returns nothing for):
-     *  - Comment lines (starting with !, #, [)
-     *  - CSS element-hiding rules (containing ##, #@#, #?#) — these were the
-     *    primary cause of community lists "not working": e.g. 'example.com##.ad'
-     *    was being stripped to 'example.com' and saved as a domain block rule,
-     *    which both polluted the blocklist and incorrectly blocked legitimate sites.
+     * Explicitly skips:
+     *  - Comment lines (starting with !, #, [, ;)
+     *  - CSS element-hiding / procedural / snippet rules (##, #@#, #?#, #$#)
      */
     fun parseBlocklistText(text: String): Set<String> {
         val rules = mutableSetOf<String>()
         text.lineSequence().forEach { line ->
-            val trimmed = line.trim()
+            var trimmed = line.trim()
 
-            // Skip blank lines and comment-only lines
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || 
+                trimmed.startsWith("[") || trimmed.startsWith(";")) return@forEach
 
-            // ── Skip CSS element-hiding and snippet rules BEFORE any '#' stripping ──
-            // These are NOT network rules and must not be parsed as domain blocks.
-            // e.g. "example.com##.ad-banner", "example.com#@#.ad", "example.com#?#.ad"
-            if (trimmed.contains("##") || trimmed.contains("#@#") || trimmed.contains("#?#")) return@forEach
+            // Skip CSS element-hiding and procedural rules
+            if (trimmed.contains("##") || trimmed.contains("#@#") || 
+                trimmed.contains("#?#") || trimmed.contains("#$#")) return@forEach
 
-            // Strip inline comments that appear after the rule (safe now that CSS ## is excluded)
-            val rule = trimmed.substringBefore(" !").substringBefore(" #").trim()
+            // Strip inline comments on hosts / rule lines (handles both spaces and tabs before # or !)
+            val commentIdx = indexOfComment(trimmed)
+            if (commentIdx != -1) {
+                trimmed = trimmed.substring(0, commentIdx).trim()
+            }
 
-            if (rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1")) {
-                // Hosts file format: "0.0.0.0 ads.example.com" or "127.0.0.1 ads.example.com"
-                val parts = rule.split(Regex("\\s+"))
-                if (parts.size >= 2) {
-                    val domain = parts[1].lowercase().trim()
-                    if (domain.contains(".") && domain != "localhost") {
+            if (trimmed.isEmpty()) return@forEach
+
+            // Check if hosts file entry (0.0.0.0, 127.0.0.1, ::1, ::)
+            if (isHostsLine(trimmed)) {
+                val parts = trimmed.split(Regex("\\s+"))
+                // Skip the IP (parts[0]), collect all domain targets on the line
+                for (i in 1 until parts.size) {
+                    val domain = parts[i].lowercase().trim()
+                    if (domain.contains(".") && domain != "localhost" && domain != "broadcasthost" && !domain.startsWith("#")) {
                         rules.add(domain)
                     }
                 }
             } else {
-                // ABP network rules (||domain^, @@||exception^) and plain domains.
-                // Pass raw so AdBlockList.cleanRule() can properly categorize them.
-                if (rule.isNotBlank()) rules.add(rule)
+                rules.add(trimmed)
             }
         }
         return rules
+    }
+
+    private fun isHostsLine(line: String): Boolean {
+        return line.startsWith("0.0.0.0") || line.startsWith("127.0.0.1") || 
+               line.startsWith("::1") || line.startsWith("::")
+    }
+
+    private fun indexOfComment(line: String): Int {
+        val hashIdx = line.indexOf('#')
+        val exclIdx = line.indexOf('!')
+        val candidates = listOf(hashIdx, exclIdx).filter { it > 0 }
+        return candidates.minOrNull() ?: -1
     }
 
 
