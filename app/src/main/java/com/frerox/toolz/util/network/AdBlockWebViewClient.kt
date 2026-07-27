@@ -19,8 +19,6 @@ open class AdBlockWebViewClient(
     private val shouldOverrideUrl: (String?) -> Boolean = { false }
 ) : WebViewClient() {
 
-    private var currentPageUrl: String? = null
-
     override fun shouldInterceptRequest(
         view: WebView?,
         request: WebResourceRequest?
@@ -31,51 +29,60 @@ open class AdBlockWebViewClient(
         }
         
         val url = request?.url?.toString() ?: return null
-        return intercept(url)
+        return intercept(view, url)
     }
 
     @Deprecated("Deprecated in Java")
     override fun shouldInterceptRequest(view: WebView?, url: String?): WebResourceResponse? {
-        return intercept(url ?: "")
+        return intercept(view, url ?: "")
     }
 
-    private fun intercept(url: String): WebResourceResponse? {
+    private fun intercept(view: WebView?, url: String): WebResourceResponse? {
         if (url.isBlank() || url.startsWith("data:") || url.startsWith("blob:")) return null
         
         // SAME-ROOT PROTECTION: Never block resources from the same root domain as the current page.
-        // This prevents breaking core site functionality (like Brave Search scripts/CSS).
-        currentPageUrl?.let { pageUrl ->
-            if (DomainUtils.isSameRootDomain(pageUrl, url)) {
-                return null 
-            }
+        // This ensures Brave/Google Search assets are NEVER blocked, even if hosted on different subdomains.
+        val pageUrl = view?.url
+        if (pageUrl != null && DomainUtils.isSameRootDomain(pageUrl, url)) {
+            return null 
         }
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
-            android.util.Log.d("AdBlock", "Blocked (403): $url")
+            android.util.Log.d("AdBlock", "Blocked: $url")
             
+            // Determine likely mime type to avoid "broken icon" or "script error"
+            val lowerUrl = url.lowercase()
             val mimeType = when {
-                url.contains(".js")   -> "application/javascript"
-                url.contains(".css")  -> "text/css"
-                url.contains(".png")  -> "image/png"
-                url.contains(".jpg")  -> "image/jpeg"
-                url.contains(".gif")  -> "image/gif"
-                url.contains(".svg")  -> "image/svg+xml"
+                lowerUrl.contains(".js")   -> "application/javascript"
+                lowerUrl.contains(".css")  -> "text/css"
+                lowerUrl.contains(".png")  -> "image/png"
+                lowerUrl.contains(".jpg")  -> "image/jpeg"
+                lowerUrl.contains(".gif")  -> "image/gif"
+                lowerUrl.contains(".svg")  -> "image/svg+xml"
                 else -> "text/plain"
             }
 
-            // Return 403 Forbidden. This ensures ad-block test sites recognize the block correctly.
-            // Since we now bypass same-root resources, 403 should be safe for trackers.
+            // High-Score Block Response:
+            // For images, return a 1x1 transparent GIF. For scripts/CSS, return empty text.
+            val inputStream = if (mimeType.startsWith("image/")) {
+                val pixel = android.util.Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", android.util.Base64.DEFAULT)
+                ByteArrayInputStream(pixel)
+            } else {
+                ByteArrayInputStream("".toByteArray())
+            }
+
+            // Return 200 OK with appropriate content. This is the most compatible way to block.
             return WebResourceResponse(
                 mimeType, 
                 "UTF-8", 
-                403, 
-                "Forbidden",
+                200, 
+                "OK",
                 mapOf(
                     "Cache-Control" to "no-store",
                     "Access-Control-Allow-Origin" to "*",
                     "X-Content-Type-Options" to "nosniff"
                 ),
-                ByteArrayInputStream("".toByteArray())
+                inputStream
             )
         }
         
@@ -84,7 +91,6 @@ open class AdBlockWebViewClient(
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
-        currentPageUrl = url
         onPageStarted(url)
     }
 
