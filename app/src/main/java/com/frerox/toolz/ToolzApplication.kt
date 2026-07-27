@@ -7,6 +7,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
+import com.frerox.toolz.util.network.AdBlockManager
 
 @HiltAndroidApp
 class ToolzApplication : Application(), Configuration.Provider {
@@ -22,6 +23,9 @@ class ToolzApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
+
+    @Inject
+    lateinit var adBlockManager: AdBlockManager
 
     override fun onCreate() {
         super.onCreate()
