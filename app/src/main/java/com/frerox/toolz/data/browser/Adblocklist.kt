@@ -157,42 +157,37 @@ object AdBlockList {
     fun isBlocked(url: String): Boolean {
         if (!isEngineReady || url.isBlank()) return false
         
-        // Normalize URL
-        val cleanUrl = when {
-            url.startsWith("//") -> "https:$url"
-            !url.contains("://") -> "https://$url"
-            else -> url
+        val fullUrlLower = url.lowercase().trim()
+        
+        // 1. Quick Allowlist & Exceptions check (Highest Priority)
+        if (allowlist.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) return false
+        if (exceptionRules.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) return false
+
+        // 2. Extract Host for deep domain matching
+        val host = try {
+            val uri = URI(if (url.contains("://")) url else "https://$url")
+            uri.host?.lowercase()
+        } catch (_: Exception) {
+            // Manual host extraction fallback for complex/malformed tracker URLs
+            url.substringAfter("://").substringBefore("/").substringBefore(":").lowercase()
+        } ?: ""
+
+        if (host.isNotBlank()) {
+            if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
         
-        return try {
-            val uri = URI(cleanUrl)
-            val host = uri.host?.lowercase() ?: return false
-            val fullUrlLower = cleanUrl.lowercase()
-
-            // 1. Exceptions & Allowlist (Highest Priority)
-            if (deepDomainMatch(host, exceptionRules.get())) return false
-            if (deepDomainMatch(host, allowlist.get())) return false
-
-            // 2. Domain Blocking (with deep subdomain support)
-            if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
-            
-            // 3. Pattern Matching (contains path/segments)
-            if (activePatterns.get().any { fullUrlLower.contains(it) }) return hit("Pattern", cleanUrl)
-            
-            // 4. Built-in path fragments fallback
-            if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", cleanUrl)
-            
-            false
-        } catch (_: Exception) {
-            // Aggressive fallback for malformed strings
-            val lower = cleanUrl.lowercase()
-            if (allowlist.get().any { lower.contains(it) }) return false
-            if (exceptionRules.get().any { lower.contains(it) }) return false
-            
-            activeDomains.get().any { it.contains(".") && lower.contains(it) } || 
-                activePatterns.get().any { lower.contains(it) } ||
-                blockedPaths.any { lower.contains(it) }
+        // 3. Pattern Matching (contains path/segments)
+        // Optimization: only check if url actually has a path or query
+        if (url.contains("/") || url.contains("?")) {
+            if (activePatterns.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) {
+                return hit("Pattern", url)
+            }
         }
+        
+        // 4. Built-in path fragments fallback
+        if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", url)
+        
+        return false
     }
 
     /**
@@ -200,16 +195,13 @@ object AdBlockList {
      * e.g. "a.b.c.com" -> ["a.b.c.com", "b.c.com", "c.com"]
      */
     private fun deepDomainMatch(host: String, targetSet: Set<String>): Boolean {
-        if (targetSet.isEmpty()) return false
+        if (targetSet.isEmpty() || host.isBlank()) return false
         if (targetSet.contains(host)) return true
 
-        val parts = host.split('.')
-        if (parts.size < 2) return false
-
-        var current = parts.last()
-        for (i in parts.size - 2 downTo 0) {
-            current = "${parts[i]}.$current"
-            if (publicSuffixes.contains(current)) continue
+        var current = host
+        while (current.contains(".")) {
+            current = current.substringAfter(".")
+            if (current.isBlank() || publicSuffixes.contains(current)) break
             if (targetSet.contains(current)) return true
         }
         return false
