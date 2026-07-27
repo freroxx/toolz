@@ -69,7 +69,7 @@ class AdBlockManager @Inject constructor(
             val request = okhttp3.Request.Builder()
                 .url(url)
                 .header("Accept", "text/plain, application/octet-stream, */*")
-                .header("User-Agent", "Mozilla/5.0 (compatible; AdBlockSync/1.0)")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext emptySet()
@@ -85,31 +85,28 @@ class AdBlockManager @Inject constructor(
      * Parses raw blocklist text (hosts, ABP, plain domain) into a Set<String>.
      */
     fun parseBlocklistText(text: String): Set<String> {
-        val domains = mutableSetOf<String>()
+        val rules = mutableSetOf<String>()
         text.lineSequence().forEach { line ->
-            var trimmed = line.trim()
+            val trimmed = line.trim()
             if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
-            if (trimmed.contains("#")) trimmed = trimmed.substringBefore("#").trim()
-            val isException = trimmed.startsWith("@@")
-            val rule = if (isException) trimmed.substring(2) else trimmed
-            val domain = when {
-                rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1") -> {
-                    rule.split(Regex("\\s+")).getOrNull(1)?.lowercase()?.trim() ?: return@forEach
+            
+            // Handle both plain domains, hosts file format (0.0.0.0 domain), and basic ABP patterns (||domain^)
+            val rule = if (trimmed.contains("#")) trimmed.substringBefore("#").trim() else trimmed
+            
+            if (rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1")) {
+                val parts = rule.split(Regex("\\s+"))
+                if (parts.size >= 2) {
+                    val domain = parts[1].lowercase().trim()
+                    if (domain.contains(".") && domain != "localhost") {
+                        rules.add(domain)
+                    }
                 }
-                rule.startsWith("||") -> {
-                    val end = rule.indexOfAny(charArrayOf('^', '$', '/'))
-                    if (end != -1) rule.substring(2, end) else rule.substring(2)
-                }
-                !rule.contains(" ") && rule.contains(".") -> {
-                    rule.removePrefix("||").substringBefore("^").substringBefore("$").substringBefore("/").trim()
-                }
-                else -> return@forEach
-            }.lowercase().trim()
-            if (domain.contains(".") && domain != "localhost") {
-                domains.add(if (isException) "@@$domain" else domain)
+            } else {
+                // Keep the rule as is for AdBlockList to clean/categorize (preserves paths)
+                if (rule.isNotBlank()) rules.add(rule)
             }
         }
-        return domains
+        return rules
     }
 
 
