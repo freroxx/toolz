@@ -132,6 +132,10 @@ object AdBlockList {
 
         allRules.forEach {
             val cleaned = cleanRule(it) ?: return@forEach
+            // Ignore extremely short patterns (e.g. "ad") that cause massive false positives
+            // unless they contain structural markers like / or *
+            if (cleaned.length < 4 && !cleaned.contains("/") && !cleaned.contains("*")) return@forEach
+
             if (cleaned.contains("/") || cleaned.contains("*") || cleaned.contains("?")) {
                 patterns.add(toRegex(cleaned))
             } else {
