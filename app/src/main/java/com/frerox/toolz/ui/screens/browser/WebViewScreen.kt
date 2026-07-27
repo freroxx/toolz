@@ -123,6 +123,8 @@ fun WebViewScreen(
     val downloads by viewModel.downloads.collectAsState()
     val autofillSuggestions by viewModel.autofillSuggestions.collectAsState()
     val autofillSuccess by viewModel.autofillSuccess.collectAsState()
+    
+    val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
 
     LaunchedEffect(Unit) {
         viewModel.ensureTabExists(url)
@@ -268,7 +270,7 @@ fun WebViewScreen(
                             }
 
                             webViewClient = object : AdBlockWebViewClient(
-                                adBlockEnabled = { adBlockEnabled },
+                                adBlockEnabled = { currentAdBlockEnabled },
                                 onPageStarted = { u ->
                                     isLoading = true
                                     u?.let { currentUrl = it; viewModel.updateTab(url = it) }
