@@ -147,10 +147,14 @@ class AdBlockManager @Inject constructor(
         enabledLists.forEach { id ->
             val url = com.frerox.toolz.ui.screens.search.AdBlockSettingsViewModel.POPULAR_LISTS[id] ?: return@forEach
             try {
+                android.util.Log.d("AdBlockManager", "Sync: Fetching list $id from $url")
                 val rules = fetcher(url)
                 if (rules.isNotEmpty()) {
                     allRules.addAll(rules)
                     successCount++
+                    android.util.Log.d("AdBlockManager", "Sync: List $id fetched. Got ${rules.size} rules.")
+                } else {
+                    android.util.Log.w("AdBlockManager", "Sync: List $id returned 0 rules.")
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AdBlockManager", "Sync failed for list $id", e)
@@ -158,7 +162,6 @@ class AdBlockManager @Inject constructor(
         }
         
         // Only persist and update if at least one list was successfully fetched
-        // or if we explicitly enabled lists that returned nothing (unlikely for ad block lists)
         if (successCount > 0 || allRules.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 try {
@@ -168,7 +171,7 @@ class AdBlockManager @Inject constructor(
                     // Update singleton & DataStore count
                     AdBlockList.updateImportedList(allRules)
                     settingsRepository.setSearchAdBlockImportedCount(allRules.size)
-                    android.util.Log.d("AdBlockManager", "Sync: Success. ${allRules.size} rules active.")
+                    android.util.Log.d("AdBlockManager", "Sync: Success. ${allRules.size} rules parsed and active.")
                 } catch (e: Exception) {
                     android.util.Log.e("AdBlockManager", "Failed to save sync results", e)
                 }
