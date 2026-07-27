@@ -166,7 +166,7 @@ class WebSearchRepository @Inject constructor(
 
     private data class EngineCooldown(val until: Long)
     private val engineCooldowns = ConcurrentHashMap<String, EngineCooldown>()
-    private val COOLDOWN_MS     = 4L * 60L * 1000L // 4 minutes
+    private val COOLDOWN_MS     = 30L * 1000L // 30 seconds (resilient retry)
 
     private fun isEngineAvailable(engine: String): Boolean {
         val cd = engineCooldowns[engine] ?: return true
@@ -418,8 +418,8 @@ class WebSearchRepository @Inject constructor(
                 SearchCategory.NEWS -> listOf("https://www.google.com/search?q=$encodedQuery&tbm=nws&start=$offset$safeSearchGoogle")
                 SearchCategory.VIDEOS -> listOf("https://www.google.com/search?q=$encodedQuery&tbm=vid&start=$offset$safeSearchGoogle")
                 else -> listOf(
+                    "https://www.google.com/search?q=$encodedQuery&gbv=1&start=$offset$safeSearchGoogle",
                     "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle",
-                    "https://www.google.com/search?q=$encodedQuery&start=$offset$safeSearchGoogle&gbv=1",
                     "https://www.google.com/search?q=$encodedQuery&num=100",
                 )
             }
@@ -427,7 +427,10 @@ class WebSearchRepository @Inject constructor(
                 SearchCategory.IMAGES -> listOf("https://search.brave.com/images?q=$encodedQuery$safeSearchBrave")
                 SearchCategory.NEWS -> listOf("https://search.brave.com/news?q=$encodedQuery$safeSearchBrave")
                 SearchCategory.VIDEOS -> listOf("https://search.brave.com/videos?q=$encodedQuery$safeSearchBrave")
-                else -> listOf("https://search.brave.com/search?q=$encodedQuery&source=web$safeSearchBrave")
+                else -> listOf(
+                    "https://search.brave.com/search?q=$encodedQuery&source=web$safeSearchBrave",
+                    "https://search.brave.com/search?q=$encodedQuery"
+                )
             }
             "BING" -> when(category) {
                 SearchCategory.IMAGES -> listOf("https://www.bing.com/images/search?q=$encodedQuery&first=$offset$safeSearchBing")
@@ -448,17 +451,15 @@ class WebSearchRepository @Inject constructor(
                     "https://html.duckduckgo.com/html/?q=$encodedQuery$offsetParam$safeSearchDDG$regionParam"
             )
             else -> when(category) {
-                // DDG HTML news: ia=news returns a working news page
                 SearchCategory.NEWS -> listOf(
                     "https://html.duckduckgo.com/html/?q=$encodedQuery&ia=news$safeSearchDDG$regionParam",
                     "https://html.duckduckgo.com/html/?q=$encodedQuery+news&iar=news$safeSearchDDG$regionParam",
                 )
                 else -> {
-                    // DDG HTML pagination: &s= is result offset (0, 30, 60, ...)
-                    // Use offset directly to ensure we get next results even if previous page was partially filtered
                     val ddgOffset = if (offset > 0) "&s=$offset" else ""
                     listOf(
                         "https://html.duckduckgo.com/html/?q=$encodedQuery$ddgOffset$safeSearchDDG$regionParam",
+                        "https://lite.duckduckgo.com/lite/?q=$encodedQuery$ddgOffset",
                     )
                 }
             }
@@ -559,10 +560,14 @@ class WebSearchRepository @Inject constructor(
 
     private fun buildRequest(url: String): Request = Request.Builder()
         .url(url)
-        .header("User-Agent", randomUA())
-        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
         .header("Accept-Language", "en-US,en;q=0.9")
-        .header("Cache-Control", "no-cache")
+        .header("Cookie", "SOCS=CAESHAgBEhJnd3NfMjAyNDA2MTAtMF9SQzEaAmVuIAEaBgiAo_uwBg; CONSENT=PENDING+999")
+        .header("Referer", if (url.contains("duckduckgo")) "https://html.duckduckgo.com/" else "https://www.google.com/")
+        .header("Sec-Ch-Ua", "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\"")
+        .header("Sec-Ch-Ua-Mobile", "?0")
+        .header("Sec-Ch-Ua-Platform", "\"Windows\"")
         .header("Sec-Fetch-Dest", "document")
         .header("Sec-Fetch-Mode", "navigate")
         .header("Sec-Fetch-Site", "none")
