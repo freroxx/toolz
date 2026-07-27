@@ -168,6 +168,36 @@ object AdBlockList {
     }
 
     /**
+     * Filters out dangerous global wildcards (like `*.css`, `*.js`, `*.woff2`)
+     * that match all website stylesheets or assets globally.
+     */
+    private fun isSafeNetworkPattern(cleaned: String): Boolean {
+        val lower = cleaned.lowercase().trim()
+
+        // Exact dangerous global extension wildcards
+        val unsafeGlobals = setOf(
+            "*.css", "*.js", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.svg",
+            "*.woff", "*.woff2", "*.ttf", "*.eot", "*.ico", "*.json",
+            "/*.css", "/*.js", "/*.png", "/*.jpg", "/*.gif", "/*.svg",
+            "css", "js", "png", "jpg", "jpeg", "gif", "svg"
+        )
+        if (unsafeGlobals.contains(lower)) return false
+
+        // Generic extension wildcards without domain/path anchors (e.g. `*.css` or `*/style.css`)
+        if (lower.startsWith("*.") || lower.startsWith("/*.") || (lower.startsWith("*") && !lower.contains("/"))) {
+            val ext = lower.substringAfterLast(".")
+            if (ext in setOf("css", "js", "png", "jpg", "jpeg", "gif", "svg", "woff", "woff2", "ttf", "eot", "ico", "json")) {
+                val hasAdKeyword = lower.contains("ad") || lower.contains("track") || lower.contains("pixel") ||
+                                   lower.contains("telemetry") || lower.contains("banner") || lower.contains("analytics") ||
+                                   lower.contains("doubleclick") || lower.contains("pagead")
+                if (!hasAdKeyword) return false
+            }
+        }
+
+        return true
+    }
+
+    /**
      * Re-categorizes all rules into domain-only and wildcard-patterns for optimal matching.
      */
     fun refreshIndex() {
@@ -182,6 +212,9 @@ object AdBlockList {
             val cleaned = cleanRule(it) ?: return@forEach
             // Ignore extremely short plain text patterns (<4 chars without structural markers)
             if (cleaned.length < 4 && !cleaned.contains("/") && !cleaned.contains("*") && !cleaned.contains(".")) return@forEach
+
+            // Enforce pattern safety to prevent wildcards like *.css from breaking site stylesheets
+            if (!isSafeNetworkPattern(cleaned)) return@forEach
 
             if (cleaned.contains("/") || cleaned.contains("*") || cleaned.contains("?")) {
                 patterns.add(toRegex(cleaned))
@@ -274,13 +307,24 @@ object AdBlockList {
             // 3. Domain Blocking (with deep subdomain support)
             if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
+
+        // 4. Stylesheet & Font Protection: Never block .css or font files unless the host is a known ad domain or URL has explicit ad keywords
+        val isCssOrFont = fullUrlLower.endsWith(".css") || fullUrlLower.contains(".css?") ||
+                          fullUrlLower.endsWith(".woff") || fullUrlLower.endsWith(".woff2") ||
+                          fullUrlLower.endsWith(".ttf") || fullUrlLower.endsWith(".eot")
+        if (isCssOrFont) {
+            val hasExplicitAdPath = blockedPaths.any { fullUrlLower.contains(it) } ||
+                                   fullUrlLower.contains("doubleclick") || fullUrlLower.contains("pagead") ||
+                                   fullUrlLower.contains("adservice") || fullUrlLower.contains("google-analytics")
+            if (!hasExplicitAdPath) return false
+        }
         
-        // 4. Pattern Matching (contains path/segments/wildcards)
+        // 5. Pattern Matching (contains path/segments/wildcards)
         if (activePatterns.get().any { it.containsMatchIn(cleanUrl) }) {
             return hit("Pattern", cleanUrl)
         }
         
-        // 5. Built-in path fragments fallback
+        // 6. Built-in path fragments fallback
         if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", cleanUrl)
         
         return false
