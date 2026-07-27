@@ -6,7 +6,6 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.frerox.toolz.data.browser.AdBlockList
-import java.io.ByteArrayInputStream
 
 /**
  * A customized WebViewClient that integrates with AdBlockList.
@@ -53,41 +52,16 @@ open class AdBlockWebViewClient(
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
             android.util.Log.d("AdBlock", "Blocked: $url")
-            
-            // Determine likely mime type to avoid "broken icon" or "script error"
-            val lowerUrl = url.lowercase()
-            val mimeType = when {
-                lowerUrl.contains(".js")   -> "application/javascript"
-                lowerUrl.contains(".css")  -> "text/css"
-                lowerUrl.contains(".png")  -> "image/png"
-                lowerUrl.contains(".jpg")  -> "image/jpeg"
-                lowerUrl.contains(".gif")  -> "image/gif"
-                lowerUrl.contains(".svg")  -> "image/svg+xml"
-                else -> "text/plain"
-            }
 
-            // High-Score Block Response:
-            // For images, return a 1x1 transparent GIF. For scripts/CSS, return empty text.
-            val inputStream = if (mimeType.startsWith("image/")) {
-                val pixel = android.util.Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", android.util.Base64.DEFAULT)
-                ByteArrayInputStream(pixel)
-            } else {
-                ByteArrayInputStream("".toByteArray())
-            }
-
-            // Return 200 OK with appropriate content. This is the most compatible way to block.
-            return WebResourceResponse(
-                mimeType, 
-                "UTF-8", 
-                200, 
-                "OK",
-                mapOf(
-                    "Cache-Control" to "no-store",
-                    "Access-Control-Allow-Origin" to "*",
-                    "X-Content-Type-Options" to "nosniff"
-                ),
-                inputStream
-            )
+            // Return a network-error response so that:
+            //  • <img>.onerror fires  (ad-block test tools detect this)
+            //  • <script> fails to execute
+            //  • fetch() / XHR rejects with a network error
+            //
+            // Returning HTTP 200 with a 1x1 GIF (old approach) causes test tools to score
+            // 0% because the request "succeeded". A null-stream WebResourceResponse causes
+            // the WebView to emit net::ERR_FAILED — the correct signal for a blocked resource.
+            return WebResourceResponse("text/plain", "UTF-8", null)
         }
         
         return null
