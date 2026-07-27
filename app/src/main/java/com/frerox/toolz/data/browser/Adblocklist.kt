@@ -157,35 +157,37 @@ object AdBlockList {
     fun isBlocked(url: String): Boolean {
         if (!isEngineReady || url.isBlank()) return false
         
-        val fullUrlLower = url.lowercase().trim()
+        // Normalize protocol-relative URLs
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        val fullUrlLower = cleanUrl.lowercase().trim()
         
-        // 1. Quick Allowlist & Exceptions check (Highest Priority)
-        if (allowlist.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) return false
-        if (exceptionRules.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) return false
-
-        // 2. Extract Host for deep domain matching
+        // 1. Host Extraction
         val host = try {
-            val uri = URI(if (url.contains("://")) url else "https://$url")
+            val uri = URI(if (cleanUrl.contains("://")) cleanUrl else "https://$cleanUrl")
             uri.host?.lowercase()
         } catch (_: Exception) {
-            // Manual host extraction fallback for complex/malformed tracker URLs
-            url.substringAfter("://").substringBefore("/").substringBefore(":").lowercase()
+            cleanUrl.substringAfter("://").substringBefore("/").substringBefore(":").lowercase()
         } ?: ""
 
         if (host.isNotBlank()) {
+            // 2. Allowlist & Exceptions check (Highest Priority)
+            // Fix: Must match at host boundaries or be a substring that makes sense
+            if (allowlist.get().any { it.isNotBlank() && (host == it || host.endsWith(".$it")) }) return false
+            if (exceptionRules.get().any { it.isNotBlank() && (host == it || host.endsWith(".$it")) }) return false
+
+            // 3. Domain Blocking (with deep subdomain support)
             if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
         
-        // 3. Pattern Matching (contains path/segments)
-        // Optimization: only check if url actually has a path or query
-        if (url.contains("/") || url.contains("?")) {
+        // 4. Pattern Matching (contains path/segments)
+        if (cleanUrl.contains("/") || cleanUrl.contains("?")) {
             if (activePatterns.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) {
-                return hit("Pattern", url)
+                return hit("Pattern", cleanUrl)
             }
         }
         
-        // 4. Built-in path fragments fallback
-        if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", url)
+        // 5. Built-in path fragments fallback
+        if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", cleanUrl)
         
         return false
     }
