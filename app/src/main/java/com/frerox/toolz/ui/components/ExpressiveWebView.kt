@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.frerox.toolz.util.network.AdBlockWebViewClient
 
 @Composable
 fun ExpressiveWebView(
@@ -114,16 +115,16 @@ fun ExpressiveWebView(
                             domStorageEnabled = true
                             databaseEnabled = true
                         }
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        webViewClient = AdBlockWebViewClient(
+                            onPageStarted = { url ->
                                 isLoading = true
                                 url?.let { currentUrl = it }
-                            }
-                            override fun onPageFinished(view: WebView?, url: String?) {
+                            },
+                            onPageFinished = { url ->
                                 isLoading = false
-                                pageTitle = view?.title ?: ""
+                                pageTitle = title ?: ""
                             }
-                        }
+                        )
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                 progress = newProgress / 100f
