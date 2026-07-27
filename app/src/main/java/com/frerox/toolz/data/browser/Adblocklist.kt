@@ -51,8 +51,9 @@ object AdBlockList {
 
     // ────────────────────────────────────────────────────────── Dynamic Indexes
     private val activeDomains  = AtomicReference<Set<String>>(emptySet())
-    private val activePatterns = AtomicReference<Set<String>>(emptySet())
+    private val activePatterns = AtomicReference<List<Regex>>(emptyList())
     private val exceptionRules = AtomicReference<Set<String>>(emptySet())
+    private val exceptionPatterns = AtomicReference<List<Regex>>(emptyList())
     private val allowlist      = AtomicReference<Set<String>>(emptySet())
 
     private val rawCustomBlocked = AtomicReference<Set<String>>(emptySet())
@@ -64,38 +65,50 @@ object AdBlockList {
     init { refreshIndex() }
 
     /**
-     * Cleans adblock-style markers and URL schemes from a rule to get a pure domain or path fragment.
+     * Cleans adblock-style markers and URL schemes from a rule to get a pure domain or pattern fragment.
+     * Returns null if the rule is not a network rule (e.g. element hiding).
      */
-    private fun cleanRule(rule: String): String {
+    private fun cleanRule(rule: String): String? {
         var cleaned = rule.trim().lowercase()
-        if (cleaned.isEmpty()) return ""
+        if (cleaned.isEmpty()) return null
 
-        // Strip exception marker
+        // Ignore CSS rules / element hiding
+        if (cleaned.contains("##") || cleaned.contains("#?#") || cleaned.contains("#@#")) {
+            return null
+        }
+
+        // Strip exception marker for parsing pattern
         if (cleaned.startsWith("@@")) {
             cleaned = cleaned.substring(2)
         }
+        
         // Strip adblock domain anchor
         if (cleaned.startsWith("||")) {
             cleaned = cleaned.substring(2)
         }
+        
         // Strip URL scheme if present
         if (cleaned.startsWith("http://")) {
             cleaned = cleaned.substring(7)
         } else if (cleaned.startsWith("https://")) {
             cleaned = cleaned.substring(8)
         }
-        // Strip adblock separator / options
-        if (cleaned.contains("^")) {
-            cleaned = cleaned.substringBefore("^")
-        }
+        
+        // Strip adblock separator / options (e.g. $third-party, ^)
+        // We keep '*' for regex conversion later
         if (cleaned.contains("$")) {
             cleaned = cleaned.substringBefore("$")
         }
+        if (cleaned.contains("^")) {
+            cleaned = cleaned.substringBefore("^")
+        }
+
         // Strip trailing slash if it's a domain-only rule
         if (cleaned.endsWith("/") && !cleaned.substring(0, cleaned.length - 1).contains("/")) {
             cleaned = cleaned.removeSuffix("/")
         }
-        return cleaned.trim()
+        
+        return cleaned.trim().takeIf { it.isNotBlank() }
     }
 
     private fun log(tag: String, msg: String) {
@@ -107,30 +120,63 @@ object AdBlockList {
     }
 
     /**
-     * Re-categorizes all rules into domain-only and path-patterns for optimal matching.
+     * Re-categorizes all rules into domain-only and wildcard-patterns for optimal matching.
      */
     fun refreshIndex() {
         val allRules = staticRules + rawCustomBlocked.get() + rawImported.get()
         val domains  = mutableSetOf<String>()
-        val patterns = mutableSetOf<String>()
+        val patterns = mutableListOf<Regex>()
+        
+        val excRules = mutableSetOf<String>()
+        val excPatterns = mutableListOf<Regex>()
 
         allRules.forEach {
-            val cleaned = cleanRule(it)
-            if (cleaned.isEmpty()) return@forEach
-            if (cleaned.contains("/")) patterns.add(cleaned)
-            else domains.add(cleaned)
+            val cleaned = cleanRule(it) ?: return@forEach
+            if (cleaned.contains("/") || cleaned.contains("*") || cleaned.contains("?")) {
+                patterns.add(toRegex(cleaned))
+            } else {
+                domains.add(cleaned)
+            }
+        }
+        
+        // Exceptions need to be categorized too
+        exceptionRules.get().forEach { 
+            if (it.contains("/") || it.contains("*") || it.contains("?")) {
+                excPatterns.add(toRegex(it))
+            } else {
+                excRules.add(it)
+            }
         }
 
         activeDomains.set(domains)
         activePatterns.set(patterns)
+        exceptionRules.set(excRules)
+        exceptionPatterns.set(excPatterns)
         isEngineReady = true
         
         log("AdBlockList", "Engine Ready: ${domains.size} domains, ${patterns.size} patterns active")
     }
 
+    private fun toRegex(pattern: String): Regex {
+        // Convert ABP-style pattern to Regex
+        // 1. Break by wildcards
+        val parts = pattern.split("*", "?")
+        // 2. Escape each part literally
+        val escapedParts = parts.map { Regex.escape(it) }
+        // 3. Join with .* (for *) and . (for ?) - we simplify both to .* for safety in this version
+        val regexStr = escapedParts.joinToString(".*")
+        
+        return try {
+            Regex(regexStr, RegexOption.IGNORE_CASE)
+        } catch (_: Exception) {
+            // Fallback to literal if compilation fails
+            Regex(Regex.escape(pattern), RegexOption.IGNORE_CASE)
+        }
+    }
+
     fun updateCustomLists(blocked: Set<String>, allowed: Set<String>) {
-        rawCustomBlocked.set(blocked.map { cleanRule(it) }.toSet())
-        allowlist.set(allowed.map { cleanRule(it) }.toSet())
+        rawCustomBlocked.set(blocked.mapNotNull { cleanRule(it) }.toSet())
+        allowlist.set(allowed.mapNotNull { cleanRule(it) }.toSet())
         refreshIndex()
     }
 
@@ -140,15 +186,16 @@ object AdBlockList {
         
         rules.forEach { 
             val lower = it.lowercase().trim()
+            val cleaned = cleanRule(lower) ?: return@forEach
             if (lower.startsWith("@@")) {
-                exceptions.add(cleanRule(lower))
+                exceptions.add(cleaned)
             } else {
-                blocked.add(cleanRule(lower))
+                blocked.add(cleaned)
             }
         }
         
         rawImported.set(blocked)
-        exceptionRules.set(exceptions)
+        exceptionRules.set(exceptions) // This is temporary, refreshIndex will re-categorize
         refreshIndex()
     }
 
@@ -171,19 +218,17 @@ object AdBlockList {
 
         if (host.isNotBlank()) {
             // 2. Allowlist & Exceptions check (Highest Priority)
-            // Fix: Must match at host boundaries or be a substring that makes sense
-            if (allowlist.get().any { it.isNotBlank() && (host == it || host.endsWith(".$it")) }) return false
-            if (exceptionRules.get().any { it.isNotBlank() && (host == it || host.endsWith(".$it")) }) return false
+            if (allowlist.get().any { host == it || host.endsWith(".$it") }) return false
+            if (exceptionRules.get().any { host == it || host.endsWith(".$it") }) return false
+            if (exceptionPatterns.get().any { it.containsMatchIn(cleanUrl) }) return false
 
             // 3. Domain Blocking (with deep subdomain support)
             if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
         
-        // 4. Pattern Matching (contains path/segments)
-        if (cleanUrl.contains("/") || cleanUrl.contains("?")) {
-            if (activePatterns.get().any { it.isNotBlank() && fullUrlLower.contains(it) }) {
-                return hit("Pattern", cleanUrl)
-            }
+        // 4. Pattern Matching (contains path/segments/wildcards)
+        if (activePatterns.get().any { it.containsMatchIn(cleanUrl) }) {
+            return hit("Pattern", cleanUrl)
         }
         
         // 5. Built-in path fragments fallback
