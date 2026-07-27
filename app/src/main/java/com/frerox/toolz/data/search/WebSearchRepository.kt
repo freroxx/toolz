@@ -18,6 +18,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.dnsoverhttps.DnsOverHttps
 import org.jsoup.Jsoup
+import java.net.InetAddress
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
@@ -86,7 +87,7 @@ class WebSearchRepository @Inject constructor(
 
         val dns: Dns = withContext(Dispatchers.IO) {
             try {
-                when (provider) {
+                val primaryDns = when (provider) {
                     "ADGUARD"           -> doh("https://dns.adguard-dns.com/dns-query", "94.140.14.14")
                     "ADGUARD_FAMILY"    -> doh("https://dns-family.adguard-dns.com/dns-query", "94.140.14.15")
                     "CLOUDFLARE"        -> doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1")
@@ -117,6 +118,7 @@ class WebSearchRepository @Inject constructor(
                     }
                     else                -> Dns.SYSTEM
                 }
+                if (primaryDns === Dns.SYSTEM) Dns.SYSTEM else ResilientDns(primaryDns, Dns.SYSTEM)
             } catch (e: Exception) { 
                 e.printStackTrace()
                 Dns.SYSTEM 
@@ -144,6 +146,20 @@ class WebSearchRepository @Inject constructor(
         }
         
         return builder.build()
+    }
+
+    private class ResilientDns(private val primary: Dns, private val fallback: Dns = Dns.SYSTEM) : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            return try {
+                primary.lookup(hostname)
+            } catch (e: Exception) {
+                try {
+                    fallback.lookup(hostname)
+                } catch (_: Exception) {
+                    throw e
+                }
+            }
+        }
     }
 
     // ─── Engine cooldown (CAPTCHA / 429 resilience) ───────────────────────────
@@ -488,7 +504,10 @@ class WebSearchRepository @Inject constructor(
                 }
                 android.util.Log.d("Search", "[$eng] category=$category parsed=${parsed.size} from $tryUrl")
                 if (parsed.isNotEmpty()) return parsed
-            } catch (_: Exception) { continue }
+            } catch (e: Exception) { 
+                android.util.Log.w("Search", "[$eng] Error fetching $tryUrl", e)
+                continue 
+            }
         }
         return emptyList()
     }
