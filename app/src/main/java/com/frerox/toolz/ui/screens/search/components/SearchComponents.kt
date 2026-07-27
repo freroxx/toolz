@@ -275,7 +275,7 @@ private fun SecurityDot(color: Color) {
 // ══════════════════════════════════════════════════════════
 
 @Composable
-private fun sourceAccentColor(source: String): Color {
+internal fun sourceAccentColor(source: String): Color {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val alpha  = if (isDark) 0.85f else 1f
     return when (source.uppercase()) {
