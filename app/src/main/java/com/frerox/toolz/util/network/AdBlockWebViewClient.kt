@@ -19,7 +19,7 @@ open class AdBlockWebViewClient(
     private val shouldOverrideUrl: (String?) -> Boolean = { false }
 ) : WebViewClient() {
 
-    private var currentHost: String? = null
+    private var currentPageUrl: String? = null
 
     override fun shouldInterceptRequest(
         view: WebView?,
@@ -42,33 +42,38 @@ open class AdBlockWebViewClient(
     private fun intercept(url: String): WebResourceResponse? {
         if (url.isBlank() || url.startsWith("data:") || url.startsWith("blob:")) return null
         
-        // SAME-SITE PROTECTION: Never block resources from the same host as the current page.
-        // This prevents breaking core site functionality (like Brave Search scripts).
-        val requestHost = try { java.net.URI(url).host?.lowercase() } catch (_: Exception) { null }
-        if (requestHost != null && currentHost != null) {
-            if (requestHost == currentHost || requestHost.endsWith(".$currentHost") || currentHost!!.endsWith(".$requestHost")) {
+        // SAME-ROOT PROTECTION: Never block resources from the same root domain as the current page.
+        // This prevents breaking core site functionality (like Brave Search scripts/CSS).
+        currentPageUrl?.let { pageUrl ->
+            if (DomainUtils.isSameRootDomain(pageUrl, url)) {
                 return null 
             }
         }
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
-            android.util.Log.d("AdBlock", "Blocked: $url")
+            android.util.Log.d("AdBlock", "Blocked (403): $url")
             
             val mimeType = when {
                 url.contains(".js")   -> "application/javascript"
                 url.contains(".css")  -> "text/css"
+                url.contains(".png")  -> "image/png"
+                url.contains(".jpg")  -> "image/jpeg"
+                url.contains(".gif")  -> "image/gif"
+                url.contains(".svg")  -> "image/svg+xml"
                 else -> "text/plain"
             }
 
-            // Return 200 OK with empty body. 403 can sometimes crash fragile site scripts.
+            // Return 403 Forbidden. This ensures ad-block test sites recognize the block correctly.
+            // Since we now bypass same-root resources, 403 should be safe for trackers.
             return WebResourceResponse(
                 mimeType, 
                 "UTF-8", 
-                200, 
-                "OK",
+                403, 
+                "Forbidden",
                 mapOf(
                     "Cache-Control" to "no-store",
-                    "Access-Control-Allow-Origin" to "*"
+                    "Access-Control-Allow-Origin" to "*",
+                    "X-Content-Type-Options" to "nosniff"
                 ),
                 ByteArrayInputStream("".toByteArray())
             )
@@ -79,7 +84,7 @@ open class AdBlockWebViewClient(
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
-        currentHost = try { java.net.URI(url).host?.lowercase() } catch (_: Exception) { null }
+        currentPageUrl = url
         onPageStarted(url)
     }
 
