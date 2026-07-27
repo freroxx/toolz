@@ -19,12 +19,16 @@ open class AdBlockWebViewClient(
     private val shouldOverrideUrl: (String?) -> Boolean = { false }
 ) : WebViewClient() {
 
+    @Volatile
+    private var currentPageUrl: String? = null
+
     override fun shouldInterceptRequest(
         view: WebView?,
         request: WebResourceRequest?
     ): WebResourceResponse? {
         // CRITICAL FIX: Never block the main website page, only its sub-resources (ads, scripts)
         if (request != null && request.isForMainFrame) {
+            currentPageUrl = request.url.toString()
             return null
         }
         
@@ -42,7 +46,7 @@ open class AdBlockWebViewClient(
         
         // SAME-ROOT PROTECTION: Never block resources from the same root domain as the current page.
         // This ensures Brave/Google Search assets are NEVER blocked, even if hosted on different subdomains.
-        val pageUrl = view?.url
+        val pageUrl = currentPageUrl
         if (pageUrl != null && DomainUtils.isSameRootDomain(pageUrl, url)) {
             return null 
         }

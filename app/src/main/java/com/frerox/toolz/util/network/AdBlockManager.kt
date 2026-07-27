@@ -21,6 +21,18 @@ class AdBlockManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    companion object {
+        /**
+         * Bump this version whenever the parser logic changes in a way that
+         * makes previously cached data invalid. On mismatch the cache file
+         * is treated as stale and a fresh network sync is performed.
+         * v2 — fixed CSS element-hiding rule contamination in parseBlocklistText.
+         */
+        private const val CACHE_VERSION = 2
+        private const val VERSION_HEADER = "#cache-version=$CACHE_VERSION"
+        private const val CACHE_FILE = "imported_blocklist.txt"
+    }
+
     init {
         // Startup Sequence: Fast & Guaranteed
         scope.launch {
@@ -35,12 +47,16 @@ class AdBlockManager @Inject constructor(
             val customAllowed = settingsRepository.searchAdBlockAllowlists.first()
             AdBlockList.updateCustomLists(customBlocked, customAllowed)
 
-            // 3. Background-sync imported lists if enabled and cache is stale (>24h)
+            // 4. Background-sync imported lists if enabled and cache is stale (>24h) or version-mismatched
             val enabledLists = settingsRepository.searchEnabledImportedLists.first()
             if (enabledLists.isNotEmpty()) {
-                val file = File(application.filesDir, "imported_blocklist.txt")
-                val isStale = !file.exists() || (System.currentTimeMillis() - file.lastModified()) > 86_400_000L
-                if (isStale) {
+                val file = File(application.filesDir, CACHE_FILE)
+                val isAged = !file.exists() || (System.currentTimeMillis() - file.lastModified()) > 86_400_000L
+                val isWrongVersion = !file.exists() || runCatching {
+                    file.bufferedReader().readLine() != VERSION_HEADER
+                }.getOrDefault(true)
+                if (isAged || isWrongVersion) {
+                    android.util.Log.d("AdBlockManager", "Startup: cache stale or version mismatch — re-syncing")
                     try {
                         syncImportedLists(enabledLists) { url -> fetchListFromNetwork(url) }
                     } catch (e: Exception) {
@@ -86,17 +102,38 @@ class AdBlockManager @Inject constructor(
 
     /**
      * Parses raw blocklist text (hosts, ABP, plain domain) into a Set<String>.
+     *
+     * Correctly handles:
+     *  - Plain domain lists (one domain per line)
+     *  - Hosts file format (0.0.0.0 domain or 127.0.0.1 domain)
+     *  - ABP network rules (||domain^, ||domain^$options, @@||exception^)
+     *  - ABP exception rules (@@||safesite.com^)
+     *
+     * Explicitly skips (returns nothing for):
+     *  - Comment lines (starting with !, #, [)
+     *  - CSS element-hiding rules (containing ##, #@#, #?#) — these were the
+     *    primary cause of community lists "not working": e.g. 'example.com##.ad'
+     *    was being stripped to 'example.com' and saved as a domain block rule,
+     *    which both polluted the blocklist and incorrectly blocked legitimate sites.
      */
     fun parseBlocklistText(text: String): Set<String> {
         val rules = mutableSetOf<String>()
         text.lineSequence().forEach { line ->
             val trimmed = line.trim()
+
+            // Skip blank lines and comment-only lines
             if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || trimmed.startsWith("[")) return@forEach
-            
-            // Handle both plain domains, hosts file format (0.0.0.0 domain), and basic ABP patterns (||domain^)
-            val rule = if (trimmed.contains("#")) trimmed.substringBefore("#").trim() else trimmed
-            
+
+            // ── Skip CSS element-hiding and snippet rules BEFORE any '#' stripping ──
+            // These are NOT network rules and must not be parsed as domain blocks.
+            // e.g. "example.com##.ad-banner", "example.com#@#.ad", "example.com#?#.ad"
+            if (trimmed.contains("##") || trimmed.contains("#@#") || trimmed.contains("#?#")) return@forEach
+
+            // Strip inline comments that appear after the rule (safe now that CSS ## is excluded)
+            val rule = trimmed.substringBefore(" !").substringBefore(" #").trim()
+
             if (rule.startsWith("0.0.0.0") || rule.startsWith("127.0.0.1")) {
+                // Hosts file format: "0.0.0.0 ads.example.com" or "127.0.0.1 ads.example.com"
                 val parts = rule.split(Regex("\\s+"))
                 if (parts.size >= 2) {
                     val domain = parts[1].lowercase().trim()
@@ -105,7 +142,8 @@ class AdBlockManager @Inject constructor(
                     }
                 }
             } else {
-                // Keep the rule as is for AdBlockList to clean/categorize (preserves paths)
+                // ABP network rules (||domain^, @@||exception^) and plain domains.
+                // Pass raw so AdBlockList.cleanRule() can properly categorize them.
                 if (rule.isNotBlank()) rules.add(rule)
             }
         }
@@ -114,16 +152,20 @@ class AdBlockManager @Inject constructor(
 
 
     private suspend fun loadImportedDomains() {
-        val file = File(application.filesDir, "imported_blocklist.txt")
+        val file = File(application.filesDir, CACHE_FILE)
         if (file.exists()) {
             withContext(Dispatchers.IO) {
                 try {
-                    val domains = file.readLines().toSet()
+                    // Skip the version-header line when reading rules
+                    val lines = file.readLines()
+                    val domains = lines
+                        .filter { it.isNotBlank() && it != VERSION_HEADER }
+                        .toSet()
                     if (domains.isNotEmpty()) {
                         AdBlockList.updateImportedList(domains)
                         android.util.Log.d("AdBlockManager", "Persistence: Loaded ${domains.size} rules from disk")
                     } else {
-                        android.util.Log.w("AdBlockManager", "Persistence: imported_blocklist.txt is empty")
+                        android.util.Log.w("AdBlockManager", "Persistence: $CACHE_FILE is empty")
                         AdBlockList.refreshIndex()
                     }
                 } catch (e: Exception) {
@@ -132,7 +174,7 @@ class AdBlockManager @Inject constructor(
                 }
             }
         } else {
-            android.util.Log.d("AdBlockManager", "Persistence: No imported_blocklist.txt found. Using static rules.")
+            android.util.Log.d("AdBlockManager", "Persistence: No $CACHE_FILE found. Using static rules.")
             AdBlockList.refreshIndex()
         }
     }
@@ -140,7 +182,7 @@ class AdBlockManager @Inject constructor(
     suspend fun syncImportedLists(enabledLists: Set<String>, fetcher: suspend (String) -> Set<String>) {
         if (enabledLists.isEmpty()) {
             withContext(Dispatchers.IO) {
-                File(application.filesDir, "imported_blocklist.txt").delete()
+                File(application.filesDir, CACHE_FILE).delete()
             }
             AdBlockList.updateImportedList(emptySet())
             settingsRepository.setSearchAdBlockImportedCount(0)
@@ -172,8 +214,9 @@ class AdBlockManager @Inject constructor(
         if (successCount > 0 || allRules.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 try {
-                    val file = File(application.filesDir, "imported_blocklist.txt")
-                    file.writeText(allRules.joinToString("\n"))
+                    val file = File(application.filesDir, CACHE_FILE)
+                    // Prepend version header so startup can detect stale caches
+                    file.writeText(VERSION_HEADER + "\n" + allRules.joinToString("\n"))
                     
                     // Update singleton & DataStore count
                     AdBlockList.updateImportedList(allRules)
