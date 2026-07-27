@@ -53,6 +53,31 @@ object AdBlockList {
         "amplitude.com", "hotjar.com", "clarity.ms", "crashlytics.com", "optimizely.com"
     )
 
+    // ────────────────────────────────────────────────────────── Default Allowlist (Search & Core Infra)
+    private val defaultAllowlist: Set<String> = setOf(
+        // SEARCH ENGINES & SUGGESTIONS
+        "duckduckgo.com", "html.duckduckgo.com", "links.duckduckgo.com",
+        "google.com", "www.google.com", "encrypted.google.com", "gstatic.com", "apis.google.com",
+        "brave.com", "search.brave.com", "cdn.search.brave.com",
+        "bing.com", "www.bing.com", "api.bing.com", "ssl.bing.com",
+        "ecosia.org", "www.ecosia.org",
+        "startpage.com", "www.startpage.com",
+        "swisscows.com", "www.swisscows.com",
+        "yandex.com", "yandex.ru", "yahoo.com", "search.yahoo.com",
+
+        // DNS & DoH PROVIDERS
+        "dns.adguard-dns.com", "dns-family.adguard-dns.com",
+        "cloudflare-dns.com", "family.cloudflare-dns.com", "one.one.one.one",
+        "dns.google", "dns.quad9.net", "doh.opendns.com",
+        "dns.nextdns.io", "test.nextdns.io",
+        "freedns.controld.com", "doh.cleanbrowsing.org",
+
+        // ESSENTIAL INFRASTRUCTURE & CDNs FOR EMBEDDED WEBVIEWS
+        "github.com", "raw.githubusercontent.com", "github.io",
+        "jsdelivr.net", "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
+        "wikipedia.org", "wikimedia.org"
+    )
+
     // ────────────────────────────────────────────────────────── Dynamic Indexes
     private val activeDomains         = AtomicReference<Set<String>>(emptySet())
     private val activePatterns        = AtomicReference<List<Regex>>(emptyList())
@@ -241,6 +266,7 @@ object AdBlockList {
 
         if (host.isNotBlank()) {
             // 2. Allowlist & Exceptions check (Highest Priority)
+            if (defaultAllowlist.any { host == it || host.endsWith(".$it") }) return false
             if (allowlist.get().any { host == it || host.endsWith(".$it") }) return false
             if (exceptionRules.get().any { host == it || host.endsWith(".$it") }) return false
             if (exceptionPatterns.get().any { it.containsMatchIn(cleanUrl) }) return false
