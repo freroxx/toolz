@@ -868,6 +868,7 @@ private fun ResultsPage(
                 InlineSearchWebView(
                     result          = result,
                     category        = uiState.category,
+                    adBlockEnabled  = uiState.adBlockEnabled,
                     onOpenInBrowser = { url -> onResultClick(SearchResult(result.title, result.snippet, url, result.displayUrl, result.source)) },
                     modifier        = Modifier.animateItem(
                         fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
