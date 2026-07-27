@@ -33,13 +33,16 @@ fun ExpressiveWebView(
     modifier: Modifier = Modifier,
     title: String = "Setup",
     showPasswordHelper: Boolean = false,
-    onPasswordClick: () -> Unit = {}
+    onPasswordClick: () -> Unit = {},
+    adBlockEnabled: Boolean = true,
 ) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var isLoading by remember { mutableStateOf(true) }
     var currentUrl by remember { mutableStateOf(url) }
     var progress by remember { mutableFloatStateOf(0f) }
     var pageTitle by remember { mutableStateOf("") }
+    
+    val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
 
     Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Minimalist Top Bar
@@ -116,6 +119,7 @@ fun ExpressiveWebView(
                             databaseEnabled = true
                         }
                         webViewClient = AdBlockWebViewClient(
+                            adBlockEnabled = { currentAdBlockEnabled },
                             onPageStarted = { url ->
                                 isLoading = true
                                 url?.let { currentUrl = it }
