@@ -374,7 +374,10 @@ private fun HeroHeader(
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color.White),
                         contentScale = ContentScale.Fit,
                     )
                 } else {
