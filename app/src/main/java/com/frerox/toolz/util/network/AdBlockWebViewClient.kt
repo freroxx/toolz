@@ -32,16 +32,22 @@ open class AdBlockWebViewClient(
         }
         
         val url = request?.url?.toString() ?: return null
-        return intercept(view, url)
+        return intercept(url)
     }
 
     @Deprecated("Deprecated in Java")
     override fun shouldInterceptRequest(view: WebView?, url: String?): WebResourceResponse? {
-        return intercept(view, url ?: "")
+        return intercept(url ?: "")
     }
 
-    private fun intercept(view: WebView?, url: String): WebResourceResponse? {
+    private fun intercept(url: String): WebResourceResponse? {
         if (url.isBlank() || url.startsWith("data:") || url.startsWith("blob:")) return null
+
+        // SAME-ROOT PROTECTION: Never block resources from the same root domain as the current page.
+        val pageUrl = currentPageUrl
+        if (pageUrl != null && DomainUtils.isSameRootDomain(pageUrl, url)) {
+            return null
+        }
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
             android.util.Log.d("AdBlock", "Blocked: $url")
@@ -62,6 +68,7 @@ open class AdBlockWebViewClient(
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
+        currentPageUrl = url
         onPageStarted(url)
     }
 
