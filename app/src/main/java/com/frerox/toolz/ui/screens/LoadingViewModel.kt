@@ -1,10 +1,18 @@
 package com.frerox.toolz.ui.screens
 
+import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil3.imageLoader
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.ImageRequest
+import com.frerox.toolz.data.device.DeviceSpecsRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,8 +22,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LoadingViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val updateRepository: UpdateRepository,
+    private val specsRepository: DeviceSpecsRepository,
 ) : ViewModel() {
 
     private val _isInitialized = MutableStateFlow(false)
@@ -73,6 +83,29 @@ class LoadingViewModel @Inject constructor(
                     settingsRepository.setLastUpdateCheck(System.currentTimeMillis())
                 }
             } catch (_: Exception) { /* Non-fatal */ }
+
+            _loadingProgress.value = 0.50f
+
+            // ── Stage 3.5: Prefetch Device Specs & Image ────
+            try {
+                _loadingMessage.value = "SYNCING DEVICE CATALOG"
+                val query = Build.MODEL.trim().ifBlank { Build.DEVICE.trim() }.ifBlank { "Unknown" }
+                val result = specsRepository.getDeviceSpecs(query)
+                result.onSuccess { (response, _) ->
+                    if (response.image.isNotBlank()) {
+                        val request = ImageRequest.Builder(context)
+                            .data(response.image)
+                            .httpHeaders(
+                                NetworkHeaders.Builder()
+                                    .set("Referer", "https://www.gsmarena.com/")
+                                    .set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36")
+                                    .build()
+                            )
+                            .build()
+                        context.imageLoader.enqueue(request)
+                    }
+                }
+            } catch (_: Exception) { /* Non-fatal prefetch */ }
 
             _loadingProgress.value = 0.90f
 

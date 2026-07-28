@@ -356,14 +356,15 @@ private fun HeroHeader(
 
             Box(
                 modifier = Modifier
-                    .fillMaxSize(0.75f)
-                    .scale(imageScale),
+                    .fillMaxSize(0.85f)
+                    .scale(imageScale)
+                    .clip(RoundedCornerShape(24.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                if (spec?.img?.isNotBlank() == true) {
+                if (spec?.image?.isNotBlank() == true) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(spec.img)
+                            .data(spec.image)
                             .httpHeaders(
                                 NetworkHeaders.Builder()
                                     .set("Referer", "https://www.gsmarena.com/")

@@ -85,7 +85,7 @@ object DeviceSpecMapper {
 
         return DeviceSpecUiModel(
             name = response.matchedDevice.ifBlank { "Unknown Device" },
-            img = sanitizeImageUrl(response.img),
+            image = sanitizeImageUrl(response.image.ifBlank { response.img }),
             sourceUrl = response.sourceUrl,
             quickSpecs = quickSpecs,
             categories = categories,
