@@ -21,38 +21,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    configurations.all {
-        resolutionStrategy {
-            force("org.jetbrains.kotlin:kotlin-stdlib:2.4.0")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.4.0")
-            force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.4.0")
-            force("org.jetbrains.kotlin:kotlin-reflect:2.4.0")
-            force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
-        }
-    }
-
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = false
-        }
-    }
-
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
-            excludes += "META-INF/DEPENDENCIES"
-        }
-        jniLibs {
-            // Set to false to support 16 KB page sizes. 
-            // This ensures uncompressed libraries are 16 KB aligned in the APK.
-            useLegacyPackaging = false
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -88,7 +56,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.foundation)
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    coreLibraryDesugaring(libs.android.desugar.jdk.libs)
     
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -112,7 +80,7 @@ dependencies {
     implementation(libs.androidx.compose.material3.windowSizeClass)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
-    implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation(libs.androidx.palette.ktx)
     
     // Coil 3
     implementation(libs.coil.compose)
@@ -144,16 +112,16 @@ dependencies {
     implementation(libs.material)
     implementation(libs.barcode.scanning)
     implementation(libs.mlkit.text.recognition)
-    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
-    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
-    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
-    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation(libs.mlkit.text.recognition.chinese)
+    implementation(libs.mlkit.text.recognition.devanagari)
+    implementation(libs.mlkit.text.recognition.japanese)
+    implementation(libs.mlkit.text.recognition.korean)
     implementation(libs.exp4j)
-    implementation("org.jsoup:jsoup:1.22.1")
+    implementation(libs.jsoup)
     implementation(libs.commonmark)
     implementation(libs.androidsvg)
     implementation(libs.zxing.core)
-    implementation("androidx.webkit:webkit:1.12.1")
+    implementation(libs.androidx.webkit)
     
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
@@ -186,8 +154,8 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     // Shizuku
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     // FFmpeg & Lottie
     implementation(libs.ffmpeg.kit.standard)
