@@ -84,6 +84,7 @@ data class MusicUiState(
     val sleepTimerActive        : Boolean                   = false,
     val sleepTimerRemaining     : Long?                     = null,
     val queue                   : List<QueueEntry>          = emptyList(),
+    val currentQueueIndex       : Int                       = 0,
     val performanceMode         : Boolean                   = false,
     val playbackPosition        : Long                      = 0L,
     val duration                : Long                      = 0L,
@@ -374,7 +375,7 @@ class MusicPlayerViewModel @Inject constructor(
             }
 
             currentQueueUris = uris
-            _uiState.update { it.copy(queue = entries) }
+            _uiState.update { it.copy(queue = entries, currentQueueIndex = p.currentMediaItemIndex.coerceAtLeast(0)) }
         }
     }
 
@@ -1699,6 +1700,15 @@ class MusicPlayerViewModel @Inject constructor(
     }
 
     fun toggleMusicSettings() { _uiState.update { it.copy(showMusicSettings = !it.showMusicSettings) }; hapticClick() }
+
+    fun seekToQueueIndex(index: Int) {
+        val p: Player = controller ?: player
+        if (index in 0 until p.mediaItemCount) {
+            p.seekTo(index, 0L)
+            p.play()
+            hapticClick()
+        }
+    }
 
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
         val p: Player = controller ?: player
