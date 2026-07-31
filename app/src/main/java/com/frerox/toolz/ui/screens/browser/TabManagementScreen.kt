@@ -541,31 +541,10 @@ private fun EmptyTabsView(
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
-    // Ambient background
-    val infiniteTransition = rememberInfiniteTransition(label = "emptyAmbient")
-    val ambientPhase by infiniteTransition.animateFloat(
-        initialValue  = 0f,
-        targetValue   = 1f,
-        animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing)),
-        label         = "emptyAmbientPhase",
-    )
-
     Box(
         modifier        = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        // Soft ambient circle
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(
-                color  = ElectricViolet.copy(alpha = 0.04f),
-                radius = size.minDimension * 0.55f,
-                center = Offset(
-                    size.width / 2 + kotlin.math.sin(ambientPhase * 2 * Math.PI.toFloat()) * 20f,
-                    size.height / 2 + kotlin.math.cos(ambientPhase * 2 * Math.PI.toFloat()) * 15f,
-                ),
-            )
-        }
-
         AnimatedVisibility(
             visible = visible,
             enter   = fadeIn(tween(500)) + scaleIn(initialScale = 0.92f, animationSpec = spring(Spring.DampingRatioMediumBouncy)),
