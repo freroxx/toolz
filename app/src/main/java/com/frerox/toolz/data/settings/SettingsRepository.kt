@@ -56,6 +56,7 @@ class SettingsRepository @Inject constructor(
     private val EVENT_REMINDER_NOTIFICATIONS = booleanPreferencesKey("event_reminder_notifications")
     private val FLASHLIGHT_NOTIFICATIONS = booleanPreferencesKey("flashlight_notifications")
     private val POMODORO_NOTIFICATIONS = booleanPreferencesKey("pomodoro_notifications")
+    private val BACKUP_NOTIFICATIONS = booleanPreferencesKey("backup_notifications")
     private val KARAOKE_ENABLED = booleanPreferencesKey("karaoke_enabled")
     private val NOTIFICATION_RETENTION_DAYS = intPreferencesKey("notification_retention_days")
 
@@ -499,6 +500,7 @@ class SettingsRepository @Inject constructor(
     val taskReminderNotifications: Flow<Boolean> = dataStore.data.map { it[TASK_REMINDER_NOTIFICATIONS] ?: true }
     val eventReminderNotifications: Flow<Boolean> = dataStore.data.map { it[EVENT_REMINDER_NOTIFICATIONS] ?: true }
     val pomodoroNotifications: Flow<Boolean> = dataStore.data.map { it[POMODORO_NOTIFICATIONS] ?: true }
+    val backupNotifications: Flow<Boolean> = dataStore.data.map { it[BACKUP_NOTIFICATIONS] ?: true }
     val flashlightNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[FLASHLIGHT_NOTIFICATIONS] ?: true }
     val karaokeEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_ENABLED] ?: true }
     val notificationRetentionDays: Flow<Int> = dataStore.data.map { 
@@ -838,6 +840,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setTaskReminderNotifications(enabled: Boolean) { dataStore.edit { it[TASK_REMINDER_NOTIFICATIONS] = enabled } }
     suspend fun setEventReminderNotifications(enabled: Boolean) { dataStore.edit { it[EVENT_REMINDER_NOTIFICATIONS] = enabled } }
     suspend fun setPomodoroNotifications(enabled: Boolean) { dataStore.edit { it[POMODORO_NOTIFICATIONS] = enabled } }
+    suspend fun setBackupNotifications(enabled: Boolean) { dataStore.edit { it[BACKUP_NOTIFICATIONS] = enabled } }
     suspend fun setFlashlightNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[FLASHLIGHT_NOTIFICATIONS] = enabled } }
     suspend fun setKaraokeEnabled(enabled: Boolean) { dataStore.edit { it[KARAOKE_ENABLED] = enabled } }
     suspend fun setNotificationRetentionDays(days: Int) { dataStore.edit { it[NOTIFICATION_RETENTION_DAYS] = days } }
