@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.search.SearchResult
@@ -1829,6 +1830,82 @@ fun SearchCategoryChips(
                     Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
             )
+        }
+    }
+}
+
+@Composable
+fun InlineSearchWebView(
+    result: com.frerox.toolz.data.search.SearchResult,
+    category: com.frerox.toolz.data.search.SearchCategory,
+    adBlockEnabled: Boolean,
+    onOpenInBrowser: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(280.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Column {
+            Box(modifier = Modifier.weight(1f)) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = com.frerox.toolz.util.network.AdBlockWebViewClient(
+                                adBlockEnabled = { adBlockEnabled }
+                            )
+                            loadUrl(result.url)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                // Overlay to catch clicks and open in browser
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { onOpenInBrowser(result.url) }
+                )
+            }
+            
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = result.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = result.displayUrl,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.OpenInBrowser,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
