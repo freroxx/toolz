@@ -340,6 +340,19 @@ class NowPlayingAiViewModel @Inject constructor(
                 _uiState.update { it.copy(userName = name) }
             }
         }
+
+        checkGroqKey()
+    }
+
+    private fun checkGroqKey() {
+        val key = getGroqKey()
+        _uiState.update { it.copy(isGroqKeyMissing = key.isBlank()) }
+    }
+
+    fun saveGroqKey(key: String) {
+        settingsManager.setApiKey(key, "Groq")
+        _uiState.update { it.copy(isGroqKeyMissing = false) }
+        refreshCurrentTab()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -589,62 +602,180 @@ class NowPlayingAiViewModel @Inject constructor(
                 var lyricsContent: String? = null
                 var isSynced              = false
 
-                if (track?.path != null && sourceUrl == null) {
-                    runCatching {
-                        val lrc = java.io.File(java.io.File(track.path).parent,
-                            java.io.File(track.path).nameWithoutExtension + ".lrc")
-                        if (lrc.exists()) {
-                            lyricsContent = lrc.readText()
-                            isSynced      = lyricsContent.contains("[0") == true
-                            Log.d(TAG, "Local .lrc found: ${lrc.absolutePath}")
-                        }
+                // 1. Check cached database lyrics first
+                if (!track?.aiLyrics.isNullOrBlank()) {
+                    lyricsContent = track?.aiLyrics
+                    isSynced = lyricsContent?.contains("[0") == true || lyricsContent?.contains("[1") == true
+                    Log.d(TAG, "Loaded cached lyrics from DB for: ${song.title}")
+                }
+
+                // 2. Check embedded audio metadata lyrics
+                if (lyricsContent == null) {
+                    val embedded = LyricsExtractor.extractEmbeddedLyrics(context, uri, track?.path)
+                    if (embedded != null) {
+                        lyricsContent = embedded
+                        isSynced = embedded.contains("[0") || embedded.contains("[1")
+                        Log.d(TAG, "Extracted embedded metadata lyrics for: ${song.title}")
                     }
                 }
 
+                // 3. Check local sidecar files (.lrc, .txt)
+                if (lyricsContent == null && track?.path != null) {
+                    val sidecar = LyricsExtractor.findLocalSidecarLyrics(track.path)
+                    if (sidecar != null) {
+                        lyricsContent = sidecar.first
+                        isSynced = sidecar.second
+                        Log.d(TAG, "Loaded local sidecar lyrics for: ${song.title}")
+                    }
+                }
+
+                // 4. Online fetching with LRCLIB multi-stage fallback strategy
                 if (!offline && lyricsContent == null) {
-                    runCatching {
-                        val cleanTitle = song.title
-                            .replace(Regex("\\(.*?\\)"), "")
-                            .replace(Regex("\\[.*?\\]"), "")
-                            .replace(Regex("(?i)-?\\s*(Official|Lyric|Music|Audio)\\s*(Video)?.*"), "")
-                            .replace(Regex("(?i)(feat|ft)\\..*"), "")
-                            .trim()
+                    var effectiveArtist = artist.takeUnless { it.equals("Unknown Artist", true) || it.equals("Unknown", true) } ?: ""
+                    var cleanTitle = song.title
+                        .replace(Regex("(?i)\\.(mp3|m4a|flac|wav|aac|ogg|opus|wma)$"), "")
+                        .replace(Regex("^\\d{1,3}[\\s._-]+"), "")
+                        .replace('_', ' ')
+                        .trim()
 
-                        val getLyricsJob = async {
-                            runCatching {
-                                lrcLibService.getLyrics(
-                                    trackName = cleanTitle,
-                                    artistName = artist,
-                                    albumName = album.ifEmpty { null },
-                                    durationInSeconds = (song.durationInMillis / 1000).toInt()
-                                )
-                            }.getOrNull()
+                    if (effectiveArtist.isBlank()) {
+                        val dashRegex = Regex("\\s+[-–—]\\s+")
+                        if (cleanTitle.contains(dashRegex)) {
+                            val parts = cleanTitle.split(dashRegex, 2)
+                            if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                                effectiveArtist = parts[0].trim()
+                                cleanTitle = parts[1].trim()
+                            }
                         }
-
-                        val searchLyricsJob = async {
-                            runCatching {
-                                val results = lrcLibService.searchLyrics(cleanTitle, artist)
-                                results.firstOrNull { it.syncedLyrics != null }
-                                    ?: results.firstOrNull { it.plainLyrics != null }
-                            }.getOrNull()
-                        }
-
-                        val getResponse = getLyricsJob.await()
-                        val searchResponse = searchLyricsJob.await()
-
-                        val response = if (getResponse?.syncedLyrics != null) getResponse
-                        else if (searchResponse?.syncedLyrics != null) searchResponse
-                        else if (getResponse?.plainLyrics != null) getResponse
-                        else searchResponse
-
-                        lyricsContent = response?.syncedLyrics ?: response?.plainLyrics
-                        isSynced = response?.syncedLyrics != null
                     }
 
+                    cleanTitle = cleanTitle
+                        .replace(Regex("(?i)\\([^)]*\\)"), "")
+                        .replace(Regex("(?i)\\[[^\\]]*\\]"), "")
+                        .replace(Regex("(?i)-?\\s*(Official|Lyric|Lyrics|Music|Audio|HD|4K|Video)\\s*(Video)?.*"), "")
+                        .replace(Regex("(?i)(feat|ft|featuring)\\..*"), "")
+                        .replace(Regex("(?i)remastered.*"), "")
+                        .replace(Regex("(?i)single.*"), "")
+                        .trim()
+
+                    runCatching {
+                        val exactJob = async {
+                            runCatching {
+                                if (effectiveArtist.isNotBlank() && cleanTitle.isNotBlank()) {
+                                    lrcLibService.getLyrics(
+                                        trackName = cleanTitle,
+                                        artistName = effectiveArtist,
+                                        albumName = album.ifEmpty { null },
+                                        durationInSeconds = (song.durationInMillis / 1000).toInt()
+                                    )
+                                } else null
+                            }.getOrNull()
+                        }
+
+                        val relaxedJob = async {
+                            runCatching {
+                                if (effectiveArtist.isNotBlank() && cleanTitle.isNotBlank()) {
+                                    lrcLibService.getLyrics(
+                                        trackName = cleanTitle,
+                                        artistName = effectiveArtist,
+                                        albumName = null,
+                                        durationInSeconds = null
+                                    )
+                                } else null
+                            }.getOrNull()
+                        }
+
+                        val searchJob = async {
+                            runCatching {
+                                if (effectiveArtist.isNotBlank() && cleanTitle.isNotBlank()) {
+                                    lrcLibService.searchLyrics(cleanTitle, effectiveArtist)
+                                } else emptyList()
+                            }.getOrNull() ?: emptyList()
+                        }
+
+                        val queryJob = async {
+                            runCatching {
+                                val queryStr = if (effectiveArtist.isNotBlank()) "$cleanTitle $effectiveArtist" else cleanTitle
+                                if (queryStr.isNotBlank()) {
+                                    lrcLibService.searchLyricsByQuery(queryStr)
+                                } else emptyList()
+                            }.getOrNull() ?: emptyList()
+                        }
+
+                        val titleOnlyJob = async {
+                            runCatching {
+                                if (cleanTitle.isNotBlank()) {
+                                    lrcLibService.searchLyricsByQuery(cleanTitle)
+                                } else emptyList()
+                            }.getOrNull() ?: emptyList()
+                        }
+
+                        val exactResp = exactJob.await()
+                        val relaxedResp = relaxedJob.await()
+                        val searchResps = searchJob.await()
+                        val queryResps = queryJob.await()
+                        val titleOnlyResps = titleOnlyJob.await()
+
+                        val candidates = listOfNotNull(exactResp, relaxedResp) + searchResps + queryResps + titleOnlyResps
+                        val syncedMatch = candidates.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
+                        val plainMatch = candidates.firstOrNull { !it.plainLyrics.isNullOrBlank() }
+
+                        if (syncedMatch != null) {
+                            lyricsContent = syncedMatch.syncedLyrics
+                            isSynced = true
+                        } else if (plainMatch != null) {
+                            lyricsContent = plainMatch.plainLyrics
+                            isSynced = false
+                        }
+                    }
+
+                    // 5. Catalog captions fallback for online streaming tracks
                     if (lyricsContent == null && sourceUrl != null) {
                         runCatching {
                             lyricsContent = catalogRepository.fetchCaptions(sourceUrl)
-                            isSynced = lyricsContent?.contains("[0") == true
+                            isSynced = lyricsContent?.contains("[0") == true || lyricsContent?.contains("[1") == true
+                        }
+                    }
+
+                    // 6. Secondary public lyrics API fallback (Lyrist / lyrics.ovh)
+                    if (lyricsContent == null && cleanTitle.isNotBlank()) {
+                        runCatching {
+                            val queryStr = if (effectiveArtist.isNotBlank()) "$cleanTitle $effectiveArtist" else cleanTitle
+                            val encodedQuery = java.net.URLEncoder.encode(queryStr, "UTF-8")
+                            val lyristUrl = "https://lyrist.vericatch.com/api/$encodedQuery"
+                            val conn = java.net.URL(lyristUrl).openConnection() as java.net.HttpURLConnection
+                            conn.connectTimeout = 4000
+                            conn.readTimeout = 4000
+                            if (conn.responseCode == 200) {
+                                val jsonStr = conn.inputStream.bufferedReader().readText()
+                                val json = org.json.JSONObject(jsonStr)
+                                val lyrics = json.optString("lyrics")
+                                if (lyrics.isNotBlank() && lyrics != "null") {
+                                    lyricsContent = lyrics.trim()
+                                    isSynced = lyricsContent?.contains("[0") == true || lyricsContent?.contains("[1") == true
+                                    Log.d(TAG, "Fetched secondary fallback lyrics from Lyrist for $cleanTitle")
+                                }
+                            }
+                        }
+                    }
+
+                    if (lyricsContent == null && effectiveArtist.isNotBlank() && cleanTitle.isNotBlank()) {
+                        runCatching {
+                            val encodedArtist = java.net.URLEncoder.encode(effectiveArtist, "UTF-8")
+                            val encodedTitle  = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                            val ovhUrl = "https://api.lyrics.ovh/v1/$encodedArtist/$encodedTitle"
+                            val conn = java.net.URL(ovhUrl).openConnection() as java.net.HttpURLConnection
+                            conn.connectTimeout = 4000
+                            conn.readTimeout = 4000
+                            if (conn.responseCode == 200) {
+                                val jsonStr = conn.inputStream.bufferedReader().readText()
+                                val rawLyrics = org.json.JSONObject(jsonStr).optString("lyrics")
+                                if (rawLyrics.isNotBlank() && rawLyrics != "null") {
+                                    lyricsContent = rawLyrics.trim()
+                                    isSynced = false
+                                    Log.d(TAG, "Fetched secondary fallback lyrics from lyrics.ovh for $cleanTitle")
+                                }
+                            }
                         }
                     }
                 }
@@ -797,10 +928,10 @@ class NowPlayingAiViewModel @Inject constructor(
             if (settingsRepository.offlineModeEnabled.first()) return@launch
             val key = getGroqKey()
             if (key.isBlank()) {
-                _uiState.update { it.copy(error = "Configure Groq key in AI Settings.") }
+                _uiState.update { it.copy(isGroqKeyMissing = true) }
                 return@launch
             }
-            _uiState.update { it.copy(moreInfoState = it.moreInfoState.copy(isLoading = true, artistVitals = "", songMeaning = ""), error = null) }
+            _uiState.update { it.copy(moreInfoState = it.moreInfoState.copy(isLoading = true, artistVitals = "", songMeaning = ""), error = null, isGroqKeyMissing = false) }
             try {
                 val prompt = """
                     Act as an expert Music Curator and historian. Analyze "${song.title}" by "${song.artist}" from the album "${song.album}".
@@ -837,13 +968,16 @@ class NowPlayingAiViewModel @Inject constructor(
         recommendationsJob = viewModelScope.launch {
             if (settingsRepository.offlineModeEnabled.first()) return@launch
             val key = getGroqKey()
-            if (key.isBlank()) return@launch
+            if (key.isBlank()) {
+                _uiState.update { it.copy(isGroqKeyMissing = true) }
+                return@launch
+            }
 
             _uiState.update {
                 it.copy(tasteState = it.tasteState.copy(
                     isLoadingCurated = true, isLoadingArtist = true,
                     curatedRecommendations = emptyList(), artistRecommendations = emptyList()
-                ), error = null)
+                ), error = null, isGroqKeyMissing = false)
             }
 
             launch {
