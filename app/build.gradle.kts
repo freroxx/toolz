@@ -56,7 +56,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.foundation)
-    coreLibraryDesugaring(libs.android.desugar.jdk.libs)
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
     
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
