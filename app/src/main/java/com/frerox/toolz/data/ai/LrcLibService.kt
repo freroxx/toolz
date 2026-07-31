@@ -32,4 +32,9 @@ interface LrcLibService {
         @Query("artist_name") artistName: String,
         @Query("album_name") albumName: String? = null
     ): List<LrcResponse>
+
+    @GET("search")
+    suspend fun searchLyricsByQuery(
+        @Query("q") query: String
+    ): List<LrcResponse>
 }
