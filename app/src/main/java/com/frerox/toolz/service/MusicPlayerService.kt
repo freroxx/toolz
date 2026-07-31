@@ -1,17 +1,27 @@
 package com.frerox.toolz.service
 
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.*
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -25,10 +35,15 @@ import coil3.toBitmap
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.music.MusicRepository
+import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.WidgetUpdateManager
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.EXTRA_QUEUE_INDEX
 import com.frerox.toolz.widget.glance.QueueTrackInfo
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -72,8 +87,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var widgetCorrectionJob: Job? = null
+    private var statePersistenceJob: Job? = null
 
     private var sensorManager: SensorManager? = null
+    private var audioManager: AudioManager? = null
     private var acceleration = 0f
     private var currentAcceleration = 0f
     private var lastAcceleration = 0f
@@ -85,6 +102,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var lastTrackUri: String? = null
     private var lastShape: String? = null
     private var lastAccentColor: String? = null
+
+    // Multi-tap detection for earphone center button
+    private var lastMediaButtonClickTime: Long = 0
+    private var mediaButtonClickCount = 0
+    private var mediaButtonCheckJob: Job? = null
 
     @Inject
     lateinit var player: ExoPlayer
@@ -104,9 +126,35 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     @Inject
     lateinit var vibrationManager: com.frerox.toolz.util.VibrationManager
 
+    @Inject
+    lateinit var moshi: Moshi
+
+    private val headsetReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_HEADSET_PLUG -> {
+                    val state = intent.getIntExtra("state", -1)
+                    if (state == 1) { // Plugged
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
+                    } else if (state == 0) { // Unplugged
+                        if (player.isPlaying) player.pause()
+                    }
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
+                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    // Audio becoming noisy usually handles this, but we can be safe
+                    if (player.isPlaying) player.pause()
+                }
+            }
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateWidget(forceBitmapRefresh = true)
+            savePlaybackState()
 
             // Check if we need to resolve the stream URL for catalog tracks
             mediaItem?.let { item ->
@@ -120,10 +168,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             updateWidget()
             if (isPlaying) {
                 startWidgetCorrectionLoop()
+                startStatePersistenceLoop()
                 observeShakeSetting()
             } else {
                 stopWidgetCorrectionLoop()
+                stopStatePersistenceLoop()
                 unregisterShakeListener()
+                savePlaybackState()
             }
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -134,6 +185,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             // reordered) without a media item transition — re-push so the
             // widget's Up Next list doesn't go stale.
             updateWidget()
+            savePlaybackState()
         }
     }
 
@@ -166,6 +218,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         super.onCreate()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         acceleration = 10f
         currentAcceleration = SensorManager.GRAVITY_EARTH
         lastAcceleration = SensorManager.GRAVITY_EARTH
@@ -182,15 +235,132 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
+            .setCallback(CustomMediaSessionCallback())
             .build()
 
         player.addListener(playerListener)
 
         if (player.isPlaying) {
             startWidgetCorrectionLoop()
+            startStatePersistenceLoop()
             observeShakeSetting()
         }
         updateWidget(forceBitmapRefresh = true)
+
+        // Register headset and bluetooth receivers
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_HEADSET_PLUG)
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        }
+        registerReceiver(headsetReceiver, filter)
+        
+        // Restore last state if empty
+        if (player.mediaItemCount == 0) {
+            restorePlaybackState(autoPlay = false)
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    private inner class CustomMediaSessionCallback : MediaSession.Callback {
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent
+        ): Boolean {
+            val keyEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+            }
+            if (keyEvent?.action == android.view.KeyEvent.ACTION_DOWN) {
+                when (keyEvent.keyCode) {
+                    android.view.KeyEvent.KEYCODE_HEADSETHOOK,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                        handleMediaButtonClick()
+                        return true
+                    }
+                }
+            }
+            return super.onMediaButtonEvent(session, controllerInfo, intent)
+        }
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            return MediaSession.ConnectionResult.accept(
+                androidx.media3.session.SessionCommands.EMPTY,
+                androidx.media3.common.Player.Commands.Builder().addAllCommands().build()
+            )
+        }
+
+        @Deprecated("Use onPlaybackResumption(MediaSession, ControllerInfo, Bundle) instead")
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val setter = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                val uri = settingsRepository.musicLastPlayedUri.first()
+                val pos = settingsRepository.musicLastPlayedPosition.first()
+                val queueJson = settingsRepository.musicLastPlayedQueue.first()
+                
+                if (uri != null) {
+                    val track = musicRepository.getTrackByUri(uri)
+                    if (track != null) {
+                        val items = mutableListOf<MediaItem>()
+                        if (queueJson != null) {
+                            val uris = try {
+                                moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+                                    .fromJson(queueJson) ?: emptyList()
+                            } catch (e: Exception) { emptyList() }
+                            
+                            val tracks = uris.mapNotNull { musicRepository.getTrackByUri(it) }
+                            items.addAll(tracks.map { it.toMediaItem() })
+                        } else {
+                            items.add(track.toMediaItem())
+                        }
+                        
+                        val startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                        setter.set(MediaSession.MediaItemsWithStartPosition(items, startIndex, pos))
+                    } else {
+                        setter.setException(Exception("Track not found"))
+                    }
+                } else {
+                    setter.setException(Exception("No last played track"))
+                }
+            }
+            return setter
+        }
+    }
+
+    private fun handleMediaButtonClick() {
+        val now = System.currentTimeMillis()
+        if (now - lastMediaButtonClickTime > 500) {
+            mediaButtonClickCount = 1
+        } else {
+            mediaButtonClickCount++
+        }
+        lastMediaButtonClickTime = now
+
+        mediaButtonCheckJob?.cancel()
+        mediaButtonCheckJob = serviceScope.launch {
+            delay(350)
+            when (mediaButtonClickCount) {
+                1 -> {
+                    if (player.mediaItemCount == 0) {
+                        restorePlaybackState(autoPlay = true)
+                    } else {
+                        if (player.isPlaying) player.pause() else player.play()
+                    }
+                }
+                2 -> player.seekToNext()
+                3 -> player.seekToPrevious()
+            }
+            mediaButtonClickCount = 0
+        }
     }
 
     private fun observeShakeSetting() {
@@ -282,7 +452,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }
         }
         updateWidget()
-        return super.onStartCommand(intent, flags, startId)
+        super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
     /**
@@ -306,6 +477,95 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private fun stopWidgetCorrectionLoop() {
         widgetCorrectionJob?.cancel()
         updateWidget()
+    }
+
+    private fun startStatePersistenceLoop() {
+        statePersistenceJob?.cancel()
+        statePersistenceJob = serviceScope.launch {
+            while (isActive) {
+                delay(30_000L) // Save state every 30s while playing
+                savePlaybackState()
+            }
+        }
+    }
+
+    private fun stopStatePersistenceLoop() {
+        statePersistenceJob?.cancel()
+        savePlaybackState()
+    }
+
+    private fun savePlaybackState() {
+        val currentItem = player.currentMediaItem ?: return
+        val position = player.currentPosition
+        val uri = currentItem.mediaId
+        
+        val queueUris = mutableListOf<String>()
+        for (i in 0 until player.mediaItemCount) {
+            queueUris.add(player.getMediaItemAt(i).mediaId)
+        }
+        val queueJson = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+            .toJson(queueUris)
+
+        serviceScope.launch {
+            settingsRepository.setMusicLastPlayedState(uri, position, queueJson)
+        }
+    }
+
+    private fun restorePlaybackState(autoPlay: Boolean = false) {
+        serviceScope.launch {
+            val uri = settingsRepository.musicLastPlayedUri.first()
+            val position = settingsRepository.musicLastPlayedPosition.first()
+            val queueJson = settingsRepository.musicLastPlayedQueue.first()
+
+            if (uri != null) {
+                val track = musicRepository.getTrackByUri(uri)
+                if (track != null) {
+                    val items = mutableListOf<MediaItem>()
+                    if (queueJson != null) {
+                        val uris = try {
+                            moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+                                .fromJson(queueJson) ?: emptyList()
+                        } catch (e: Exception) { emptyList() }
+                        
+                        val tracks = uris.mapNotNull { musicRepository.getTrackByUri(it) }
+                        items.addAll(tracks.map { it.toMediaItem() })
+                    } else {
+                        items.add(track.toMediaItem())
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        val startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                        player.setMediaItems(items, startIndex, position)
+                        player.prepare()
+                        if (autoPlay) player.play()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun MusicTrack.toMediaItem(): MediaItem {
+        val meta = MediaMetadata.Builder()
+            .setTitle(title).setArtist(artist ?: "Unknown Artist")
+            .setAlbumTitle(album ?: "Unknown Album").setDisplayTitle(title)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
+            .setArtworkUri(thumbnailUri?.let { Uri.parse(it) })
+            .apply { sourceUrl?.let { setExtras(Bundle().apply { putString("source_url", it) }) } }
+            .build()
+        val playableUri = if (uri.startsWith("content://") || uri.startsWith("file://")) {
+            uri
+        } else {
+            path?.let {
+                when {
+                    it.startsWith("content://") || it.startsWith("file://") -> it
+                    it.startsWith("/") -> Uri.fromFile(File(it)).toString()
+                    else -> it
+                }
+            } ?: uri
+        }
+        val parsedUri = if (playableUri.startsWith("/")) Uri.fromFile(File(playableUri)) else Uri.parse(playableUri)
+        return MediaItem.Builder()
+            .setMediaId(uri).setUri(parsedUri).setMediaMetadata(meta).build()
     }
 
     private fun buildQueueSnapshot(): List<QueueTrackInfo> {
@@ -430,7 +690,14 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Save state one last time
+        savePlaybackState()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        runCatching { unregisterReceiver(headsetReceiver) }
         unregisterShakeListener()
         serviceScope.cancel()
         mediaSession?.run {
