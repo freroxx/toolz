@@ -3,6 +3,9 @@ package com.frerox.toolz.ui.screens.media.ai
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import com.frerox.toolz.ui.screens.media.RevampedNowPlayingBackground
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -58,6 +61,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.frerox.toolz.data.ai.AiSettingsHelper
 import com.frerox.toolz.ui.components.AlbumArtImage
 import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.components.fadingEdges
@@ -131,38 +135,19 @@ fun NowPlayingAiContent(
         }
     }
 
-    Box(
+    RevampedNowPlayingBackground(
+        artworkUri = uiState.currentSong?.coverUrl,
+        performanceMode = performanceMode,
         modifier = Modifier
             .fillMaxHeight(0.9f)
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 44.dp, topEnd = 44.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.97f))
     ) {
-        AsyncImage(
-            model = uiState.currentSong?.coverUrl,
-            contentDescription = null,
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(if (performanceMode) 0.05f else 0.1f)
-                .run {
-                    if (performanceMode) this else blur(100.dp)
-                },
-            contentScale = ContentScale.Crop,
-            error = painterResource(android.R.drawable.ic_media_play)
-        )
+        var showLyricsArchSheet by remember { mutableStateOf(false) }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Transparent,
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                        )
-                    )
-                )
-        )
+        if (showLyricsArchSheet) {
+            LyricsArchitectureSheet(onDismiss = { showLyricsArchSheet = false })
+        }
 
         Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
             AiHeader(
@@ -174,6 +159,9 @@ fun NowPlayingAiContent(
                 onRefresh = {
                     vibrationManager.vibrateClick()
                     viewModel.refreshCurrentTab()
+                },
+                onOpenLyricsInfo = {
+                    showLyricsArchSheet = true
                 },
                 onDismiss = onDismiss,
                 onToggleKaraoke = onToggleKaraoke
@@ -201,8 +189,8 @@ fun NowPlayingAiContent(
                 ) { tab ->
                     when (tab) {
                         AiTab.Lyrics     -> LyricsTab(uiState.lyricsState, viewModel, vibrationManager, uiState.performanceMode, onSeek)
-                        AiTab.MoreInfo   -> MoreInfoTab(uiState.moreInfoState)
-                        AiTab.MusicTaste -> TasteTab(uiState.tasteState, onRecommendationClick = onPlayRecommendation)
+                        AiTab.MoreInfo   -> MoreInfoTab(uiState.moreInfoState, uiState.isGroqKeyMissing, viewModel::saveGroqKey)
+                        AiTab.MusicTaste -> TasteTab(uiState.tasteState, uiState.isGroqKeyMissing, viewModel::saveGroqKey, onRecommendationClick = onPlayRecommendation)
                     }
                 }
             }
@@ -219,6 +207,7 @@ fun AiHeader(
     uiState: NowPlayingAiUiState,
     onTabSelected: (AiTab) -> Unit,
     onRefresh: () -> Unit,
+    onOpenLyricsInfo: () -> Unit = {},
     onDismiss: () -> Unit,
     onToggleKaraoke: () -> Unit = {}
 ) {
@@ -259,7 +248,7 @@ fun AiHeader(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
-                        "MUSIC AI",
+                        "T-MUSIC",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -275,7 +264,7 @@ fun AiHeader(
                             )
                         } else {
                             Text(
-                                "Powered by Toolz Intelligence",
+                                "Powered by Frerox",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                                 fontWeight = FontWeight.SemiBold
@@ -286,6 +275,23 @@ fun AiHeader(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Expressive Lyrics Architecture Info button
+                Surface(
+                    onClick = onOpenLyricsInfo,
+                    modifier = Modifier.size(36.dp).bouncyClick {},
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Info,
+                            contentDescription = "Lyrics Architecture Info",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
                 if (uiState.isAiEnabled && (uiState.lyricsState.syncedLyrics.isNotEmpty() || uiState.instrumentalMatch != null)) {
                     KaraokeMicIcon(
                         isActive = uiState.isSingConfidentlyActive || uiState.isKaraokeRecording,
@@ -798,7 +804,12 @@ fun WordView(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun MoreInfoTab(state: AiMoreInfoState) {
+fun MoreInfoTab(state: AiMoreInfoState, isKeyMissing: Boolean, onSaveKey: (String) -> Unit) {
+    if (isKeyMissing) {
+        GroqApiKeySetupUI(onSaveKey = onSaveKey)
+        return
+    }
+
     when {
         state.isLoading -> AiShimmerInfo()
 
@@ -890,8 +901,15 @@ fun InfoCard(title: String, content: String, icon: ImageVector, accentColor: Col
 @Composable
 fun TasteTab(
     state: AiTasteState,
+    isKeyMissing: Boolean,
+    onSaveKey: (String) -> Unit,
     onRecommendationClick: (AiRecommendation) -> Unit = {}
 ) {
+    if (isKeyMissing) {
+        GroqApiKeySetupUI(onSaveKey = onSaveKey)
+        return
+    }
+
     val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     
@@ -1368,4 +1386,124 @@ private fun Context.findActivity(): Activity? {
         context = context.baseContext
     }
     return null
+}
+
+@Composable
+fun GroqApiKeySetupUI(
+    onSaveKey: (String) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var key by remember { mutableStateOf("") }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Surface(
+            modifier = Modifier.size(64.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.Key,
+                    null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+
+        Text(
+            "GROQ KEY REQUIRED",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp
+        )
+
+        Text(
+            "To use AI insights and recommendations, you need to provide a Groq API key.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+
+        OutlinedTextField(
+            value = key,
+            onValueChange = { key = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Groq API Key") },
+            placeholder = { Text("gsk_...") },
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+            )
+        )
+
+        Button(
+            onClick = { if (key.isNotBlank()) onSaveKey(key) },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp),
+            enabled = key.isNotBlank()
+        ) {
+            Text("Save API Key", fontWeight = FontWeight.Bold)
+        }
+
+        TextButton(
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys"))
+                context.startActivity(intent)
+            }
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Get key from console.groq.com", fontWeight = FontWeight.Bold)
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(16.dp))
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(modifier = Modifier.alpha(0.1f))
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            "HOW TO SETUP",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary
+        )
+
+        val steps = AiSettingsHelper.tutorials["Groq"] ?: emptyList()
+        steps.forEachIndexed { index, step ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(24.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            "${index + 1}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Text(
+                    step,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
 }
