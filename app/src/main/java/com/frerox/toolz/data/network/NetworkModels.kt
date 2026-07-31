@@ -224,14 +224,6 @@ data class SmartFixRecommendation(
     val isActionable: Boolean = true
 )
 
-data class Blocklist(
-    val id: String,
-    val name: String,
-    val url: String,
-    val isEnabled: Boolean = false,
-    val lastUpdated: Long = 0L
-)
-
 data class PrivilegedState(
     val isReachable: Boolean = false,
     val isAuthorized: Boolean = false,
