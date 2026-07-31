@@ -952,6 +952,8 @@ class WifiTweaksViewModel @Inject constructor(
         tweak: WifiTweak,
         emitStatusMessage: Boolean = true
     ): Boolean {
+        addLog("TWEAK", "Requesting application of: ${tweak.title}", LogLevel.INFO)
+        
         if (tweak.type == TweakType.MANUAL_GUIDE) {
             setTweakResult(
                 tweak.id,
@@ -962,10 +964,12 @@ class WifiTweaksViewModel @Inject constructor(
             if (emitStatusMessage) {
                 emitMessage("Manual guide ready for ${tweak.title}.")
             }
+            addLog("TWEAK", "Manual guide displayed for ${tweak.title}", LogLevel.SUCCESS)
             return true
         }
 
         if (!requireShizukuFor(tweak)) {
+            addLog("TWEAK", "Shizuku not available for ${tweak.title}", LogLevel.WARNING)
             return false
         }
 
@@ -974,6 +978,8 @@ class WifiTweaksViewModel @Inject constructor(
             status = TweakStatus.RUNNING,
             message = "Applying..."
         )
+        
+        addLog("SHELL", "Executing ${tweak.applyCommands.size} commands for ${tweak.id}", LogLevel.INFO)
         val result = runCommands(tweak.applyCommands)
         if (!result.first) {
             setTweakResult(
@@ -984,6 +990,7 @@ class WifiTweaksViewModel @Inject constructor(
             if (emitStatusMessage) {
                 emitMessage("${tweak.title} failed to apply.")
             }
+            addLog("TWEAK", "Failed to apply ${tweak.title}: ${result.second}", LogLevel.ERROR)
             return false
         }
 
@@ -998,6 +1005,7 @@ class WifiTweaksViewModel @Inject constructor(
         if (emitStatusMessage) {
             emitMessage("${tweak.title} applied.")
         }
+        addLog("TWEAK", "Successfully applied ${tweak.title}", LogLevel.SUCCESS)
         return applied
     }
 
