@@ -156,6 +156,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
         scheduleCleanup()
         scheduleUpdateCheck()
+        scheduleFocusUsageSnapshot()
 
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
@@ -380,6 +381,22 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             "UpdateCheck",
             ExistingPeriodicWorkPolicy.KEEP,
             updateCheckRequest
+        )
+    }
+
+    private fun scheduleFocusUsageSnapshot() {
+        val focusUsageRequest = PeriodicWorkRequestBuilder<com.frerox.toolz.worker.FocusUsageWorker>(
+            8, TimeUnit.HOURS
+        ).setConstraints(
+            Constraints.Builder()
+                .setRequiresBatteryNotLow(true)
+                .build()
+        ).build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "FocusUsageSnapshot",
+            ExistingPeriodicWorkPolicy.KEEP,
+            focusUsageRequest
         )
     }
 
