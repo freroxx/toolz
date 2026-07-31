@@ -279,6 +279,9 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_VISUALIZER_AUTO_SENSITIVITY = booleanPreferencesKey("music_visualizer_auto_sensitivity")
     private val MUSIC_CUSTOM_EQUALIZER = stringPreferencesKey("music_custom_equalizer") // JSON or list of gains
     private val MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES = intPreferencesKey("music_sleep_timer_last_custom_minutes")
+    private val MUSIC_LAST_PLAYED_URI = stringPreferencesKey("music_last_played_uri")
+    private val MUSIC_LAST_PLAYED_POSITION = longPreferencesKey("music_last_played_position")
+    private val MUSIC_LAST_PLAYED_QUEUE = stringPreferencesKey("music_last_played_queue") // JSON array of URIs
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
@@ -621,6 +624,9 @@ class SettingsRepository @Inject constructor(
     val musicVisualizerSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_VISUALIZER_SENSITIVITY] ?: 1.0f }
     val musicVisualizerAutoSensitivity: Flow<Boolean> = dataStore.data.map { it[MUSIC_VISUALIZER_AUTO_SENSITIVITY] ?: true }
     val musicSleepTimerLastCustomMinutes: Flow<Int> = dataStore.data.map { it[MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES] ?: 20 }
+    val musicLastPlayedUri: Flow<String?> = dataStore.data.map { it[MUSIC_LAST_PLAYED_URI] }
+    val musicLastPlayedPosition: Flow<Long> = dataStore.data.map { it[MUSIC_LAST_PLAYED_POSITION] ?: 0L }
+    val musicLastPlayedQueue: Flow<String?> = dataStore.data.map { it[MUSIC_LAST_PLAYED_QUEUE] }
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
@@ -936,6 +942,13 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicVisualizerSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_VISUALIZER_SENSITIVITY] = sensitivity } }
     suspend fun setMusicVisualizerAutoSensitivity(enabled: Boolean) { dataStore.edit { it[MUSIC_VISUALIZER_AUTO_SENSITIVITY] = enabled } }
     suspend fun setMusicSleepTimerLastCustomMinutes(minutes: Int) { dataStore.edit { it[MUSIC_SLEEP_TIMER_LAST_CUSTOM_MINUTES] = minutes } }
+    suspend fun setMusicLastPlayedState(uri: String?, position: Long, queue: String? = null) {
+        dataStore.edit {
+            if (uri == null) it.remove(MUSIC_LAST_PLAYED_URI) else it[MUSIC_LAST_PLAYED_URI] = uri
+            it[MUSIC_LAST_PLAYED_POSITION] = position
+            if (queue == null) it.remove(MUSIC_LAST_PLAYED_QUEUE) else it[MUSIC_LAST_PLAYED_QUEUE] = queue
+        }
+    }
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
