@@ -762,17 +762,35 @@ private fun PingHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
+    val points = remember(history) { history.filter { it > 0 } }
+    
     Canvas(modifier = modifier) {
-        if (history.size < 2) return@Canvas
+        if (points.size < 2) {
+            // Draw a subtle placeholder line if not enough data
+            drawLine(
+                color = lineColor.copy(alpha = 0.1f),
+                start = Offset(0f, size.height / 2),
+                end = Offset(size.width, size.height / 2),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+            )
+            return@Canvas
+        }
 
         val width = size.width
         val height = size.height
-        val maxPing = (history.maxOrNull() ?: 100L).coerceAtLeast(100L).toFloat()
+        val minPing = points.minOrNull()?.toFloat() ?: 0f
+        val maxPing = (points.maxOrNull() ?: 100L).coerceAtLeast(100L).toFloat()
+        val range = (maxPing - minPing).coerceAtLeast(1f)
+        
         val linePath = Path()
 
-        history.forEachIndexed { index, ping ->
-            val x = (index.toFloat() / (history.lastIndex.coerceAtLeast(1))) * width
-            val y = height - (ping.toFloat() / maxPing).coerceIn(0f, 1f) * height
+        points.forEachIndexed { index, ping ->
+            val x = (index.toFloat() / (points.lastIndex.coerceAtLeast(1))) * width
+            // Invert Y so higher ping is higher on screen? No, higher ping should be lower? 
+            // Usually higher latency is "worse", so maybe higher y value (lower on screen).
+            // Let's stick to standard: higher is higher value.
+            val y = height - ((ping.toFloat() - minPing) / range).coerceIn(0f, 1f) * height * 0.8f - (height * 0.1f)
             if (index == 0) {
                 linePath.moveTo(x, y)
             } else {
@@ -782,8 +800,22 @@ private fun PingHistoryChart(
 
         drawPath(
             path = linePath,
-            color = lineColor.copy(alpha = 0.6f),
-            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+            color = lineColor,
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        
+        // Fill area under the curve
+        val fillPath = Path().apply {
+            addPath(linePath)
+            lineTo(width, height)
+            lineTo(0f, height)
+            close()
+        }
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                listOf(lineColor.copy(alpha = 0.2f), Color.Transparent)
+            )
         )
     }
 }
