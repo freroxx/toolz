@@ -92,6 +92,7 @@ import com.frerox.toolz.ui.screens.browser.WebViewViewModel
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
 import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
+import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.service.StepCounterService
@@ -154,6 +155,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         currentIntentState.value = intent
         currentIntentVersion.value += 1
 
+        NotificationHelper.createAllChannels(this)
         scheduleCleanup()
         scheduleUpdateCheck()
         scheduleFocusUsageSnapshot()
