@@ -107,34 +107,67 @@ fun WifiTweaksScreen(
             contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                ExpressiveTopAppBar(
-                    title = "Network Power-Suite",
-                    subtitle = uiState.currentSsid,
-                    navigationIcon = {
-                        IconButton(onClick = {
-                            vibrationManager?.vibrateClick()
-                            onBack()
-                        }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = {
-                            vibrationManager?.vibrateClick()
-                            viewModel.refreshEnvironment()
-                        }) {
-                            if (uiState.isScanning) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                Surface(
+                    shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                    tonalElevation = 3.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ExpressiveTopAppBar(
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "Network tweaks",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        "Beta",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
                             }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
+                        },
+                        subtitle = {
+                            Text(
+                                uiState.currentSsid,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = {
+                                vibrationManager?.vibrateClick()
+                                onBack()
+                            }) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = {
+                                vibrationManager?.vibrateClick()
+                                viewModel.refreshEnvironment()
+                            }) {
+                                if (uiState.isScanning) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                                }
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent,
+                            scrolledContainerColor = Color.Transparent
+                        )
                     )
-                )
+                }
             }
         ) { padding ->
             Column(
@@ -364,6 +397,37 @@ fun WifiTweaksScreen(
                         snackbarHostState.showSnackbar("Ping to $target: ${latency ?: "Timeout"}ms")
                     }
                 }
+            )
+        }
+
+        if (uiState.showDisclaimer) {
+            AlertDialog(
+                onDismissRequest = { },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            vibrationManager?.vibrateClick()
+                            viewModel.dismissDisclaimer() 
+                        },
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Got it")
+                    }
+                },
+                title = { 
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.tertiary)
+                        Text("Experimental Tool", fontWeight = FontWeight.Black)
+                    }
+                },
+                text = {
+                    Text(
+                        "This suite contains advanced networking tweaks that are currently in Beta. Some features may be experimental, and stability might vary depending on your device and Android version.\n\n" +
+                        "Most optimizations require Shizuku for privileged shell access. Use with caution."
+                    )
+                },
+                shape = RoundedCornerShape(32.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         }
     }
