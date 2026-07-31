@@ -55,6 +55,7 @@ class WebViewViewModel @Inject constructor(
     }
 
     val adBlockEnabled = settingsRepository.searchAdBlockEnabled
+    val floatingToolbarVisible = settingsRepository.searchFloatingToolbarVisible
     val dnsProvider = settingsRepository.searchDnsProvider
     val customDns = settingsRepository.searchCustomDns
 
@@ -197,6 +198,12 @@ class WebViewViewModel @Inject constructor(
     fun setAdBlockEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setSearchAdBlockEnabled(enabled)
+        }
+    }
+
+    fun setFloatingToolbarVisible(visible: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSearchFloatingToolbarVisible(visible)
         }
     }
 
