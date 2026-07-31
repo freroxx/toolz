@@ -197,5 +197,6 @@ data class WifiTweaksUiState(
     val privateDnsHost: String = "",
     val selectedBenchmarkProviders: Set<String> = emptySet(),
     val traceHistory: List<String> = emptyList(),
-    val lastTraceTarget: String = "1.1.1.1"
+    val lastTraceTarget: String = "1.1.1.1",
+    val showDisclaimer: Boolean = false
 )
