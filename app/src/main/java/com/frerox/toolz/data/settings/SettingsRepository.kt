@@ -406,6 +406,7 @@ class SettingsRepository @Inject constructor(
     private val NETWORK_BENCHMARK_SERVERS = stringSetPreferencesKey("network_benchmark_servers")
     private val NETWORK_LAST_TRACE_TARGET = stringPreferencesKey("network_last_trace_target")
     private val NETWORK_AUTO_CONNECT_SHIZUKU = booleanPreferencesKey("network_auto_connect_shizuku")
+    private val NETWORK_DISCLAIMER_SHOWN = booleanPreferencesKey("network_disclaimer_shown")
 
     // BMI Persistence
     private val BMI_HEIGHT = stringPreferencesKey("bmi_height")
@@ -759,6 +760,7 @@ class SettingsRepository @Inject constructor(
     }
     val networkLastTraceTarget: Flow<String> = dataStore.data.map { it[NETWORK_LAST_TRACE_TARGET] ?: "1.1.1.1" }
     val networkAutoConnectShizuku: Flow<Boolean> = dataStore.data.map { it[NETWORK_AUTO_CONNECT_SHIZUKU] ?: true }
+    val networkDisclaimerShown: Flow<Boolean> = dataStore.data.map { it[NETWORK_DISCLAIMER_SHOWN] ?: false }
 
     // BMI Flows
     val bmiHeight: Flow<String> = dataStore.data.map { it[BMI_HEIGHT] ?: "" }
@@ -1133,6 +1135,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setNetworkAutoConnectShizuku(enabled: Boolean) {
         dataStore.edit { it[NETWORK_AUTO_CONNECT_SHIZUKU] = enabled }
+    }
+
+    suspend fun setNetworkDisclaimerShown(shown: Boolean) {
+        dataStore.edit { it[NETWORK_DISCLAIMER_SHOWN] = shown }
     }
 
     suspend fun setBmiHeight(height: String) { dataStore.edit { it[BMI_HEIGHT] = height } }
