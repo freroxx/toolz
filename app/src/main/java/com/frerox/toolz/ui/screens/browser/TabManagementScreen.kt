@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.TabEntry
+import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.screens.search.components.FaviconDisplay
 
 // ─── Accent Colors ────────────────────────────────────────────────────────────
@@ -86,8 +87,9 @@ fun TabManagementScreen(
                                     ) {
                                         Text(
                                             "Tabs",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            style      = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Black,
+                                            style      = MaterialTheme.typography.headlineSmall,
+                                            letterSpacing = (-0.5).sp
                                         )
                                         if (tabs.isNotEmpty()) {
                                             Surface(
@@ -313,113 +315,115 @@ private fun PremiumTabCard(
     ) {
         Box(
             modifier = Modifier
-                .height(220.dp)
+                .height(240.dp)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .border(BorderStroke(1.5.dp, borderColor), RoundedCornerShape(22.dp))
-                .background(cardColor)
-                .combinedClickable(
-                    onClick   = onClick,
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onLongClick()
-                    }
-                )
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            ExpressiveCard(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+                shape = RoundedCornerShape(28.dp),
+                containerColor = cardColor,
+                border = BorderStroke(1.5.dp, borderColor),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
 
-                // ── Header row ────────────────────────────────────────────────
-                Row(
-                    modifier              = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 10.dp, end = 6.dp, top = 10.dp, bottom = 6.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    FaviconDisplay(
-                        url      = tab.url,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        tab.title,
-                        style      = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                        maxLines   = 1,
-                        overflow   = TextOverflow.Ellipsis,
-                        modifier   = Modifier.weight(1f),
-                        color      = if (isActive) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                    )
-                    if (!isMultiSelect) {
-                        IconButton(
-                            onClick  = onClose,
-                            modifier = Modifier.size(24.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.Close,
-                                null,
-                                modifier = Modifier.size(14.dp),
-                                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                            )
+                    // ── Header row ────────────────────────────────────────────────
+                    Row(
+                        modifier              = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FaviconDisplay(
+                            url      = tab.url,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            tab.title,
+                            style      = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis,
+                            modifier   = Modifier.weight(1f),
+                            color      = if (isActive) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                        )
+                        if (!isMultiSelect) {
+                            IconButton(
+                                onClick  = onClose,
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
                         }
                     }
-                }
 
-                // ── Preview area ──────────────────────────────────────────────
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f))
-                ) {
-                    if (tab.previewPath != null) {
-                        AsyncImage(
-                            model              = tab.previewPath,
-                            contentDescription = null,
-                            modifier           = Modifier.fillMaxSize(),
-                            contentScale       = ContentScale.Crop,
-                        )
-                        // Gradient overlay on preview for readability
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp)
-                                .align(Alignment.BottomCenter)
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.25f))
-                                    )
-                                )
-                        )
-                    } else {
-                        // URL text fallback
-                        Column(
-                            modifier            = Modifier
-                                .fillMaxSize()
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Icon(
-                                Icons.Rounded.Public,
-                                null,
+                    // ── Preview area ──────────────────────────────────────────────
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                    ) {
+                        if (tab.previewPath != null) {
+                            AsyncImage(
+                                model              = tab.previewPath,
+                                contentDescription = null,
+                                modifier           = Modifier.fillMaxSize(),
+                                contentScale       = ContentScale.Crop,
+                            )
+                            // Gradient overlay on preview for readability
+                            Box(
                                 modifier = Modifier
-                                    .size(24.dp)
-                                    .alpha(0.2f),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .align(Alignment.BottomCenter)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.3f))
+                                        )
+                                    )
                             )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                tab.url,
-                                style    = MaterialTheme.typography.labelSmall,
-                                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                                fontSize  = 9.sp,
-                                lineHeight = 13.sp,
-                            )
+                        } else {
+                            // URL text fallback
+                            Column(
+                                modifier            = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Public,
+                                    null,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .alpha(0.2f),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    tab.url,
+                                    style    = MaterialTheme.typography.labelSmall,
+                                    color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    fontSize  = 10.sp,
+                                    lineHeight = 14.sp,
+                                )
+                            }
                         }
                     }
                 }
@@ -432,7 +436,7 @@ private fun PremiumTabCard(
                 exit    = scaleOut() + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(14.dp),
+                    .padding(16.dp),
             ) {
                 ActiveDot()
             }
@@ -444,7 +448,7 @@ private fun PremiumTabCard(
                 exit     = scaleOut() + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(10.dp),
+                    .padding(12.dp),
             ) {
                 MultiSelectIndicator(isSelected = isSelected)
             }
