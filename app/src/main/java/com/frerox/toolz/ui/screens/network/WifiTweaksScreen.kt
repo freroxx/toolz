@@ -1723,55 +1723,67 @@ private fun DiagnosticsTab(
     var traceTarget by remember(state.lastTraceTarget) { mutableStateOf(state.lastTraceTarget) }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .fadingEdges(top = 16.dp, bottom = 40.dp),
-        contentPadding = PaddingValues(bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
+            Text(
+                text = "Health Audit",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+
+        item {
+            ExpressiveCard(
+                onClick = onRunSpeedTest,
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                shape = RoundedCornerShape(32.dp)
             ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Speed Test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    
+                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
+                            Text("Real-world Speed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "${state.speedTest.downloadSpeedMbps.roundToInt()} Mbps",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Black
-                            )
-                            Text(
-                                text = state.speedTest.phaseLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = if (state.speedTest.isRunning) state.speedTest.phaseLabel else "Last result: ${state.speedTest.downloadSpeedMbps.roundToInt()} Mbps",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                             )
                         }
                         
-                        Button(
+                        ToolzExpressiveButton(
                             onClick = onRunSpeedTest,
                             enabled = !state.speedTest.isRunning,
-                            shape = RoundedCornerShape(16.dp)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
                         ) {
-                            Text(if (state.speedTest.isRunning) "Running" else "Run Test")
+                            if (state.speedTest.isRunning) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Rounded.Speed, null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text("Start Test")
                         }
                     }
 
-                    LinearProgressIndicator(
-                        progress = { state.speedTest.progress },
-                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        LinearProgressIndicator(
+                            progress = { state.speedTest.progress },
+                            modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        )
+                    }
                 }
             }
         }
@@ -1780,10 +1792,10 @@ private fun DiagnosticsTab(
             ElevatedCard(
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
                 )
             ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("Trace Route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     
                     OutlinedTextField(
@@ -1791,7 +1803,7 @@ private fun DiagnosticsTab(
                         onValueChange = { traceTarget = it },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Target Host") },
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         trailingIcon = {
                             IconButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing) {
                                 if (state.isTracing) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -1801,94 +1813,75 @@ private fun DiagnosticsTab(
                     )
 
                     if (state.traceHops.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.traceHops.forEach { hop ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text("Hop ${hop.hop}", fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
-                                    Text(hop.ip, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        text = hop.latencyMs?.let { "${it}ms" } ?: "*",
-                                        fontWeight = FontWeight.Black,
-                                        color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                    )
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                state.traceHops.forEach { hop ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Hop ${hop.hop}", fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp), style = MaterialTheme.typography.bodySmall)
+                                        Text(hop.ip, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            text = hop.latencyMs?.let { "${it}ms" } ?: "*",
+                                            fontWeight = FontWeight.Black,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                         }
-                    } else if (state.traceHistory.isNotEmpty()) {
-                        Text("Recent Targets:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.traceHistory.forEach { host ->
-                                AssistChip(
-                                    onClick = { traceTarget = host; onRunTraceRoute(host) },
-                                    label = { Text(host) },
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                            }
-                        }
                     }
                 }
             }
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Network details", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    ConfigGrid(state.networkConfig)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Low-level Config", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
+                ElevatedCard(
+                    shape = RoundedCornerShape(32.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        ConfigGrid(state.networkConfig)
+                    }
                 }
             }
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Tools", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FilledTonalButton(
-                            onClick = onCopySummary,
-                            shape = RoundedCornerShape(18.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 12.dp)
-                        ) {
-                            Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy summary")
-                        }
-                        OutlinedButton(
-                            onClick = onOpenWifiSettings,
-                            shape = RoundedCornerShape(18.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 12.dp)
-                        ) {
-                            Icon(Icons.Rounded.SettingsEthernet, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Settings")
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onOpenDevSettings,
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 12.dp)
-                    ) {
-                        Icon(Icons.Rounded.DeveloperMode, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Developer options")
-                    }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToolzOutlinedExpressiveButton(
+                    onClick = onCopySummary,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Copy Report")
                 }
+                ToolzOutlinedExpressiveButton(
+                    onClick = onOpenWifiSettings,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.Settings, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("OS Settings")
+                }
+            }
+            ToolzOutlinedExpressiveButton(
+                onClick = onOpenDevSettings,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.DeveloperMode, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Developer Options")
             }
         }
     }
