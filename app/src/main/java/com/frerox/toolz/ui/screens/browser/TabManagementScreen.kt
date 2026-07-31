@@ -3,11 +3,11 @@ package com.frerox.toolz.ui.screens.browser
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.*
@@ -24,7 +25,7 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.TabEntry
-import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.search.components.FaviconDisplay
 
 // ─── Accent Colors ────────────────────────────────────────────────────────────
@@ -46,6 +47,8 @@ fun TabManagementScreen(
 ) {
     val tabs        by viewModel.tabs.collectAsState(initial = emptyList())
     val activeTabId by viewModel.activeTabId.collectAsState(initial = null)
+    
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     val isMultiSelect by remember { derivedStateOf { selectedIds.isNotEmpty() } }
@@ -61,10 +64,15 @@ fun TabManagementScreen(
     )
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            Surface(color = topBarColor, shadowElevation = 0.dp) {
+            Box(
+                modifier = Modifier
+                    .clip(ExtraLargeExpressiveShape)
+                    .background(topBarColor)
+            ) {
                 Column {
-                    CenterAlignedTopAppBar(
+                    ExpressiveTopAppBar(
                         title = {
                             AnimatedContent(
                                 targetState  = isMultiSelect,
@@ -77,31 +85,32 @@ fun TabManagementScreen(
                                 if (multiSelect) {
                                     Text(
                                         "${selectedIds.size} selected",
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = FontWeight.Black,
                                         color      = ElectricViolet,
+                                        style = MaterialTheme.typography.headlineMedium
                                     )
                                 } else {
                                     Row(
                                         verticalAlignment     = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
                                         Text(
                                             "Tabs",
                                             fontWeight = FontWeight.Black,
-                                            style      = MaterialTheme.typography.headlineSmall,
-                                            letterSpacing = (-0.5).sp
+                                            style      = MaterialTheme.typography.headlineLarge,
+                                            letterSpacing = (-1).sp
                                         )
                                         if (tabs.isNotEmpty()) {
                                             Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = ElectricViolet.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = ElectricViolet.copy(alpha = 0.15f),
                                             ) {
                                                 Text(
                                                     "${tabs.size}",
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                                    style      = MaterialTheme.typography.labelMedium,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                    style      = MaterialTheme.typography.labelLarge,
                                                     color      = ElectricViolet,
-                                                    fontWeight = FontWeight.Bold,
+                                                    fontWeight = FontWeight.Black,
                                                 )
                                             }
                                         }
@@ -124,6 +133,7 @@ fun TabManagementScreen(
                                     Icon(
                                         if (multiSelect) Icons.Rounded.Close else Icons.Rounded.Close,
                                         contentDescription = if (multiSelect) "Cancel selection" else "Close",
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -134,9 +144,8 @@ fun TabManagementScreen(
                                 transitionSpec = { fadeIn() togetherWith fadeOut() },
                                 label        = "topActions",
                             ) { multiSelect ->
-                                Row {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (multiSelect) {
-                                        // Select / deselect all
                                         IconButton(onClick = {
                                             selectedIds = if (selectedIds.size == tabs.size)
                                                 emptySet()
@@ -147,9 +156,9 @@ fun TabManagementScreen(
                                                 Icons.Rounded.DoneAll,
                                                 contentDescription = "Select all",
                                                 tint = ElectricViolet,
+                                                modifier = Modifier.size(26.dp)
                                             )
                                         }
-                                        // Delete selected
                                         IconButton(onClick = {
                                             viewModel.closeTabs(selectedIds)
                                             selectedIds = emptySet()
@@ -158,19 +167,24 @@ fun TabManagementScreen(
                                                 Icons.Rounded.DeleteSweep,
                                                 contentDescription = "Close selected",
                                                 tint = DangerRed,
+                                                modifier = Modifier.size(26.dp)
                                             )
                                         }
                                     } else {
                                         IconButton(onClick = onNewTab) {
-                                            Icon(Icons.Rounded.Add, contentDescription = "New tab", tint = ElectricViolet)
+                                            Icon(Icons.Rounded.Add, contentDescription = "New tab", tint = ElectricViolet, modifier = Modifier.size(32.dp))
                                         }
                                     }
                                 }
                             }
                         },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        scrollBehavior = scrollBehavior,
+                        largeFlexible = true,
+                        colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = Color.Transparent,
-                        ),
+                            scrolledContainerColor = Color.Transparent,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        )
                     )
 
                     // Multi-select progress bar
@@ -179,9 +193,9 @@ fun TabManagementScreen(
                         enter   = expandVertically(),
                         exit    = shrinkVertically(),
                     ) {
-                        com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
+                        ExpressiveLinearProgressIndicator(
                             progress = { if (tabs.isEmpty()) 0f else selectedIds.size.toFloat() / tabs.size },
-                            modifier  = Modifier.fillMaxWidth(),
+                            modifier  = Modifier.fillMaxWidth().height(4.dp),
                             color     = ElectricViolet,
                             trackColor = ElectricViolet.copy(alpha = 0.12f),
                         )
@@ -197,14 +211,16 @@ fun TabManagementScreen(
             ) {
                 ExtendedFloatingActionButton(
                     onClick        = onNewTab,
-                    icon           = { Icon(Icons.Rounded.Add, null) },
-                    text           = { Text("New tab") },
-                    shape          = RoundedCornerShape(20.dp),
+                    icon           = { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp)) },
+                    text           = { Text("New tab", fontWeight = FontWeight.Black) },
+                    shape          = ExtraLargeExpressiveShape,
                     containerColor = ElectricViolet,
                     contentColor   = Color.White,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp)
                 )
             }
         },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) { padding ->
         if (tabs.isEmpty()) {
             EmptyTabsView(
@@ -215,12 +231,12 @@ fun TabManagementScreen(
             LazyVerticalGrid(
                 columns             = GridCells.Fixed(2),
                 contentPadding      = PaddingValues(
-                    start  = 12.dp, end = 12.dp,
-                    top    = 12.dp,
-                    bottom = padding.calculateBottomPadding() + 88.dp,
+                    start  = 16.dp, end = 16.dp,
+                    top    = 16.dp,
+                    bottom = padding.calculateBottomPadding() + 100.dp,
                 ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement   = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement   = Arrangement.spacedBy(12.dp),
                 modifier              = Modifier
                     .padding(top = padding.calculateTopPadding())
                     .fillMaxSize(),
@@ -267,67 +283,48 @@ private fun PremiumTabCard(
     onLongClick: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val haptic = LocalHapticFeedback.current
-
-    // Staggered entry animation
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(index.coerceAtMost(10) * 35L)
-        visible = true
-    }
+    val haptic = rememberToolzHapticFeedback()
+    val interactionSource = remember { MutableInteractionSource() }
 
     // Card visual states
-    val cardElevation by animateDpAsState(
-        targetValue   = when {
-            isSelected -> 0.dp
-            isActive   -> 3.dp
-            else       -> 1.dp
-        },
-        label = "tabCardElevation",
-    )
-
     val borderColor by animateColorAsState(
         targetValue   = when {
             isSelected -> ElectricViolet
-            isActive   -> ElectricViolet.copy(alpha = 0.4f)
-            else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)
+            isActive   -> ElectricViolet.copy(alpha = 0.6f)
+            else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         },
-        animationSpec = tween(200),
+        animationSpec = tween(300),
         label         = "tabBorderColor",
     )
 
     val cardColor by animateColorAsState(
         targetValue   = when {
-            isSelected -> ElectricViolet.copy(alpha = 0.1f)
-            isActive   -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
-            else       -> MaterialTheme.colorScheme.surfaceColorAtElevation(cardElevation)
+            isSelected -> ElectricViolet.copy(alpha = 0.12f)
+            isActive   -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
+            else       -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
-        animationSpec = tween(200),
+        animationSpec = tween(300),
         label         = "tabCardColor",
     )
 
-    AnimatedVisibility(
-        visible       = visible,
-        enter         = scaleIn(
-            initialScale  = 0.85f,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-        ) + fadeIn(tween(150)),
-    ) {
+    StaggeredEntrance(index = index) {
         Box(
             modifier = Modifier
-                .height(240.dp)
+                .height(260.dp)
                 .fillMaxWidth()
         ) {
             ExpressiveCard(
                 onClick = onClick,
                 onLongClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.longClick()
                     onLongClick()
                 },
-                shape = RoundedCornerShape(28.dp),
+                shape = LargeExpressiveShape,
                 containerColor = cardColor,
-                border = BorderStroke(1.5.dp, borderColor),
-                modifier = Modifier.fillMaxSize()
+                border = BorderStroke(if (isSelected || isActive) 2.dp else 1.dp, borderColor),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .expressiveMorphing(interactionSource)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
 
@@ -335,34 +332,34 @@ private fun PremiumTabCard(
                     Row(
                         modifier              = Modifier
                             .fillMaxWidth()
-                            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+                            .padding(start = 14.dp, end = 10.dp, top = 14.dp, bottom = 10.dp),
                         verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         FaviconDisplay(
                             url      = tab.url,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(24.dp),
                         )
                         Text(
                             tab.title,
-                            style      = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
+                            style      = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (isActive) FontWeight.Black else FontWeight.ExtraBold,
                             maxLines   = 1,
                             overflow   = TextOverflow.Ellipsis,
                             modifier   = Modifier.weight(1f),
                             color      = if (isActive) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f),
                         )
                         if (!isMultiSelect) {
                             IconButton(
-                                onClick  = onClose,
-                                modifier = Modifier.size(28.dp),
+                                onClick  = { haptic.tick(); onClose() },
+                                modifier = Modifier.size(32.dp),
                             ) {
                                 Icon(
                                     Icons.Rounded.Close,
                                     null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(18.dp),
+                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 )
                             }
                         }
@@ -372,9 +369,9 @@ private fun PremiumTabCard(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                            .clip(MediumExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
                     ) {
                         if (tab.previewPath != null) {
                             AsyncImage(
@@ -387,11 +384,11 @@ private fun PremiumTabCard(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp)
+                                    .height(64.dp)
                                     .align(Alignment.BottomCenter)
                                     .background(
                                         Brush.verticalGradient(
-                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.3f))
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
                                         )
                                     )
                             )
@@ -400,7 +397,7 @@ private fun PremiumTabCard(
                             Column(
                                 modifier            = Modifier
                                     .fillMaxSize()
-                                    .padding(12.dp),
+                                    .padding(16.dp),
                                 verticalArrangement = Arrangement.Center,
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
@@ -408,20 +405,21 @@ private fun PremiumTabCard(
                                     Icons.Rounded.Public,
                                     null,
                                     modifier = Modifier
-                                        .size(32.dp)
-                                        .alpha(0.2f),
+                                        .size(40.dp)
+                                        .alpha(0.3f),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(10.dp))
                                 Text(
                                     tab.url,
                                     style    = MaterialTheme.typography.labelSmall,
-                                    color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
                                     textAlign = TextAlign.Center,
-                                    fontSize  = 10.sp,
-                                    lineHeight = 14.sp,
+                                    fontSize  = 11.sp,
+                                    lineHeight = 15.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -432,11 +430,11 @@ private fun PremiumTabCard(
             // ── Active indicator dot (bottom-end) ─────────────────────────────
             AnimatedVisibility(
                 visible = isActive && !isMultiSelect,
-                enter   = scaleIn() + fadeIn(),
+                enter   = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
                 exit    = scaleOut() + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
+                    .padding(20.dp),
             ) {
                 ActiveDot()
             }
@@ -448,7 +446,7 @@ private fun PremiumTabCard(
                 exit     = scaleOut() + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(12.dp),
+                    .padding(14.dp),
             ) {
                 MultiSelectIndicator(isSelected = isSelected)
             }
@@ -468,23 +466,24 @@ private fun ActiveDot() {
         label         = "pulseScale",
     )
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(16.dp)) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp)) {
         // Outer pulse
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(14.dp)
                 .scale(pulseScale)
                 .clip(CircleShape)
-                .background(ElectricViolet.copy(alpha = 0.25f))
+                .background(ElectricViolet.copy(alpha = 0.3f))
         )
         // Solid core
         Box(
             modifier = Modifier
-                .size(7.dp)
+                .size(10.dp)
                 .clip(CircleShape)
                 .background(
-                    Brush.radialGradient(listOf(NeonCyan, ElectricViolet))
+                    Brush.linearGradient(listOf(NeonCyan, ElectricViolet))
                 )
+                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape)
         )
     }
 }
@@ -578,49 +577,53 @@ private fun EmptyTabsView(
             ) {
                 // Icon container
                 Surface(
-                    modifier = Modifier.size(100.dp),
-                    shape    = RoundedCornerShape(36.dp),
-                    color    = ElectricViolet.copy(alpha = 0.08f),
-                    border   = BorderStroke(1.dp, ElectricViolet.copy(alpha = 0.15f)),
+                    modifier = Modifier.size(120.dp),
+                    shape    = ExtraLargeExpressiveShape,
+                    color    = ElectricViolet.copy(alpha = 0.1f),
+                    border   = BorderStroke(1.5.dp, ElectricViolet.copy(alpha = 0.2f)),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.Layers,
                             null,
-                            modifier = Modifier.size(44.dp),
-                            tint     = ElectricViolet.copy(alpha = 0.6f),
+                            modifier = Modifier.size(56.dp),
+                            tint     = ElectricViolet.copy(alpha = 0.8f),
                         )
                     }
                 }
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier            = Modifier.padding(top = 8.dp)
                 ) {
                     Text(
                         "No open tabs",
-                        style      = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        style      = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
                         color      = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         "Start a new tab to begin browsing",
-                        style    = MaterialTheme.typography.bodyMedium,
-                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        style    = MaterialTheme.typography.bodyLarge,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(16.dp))
 
                 Button(
                     onClick = onNewTab,
-                    shape   = RoundedCornerShape(16.dp),
+                    shape   = LargeExpressiveShape,
                     colors  = ButtonDefaults.buttonColors(containerColor = ElectricViolet),
+                    modifier = Modifier.height(56.dp).padding(horizontal = 24.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                 ) {
-                    Icon(Icons.Rounded.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open new tab", fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Open new tab", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

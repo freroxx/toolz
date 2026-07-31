@@ -39,6 +39,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,6 +57,7 @@ import androidx.webkit.WebViewFeature
 import com.frerox.toolz.data.browser.AdBlockList
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.password.PasswordEntity
+import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.browser.components.AutofillBottomSheet
 import com.frerox.toolz.ui.screens.browser.components.AutofillSuccessOverlay
 import com.frerox.toolz.ui.screens.browser.components.DownloadsSheet
@@ -731,6 +733,7 @@ private fun TopChrome(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(ExtraLargeExpressiveShape)
             .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding(),
     ) {
@@ -854,7 +857,7 @@ private fun TopChrome(
 
         // Thin progress bar
         if (progressAlpha > 0.01f) {
-            com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator(
+            ExpressiveLinearProgressIndicator(
                 progress   = { progress },
                 modifier   = Modifier
                     .fillMaxWidth()
@@ -982,11 +985,11 @@ private fun TabStrip(
 
             Surface(
                 onClick = { onTabClick(tab) },
-                shape = RoundedCornerShape(18.dp),
+                shape = SmallExpressiveShape,
                 color = backgroundColor,
                 modifier = Modifier
-                    .widthIn(max = 160.dp)
-                    .height(40.dp)
+                    .widthIn(max = 180.dp)
+                    .height(42.dp)
                     .animateContentSize()
             ) {
                 Row(
