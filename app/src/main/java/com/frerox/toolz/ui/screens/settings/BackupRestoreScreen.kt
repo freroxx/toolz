@@ -344,7 +344,7 @@ private fun ActionSection(
                             ) {
                                 Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(10.dp))
-                                Text("Create backup", fontWeight = FontWeight.SemiBold)
+                                Text("New backup", fontWeight = FontWeight.SemiBold)
                             }
 
                             ToolzOutlinedExpressiveButton(
