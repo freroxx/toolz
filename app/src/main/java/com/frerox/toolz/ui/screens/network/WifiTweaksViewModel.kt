@@ -456,12 +456,38 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
-    private fun addLog(tag: String, message: String, level: LogLevel = LogLevel.INFO) {
+    fun addLog(tag: String, message: String, level: LogLevel = LogLevel.INFO) {
         _uiState.update { state ->
             val newLogs = (listOf(DiagnosticLog(tag = tag, message = message, level = level)) + state.diagnosticLogs)
                 .take(100)
             state.copy(diagnosticLogs = newLogs)
         }
+    }
+
+    fun executeRawCommand(command: String) {
+        viewModelScope.launch {
+            if (!_uiState.value.shizukuStatus.isServiceReady) {
+                emitMessage("Shizuku service required to run shell commands.")
+                return@launch
+            }
+            addLog("COMMAND", "> $command", LogLevel.INFO)
+            val result = runCatching {
+                shizukuExecutor.executeForResult(command)
+            }.getOrNull()
+
+            val output = if (result?.isSuccess == true) {
+                result.stdout.ifBlank { "Command completed (exit code 0)" }
+            } else if (result != null) {
+                "Failed (exit code ${result.exitCode}):\n${result.stderr.ifBlank { result.stdout }}"
+            } else {
+                "Command failed to execute."
+            }
+            addLog("COMMAND", output, if (result?.isSuccess == true) LogLevel.SUCCESS else LogLevel.ERROR)
+        }
+    }
+
+    fun clearLogs() {
+        _uiState.update { it.copy(diagnosticLogs = emptyList()) }
     }
 
     fun benchmarkDns() {
