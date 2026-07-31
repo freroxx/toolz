@@ -43,6 +43,11 @@ import com.frerox.toolz.data.network.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
+import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
+import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.ui.components.fadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -168,7 +173,8 @@ fun WifiTweaksScreen(
                                     "Profiles" to Icons.Rounded.AutoAwesome,
                                     "DNS" to Icons.Rounded.Public,
                                     "Diag" to Icons.Rounded.Analytics,
-                                    "Traffic" to Icons.Rounded.Lan
+                                    "Traffic" to Icons.Rounded.Lan,
+                                    "Console" to Icons.Rounded.Terminal
                                 ),
                                 onOptionSelected = { index: Int ->
                                     vibrationManager?.vibrateClick()
@@ -284,8 +290,15 @@ fun WifiTweaksScreen(
                                     onRunTraceRoute = { viewModel.runTraceRoute(it) }
                                 )
 
-                                else -> TrafficTab(
+                                5 -> TrafficTab(
                                     state = uiState
+                                )
+
+                                else -> NetworkConsoleView(
+                                    logs = uiState.diagnosticLogs,
+                                    isShizukuReady = uiState.shizukuStatus.isServiceReady,
+                                    onExecuteRawCommand = { cmd -> viewModel.executeRawCommand(cmd) },
+                                    onClearLogs = { viewModel.clearLogs() }
                                 )
                             }
                         }
@@ -660,6 +673,12 @@ private fun OverviewTab(
         contentPadding = PaddingValues(bottom = 60.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            SmartFixHeaderCard(
+                state = state,
+                onFixConnection = onFixConnection
+            )
+        }
         item {
             OverviewHeroCard(
                 state = state,
@@ -2753,5 +2772,116 @@ private fun requestShizuku(context: Context) {
 private fun launchSettings(context: Context, action: String) {
     runCatching {
         context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+@Composable
+private fun SmartFixHeaderCard(
+    state: WifiTweaksUiState,
+    onFixConnection: () -> Unit
+) {
+    val fixes = remember(state.currentRssi, state.networkConfig.isThrottlingEnabled) {
+        buildList {
+            if (state.networkConfig.isThrottlingEnabled) {
+                add(
+                    SmartFixRecommendation(
+                        id = "scan_throttle",
+                        title = "Wi-Fi Scan Throttling Active",
+                        description = "Android is delaying Wi-Fi scans. Disabling scan throttling makes roaming and discovery instant.",
+                        severity = RecommendationSeverity.WARNING,
+                        tweakIds = listOf("scan_throttle")
+                    )
+                )
+            }
+            if (state.currentRssi < -70 && state.currentRssi > -100) {
+                add(
+                    SmartFixRecommendation(
+                        id = "weak_signal",
+                        title = "Weak Signal Recovery",
+                        description = "Signal is low (${state.currentRssi} dBm). Enable rapid stall recovery and aggressive AP roaming.",
+                        severity = RecommendationSeverity.CRITICAL,
+                        tweakIds = listOf("avoid_bad_wifi", "data_stall_logic")
+                    )
+                )
+            }
+        }
+    }
+
+    if (fixes.isNotEmpty()) {
+        ExpressiveCard(
+            onClick = onFixConnection,
+            modifier = Modifier.fillMaxWidth(),
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.95f),
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            shape = RoundedCornerShape(28.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            "Smart Fix Recommendations",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary
+                    ) {
+                        Text(
+                            text = "${fixes.size} Actionable",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                fixes.forEach { fix ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = fix.title,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = fix.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+
+                ToolzExpressiveButton(
+                    onClick = onFixConnection,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary
+                    )
+                ) {
+                    Icon(Icons.Rounded.Bolt, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Apply Smart Fixes")
+                }
+            }
+        }
     }
 }
