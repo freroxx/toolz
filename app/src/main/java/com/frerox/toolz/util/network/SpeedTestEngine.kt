@@ -39,10 +39,11 @@ class SpeedTestEngine @Inject constructor() {
             var bytesSinceLastEmit = 0L
 
             var smoothedSpeedMbps = 0.0
-            val alpha = 0.15 // EMA smoothing factor for speed calculation
+            val alpha = 0.1 // Smoother EMA for speed calculation
 
-            // Target duration: 10 seconds test length for high precision
-            val targetDurationMs = 10_000L
+            // Target duration: 15 seconds test length for high precision
+            val targetDurationMs = 15_000L
+            val warmupMs = 800L
 
             while (true) {
                 val read = inputStream.read(buffer)
@@ -60,8 +61,8 @@ class SpeedTestEngine @Inject constructor() {
                     val durationSeconds = elapsedSinceEmit / 1000.0
                     val currentSpeedMbps = (bytesSinceLastEmit * 8.0) / (durationSeconds * 1_000_000.0)
 
-                    // Skip first 400ms warmup period from throughput calculation
-                    if (elapsedSinceStart > 400L) {
+                    // Skip warmup period from throughput calculation
+                    if (elapsedSinceStart > warmupMs) {
                         smoothedSpeedMbps = if (smoothedSpeedMbps == 0.0) {
                             currentSpeedMbps
                         } else {
@@ -69,10 +70,11 @@ class SpeedTestEngine @Inject constructor() {
                         }
                     }
 
-                    // Progress calculation based on byte ratio and duration cap
+                    // Progress calculation: take the higher of byte progress or time progress for "moving" feel
+                    // but capped at 1.0. We use a linear interpolation for a smoother feel.
                     val byteProgress = totalBytesRead.toFloat() / contentLength.toFloat()
-                    val timeProgress = (elapsedSinceStart.toFloat() / targetDurationMs.toFloat()).coerceIn(0f, 1f)
-                    val smoothProgress = (byteProgress.coerceAtMost(timeProgress)).coerceIn(0f, 1f)
+                    val timeProgress = (elapsedSinceStart.toFloat() / targetDurationMs.toFloat())
+                    val smoothProgress = (byteProgress * 0.7f + timeProgress * 0.3f).coerceIn(0f, 0.99f)
 
                     emit(smoothProgress to (smoothedSpeedMbps.coerceAtLeast(0.0)))
 
