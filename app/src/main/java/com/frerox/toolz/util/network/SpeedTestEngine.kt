@@ -1,9 +1,12 @@
 package com.frerox.toolz.util.network
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -11,64 +14,84 @@ import javax.inject.Singleton
 @Singleton
 class SpeedTestEngine @Inject constructor() {
 
-    // Using a 25MB file for more precision
-    private val testUrl = "https://speed.cloudflare.com/__down?bytes=26214400"
-    private val WARMUP_PERIOD_MS = 500L
-    private val WINDOW_SIZE = 5
+    // 50MB test payload URL from Cloudflare edge
+    private val testUrl = "https://speed.cloudflare.com/__down?bytes=52428800"
 
     fun runDownloadTest(): Flow<Pair<Float, Double>> = flow {
+        var connection: HttpURLConnection? = null
+        var inputStream: InputStream? = null
         try {
             val url = URL(testUrl)
-            val connection = url.openConnection()
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            
-            val totalBytes = 26214400L // 25MB
-            var bytesRead = 0L
-            val buffer = ByteArray(16384) // Larger buffer
-            
-            val startTime = System.currentTimeMillis()
-            val speedWindow = mutableListOf<Double>()
-            var lastUpdateTime = startTime
-            var bytesSinceLastUpdate = 0L
-            
-            connection.getInputStream().use { input ->
-                var read = input.read(buffer)
-                while (read != -1) {
-                    bytesRead += read
-                    bytesSinceLastUpdate += read
-                    
-                    val currentTime = System.currentTimeMillis()
-                    val durationSinceStart = currentTime - startTime
-                    
-                    // Skip warmup period for measurement
-                    if (durationSinceStart > WARMUP_PERIOD_MS) {
-                        val updateDuration = (currentTime - lastUpdateTime) / 1000.0
-                        if (updateDuration >= 0.2) { // Update every 200ms
-                            val currentMbps = (bytesSinceLastUpdate * 8.0) / (updateDuration * 1024 * 1024)
-                            
-                            speedWindow.add(currentMbps)
-                            if (speedWindow.size > WINDOW_SIZE) speedWindow.removeAt(0)
-                            
-                            val smoothedMbps = speedWindow.average()
-                            val progress = (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                            
-                            emit(progress to smoothedMbps)
-                            
-                            bytesSinceLastUpdate = 0
-                            lastUpdateTime = currentTime
+            connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 Toolz/2.0")
+            connection.connect()
+
+            val contentLength = connection.contentLengthLong.takeIf { it > 0 } ?: 52428800L
+            inputStream = connection.inputStream
+
+            val buffer = ByteArray(32768) // 32KB buffer
+            var totalBytesRead = 0L
+            val testStartTime = System.currentTimeMillis()
+            var lastEmitTime = testStartTime
+            var bytesSinceLastEmit = 0L
+
+            var smoothedSpeedMbps = 0.0
+            val alpha = 0.15 // EMA smoothing factor for speed calculation
+
+            // Target duration: 10 seconds test length for high precision
+            val targetDurationMs = 10_000L
+
+            while (true) {
+                val read = inputStream.read(buffer)
+                if (read == -1) break
+
+                totalBytesRead += read
+                bytesSinceLastEmit += read
+
+                val now = System.currentTimeMillis()
+                val elapsedSinceStart = now - testStartTime
+                val elapsedSinceEmit = now - lastEmitTime
+
+                // Emit progress every 50ms for ultra-smooth UI progress updates
+                if (elapsedSinceEmit >= 50L) {
+                    val durationSeconds = elapsedSinceEmit / 1000.0
+                    val currentSpeedMbps = (bytesSinceLastEmit * 8.0) / (durationSeconds * 1_000_000.0)
+
+                    // Skip first 400ms warmup period from throughput calculation
+                    if (elapsedSinceStart > 400L) {
+                        smoothedSpeedMbps = if (smoothedSpeedMbps == 0.0) {
+                            currentSpeedMbps
+                        } else {
+                            alpha * currentSpeedMbps + (1 - alpha) * smoothedSpeedMbps
                         }
-                    } else {
-                        // Just emit progress during warmup with 0 speed
-                        val progress = (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                        emit(progress to 0.0)
                     }
-                    
-                    read = input.read(buffer)
+
+                    // Progress calculation based on byte ratio and duration cap
+                    val byteProgress = totalBytesRead.toFloat() / contentLength.toFloat()
+                    val timeProgress = (elapsedSinceStart.toFloat() / targetDurationMs.toFloat()).coerceIn(0f, 1f)
+                    val smoothProgress = (byteProgress.coerceAtMost(timeProgress)).coerceIn(0f, 1f)
+
+                    emit(smoothProgress to (smoothedSpeedMbps.coerceAtLeast(0.0)))
+
+                    bytesSinceLastEmit = 0L
+                    lastEmitTime = now
+                }
+
+                if (elapsedSinceStart >= targetDurationMs) {
+                    break
                 }
             }
+
+            // Emit final result at 100% progress
+            emit(1.0f to (smoothedSpeedMbps.coerceAtLeast(0.0)))
         } catch (e: Exception) {
             throw e
+        } finally {
+            runCatching { inputStream?.close() }
+            runCatching { connection?.disconnect() }
         }
     }.flowOn(Dispatchers.IO)
 }
