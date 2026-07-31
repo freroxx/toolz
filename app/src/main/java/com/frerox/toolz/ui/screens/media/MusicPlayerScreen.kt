@@ -547,6 +547,7 @@ fun MusicPlayerScreen(
                 onToggleFavorite = { viewModel.toggleFavorite(it) },
                 onSetArtShape = { viewModel.setArtShape(it) },
                 onTrackSelect = { viewModel.playTrack(it, state.queue.map { it.track }) },
+                onQueueIndexSelect = { viewModel.seekToQueueIndex(it) },
                 onToggleRotation = { viewModel.toggleRotation() },
                 onTogglePip = { viewModel.togglePipEnabled() },
                 onOpenAi = { viewModel.vibrationManager.vibrateClick(); showAiSheet = true },
@@ -3275,6 +3276,7 @@ fun FullPlayerView(
     onToggleFavorite: (MusicTrack) -> Unit,
     onSetArtShape: (String) -> Unit,
     onTrackSelect: (MusicTrack) -> Unit,
+    onQueueIndexSelect: (Int) -> Unit,
     onToggleRotation: () -> Unit,
     onTogglePip: () -> Unit,
     onOpenAi: () -> Unit,
@@ -3464,146 +3466,11 @@ fun FullPlayerView(
                     onToggleKaraoke()
                 }
 
-                // ── Background: soft two-glow wash tied to the art ──
-                // Two glows (primary / secondary) drift on their own slow,
-                // eased orbits (24s / 32s — not multiples of each other) so
-                // motion never resolves into an obvious repeating pulse.
-                // FastOutSlowIn easing (instead of linear) gives the drift a
-                // gentle ease-in/ease-out feel rather than a constant-speed
-                // mechanical pan. Alphas are kept low and vignettes soft for
-                // a calmer, more premium backdrop. Everything is built in one
-                // drawWithCache block and rebuilt only when a driving value
-                // actually changes, so there's no extra per-frame allocation.
-                val surfaceColor = MaterialTheme.colorScheme.surface
-                if (!state.performanceMode) {
-                    val animPrimary by animateColorAsState(
-                        dynamicColors.primary,
-                        animationSpec = tween(900, easing = FastOutSlowInEasing),
-                        label = "bgPrimary"
-                    )
-                    val animSecondary by animateColorAsState(
-                        dynamicColors.secondary,
-                        animationSpec = tween(900, easing = FastOutSlowInEasing),
-                        label = "bgSecondary"
-                    )
-                    val energy by animateFloatAsState(
-                        targetValue = if (state.isPlaying) 1f else 0.6f,
-                        animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessVeryLow),
-                        label = "bgEnergy"
-                    )
-
-                    val meshTransition = rememberInfiniteTransition(label = "bgMesh")
-                    val orbitA by meshTransition.animateFloat(
-                        0f, 1f,
-                        infiniteRepeatable(tween(24_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                        label = "orbitA"
-                    )
-                    val orbitB by meshTransition.animateFloat(
-                        0f, 1f,
-                        infiniteRepeatable(tween(32_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                        label = "orbitB"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .drawWithCache {
-                                val centerA = Offset(
-                                    size.width * lerp(0.16f, 0.50f, orbitA),
-                                    size.height * lerp(0.08f, 0.24f, orbitB)
-                                )
-                                val centerB = Offset(
-                                    size.width * lerp(0.84f, 0.48f, orbitB),
-                                    size.height * lerp(0.16f, 0.34f, orbitA)
-                                )
-                                val glowA = Brush.radialGradient(
-                                    listOf(animPrimary.copy(alpha = 0.18f * energy), Color.Transparent),
-                                    center = centerA,
-                                    radius = size.maxDimension * 0.6f
-                                )
-                                val glowB = Brush.radialGradient(
-                                    listOf(animSecondary.copy(alpha = 0.11f * energy), Color.Transparent),
-                                    center = centerB,
-                                    radius = size.maxDimension * 0.55f
-                                )
-                                val topVignette = Brush.verticalGradient(
-                                    0f to surfaceColor.copy(alpha = 0.22f),
-                                    0.20f to Color.Transparent
-                                )
-                                val bottomVignette = Brush.verticalGradient(
-                                    0.75f to Color.Transparent,
-                                    1f to surfaceColor.copy(alpha = 0.50f)
-                                )
-                                onDrawBehind {
-                                    drawRect(surfaceColor)
-                                    drawRect(glowA)
-                                    drawRect(glowB)
-                                    drawRect(topVignette)
-                                    drawRect(bottomVignette)
-                                }
-                            }
-                    )
-
-                    // ── Small top-to-bottom dynamic-color gradient ──
-                    // A quiet directional wash on top of the mesh: a hint of
-                    // the primary color at the very top, clear through the
-                    // middle, and a hint of secondary at the bottom. animPrimary/
-                    // animSecondary already cross-fade smoothly on track change
-                    // (tween above), so this wash fades along with them instead
-                    // of snapping when the artwork changes.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to animPrimary.copy(alpha = 0.16f * energy),
-                                    0.30f to Color.Transparent,
-                                    0.70f to Color.Transparent,
-                                    1f to animSecondary.copy(alpha = 0.20f * energy)
-                                )
-                            )
-                    )
-
-                    if (!track.thumbnailUri.isNullOrBlank()) {
-                        AsyncImage(
-                            model = track.thumbnailUri,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            alpha = 0.16f,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    renderEffect = AndroidRenderEffect
-                                        .createBlurEffect(120f, 120f, AndroidShader.TileMode.CLAMP)
-                                        .asComposeRenderEffect()
-                                },
-                            error = rememberVectorPainter(Icons.Rounded.MusicNote)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(surfaceColor.copy(alpha = 0.70f))
-                        )
-                    }
-                } else {
-                    // ── Performance-mode fallback ──
-                    // No animation, no drawWithCache, just one static brush
-                    // painted once: a soft vertical wash tinted toward the
-                    // art's primary/secondary colors so the screen doesn't
-                    // read as a flat, lifeless surface on low-power devices.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        androidx.compose.ui.graphics.lerp(surfaceColor, dynamicColors.primary, 0.14f),
-                                        surfaceColor,
-                                        androidx.compose.ui.graphics.lerp(surfaceColor, dynamicColors.secondary, 0.09f)
-                                    )
-                                )
-                            )
-                    )
+                RevampedNowPlayingBackground(
+                    artworkUri = track.thumbnailUri,
+                    performanceMode = state.performanceMode,
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 }
 
                 AnimatedContent(
@@ -4400,7 +4267,9 @@ fun FullPlayerView(
         QueueSheet(
             queue = state.queue,
             currentTrack = track,
+            currentQueueIndex = state.currentQueueIndex,
             onTrackSelect = { onTrackSelect(it) },
+            onQueueIndexSelect = { onQueueIndexSelect(it) },
             onDismiss = { showQueue = false },
             onMove = { from, to -> onMoveQueueItem(from, to) },
             onRemove = { index -> onRemoveQueueItem(index) },
@@ -5364,7 +5233,9 @@ fun AudioVisualizerHalo(
 fun QueueSheet(
     queue: List<QueueEntry>,
     currentTrack: MusicTrack,
+    currentQueueIndex: Int = 0,
     onTrackSelect: (MusicTrack) -> Unit,
+    onQueueIndexSelect: (Int) -> Unit = {},
     onMove: (Int, Int) -> Unit,
     onRemove: (Int) -> Unit,
     onClear: () -> Unit,
@@ -5375,47 +5246,23 @@ fun QueueSheet(
     val dynamicColors = rememberDynamicColors(currentTrack.thumbnailUri)
     val reducedEffects = LocalPerformanceMode.current
 
-    // The currently-playing track gets its own hero card above the list, so
-    // it's filtered out of the reorderable rows here — once, up front —
-    // rather than skipped mid-loop further down. Filtering here keeps this
-    // list's index exactly equal to each row's real position in the
-    // LazyColumn, which is what makes the header-offset math below (and the
-    // drag-and-drop index math in DragDropState) actually line up. Filtering
-    // mid-loop instead — i.e. still calling itemsIndexed on the full queue
-    // and skipping the current-track row inside the item lambda — leaves a
-    // "hole": the skipped row still occupies a real slot in the LazyColumn,
-    // so every row after it ends up one slot off from the index this list
-    // assumes it's at. That mismatch is what made dragging reorder the
-    // wrong pair of tracks (or nothing at all) whenever the playing track
-    // wasn't first in the queue — the actual "Up Next doesn't control the
-    // queue" bug.
-    // Pairs each visible row with its real index in the full `queue` — the
-    // index space `onMove`/`onRemove` operate on — so filtering out the
-    // current track for display never desyncs from the indices reported
-    // back to the ViewModel.
-    val upcoming = remember(queue, currentTrack.uri) {
-        queue.withIndex().filter { (_, entry) -> entry.track.uri != currentTrack.uri }
+    // Upcoming queue elements strictly start from index currentQueueIndex + 1.
+    // The very first item shown in "Up Next" is currentQueueIndex + 1 (the next song to play).
+    val upcoming = remember(queue, currentQueueIndex) {
+        if (queue.isEmpty()) emptyList()
+        else {
+            val currIdx = currentQueueIndex.coerceIn(0, queue.size - 1)
+            if (currIdx + 1 < queue.size) {
+                queue.withIndex().drop(currIdx + 1).toList()
+            } else emptyList()
+        }
     }
 
-    // Reordering is driven straight off `queue` (via `upcoming`) rather than
-    // an optimistic local copy that then has to be reconciled back against
-    // the real queue. A local copy only helps if the real update can lag
-    // behind the gesture; here `onMove` reports back into the same state
-    // this composable already recomposes from, so keeping a second copy
-    // just meant the two could drift and re-sync mid-drag. Drag-and-drop
-    // visuals (the lifted row's offset/scale/shadow) come entirely from
-    // DragDropState instead, which doesn't need its own copy of the list.
     val lazyListState = rememberLazyListState()
     val dragDropState = rememberDragDropState(lazyListState) { fromSlot, toSlot ->
-        // Adjust for the header rows ahead of the reorderable queue rows:
-        // "Up next" title row, the now-playing hero card, and the
-        // "COMING UP" section label — 3 slots total.
         val fromRow = fromSlot - 3
         val toRow = toSlot - 3
         if (fromRow in upcoming.indices && toRow in upcoming.indices) {
-            // Translate row positions (within the filtered, on-screen list)
-            // back to real positions in the full queue before reporting the
-            // move — this is the index space the ViewModel actually owns.
             onMove(upcoming[fromRow].index, upcoming[toRow].index)
         }
     }
@@ -5594,7 +5441,7 @@ fun QueueSheet(
                             index = rowIndex,
                             absoluteIndex = absoluteIndex,
                             qTrack = qTrack,
-                            onTrackSelect = { onTrackSelect(qTrack) },
+                            onTrackSelect = { onQueueIndexSelect(realQueueIndex) },
                             onRemove = { onRemove(realQueueIndex) },
                             dragDropState = dragDropState,
                             dynamicColors = dynamicColors,
@@ -5710,27 +5557,6 @@ private fun NowPlayingHeroCard(
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = dynamicColors.primary.copy(alpha = 0.18f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                PlayingBarsIndicator()
-                                Text(
-                                    "NOW PLAYING",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = dynamicColors.primary,
-                                    letterSpacing = 0.6.sp,
-                                    fontSize = 9.sp
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
                         Text(
                             track.title,
                             style = MaterialTheme.typography.titleMedium,
