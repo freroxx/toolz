@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
@@ -79,15 +80,26 @@ fun BackupRestoreScreen(
 
     Scaffold(
         topBar = {
-            ExpressiveTopAppBar(
-                title = "Backup & restore",
-                subtitle = "Keep a copy of your data, or bring it back",
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
+            Surface(
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 0.dp,
+                shadowElevation = 8.dp
+            ) {
+                ExpressiveTopAppBar(
+                    title = "Backup & restore",
+                    subtitle = "Keep a copy of your data, or bring it back",
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent
+                    )
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.surface
     ) { padding ->
@@ -95,6 +107,7 @@ fun BackupRestoreScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .fadingEdges(top = 16.dp, bottom = 16.dp)
                 .verticalScroll(scrollState)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
@@ -134,7 +147,9 @@ fun BackupRestoreScreen(
                 AutoBackupSection(
                     currentFrequency = uiState.backupFrequency,
                     customDays = uiState.customAutoBackupDays,
+                    notificationsEnabled = uiState.backupNotifications,
                     onFrequencyChange = { viewModel.setBackupFrequency(it) },
+                    onToggleNotifications = { viewModel.setBackupNotifications(it) },
                     onShowCustomInterval = { showCustomIntervalDialog = true }
                 )
             }
@@ -377,32 +392,39 @@ private fun ActionSection(
     }
 }
 
+@Composable
+private fun SectionHeaderSimple(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(start = 4.dp)
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AutoBackupSection(
     currentFrequency: String,
     customDays: Int,
+    notificationsEnabled: Boolean,
     onFrequencyChange: (String) -> Unit,
+    onToggleNotifications: (Boolean) -> Unit,
     onShowCustomInterval: () -> Unit
 ) {
-    val options = listOf("Never", "Daily", "Weekly", "Monthly", "Custom")
-    val selectedIndex = options.indexOf(currentFrequency).coerceAtLeast(0)
-
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            "Automation",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 4.dp)
-        )
+        SectionHeaderSimple(title = "Automation")
 
         ExpressiveCard(
             onClick = {},
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Surface(
                         color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = MaterialTheme.shapes.medium
@@ -415,7 +437,7 @@ private fun AutoBackupSection(
                         )
                     }
                     Spacer(Modifier.width(16.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "Scheduled backups",
                             style = MaterialTheme.typography.titleMedium,
@@ -429,21 +451,79 @@ private fun AutoBackupSection(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    ExpressiveSwitch(
+                        checked = currentFrequency != "Never",
+                        onCheckedChange = { if (it) onFrequencyChange("Daily") else onFrequencyChange("Never") }
+                    )
                 }
-                Spacer(Modifier.height(20.dp))
 
-                ToolzConnectedButtonGroup(
-                    selectedIndex = if (currentFrequency == "Custom") 4 else selectedIndex,
-                    options = listOf(
-                        "Never", "Daily", "Weekly", "Monthly",
-                        if (currentFrequency == "Custom") "$customDays d" else "Custom"
-                    ),
-                    onOptionSelected = { index ->
-                        if (index == 4) onShowCustomInterval()
-                        else onFrequencyChange(options[index])
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                AnimatedVisibility(visible = currentFrequency != "Never") {
+                    Column {
+                        Spacer(Modifier.height(24.dp))
+                        
+                        Text(
+                            "Backup frequency",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
+                        )
+
+                        val freqOptions = listOf("Daily", "Weekly", "Monthly", "Custom")
+                        val freqSelectedIndex = when (currentFrequency) {
+                            "Daily" -> 0
+                            "Weekly" -> 1
+                            "Monthly" -> 2
+                            "Custom" -> 3
+                            else -> 0
+                        }
+
+                        ToolzConnectedButtonGroup(
+                            selectedIndex = freqSelectedIndex,
+                            options = listOf(
+                                "Daily", "Weekly", "Monthly",
+                                if (currentFrequency == "Custom") "${customDays}d" else "Custom"
+                            ),
+                            onOptionSelected = { index ->
+                                if (index == 3) onShowCustomInterval()
+                                else onFrequencyChange(freqOptions[index])
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Spacer(Modifier.height(20.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Rounded.NotificationsActive,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Notifications",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "Get notified about backup results",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            ExpressiveSwitch(
+                                checked = notificationsEnabled,
+                                onCheckedChange = onToggleNotifications
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -506,11 +586,10 @@ private fun CustomIntervalDialog(
                     )
                 }
                 Spacer(Modifier.height(20.dp))
-                Slider(
+                ExpressiveSlider(
                     value = days.toFloat(),
                     onValueChange = { days = it.toInt() },
                     valueRange = 1f..30f,
-                    steps = 28,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(24.dp))
