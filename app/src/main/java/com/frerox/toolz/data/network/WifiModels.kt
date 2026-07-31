@@ -193,10 +193,9 @@ data class WifiTweaksUiState(
     val traceHops: List<TraceHop> = emptyList(),
     val isTracing: Boolean = false,
     val activeProcesses: List<ProcessNetworkUsage> = emptyList(),
-    val blocklists: List<Blocklist> = emptyList(),
     val privateDnsMode: String = "Automatic",
     val privateDnsHost: String = "",
-    val selectedBenchmarkProviders: Set<String> = setOf("cloudflare", "google", "quad9", "adguard"),
+    val selectedBenchmarkProviders: Set<String> = emptySet(),
     val traceHistory: List<String> = emptyList(),
     val lastTraceTarget: String = "1.1.1.1"
 )
