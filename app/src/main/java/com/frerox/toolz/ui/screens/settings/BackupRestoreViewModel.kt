@@ -32,6 +32,7 @@ data class BackupRestoreUiState(
     val progress: String? = null,
     val backupFrequency: String = "Never",
     val customAutoBackupDays: Int = 1,
+    val backupNotifications: Boolean = true,
     val selectedItems: Set<BackupItem> = BackupItem.entries.toSet()
 )
 
@@ -55,6 +56,11 @@ class BackupRestoreViewModel @Inject constructor(
         viewModelScope.launch {
             repository.autoBackupCustomDays.collect { days ->
                 _uiState.value = _uiState.value.copy(customAutoBackupDays = days)
+            }
+        }
+        viewModelScope.launch {
+            repository.backupNotifications.collect { enabled ->
+                _uiState.value = _uiState.value.copy(backupNotifications = enabled)
             }
         }
         viewModelScope.launch {
@@ -97,6 +103,10 @@ class BackupRestoreViewModel @Inject constructor(
 
     fun setCustomAutoBackupDays(days: Int) = viewModelScope.launch {
         repository.setAutoBackupCustomDays(days)
+    }
+
+    fun setBackupNotifications(enabled: Boolean) = viewModelScope.launch {
+        repository.setBackupNotifications(enabled)
     }
 
     fun createBackup() = viewModelScope.launch {
