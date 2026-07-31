@@ -173,13 +173,40 @@ fun ToolzElevatedExpressiveButton(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
+fun ToolzLargeExtendedFloatingActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit,
+    text: @Composable () -> Unit,
+    enabled: Boolean = true,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    LargeExtendedFloatingActionButton(
+        onClick = {
+            if (enabled) {
+                haptic.click()
+                currentOnClick()
+            }
+        },
+        modifier = modifier.expressivePressScale(interactionSource, enabled),
+        icon = icon,
+        text = text,
+        interactionSource = interactionSource,
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
 fun ToolzElevatedExpressiveToggleButton(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     colors: ToggleButtonColors = ToggleButtonDefaults.elevatedToggleButtonColors(),
-    shapes: ToggleButtonShapes = ToggleButtonDefaults.shapes(),
+    shapes: ToggleButtonShapes = ToggleButtonShapes(ButtonDefaults.shape, ButtonDefaults.shape, ButtonDefaults.shape),
     shape: Shape? = null,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit,
