@@ -34,6 +34,11 @@ class NetworkTweakRepository @Inject constructor(
 
     fun getLogs(): Flow<List<DiagnosticLogEntry>> = diagnosticLogDao.getRecentLogs()
 
+    suspend fun clearLogs() {
+        diagnosticLogDao.clearAll()
+        addLog("SYSTEM", "Console logs cleared", LogLevel.INFO)
+    }
+
     suspend fun runRawCommand(command: String): String {
         addLog("COMMAND", "> $command", LogLevel.INFO)
         val result = try {
