@@ -116,6 +116,7 @@ fun WebViewScreen(
     // ViewModel state
     val isBookmarked   by viewModel.isBookmarked.collectAsState()
     val adBlockEnabled by viewModel.adBlockEnabled.collectAsState(initial = true)
+    val floatingToolbarVisible by viewModel.floatingToolbarVisible.collectAsState(initial = true)
     val tabs           by viewModel.tabs.collectAsState(initial = emptyList())
     val activeTabId    by viewModel.activeTabId.collectAsState(initial = null)
     val activeTab = tabs.find { it.id == activeTabId }
@@ -168,6 +169,7 @@ fun WebViewScreen(
                 activeTabId      = activeTabId,
                 isDesktopMode    = isDesktopMode,
                 adBlockEnabled   = adBlockEnabled,
+                floatingToolbarVisible = floatingToolbarVisible,
                 onTabClick       = { tab -> viewModel.switchTab(tab.id) },
                 onTabClose       = { tab -> viewModel.closeTab(tab.id) },
                 onFindQueryChange = { q ->
@@ -211,6 +213,7 @@ fun WebViewScreen(
                 },
                 onToggleDesktop = { viewModel.toggleDesktopMode() },
                 onToggleAdBlock = { viewModel.setAdBlockEnabled(!adBlockEnabled) },
+                onToggleFloatingToolbar = { viewModel.setFloatingToolbarVisible(!floatingToolbarVisible) },
                 onShowDownloads = { showDownloadsSheet = true },
                 onShowPasswords = {
                     viewModel.verifyBiometric(activity) {
@@ -431,7 +434,7 @@ fun WebViewScreen(
 
         // ── Floating search dock — WebView mode ───────────────────────────────
         AnimatedVisibility(
-            visible = isDockVisible,
+            visible = isDockVisible && floatingToolbarVisible,
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier
@@ -452,7 +455,7 @@ fun WebViewScreen(
         }
 
         // ── Restore Dock Button ───────────────────────────────────────────────
-        if (!isDockVisible) {
+        if (!isDockVisible && floatingToolbarVisible) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -695,6 +698,7 @@ private fun TopChrome(
     activeTabId: String?,
     isDesktopMode: Boolean,
     adBlockEnabled: Boolean,
+    floatingToolbarVisible: Boolean,
     onTabClick: (TabEntry) -> Unit,
     onTabClose: (TabEntry) -> Unit,
     onFindQueryChange: (String) -> Unit,
@@ -712,6 +716,7 @@ private fun TopChrome(
     onOpenExternal: () -> Unit,
     onToggleDesktop: () -> Unit,
     onToggleAdBlock: () -> Unit,
+    onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
 ) {
@@ -752,11 +757,11 @@ private fun TopChrome(
                 onClick        = onUrlBarClick,
                 modifier       = Modifier
                     .weight(1f)
-                    .height(44.dp),
-                shape          = RoundedCornerShape(22.dp),
+                    .height(48.dp),
+                shape          = CircleShape,
                 color          = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 1.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                tonalElevation = 2.dp,
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 Row(
                     modifier = Modifier
@@ -919,6 +924,7 @@ private fun TopChrome(
             isBookmarked = isBookmarked,
             isDesktopMode = isDesktopMode,
             adBlockEnabled = adBlockEnabled,
+            floatingToolbarVisible = floatingToolbarVisible,
             onDismiss = { showOptions = false },
             onForward = onForward,
             onReload = onReload,
@@ -929,6 +935,7 @@ private fun TopChrome(
             onOpenExternal = onOpenExternal,
             onToggleDesktop = onToggleDesktop,
             onToggleAdBlock = onToggleAdBlock,
+            onToggleFloatingToolbar = onToggleFloatingToolbar,
             onShowDownloads = onShowDownloads,
             onShowPasswords = onShowPasswords
         )
@@ -975,11 +982,11 @@ private fun TabStrip(
 
             Surface(
                 onClick = { onTabClick(tab) },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(18.dp),
                 color = backgroundColor,
                 modifier = Modifier
                     .widthIn(max = 160.dp)
-                    .height(36.dp)
+                    .height(40.dp)
                     .animateContentSize()
             ) {
                 Row(
@@ -1020,6 +1027,7 @@ private fun BrowserOptionsSheet(
     isBookmarked: Boolean,
     isDesktopMode: Boolean,
     adBlockEnabled: Boolean,
+    floatingToolbarVisible: Boolean,
     onDismiss: () -> Unit,
     onForward: () -> Unit,
     onReload: () -> Unit,
@@ -1030,6 +1038,7 @@ private fun BrowserOptionsSheet(
     onOpenExternal: () -> Unit,
     onToggleDesktop: () -> Unit,
     onToggleAdBlock: () -> Unit,
+    onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
 ) {
@@ -1107,6 +1116,13 @@ private fun BrowserOptionsSheet(
                         label = "Ad-blocker",
                         checked = adBlockEnabled,
                         onCheckedChange = { onToggleAdBlock(); onDismiss() }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionToggleRow(
+                        icon = Icons.Rounded.ViewStream,
+                        label = "Show Web Pill",
+                        checked = floatingToolbarVisible,
+                        onCheckedChange = { onToggleFloatingToolbar(); onDismiss() }
                     )
                 }
             }
