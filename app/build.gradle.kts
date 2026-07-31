@@ -51,7 +51,7 @@ android {
         viewBinding = true
         aidl = true
     }
-    compileSdkMinor = 0
+    compileSdkMinor = 1
 }
 
 
