@@ -37,6 +37,8 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
+import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import kotlinx.coroutines.delay
 
 // ══════════════════════════════════════════════════════════
@@ -1842,70 +1844,166 @@ fun InlineSearchWebView(
     onOpenInBrowser: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    val accentColor = sourceAccentColor(result.source)
+    var isLoading by remember { mutableStateOf(true) }
+    var progress by remember { mutableFloatStateOf(0f) }
+
+    ExpressiveCard(
+        onClick = { /* WebView handles interaction */ },
         modifier = modifier
             .fillMaxWidth()
-            .height(280.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        ),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            .height(520.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
-        Column {
-            Box(modifier = Modifier.weight(1f)) {
-                AndroidView(
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webViewClient = com.frerox.toolz.util.network.AdBlockWebViewClient(
-                                adBlockEnabled = { adBlockEnabled }
-                            )
-                            loadUrl(result.url)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-                
-                // Overlay to catch clicks and open in browser
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable { onOpenInBrowser(result.url) }
-                )
-            }
-            
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Header with Site Info
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Surface(
+                    shape = CircleShape,
+                    color = accentColor.copy(alpha = 0.1f),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        PrivacyFaviconImage(url = result.url, size = 22.dp)
+                    }
+                }
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = result.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = result.displayUrl,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Icon(
-                    imageVector = Icons.Rounded.OpenInBrowser,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary
+
+                if (result.engines.size >= 2) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    ) {
+                        Icon(
+                            Icons.Rounded.AutoFixHigh,
+                            null,
+                            modifier = Modifier.padding(6.dp).size(14.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                ToolzTonalExpressiveIconButton(
+                    onClick = { onOpenInBrowser(result.url) },
+                    modifier = Modifier.size(36.dp),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            // WebView Area
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                databaseEnabled = true
+                            }
+                            webViewClient = object : com.frerox.toolz.util.network.AdBlockWebViewClient(
+                                adBlockEnabled = { adBlockEnabled }
+                            ) {
+                                override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    super.onPageStarted(view, url, favicon)
+                                    isLoading = true
+                                }
+                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    isLoading = false
+                                }
+                            }
+                            webChromeClient = object : android.webkit.WebChromeClient() {
+                                override fun onProgressChanged(view: android.webkit.WebView?, newProgress: Int) {
+                                    progress = newProgress / 100f
+                                }
+                            }
+                            loadUrl(result.url)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
+
+                if (isLoading) {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(3.dp).align(Alignment.TopCenter),
+                        color = accentColor,
+                        trackColor = Color.Transparent
+                    )
+                }
+            }
+            
+            // Bottom Action Bar (Subtle)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) 
+                            Icons.Rounded.OndemandVideo else Icons.Rounded.Image,
+                        null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                    Text(
+                        text = if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) "Video Result" else "Image Result",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+                
+                ToolzExpressiveTextButton(
+                    onClick = { onOpenInBrowser(result.url) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text("View Full Site", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(14.dp))
+                }
             }
         }
     }
 }
+
