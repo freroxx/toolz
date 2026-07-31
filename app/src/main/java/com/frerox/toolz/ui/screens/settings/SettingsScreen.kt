@@ -1407,7 +1407,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "A polished toolkit designed for daily use by frerox.",
+                "A polished toolkit designed for daily use, made by frerox. Join the Discord server!",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,
