@@ -83,7 +83,7 @@ fun FocusFlowScreen(
     val context           = LocalContext.current
     val scope             = rememberCoroutineScope()
 
-    val canDrawOverlays         = remember { Settings.canDrawOverlays(context) }
+    var canDrawOverlays         by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isAccessibilityEnabled  by remember { mutableStateOf(false) }
     var selectedAppForSettings  by remember { mutableStateOf<AppUsageInfo?>(null) }
     var appToRename             by remember { mutableStateOf<AppUsageInfo?>(null) }
@@ -96,6 +96,8 @@ fun FocusFlowScreen(
     LaunchedEffect(lifecycleEvent) {
         if (lifecycleEvent == Lifecycle.Event.ON_RESUME) {
             isAccessibilityEnabled = checkAccessibilityEnabled(context)
+            canDrawOverlays = Settings.canDrawOverlays(context)
+            viewModel.refreshStats()
         }
     }
 
@@ -343,19 +345,9 @@ fun FocusFlowScreen(
                     AnimatedContent(
                         targetState = isWeekly,
                         transitionSpec = {
-                            val spec = tween<IntOffset>(durationMillis = 600, easing = FastOutSlowInEasing)
-                            val fadeSpec = tween<Float>(durationMillis = 500)
-                            if (targetState) {
-                                (slideInHorizontally(animationSpec = spec) { it } + fadeIn(fadeSpec)).togetherWith(
-                                    slideOutHorizontally(animationSpec = spec) { -it } + fadeOut(fadeSpec)
-                                )
-                            } else {
-                                (slideInHorizontally(animationSpec = spec) { -it } + fadeIn(fadeSpec)).togetherWith(
-                                    slideOutHorizontally(animationSpec = spec) { it } + fadeOut(fadeSpec)
-                                )
-                            }.using(SizeTransform(clip = false))
+                            fadeIn(tween(300)).togetherWith(fadeOut(tween(300)))
                         },
-                        label = "analytics_slide"
+                        label = "analytics_fade"
                     ) { weekly ->
                         if (weekly) {
                             WeeklySummaryCard(
@@ -427,15 +419,13 @@ fun FocusFlowScreen(
                 }
 
                 items(usageStats, key = { it.packageName }) { info ->
-                    StaggeredEntrance(index = usageStats.indexOf(info)) {
-                        EnhancedUsageItem(
-                            info            = info,
-                            isAiClassified  = info.packageName in aiClassifiedPkgs,
-                            onClick         = { selectedAppForSettings = info },
-                            onLongClick     = { appToRename = info },
-                            onQuickLimit    = { viewModel.setAppLimit(info.packageName, it) },
-                        )
-                    }
+                    EnhancedUsageItem(
+                        info            = info,
+                        isAiClassified  = info.packageName in aiClassifiedPkgs,
+                        onClick         = { selectedAppForSettings = info },
+                        onLongClick     = { appToRename = info },
+                        onQuickLimit    = { viewModel.setAppLimit(info.packageName, it) },
+                    )
                 }
 
                 item { Spacer(Modifier.height(80.dp)) }
@@ -555,20 +545,20 @@ fun FocusFlowScreen(
 
 @Composable
 private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Unit) {
-    ExpressiveCard(
+    Surface(
         onClick = onResolveClick,
         modifier = Modifier.fillMaxWidth(),
         shape    = SquircleShape,
-        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.12f),
-        border   = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f)),
+        color    = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+        border   = BorderStroke(1.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
     ) {
         Row(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Surface(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(56.dp),
                 shape = SquircleShape,
                 color = MaterialTheme.colorScheme.error,
             ) {
@@ -577,36 +567,35 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
                         if (!canDrawOverlays) Icons.Rounded.Layers else Icons.Rounded.AccessibilityNew,
                         null,
                         tint     = MaterialTheme.colorScheme.onError,
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(28.dp),
                     )
                 }
             }
             Column(Modifier.weight(1f)) {
                 Text(
                     if (!canDrawOverlays) "Overlay required" else "Accessibility required",
-                    fontWeight = FontWeight.SemiBold,
-                    style      = MaterialTheme.typography.titleSmall,
-                    color      = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.ExtraBold,
+                    style      = MaterialTheme.typography.titleMedium,
+                    color      = MaterialTheme.colorScheme.onErrorContainer,
                 )
-                Spacer(Modifier.height(2.dp))
                 Text(
                     if (!canDrawOverlays)
-                        "Needed to block distracting apps in real time"
+                        "Needed to block distracting apps."
                     else
-                        "Needed for the real-time flow engine to run",
+                        "Needed for the real-time engine.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                 )
-                Spacer(Modifier.height(10.dp))
-                ToolzExpressiveButton(
-                    onClick = onResolveClick,
-                    modifier = Modifier.height(34.dp),
-                    shape = SquircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
-                ) {
-                    Text("Grant permission", style = MaterialTheme.typography.labelMedium)
-                }
+            }
+            ToolzTonalExpressiveIconButton(
+                onClick = onResolveClick,
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) {
+                Icon(Icons.Rounded.ChevronRight, null)
             }
         }
     }
@@ -614,41 +603,50 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
 
 @Composable
 private fun UsagePermissionBanner(onGrantClick: () -> Unit) {
-    ExpressiveCard(
+    Surface(
         onClick = onGrantClick,
         modifier = Modifier.fillMaxWidth(),
         shape = SquircleShape,
-        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+        color = MaterialTheme.colorScheme.primaryContainer,
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Surface(
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(56.dp),
                 shape = SquircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(0.15f),
+                color = MaterialTheme.colorScheme.primary,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(28.dp))
                 }
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Accurate screen time",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    "Enable tracking",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    "Usage access required for accurate tracking. Tap to grant.",
+                    "Usage access is required for analytics.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                 )
             }
-            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.primary.copy(0.6f))
+            ToolzTonalExpressiveIconButton(
+                onClick = onGrantClick,
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Icon(Icons.Rounded.ChevronRight, null)
+            }
         }
     }
 }
@@ -1140,45 +1138,43 @@ private fun UncategorizedAppsSection(
             preferredItemWidth = 168.dp,
             contentPadding = PaddingValues(horizontal = 4.dp),
         ) { app ->
-            StaggeredEntrance(index = apps.indexOf(app)) {
-                Surface(
-                    shape = SquircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-                    modifier = Modifier.width(168.dp),
-                ) {
-                    Column(Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(28.dp)) {
-                                AppIcon(packageName = app.packageName, modifier = Modifier.fillMaxSize())
-                            }
-                            Text(
-                                app.appName,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
+            Surface(
+                shape = SquircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                modifier = Modifier.width(168.dp),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(28.dp)) {
+                            AppIcon(packageName = app.packageName, modifier = Modifier.fillMaxSize())
                         }
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            ToolzTonalExpressiveIconButton(
-                                onClick = { onClassify(app.packageName, true) },
-                                modifier = Modifier.weight(1f).height(30.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), contentColor = MaterialTheme.colorScheme.primary)
-                            ) {
-                                Icon(Icons.Rounded.AddModerator, null, modifier = Modifier.size(14.dp))
-                            }
-                            ToolzTonalExpressiveIconButton(
-                                onClick = { onClassify(app.packageName, false) },
-                                modifier = Modifier.weight(1f).height(30.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Icon(Icons.Rounded.Block, null, modifier = Modifier.size(14.dp))
-                            }
+                        Text(
+                            app.appName,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ToolzTonalExpressiveIconButton(
+                            onClick = { onClassify(app.packageName, true) },
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Rounded.AddModerator, null, modifier = Modifier.size(14.dp))
+                        }
+                        ToolzTonalExpressiveIconButton(
+                            onClick = { onClassify(app.packageName, false) },
+                            modifier = Modifier.weight(1f).height(30.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Rounded.Block, null, modifier = Modifier.size(14.dp))
                         }
                     }
                 }
