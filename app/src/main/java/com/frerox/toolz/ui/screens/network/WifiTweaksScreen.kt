@@ -668,17 +668,19 @@ private fun OverviewTab(
 ) {
     LazyColumn(
         modifier = Modifier
-            .fillMaxSize()
-            .fadingEdges(top = 16.dp, bottom = 40.dp),
-        contentPadding = PaddingValues(bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .fillMaxSize(),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
-            SmartFixHeaderCard(
-                state = state,
-                onFixConnection = onFixConnection
+            Text(
+                text = "Network Snapshot",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
         }
+
         item {
             OverviewHeroCard(
                 state = state,
@@ -686,41 +688,41 @@ private fun OverviewTab(
                 onOpenWifiSettings = onOpenWifiSettings
             )
         }
+        
         item {
-            PerformanceTrendCard(state = state)
+            SmartFixHeaderCard(
+                state = state,
+                onFixConnection = onFixConnection
+            )
         }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    PerformanceTrendCard(state = state)
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    StabilityMonitorCard(state = state)
+                }
+            }
+        }
+
         item {
             QuickActionFloatingCard(onFix = onFixConnection, onReset = onReset)
         }
-        item {
-            StabilityMonitorCard(state = state)
-        }
+
         item {
             InsightStrip(state = state)
         }
+
         item {
             LiveFeedbackCard(
                 state = state,
                 onToggleAudio = onToggleAudio
             )
-        }
-        item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Connection snapshot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    DetailRow("Band", state.networkConfig.band)
-                    DetailRow("Channel", state.networkConfig.channel.takeIf { it != 0 }?.toString() ?: "-")
-                    DetailRow("Wi-Fi standard", state.networkConfig.wifiStandard)
-                    DetailRow("Link speed", "${state.networkConfig.linkSpeed} Mbps")
-                    DetailRow("Security", state.networkConfig.security)
-                    DetailRow("Private DNS", if (state.networkConfig.privateDnsActive) state.networkConfig.privateDnsServerName else "Automatic / off")
-                }
-            }
         }
     }
 }
