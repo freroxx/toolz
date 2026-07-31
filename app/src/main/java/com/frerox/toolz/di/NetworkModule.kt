@@ -69,13 +69,23 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideLrcLibService(okHttpClient: OkHttpClient, moshi: Moshi): LrcLibService =
-        Retrofit.Builder()
+    fun provideLrcLibService(okHttpClient: OkHttpClient, moshi: Moshi): LrcLibService {
+        val lrcOkHttpClient = okHttpClient.newBuilder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .header("User-Agent", "Toolz/1.0 (Android; https://github.com/frerox/toolz)")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+
+        return Retrofit.Builder()
             .baseUrl("https://lrclib.net/api/")
-            .client(okHttpClient)
+            .client(lrcOkHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(LrcLibService::class.java)
+    }
 
     @Provides
     @Singleton
