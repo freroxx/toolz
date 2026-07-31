@@ -35,6 +35,8 @@ import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.components.LargeExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
@@ -1848,15 +1850,14 @@ fun InlineSearchWebView(
     var isLoading by remember { mutableStateOf(true) }
     var progress by remember { mutableFloatStateOf(0f) }
 
-    ExpressiveCard(
-        onClick = { /* WebView handles interaction */ },
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .height(520.dp)
-            .padding(horizontal = 4.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        shape = LargeExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Header with Site Info
@@ -1868,12 +1869,12 @@ fun InlineSearchWebView(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
-                    shape = CircleShape,
-                    color = accentColor.copy(alpha = 0.1f),
-                    modifier = Modifier.size(40.dp)
+                    shape = SmallExpressiveShape,
+                    color = accentColor.copy(alpha = 0.12f),
+                    modifier = Modifier.size(42.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        PrivacyFaviconImage(url = result.url, size = 22.dp)
+                        PrivacyFaviconImage(url = result.url, size = 24.dp)
                     }
                 }
 
@@ -1881,14 +1882,15 @@ fun InlineSearchWebView(
                     Text(
                         text = result.title,
                         style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Black,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = result.displayUrl,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1897,21 +1899,22 @@ fun InlineSearchWebView(
                 if (result.engines.size >= 2) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
                     ) {
-                        Icon(
-                            Icons.Rounded.AutoFixHigh,
-                            null,
-                            modifier = Modifier.padding(6.dp).size(14.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        Text(
+                            text = "MULTIPLE",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
 
                 ToolzTonalExpressiveIconButton(
                     onClick = { onOpenInBrowser(result.url) },
-                    modifier = Modifier.size(36.dp),
-                    shape = CircleShape
+                    modifier = Modifier.size(38.dp),
+                    shape = SmallExpressiveShape
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
                 }
@@ -1922,7 +1925,8 @@ fun InlineSearchWebView(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .padding(horizontal = 12.dp)
+                    .clip(SmallExpressiveShape)
                     .background(MaterialTheme.colorScheme.surface)
             ) {
                 AndroidView(
@@ -1935,6 +1939,18 @@ fun InlineSearchWebView(
                                 useWideViewPort = true
                                 databaseEnabled = true
                             }
+                            
+                            // Enable scrolling within LazyColumn
+                            setOnTouchListener { v, event ->
+                                when (event.action) {
+                                    android.view.MotionEvent.ACTION_DOWN,
+                                    android.view.MotionEvent.ACTION_MOVE -> {
+                                        v.parent.requestDisallowInterceptTouchEvent(true)
+                                    }
+                                }
+                                false
+                            }
+
                             webViewClient = object : com.frerox.toolz.util.network.AdBlockWebViewClient(
                                 adBlockEnabled = { adBlockEnabled }
                             ) {
@@ -1961,46 +1977,55 @@ fun InlineSearchWebView(
                 if (isLoading) {
                     LinearProgressIndicator(
                         progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(3.dp).align(Alignment.TopCenter),
+                        modifier = Modifier.fillMaxWidth().height(2.5.dp).align(Alignment.TopCenter),
                         color = accentColor,
                         trackColor = Color.Transparent
                     )
                 }
             }
             
-            // Bottom Action Bar (Subtle)
+            // Bottom Action Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) 
-                            Icons.Rounded.OndemandVideo else Icons.Rounded.Image,
-                        null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, SmallExpressiveShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) 
+                                Icons.Rounded.OndemandVideo else Icons.Rounded.Image,
+                            null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
-                        text = if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) "Video Result" else "Image Result",
+                        text = if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) "Video Stream" else "Image Gallery",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
                     )
                 }
                 
                 ToolzExpressiveTextButton(
                     onClick = { onOpenInBrowser(result.url) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    shape = SmallExpressiveShape
                 ) {
-                    Text("View Full Site", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(14.dp))
+                    Text("Visit Source", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(16.dp))
                 }
             }
         }
