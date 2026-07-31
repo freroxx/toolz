@@ -96,6 +96,7 @@ data class NowPlayingAiUiState(
     val tasteState: AiTasteState = AiTasteState(),
     val error: String? = null,
     val isAiEnabled: Boolean = true,
+    val isGroqKeyMissing: Boolean = false,
     val isExpandedPill: Boolean = false,
     val performanceMode: Boolean = false,
     // Karaoke
