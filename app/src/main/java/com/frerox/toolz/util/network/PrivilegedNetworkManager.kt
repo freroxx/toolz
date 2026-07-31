@@ -42,14 +42,31 @@ class PrivilegedNetworkManager @Inject constructor(
 
     suspend fun setPrivateDns(hostname: String?): String = withContext(Dispatchers.IO) {
         if (hostname.isNullOrBlank()) {
-            runCommand("settings put global private_dns_mode opportunistic")
+            val modeRes = runCommand("settings put global private_dns_mode opportunistic")
             runCommand("settings delete global private_dns_spec")
-            "Private DNS reset to automatic."
+            if (!modeRes.isSuccess) {
+                "Failed to reset Private DNS: ${modeRes.stderr.ifBlank { "Exit code ${modeRes.exitCode}" }}"
+            } else {
+                "Private DNS reset to automatic (opportunistic)."
+            }
         } else {
-            runCommand("settings put global private_dns_mode hostname")
-            runCommand("settings put global private_dns_spec $hostname")
-            "Private DNS hostname applied: $hostname"
+            val modeRes = runCommand("settings put global private_dns_mode hostname")
+            val hostRes = runCommand("settings put global private_dns_spec $hostname")
+            if (!modeRes.isSuccess || !hostRes.isSuccess) {
+                "Failed to set Private DNS: ${(modeRes.stderr + " " + hostRes.stderr).trim()}"
+            } else {
+                "Private DNS hostname applied: $hostname"
+            }
         }
+    }
+
+    suspend fun setDoTDns(dotHostname: String): String = withContext(Dispatchers.IO) {
+        setPrivateDns(dotHostname)
+    }
+
+    suspend fun setDoHDns(dohHostname: String): String = withContext(Dispatchers.IO) {
+        // DoH via Android 13+ Private DNS or DoT host fallback
+        setPrivateDns(dohHostname)
     }
 
     suspend fun readPrivateDnsConfig(): Pair<String, String> = withContext(Dispatchers.IO) {
