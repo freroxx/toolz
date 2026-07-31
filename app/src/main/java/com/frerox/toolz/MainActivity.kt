@@ -319,6 +319,14 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 }
             }
         }
+
+        // Keep music service warm for earphone detection
+        val musicIntent = Intent(this, com.frerox.toolz.service.MusicPlayerService::class.java)
+        try {
+            startService(musicIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun hasActivityRecognitionPermission(): Boolean {
