@@ -22,6 +22,7 @@ object NotificationHelper {
     const val CHANNEL_TASK_REMINDERS = "task_reminders"
     const val CHANNEL_EVENT_REMINDERS = "event_reminders"
     const val CHANNEL_MUSIC_DOWNLOADS = "music_downloads"
+    const val CHANNEL_BACKUPS = "backups_channel"
 
     // Notification IDs
     const val ID_FOREGROUND_SERVICE = 1000
@@ -38,6 +39,7 @@ object NotificationHelper {
     const val ID_APP_UPDATE = 8001
     const val ID_UPDATE_READY = 8002
     const val ID_MUSIC_DOWNLOAD_BASE = 9000
+    const val ID_BACKUP_OPERATION = 10001
 
     fun createAllChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -127,6 +129,13 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Status of track downloads"
+            },
+            NotificationChannel(
+                CHANNEL_BACKUPS,
+                "Backup & Restore",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Status of backup and restore operations"
             }
         )
 
@@ -138,5 +147,47 @@ object NotificationHelper {
             .setSmallIcon(R.drawable.ic_launcher_foreground) // Default icon
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
+    }
+
+    fun showBackupSuccess(context: Context, fileName: String, isScheduled: Boolean = false) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val title = if (isScheduled) "Scheduled Backup Success" else "Backup Created Successfully"
+        val notification = baseBuilder(context, CHANNEL_BACKUPS)
+            .setContentTitle(title)
+            .setContentText("File saved: $fileName")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        manager.notify(ID_BACKUP_OPERATION, notification)
+    }
+
+    fun showBackupFailure(context: Context, error: String?, isScheduled: Boolean = false) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val title = if (isScheduled) "Scheduled Backup Failed" else "Backup Failed"
+        val notification = baseBuilder(context, CHANNEL_BACKUPS)
+            .setContentTitle(title)
+            .setContentText(error ?: "An unknown error occurred")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        manager.notify(ID_BACKUP_OPERATION, notification)
+    }
+
+    fun showRestoreSuccess(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notification = baseBuilder(context, CHANNEL_BACKUPS)
+            .setContentTitle("Restore Complete")
+            .setContentText("Your data has been restored successfully.")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        manager.notify(ID_BACKUP_OPERATION, notification)
+    }
+
+    fun showRestoreFailure(context: Context, error: String?) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notification = baseBuilder(context, CHANNEL_BACKUPS)
+            .setContentTitle("Restore Failed")
+            .setContentText(error ?: "An unknown error occurred")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        manager.notify(ID_BACKUP_OPERATION, notification)
     }
 }
