@@ -336,24 +336,26 @@ private fun ActionSection(
                     }
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ToolzExpressiveButton(
                                 onClick = onCreateBackup,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(20.dp)
+                                modifier = Modifier.weight(1.2f),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                             ) {
-                                Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text("New backup", fontWeight = FontWeight.SemiBold, softWrap = false)
                             }
 
                             ToolzOutlinedExpressiveButton(
                                 onClick = onRestoreFile,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(20.dp)
+                                modifier = Modifier.weight(0.8f),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                             ) {
-                                Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
+                                Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text("Restore", softWrap = false)
                             }
                         }
