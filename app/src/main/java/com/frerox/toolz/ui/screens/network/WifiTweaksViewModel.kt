@@ -152,14 +152,16 @@ class WifiTweaksViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 settingsRepository.networkBenchmarkServers,
-                settingsRepository.networkLastTraceTarget
-            ) { servers, traceTarget ->
-                servers to traceTarget
-            }.collect { (servers, traceTarget) ->
+                settingsRepository.networkLastTraceTarget,
+                settingsRepository.networkDisclaimerShown
+            ) { servers, traceTarget, disclaimerShown ->
+                Triple(servers, traceTarget, disclaimerShown)
+            }.collect { (servers, traceTarget, disclaimerShown) ->
                 val finalServers = if (servers.isEmpty()) dnsProviders.map { it.first }.toSet() else servers
                 _uiState.update { it.copy(
                     selectedBenchmarkProviders = finalServers,
-                    lastTraceTarget = traceTarget
+                    lastTraceTarget = traceTarget,
+                    showDisclaimer = !disclaimerShown
                 ) }
             }
         }
@@ -402,6 +404,12 @@ class WifiTweaksViewModel @Inject constructor(
 
     fun clearLastActionMessage() {
         _uiState.update { it.copy(lastActionMessage = null) }
+    }
+
+    fun dismissDisclaimer() {
+        viewModelScope.launch {
+            settingsRepository.setNetworkDisclaimerShown(true)
+        }
     }
 
     fun fixMyConnection() {
