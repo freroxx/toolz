@@ -83,13 +83,7 @@ class WifiTweaksViewModel @Inject constructor(
         WifiTweaksUiState(
             tweaks = tweakCatalog,
             profiles = profileCatalog,
-            tweakResults = tweakCatalog.associate { it.id to TweakResult(id = it.id) },
-            blocklists = listOf(
-                Blocklist("adguard", "AdGuard Base", "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt", true),
-                Blocklist("oisd", "OISD Big", "https://big.oisd.nl", false),
-                Blocklist("stevenblack", "Steven Black", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", false),
-                Blocklist("energized", "Energized Spark", "https://block.energized.pro/spark/formats/hosts.txt", false)
-            )
+            tweakResults = tweakCatalog.associate { it.id to TweakResult(id = it.id) }
         )
     )
     val uiState: StateFlow<WifiTweaksUiState> = _uiState.asStateFlow()
@@ -162,8 +156,9 @@ class WifiTweaksViewModel @Inject constructor(
             ) { servers, traceTarget ->
                 servers to traceTarget
             }.collect { (servers, traceTarget) ->
+                val finalServers = if (servers.isEmpty()) dnsProviders.map { it.first }.toSet() else servers
                 _uiState.update { it.copy(
-                    selectedBenchmarkProviders = servers,
+                    selectedBenchmarkProviders = finalServers,
                     lastTraceTarget = traceTarget
                 ) }
             }
@@ -546,7 +541,11 @@ class WifiTweaksViewModel @Inject constructor(
         Triple("opendns", "OpenDNS", "208.67.222.222"),
         Triple("mullvad", "Mullvad", "194.242.2.2"),
         Triple("controld", "Control D", "76.76.2.0"),
-        Triple("nextdns", "NextDNS", "45.90.28.0")
+        Triple("nextdns", "NextDNS", "45.90.28.0"),
+        Triple("cleanbrowsing", "CleanBrowsing", "185.228.168.168"),
+        Triple("comodo", "Comodo Secure", "8.26.56.26"),
+        Triple("neustar", "Neustar Ultra", "156.154.70.1"),
+        Triple("gcore", "Gcore", "95.161.212.1")
     )
 
     fun applyCustomDns(hostname: String) {
@@ -574,18 +573,6 @@ class WifiTweaksViewModel @Inject constructor(
                 emitMessage("Failed to apply custom DNS.")
             }
         }
-    }
-
-    fun toggleBlocklist(id: String) {
-        _uiState.update { state ->
-            state.copy(
-                blocklists = state.blocklists.map {
-                    if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it
-                }
-            )
-        }
-        val list = _uiState.value.blocklists.find { it.id == id }
-        addLog("BLOCKLIST", "${if (list?.isEnabled == true) "Enabled" else "Disabled"} ${list?.name}", LogLevel.INFO)
     }
 
     private fun startStabilityCheck() {
