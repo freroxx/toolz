@@ -339,12 +339,12 @@ private fun ActionSection(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             ToolzExpressiveButton(
                                 onClick = onCreateBackup,
-                                modifier = Modifier.weight(1.4f),
+                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(20.dp)
                             ) {
                                 Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(10.dp))
-                                Text("New backup", fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.width(8.dp))
+                                Text("New backup", fontWeight = FontWeight.SemiBold, softWrap = false)
                             }
 
                             ToolzOutlinedExpressiveButton(
@@ -353,8 +353,8 @@ private fun ActionSection(
                                 shape = RoundedCornerShape(20.dp)
                             ) {
                                 Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(10.dp))
-                                Text("Restore")
+                                Spacer(Modifier.width(8.dp))
+                                Text("Restore", softWrap = false)
                             }
                         }
 
