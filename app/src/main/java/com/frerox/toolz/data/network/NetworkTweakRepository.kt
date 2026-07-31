@@ -21,7 +21,7 @@ class NetworkTweakRepository @Inject constructor(
         _tweakResults.value = tweaks.associate { it.id to TweakResult(id = it.id) }
     }
 
-    suspend fun addLog(tag: String, message: String, level: LogLevel) {
+    suspend fun addLog(tag: String, message: String, level: LogLevel = LogLevel.INFO) {
         diagnosticLogDao.insertLog(
             DiagnosticLogEntry(
                 timestamp = System.currentTimeMillis(),
@@ -34,13 +34,32 @@ class NetworkTweakRepository @Inject constructor(
 
     fun getLogs(): Flow<List<DiagnosticLogEntry>> = diagnosticLogDao.getRecentLogs()
 
+    suspend fun runRawCommand(command: String): String {
+        addLog("COMMAND", "> $command", LogLevel.INFO)
+        val result = try {
+            shizukuExecutor.executeForResult(command)
+        } catch (e: Exception) {
+            addLog("COMMAND", "Execution error: ${e.message}", LogLevel.ERROR)
+            return "Error: ${e.message}"
+        }
+        val output = if (result.isSuccess) {
+            result.stdout.ifBlank { "Command executed successfully (exit code 0)." }
+        } else {
+            "Failed (exit code ${result.exitCode}):\n${result.stderr.ifBlank { result.stdout }}"
+        }
+        addLog("COMMAND", output, if (result.isSuccess) LogLevel.SUCCESS else LogLevel.ERROR)
+        return output
+    }
+
     suspend fun applyTweak(tweak: WifiTweak): Boolean {
         if (tweak.type == TweakType.MANUAL_GUIDE) {
             updateTweakResult(tweak.id, TweakStatus.MANUAL, "Manual steps required.")
+            addLog("TWEAK", "Manual guide requested for ${tweak.title}", LogLevel.INFO)
             return true
         }
 
         updateTweakResult(tweak.id, TweakStatus.RUNNING, "Applying...")
+        addLog("TWEAK", "Applying tweak: ${tweak.title}", LogLevel.INFO)
         
         val result = runCommands(tweak.applyCommands)
         if (!result.first) {
@@ -49,20 +68,36 @@ class NetworkTweakRepository @Inject constructor(
             return false
         }
 
-        updateTweakResult(tweak.id, TweakStatus.SUCCESS, "Active", isApplied = true)
-        addLog("TWEAK", "Applied ${tweak.title} successfully", LogLevel.SUCCESS)
+        // Verification check if verification command is specified
+        if (!tweak.verificationCommand.isNullOrBlank()) {
+            val verifyResult = try {
+                shizukuExecutor.executeForResult(tweak.verificationCommand)
+            } catch (e: Exception) {
+                null
+            }
+            if (verifyResult == null || !verifyResult.isSuccess) {
+                val warnMsg = "Applied, but verification check failed (OEM restriction or Android 14+ setting override)."
+                updateTweakResult(tweak.id, TweakStatus.UNSUPPORTED, warnMsg, isApplied = false)
+                addLog("DIAGNOSTIC", "Verification failed for ${tweak.title}: $warnMsg", LogLevel.WARNING)
+                return false
+            }
+        }
+
+        updateTweakResult(tweak.id, TweakStatus.SUCCESS, "Active & Verified", isApplied = true)
+        addLog("TWEAK", "Applied and verified ${tweak.title} successfully", LogLevel.SUCCESS)
         return true
     }
 
     suspend fun undoTweak(tweak: WifiTweak): Boolean {
         updateTweakResult(tweak.id, TweakStatus.RUNNING, "Reverting...")
+        addLog("TWEAK", "Reverting tweak: ${tweak.title}", LogLevel.INFO)
         val result = runCommands(tweak.revertCommands)
         if (!result.first) {
             updateTweakResult(tweak.id, TweakStatus.FAILED, result.second)
             addLog("TWEAK", "Failed to revert ${tweak.title}: ${result.second}", LogLevel.ERROR)
             return false
         }
-        updateTweakResult(tweak.id, TweakStatus.IDLE, "", isApplied = false)
+        updateTweakResult(tweak.id, TweakStatus.IDLE, "Restored default", isApplied = false)
         addLog("TWEAK", "Reverted ${tweak.title}", LogLevel.INFO)
         return true
     }
@@ -83,14 +118,52 @@ class NetworkTweakRepository @Inject constructor(
 
     private suspend fun runCommands(commands: List<String>): Pair<Boolean, String> {
         commands.forEach { command ->
+            addLog("COMMAND", "Executing: $command", LogLevel.INFO)
             val result = try {
                 shizukuExecutor.executeForResult(command)
             } catch (e: Exception) {
-                return false to (e.message ?: "Command failed")
+                return false to (e.message ?: "Command execution failed")
             }
             if (!result.isSuccess) return false to (result.stderr.ifBlank { "Exit code ${result.exitCode}" })
         }
         return true to ""
+    }
+
+    fun buildProfiles(): List<WifiOptimizationProfile> {
+        return listOf(
+            WifiOptimizationProfile(
+                id = "gaming",
+                title = "Gaming & Esports",
+                description = "Forces lowest possible Wi-Fi latency, disables scan throttling, and enables rapid stall recovery.",
+                icon = Icons.Rounded.SportsEsports,
+                tweakIds = listOf("low_latency_mode", "scan_throttle", "data_stall_logic"),
+                accentLabel = "Low Latency"
+            ),
+            WifiOptimizationProfile(
+                id = "streaming",
+                title = "Media Streaming",
+                description = "Prevents deep Wi-Fi sleep off-screen, aggressive access point roaming, and bad Wi-Fi avoidance.",
+                icon = Icons.Rounded.Speed,
+                tweakIds = listOf("scan_throttle", "suspend_optimizations", "avoid_bad_wifi"),
+                accentLabel = "High Throughput"
+            ),
+            WifiOptimizationProfile(
+                id = "privacy",
+                title = "Privacy Guard",
+                description = "Ensures captive portal safety and guides WPA3 security setup.",
+                icon = Icons.Rounded.VerifiedUser,
+                tweakIds = listOf("captive_portal_detection", "force_wpa3"),
+                accentLabel = "Secure"
+            ),
+            WifiOptimizationProfile(
+                id = "power_save",
+                title = "Battery Saver",
+                description = "Optimizes background scan interval to 5 minutes and manages automatic network wakeup.",
+                icon = Icons.Rounded.Timer,
+                tweakIds = listOf("scan_interval", "wifi_auto_wakeup"),
+                accentLabel = "Energy Efficient"
+            )
+        )
     }
 
     fun getSmartFixes(currentRssi: Int, isThrottling: Boolean): List<SmartFixRecommendation> {
@@ -99,16 +172,18 @@ class NetworkTweakRepository @Inject constructor(
             fixes += SmartFixRecommendation(
                 id = "scan_throttle",
                 title = "Unlock faster scans",
-                reason = "Wi-Fi scan throttling is active, causing UI lag.",
+                description = "Wi-Fi scan throttling is active, which delays network discovery.",
+                reason = "Wi-Fi scan throttling is enabled in global settings.",
                 tweakIds = listOf("scan_throttle"),
                 severity = RecommendationSeverity.WARNING
             )
         }
-        if (currentRssi < -70) {
+        if (currentRssi < -70 && currentRssi > -100) {
             fixes += SmartFixRecommendation(
                 id = "weak_signal",
                 title = "Weak signal recovery",
-                reason = "RSSI is $currentRssi dBm. Enable bad-Wi-Fi avoidance and fast stall recovery.",
+                description = "RSSI is currently low ($currentRssi dBm).",
+                reason = "Signal attenuation detected. Enable bad-Wi-Fi avoidance and fast stall recovery.",
                 tweakIds = listOf("avoid_bad_wifi", "data_stall_logic", "adaptive_connectivity"),
                 severity = RecommendationSeverity.CRITICAL
             )
@@ -341,3 +416,4 @@ class NetworkTweakRepository @Inject constructor(
         )
     }
 }
+
