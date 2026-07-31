@@ -11,6 +11,7 @@ import com.frerox.toolz.data.backup.BackupImportResult
 import com.frerox.toolz.data.backup.BackupItem
 import com.frerox.toolz.data.backup.LocalBackupManager
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.VibrationManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -114,6 +115,7 @@ class BackupRestoreViewModel @Inject constructor(
             )
             _uiState.value = _uiState.value.copy(isExporting = false, exportResult = result)
             vibrationManager.vibrateSuccess()
+            NotificationHelper.showBackupSuccess(context, result.fileName)
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "Backup created: ${result.fileName}", Toast.LENGTH_LONG).show()
             }
@@ -121,6 +123,7 @@ class BackupRestoreViewModel @Inject constructor(
             e.printStackTrace()
             _uiState.value = _uiState.value.copy(isExporting = false, error = e.localizedMessage)
             vibrationManager.vibrateError()
+            NotificationHelper.showBackupFailure(context, e.localizedMessage)
         }
     }
 
@@ -140,6 +143,7 @@ class BackupRestoreViewModel @Inject constructor(
             )
             _uiState.value = _uiState.value.copy(isImporting = false, importResult = result)
             vibrationManager.vibrateSuccess()
+            NotificationHelper.showRestoreSuccess(context)
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "Backup restored successfully!", Toast.LENGTH_LONG).show()
             }
@@ -147,6 +151,7 @@ class BackupRestoreViewModel @Inject constructor(
             e.printStackTrace()
             _uiState.value = _uiState.value.copy(isImporting = false, error = e.localizedMessage)
             vibrationManager.vibrateError()
+            NotificationHelper.showRestoreFailure(context, e.localizedMessage)
         }
     }
 }
