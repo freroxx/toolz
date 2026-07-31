@@ -82,6 +82,7 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_NEXTDNS_DNS_URL = stringPreferencesKey("search_nextdns_dns_url")
     private val SEARCH_ENABLED_IMPORTED_LISTS = stringSetPreferencesKey("search_enabled_imported_lists")
     private val SEARCH_ADBLOCK_IMPORTED_COUNT = intPreferencesKey("search_adblock_imported_count")
+    private val SEARCH_FLOATING_TOOLBAR_VISIBLE = booleanPreferencesKey("search_floating_toolbar_visible")
     private val SEARCH_DNS_PROVIDER = stringPreferencesKey("search_dns_provider") // "DEFAULT", "ADGUARD", "CLOUDFLARE", "GOOGLE", "CUSTOM"
     private val SEARCH_CUSTOM_DNS = stringPreferencesKey("search_custom_dns")
     private val SEARCH_CUSTOM_DNS_SECONDARY = stringPreferencesKey("search_custom_dns_secondary")
@@ -100,6 +101,7 @@ class SettingsRepository @Inject constructor(
     val searchNextDnsDnsUrl: Flow<String> = dataStore.data.map { it[SEARCH_NEXTDNS_DNS_URL] ?: "" }
     val searchEnabledImportedLists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ENABLED_IMPORTED_LISTS] ?: emptySet() }
     val searchAdBlockImportedCount: Flow<Int> = dataStore.data.map { it[SEARCH_ADBLOCK_IMPORTED_COUNT] ?: 0 }
+    val searchFloatingToolbarVisible: Flow<Boolean> = dataStore.data.map { it[SEARCH_FLOATING_TOOLBAR_VISIBLE] ?: true }
     val searchDnsProvider: Flow<String> = dataStore.data.map { it[SEARCH_DNS_PROVIDER] ?: "ADGUARD" }
     val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
     val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
@@ -184,6 +186,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setSearchAdBlockImportedCount(count: Int) {
         dataStore.edit { it[SEARCH_ADBLOCK_IMPORTED_COUNT] = count }
+    }
+
+    suspend fun setSearchFloatingToolbarVisible(visible: Boolean) {
+        dataStore.edit { it[SEARCH_FLOATING_TOOLBAR_VISIBLE] = visible }
     }
 
     suspend fun setDnsProvider(provider: String) {
