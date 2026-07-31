@@ -246,10 +246,6 @@ fun WifiTweaksScreen(
                                     onUndoTweak = { tweak ->
                                         vibrationManager?.vibrateClick()
                                         viewModel.undoTweak(tweak)
-                                    },
-                                    onToggleBlocklist = { id ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.toggleBlocklist(id)
                                     }
                                 )
 
@@ -435,7 +431,11 @@ private fun BenchmarkSelectionSheet(
         Triple("opendns", "OpenDNS", "208.67.222.222"),
         Triple("mullvad", "Mullvad", "194.242.2.2"),
         Triple("controld", "Control D", "76.76.2.0"),
-        Triple("nextdns", "NextDNS", "45.90.28.0")
+        Triple("nextdns", "NextDNS", "45.90.28.0"),
+        Triple("cleanbrowsing", "CleanBrowsing", "185.228.168.168"),
+        Triple("comodo", "Comodo Secure", "8.26.56.26"),
+        Triple("neustar", "Neustar Ultra", "156.154.70.1"),
+        Triple("gcore", "Gcore", "95.161.212.1")
     )
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -1438,16 +1438,11 @@ private fun ProfilesTab(
     onBindShizuku: () -> Unit,
     onApplyProfile: (WifiOptimizationProfile) -> Unit,
     onApplyTweak: (WifiTweak) -> Unit,
-    onUndoTweak: (WifiTweak) -> Unit,
-    onToggleBlocklist: (String) -> Unit
+    onUndoTweak: (WifiTweak) -> Unit
 ) {
     val groupedTweaks = remember(state.tweaks) {
         state.tweaks.filter { !it.id.startsWith("private_dns_") }.groupBy { it.category }
     }
-    
-    var showCustomBlocklist by remember { mutableStateOf(false) }
-    var customName by remember { mutableStateOf("") }
-    var customUrl by remember { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier
@@ -1474,42 +1469,6 @@ private fun ProfilesTab(
             }
         }
 
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Block Lists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                IconButton(onClick = { showCustomBlocklist = true }) {
-                    Icon(Icons.Rounded.Add, "Add Custom List")
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (state.blocklists.isEmpty()) {
-                        Text("No blocklists configured. Use DNS engine to enable filtering.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        state.blocklists.forEach { list ->
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(list.name, fontWeight = FontWeight.Bold)
-                                    Text(list.url, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                Switch(checked = list.isEnabled, onCheckedChange = { onToggleBlocklist(list.id) })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         groupedTweaks.forEach { (category, tweaks) ->
             item {
                 Text(
@@ -1529,42 +1488,6 @@ private fun ProfilesTab(
                 )
             }
         }
-    }
-
-    if (showCustomBlocklist) {
-        AlertDialog(
-            onDismissRequest = { showCustomBlocklist = false },
-            confirmButton = {
-                Button(onClick = { 
-                    showCustomBlocklist = false 
-                }) {
-                    Text("Add List")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCustomBlocklist = false }) {
-                    Text("Cancel")
-                }
-            },
-            title = { Text("Add Blocklist", fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        label = { Text("List Name") },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    OutlinedTextField(
-                        value = customUrl,
-                        onValueChange = { customUrl = it },
-                        label = { Text("URL (hosts format)") },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            },
-            shape = RoundedCornerShape(28.dp)
-        )
     }
 }
 
