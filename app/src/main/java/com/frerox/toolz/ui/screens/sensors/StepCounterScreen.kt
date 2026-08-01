@@ -88,14 +88,18 @@ fun StepCounterScreen(
     val scope = rememberCoroutineScope()
 
     if (showDebugDialog) {
-        StepEngineDebugDialog(
-            onDismissRequest = { showDebugDialog = false },
-            logs = state.debugLogs,
-            motionStatus = state.motionStatus,
-            engineMode = state.stepEngineMode,
-            onToggleEngine = { viewModel.updateStepEngineMode(if (it == "STRICT") "SIMPLE" else "STRICT") },
-            onResetEngine = { viewModel.hardResetEngine() }
-        )
+        if (!state.isEnabledInSettings) {
+            showDebugDialog = false
+        } else {
+            StepEngineDebugDialog(
+                onDismissRequest = { showDebugDialog = false },
+                logs = state.debugLogs,
+                motionStatus = state.motionStatus,
+                engineMode = state.stepEngineMode,
+                onToggleEngine = { viewModel.updateStepEngineMode(if (it == "STRICT") "SIMPLE" else "STRICT") },
+                onResetEngine = { viewModel.hardResetEngine() }
+            )
+        }
     }
     
     val activityPermissionState = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -164,11 +168,13 @@ fun StepCounterScreen(
                 title = {
                     Text(
                         text = "FITNESS",
-                        modifier = Modifier.pointerInput(Unit) {
+                        modifier = Modifier.pointerInput(state.isEnabledInSettings) {
                             detectTapGestures(
                                 onLongPress = {
-                                    vibrationManager?.vibrate(100L)
-                                    showDebugDialog = true
+                                    if (state.isEnabledInSettings) {
+                                        vibrationManager?.vibrate(100L)
+                                        showDebugDialog = true
+                                    }
                                 }
                             )
                         }
@@ -319,133 +325,121 @@ private fun StepEngineDebugDialog(
         match?.groupValues?.getOrNull(1) ?: "—"
     }
 
-    // Status color helper
-    fun statusColor(status: String) = when (status) {
-        "WALKING", "ACTIVE"   -> Color(0xFF4CAF50)
-        "CANDIDATE"           -> Color(0xFF64B5F6)
-        "IDLE"                -> Color(0xFFFF9800)
-        "SUSPENDED"           -> Color(0xFFE57373)
-        else                  -> Color.Gray
+    // Material 3 semantic status color container
+    val statusContainerColor = when (motionStatus) {
+        "WALKING", "ACTIVE" -> MaterialTheme.colorScheme.primaryContainer
+        "CANDIDATE", "SEARCHING", "TRACKING" -> MaterialTheme.colorScheme.tertiaryContainer
+        "IDLE" -> MaterialTheme.colorScheme.surfaceContainerHighest
+        "SUSPENDED", "PAUSED" -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val statusContentColor = when (motionStatus) {
+        "WALKING", "ACTIVE" -> MaterialTheme.colorScheme.onPrimaryContainer
+        "CANDIDATE", "SEARCHING", "TRACKING" -> MaterialTheme.colorScheme.onTertiaryContainer
+        "IDLE" -> MaterialTheme.colorScheme.onSurfaceVariant
+        "SUSPENDED", "PAUSED" -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
 
     BasicAlertDialog(
         onDismissRequest = onDismissRequest,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp)
+            .fillMaxWidth(0.98f)
+            .fillMaxHeight(0.96f)
+            .padding(4.dp)
             .clip(LargeExpressiveShape)
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .fillMaxSize(),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = LargeExpressiveShape
         ) {
             Column(
                 modifier = Modifier
-                    .padding(24.dp)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(20.dp)
+                    .fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // ── Header ────────────────────────────────────────────────────
+                // ── Header & Mode Switcher ─────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "ENGINE DEBUG",
+                            text = "Engine Telemetry",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isStrict) "STRICT — Rhythmic Validation" else "SIMPLE — Peak Detection",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isStrict) Color(0xFF4FC3F7) else Color(0xFF81C784)
+                            text = if (isStrict) "Strict Detection Filter" else "Simple Step Detection",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    // Live motion state badge
-                    Surface(
-                        color = statusColor(motionStatus).copy(alpha = 0.15f),
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, statusColor(motionStatus))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(statusColor(motionStatus), CircleShape)
-                            )
-                            Text(
-                                text = motionStatus,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+
+                    // Mode switch filter chips
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = isStrict,
+                            onClick = { if (!isStrict) onToggleEngine(engineMode) },
+                            label = { Text("Strict", style = MaterialTheme.typography.labelSmall) },
+                            shape = CircleShape
+                        )
+                        FilterChip(
+                            selected = !isStrict,
+                            onClick = { if (isStrict) onToggleEngine(engineMode) },
+                            label = { Text("Simple", style = MaterialTheme.typography.labelSmall) },
+                            shape = CircleShape
+                        )
                     }
                 }
 
-                // ── FSM State Track (STRICT) / Status strip (SIMPLE) ──────────
-                if (isStrict) {
-                    val states = listOf("IDLE", "CANDIDATE", "WALKING", "SUSPENDED")
+                // ── Status Banner ─────────────────────────────────────────────
+                Surface(
+                    color = statusContainerColor,
+                    shape = SmallExpressiveShape,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        states.forEach { s ->
-                            val isActive = motionStatus == s
-                            Surface(
-                                modifier = Modifier.weight(1f),
-                                shape = SmallExpressiveShape,
-                                color = if (isActive) statusColor(s).copy(alpha = 0.2f)
-                                        else MaterialTheme.colorScheme.surfaceContainerHighest
-                            ) {
-                                Text(
-                                    text = s,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (isActive) FontWeight.Black else FontWeight.Normal,
-                                    color = if (isActive) statusColor(s) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 5.dp, horizontal = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // SIMPLE — show active indicator
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = SmallExpressiveShape,
-                        color = (if (motionStatus == "SUSPENDED") Color(0xFFE57373) else Color(0xFF81C784)).copy(alpha = 0.1f)
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                if (motionStatus == "SUSPENDED") Icons.Rounded.PauseCircle else Icons.Rounded.RadioButtonChecked,
-                                null,
-                                tint = if (motionStatus == "SUSPENDED") Color(0xFFE57373) else Color(0xFF81C784),
-                                modifier = Modifier.size(16.dp)
+                                imageVector = when (motionStatus) {
+                                    "WALKING", "ACTIVE", "TRACKING" -> Icons.Rounded.DirectionsRun
+                                    "SEARCHING", "CANDIDATE" -> Icons.Rounded.Sync
+                                    "SUSPENDED", "PAUSED" -> Icons.Rounded.PauseCircle
+                                    else -> Icons.Rounded.Sensors
+                                },
+                                contentDescription = null,
+                                tint = statusContentColor,
+                                modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = if (motionStatus == "SUSPENDED") "Engine suspended — gyro freeze or GPS block"
-                                       else "Engine active — counting accelerometer peaks",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "State: $motionStatus",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = statusContentColor
                             )
                         }
+
+                        Text(
+                            text = if (isStrict) "Strict DSP" else "Simple Accel",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusContentColor.copy(alpha = 0.8f)
+                        )
                     }
                 }
 
-                // ── Live Stats Row ────────────────────────────────────────────
+                // ── Live Stats Cards ──────────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -453,28 +447,35 @@ private fun StepEngineDebugDialog(
                     StatChip(label = "CADENCE", value = cadenceBpm, modifier = Modifier.weight(1f))
                     if (isStrict) {
                         StatChip(label = "PENDING", value = pendingSteps, modifier = Modifier.weight(1f))
-                        StatChip(label = "CANDIDATE", value = candidateCount, modifier = Modifier.weight(1f))
+                        StatChip(label = "BUFFER", value = candidateCount, modifier = Modifier.weight(1f))
                     } else {
-                        StatChip(label = "GYRO", value = if (isGyroFrozen) "FROZEN" else "OK",
-                            valueColor = if (isGyroFrozen) Color(0xFFE57373) else Color(0xFF81C784),
-                            modifier = Modifier.weight(1f))
+                        StatChip(
+                            label = "GYRO GATE",
+                            value = if (isGyroFrozen) "FROZEN" else "ACTIVE",
+                            valueColor = if (isGyroFrozen) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
-                // ── Log Section ───────────────────────────────────────────────
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // ── Log Section (Fills remaining height) ──────────────────────
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "LIVE TELEMETRY",
+                            "LIVE LOGS",
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.outline
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        // Copy all logs button
                         IconButton(
                             onClick = {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -486,7 +487,7 @@ private fun StepEngineDebugDialog(
                             Icon(
                                 Icons.Rounded.ContentCopy,
                                 contentDescription = "Copy logs",
-                                tint = MaterialTheme.colorScheme.outline,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -495,14 +496,15 @@ private fun StepEngineDebugDialog(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(280.dp),
-                        color = Color(0xFF0E0E0E),
+                            .weight(1f),
+                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
                         shape = SmallExpressiveShape,
-                        border = BorderStroke(1.dp, Color.DarkGray.copy(alpha = 0.4f))
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     ) {
                         AnimatedContent(
                             targetState = logResetKey,
                             label = "logResetAnimation",
+                            modifier = Modifier.fillMaxSize(),
                             transitionSpec = {
                                 slideInVertically { height -> height } + fadeIn() togetherWith
                                 slideOutVertically { height -> -height } + fadeOut()
@@ -512,15 +514,15 @@ private fun StepEngineDebugDialog(
                             LaunchedEffect(logs.size) {
                                 scrollState.animateScrollTo(scrollState.maxValue)
                             }
-                            Box(modifier = Modifier.padding(10.dp)) {
+                            Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                                 if (logs.isEmpty()) {
                                     Text(
-                                        "No telemetry yet. Start walking...",
+                                        "No telemetry logged yet. Take a few steps...",
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = 9.sp
+                                            fontSize = 11.sp
                                         ),
-                                        color = Color.DarkGray,
+                                        color = MaterialTheme.colorScheme.outline,
                                         modifier = Modifier.align(Alignment.Center)
                                     )
                                 } else {
@@ -528,33 +530,27 @@ private fun StepEngineDebugDialog(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .verticalScroll(scrollState),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         logs.forEach { log ->
+                                            val logColor = when {
+                                                log.contains("Emitted") || log.contains("Step #") || log.contains("CONFIRMED") ->
+                                                    MaterialTheme.colorScheme.primary
+                                                log.contains("SEARCHING") || log.contains("TRACKING") || log.contains("Rising") ->
+                                                    MaterialTheme.colorScheme.tertiary
+                                                log.contains("PAUSED") || log.contains("SUSPENDED") || log.contains("TIMEOUT") || log.contains("Invalid") || log.contains("Refractory") ->
+                                                    MaterialTheme.colorScheme.error
+                                                else ->
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
                                             Text(
                                                 text = log,
                                                 style = MaterialTheme.typography.bodySmall.copy(
                                                     fontFamily = FontFamily.Monospace,
-                                                    fontSize = 9.sp,
-                                                    lineHeight = 12.sp
+                                                    fontSize = 10.sp,
+                                                    lineHeight = 14.sp
                                                 ),
-                                                color = when {
-                                                    log.contains("CONFIRMED") || log.contains("Emitted")
-                                                        || log.contains("OS FLUSH") || log.contains("OS SAFETY NET")
-                                                        || log.contains("Accel confirmed") -> Color(0xFF81C784)
-                                                    log.contains("Rising") || log.contains("RISING")
-                                                        || log.contains("CANDIDATE") || log.contains("OS BUFFERED") -> Color(0xFF64B5F6)
-                                                    log.contains("Step #") || log.contains("SIMPLE: Step") -> Color(0xFF4FC3F7)
-                                                    log.contains("RESET") || log.contains("TIMEOUT")
-                                                        || log.contains("Safety net") || log.contains("safety net") -> Color(0xFFFFB74D)
-                                                    log.contains("REJECTED") || log.contains("FAIL")
-                                                        || log.contains("SUSPENDED") || log.contains("OS DROPPED") -> Color(0xFFE57373)
-                                                    log.contains("GPS") || log.contains("vehicle")
-                                                        || log.contains("driving") -> Color(0xFFCE93D8)
-                                                    log.contains("IDLE") || log.contains("OS QUEUED")
-                                                        || log.contains("Initializ") -> Color(0xFF8D8D8D)
-                                                    else -> Color(0xFFBDBDBD)
-                                                }
+                                                color = logColor
                                             )
                                         }
                                     }
@@ -564,35 +560,29 @@ private fun StepEngineDebugDialog(
                     }
                 }
 
-                // ── Action Row ────────────────────────────────────────────────
+                // ── Action Buttons ────────────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    ToolzExpressiveButton(
+                    OutlinedButton(
                         onClick = {
                             logResetKey++
                             onResetEngine()
                         },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        )
+                        shape = CircleShape
                     ) {
                         Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("RESET", fontWeight = FontWeight.Black)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Reset Engine")
                     }
-                    ToolzExpressiveButton(
+                    Button(
                         onClick = onDismissRequest,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        )
+                        shape = CircleShape
                     ) {
-                        Text("CLOSE", fontWeight = FontWeight.Black)
+                        Text("Close")
                     }
                 }
             }
@@ -605,32 +595,31 @@ private fun StatChip(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
-    valueColor: Color = Color(0xFF81C784)
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
 ) {
     Surface(
         modifier = modifier,
         shape = SmallExpressiveShape,
-        color = Color(0xFF1A1A1A)
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Column(
             modifier = Modifier
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 8.sp
+                    fontSize = 9.sp
                 ),
-                color = Color(0xFF6D6D6D)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontFamily = FontFamily.Monospace
                 ),
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.Bold,
                 color = valueColor
             )
         }
