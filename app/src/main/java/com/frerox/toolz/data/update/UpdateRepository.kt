@@ -104,7 +104,10 @@ class UpdateRepository @Inject constructor(
         }
     }
 
+    private var updateApkUrlInternal: String? = null
+
     private suspend fun saveUpdateInfo(update: UpdateCheckResult.NewUpdate) {
+        updateApkUrlInternal = update.downloadUrl
         settingsRepository.setAvailableUpdate(
             update.version,
             update.changelog,
@@ -116,21 +119,41 @@ class UpdateRepository @Inject constructor(
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         NotificationHelper.createAllChannels(context)
 
-        val intent = Intent(context, MainActivity::class.java).apply {
+        // 1. Content Intent: Open Update Screen
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra("show_update_dialog", true)
+            putExtra("navigate_to", "update_settings")
         }
-        
-        val pendingIntent = PendingIntent.getActivity(context, 8001, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val contentPendingIntent = PendingIntent.getActivity(context, 8001, contentIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        // 2. Action: Download Now
+        val downloadUrl = updateApkUrlInternal ?: ""
+        val downloadIntent = Intent(context, com.frerox.toolz.worker.UpdateReceiver::class.java).apply {
+            action = "com.frerox.toolz.DOWNLOAD_UPDATE"
+            putExtra("url", downloadUrl)
+            putExtra("version", version)
+        }
+        val downloadPendingIntent = PendingIntent.getBroadcast(context, 8002, downloadIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        // 3. Action: View Changelog
+        val changelogIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("navigate_to", "update_settings")
+        }
+        val changelogPendingIntent = PendingIntent.getActivity(context, 8003, changelogIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Update Available: $version")
-            .setContentText("A new version of Toolz is ready for deployment.")
+            .setContentTitle("New Version Available: $version")
+            .setContentText("A new version of Toolz is ready for deployment. Tap to see what's new.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Toolz $version is available with bug fixes and new features. Download now to stay up to date."))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(contentPendingIntent)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_SYSTEM)
+            .addAction(R.drawable.ic_launcher_foreground, "Download", downloadPendingIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "Details", changelogPendingIntent)
             .build()
 
         notificationManager.notify(NotificationHelper.ID_APP_UPDATE, notification)
