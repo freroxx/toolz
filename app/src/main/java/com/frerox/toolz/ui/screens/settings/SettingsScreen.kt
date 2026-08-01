@@ -735,7 +735,7 @@ fun SettingsScreen(
                                         icon = Icons.AutoMirrored.Rounded.VolumeDown,
                                         checked = audioFocusDucking,
                                         onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) },
-                                        modifier = Modifier.padding(start = 48.dp).scale(0.8f)
+                                        modifier = Modifier.padding(start = 16.dp)
                                     )
                                 }
                             }
