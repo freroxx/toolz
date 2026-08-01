@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2026 Toolz Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.frerox.toolz.ui.screens.sensors
 
 import android.content.Intent
@@ -8,12 +25,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,23 +37,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,7 +61,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
+import kotlin.math.sin
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -68,25 +76,17 @@ fun VoiceRecorderScreen(
     val context = LocalContext.current
     var showSettingsSheet by remember { mutableStateOf(false) }
 
-    val archiveLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { } // We just want to open the picker to the folder, no specific file selection needed
-
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "RECORDER",
-                subtitle = "Precision Audio Capture",
+                title = "Voice Recorder",
                 navigationIcon = {
                     IconButton(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         },
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .clip(SmallExpressiveShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(start = 4.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
@@ -97,267 +97,100 @@ fun VoiceRecorderScreen(
                             vibrationManager?.vibrateClick()
                             showSettingsSheet = true
                         },
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .clip(SmallExpressiveShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                        modifier = Modifier.padding(end = 4.dp)
                     ) {
                         Icon(Icons.Rounded.Tune, contentDescription = "Settings")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                modifier = Modifier.statusBarsPadding()
+                modifier = Modifier.statusBarsPadding(),
+                titleHorizontalAlignment = Alignment.Start
             )
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
-            ToolzHorizontalFloatingToolbar(
-                expanded = true,
-                modifier = Modifier.padding(bottom = 16.dp),
-                content = {
-                    FilledIconButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            if (uiState.isRecording) viewModel.stopRecording()
-                            else viewModel.startRecording()
-                        },
-                        modifier = Modifier.size(64.dp),
-                        shape = MediumExpressiveShape,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(
-                            if (uiState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic, 
-                            contentDescription = null,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
+            RecorderFloatingToolbar(
+                uiState = uiState,
+                onRecord = {
+                    vibrationManager?.vibrateClick()
+                    if (uiState.isRecording) viewModel.stopRecording()
+                    else viewModel.startRecording()
                 },
-                trailingContent = {
-                    if (uiState.isRecording) {
-                        clickableItem(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                if (uiState.isPaused) viewModel.resumeRecording()
-                                else viewModel.pauseRecording()
-                            },
-                            icon = { Icon(if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null) },
-                            label = if (uiState.isPaused) "RESUME" else "PAUSE"
-                        )
-                        clickableItem(
-                            onClick = {
-                                vibrationManager?.vibrateTick()
-                                viewModel.addMark()
-                            },
-                            icon = { Icon(Icons.Rounded.BookmarkBorder, null) },
-                            label = "MARK"
-                        )
-                    }
-                    clickableItem(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            try {
-                                val uri = uiState.customOutputPath?.toUri() ?: context.getExternalFilesDir("recordings")?.toUri()
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    data = uri
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                }
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                // Fallback to generic picker if direct view fails
-                                try {
-                                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                                        type = "audio/*"
-                                        addCategory(Intent.CATEGORY_OPENABLE)
-                                    }
-                                    context.startActivity(intent)
-                                } catch (e2: Exception) {
-                                    e2.printStackTrace()
-                                }
+                onPauseResume = {
+                    vibrationManager?.vibrateClick()
+                    if (uiState.isPaused) viewModel.resumeRecording()
+                    else viewModel.pauseRecording()
+                },
+                onMark = {
+                    vibrationManager?.vibrateTick()
+                    viewModel.addMark()
+                },
+                onOpenFolder = {
+                    vibrationManager?.vibrateClick()
+                    try {
+                        val uri = uiState.customOutputPath?.toUri()
+                            ?: context.getExternalFilesDir("recordings")?.toUri()
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            data = uri
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        try {
+                            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                                type = "audio/*"
+                                addCategory(Intent.CATEGORY_OPENABLE)
                             }
-                        },
-                        icon = { Icon(Icons.Rounded.FolderCopy, null) },
-                        label = "ARCHIVE"
-                    )
+                            context.startActivity(intent)
+                        } catch (e2: Exception) {
+                            e2.printStackTrace()
+                        }
+                    }
                 }
             )
         },
         floatingActionButtonPosition = FabPosition.Center
     ) { padding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-            .padding(top = padding.calculateTopPadding())
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .toolzBackground()
+                .padding(top = padding.calculateTopPadding())
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Energetic Recording Visualization Area in Squircle Container
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                    shape = ExtraLargeExpressiveShape,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 40.dp, horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(320.dp)) {
-                            // Dynamic background glow responding to state
-                            if (!performanceMode) {
-                                val infiniteTransition = rememberInfiniteTransition(label = "GlowPulse")
-                                val glowScale by infiniteTransition.animateFloat(
-                                    initialValue = 0.8f,
-                                    targetValue = 1.2f,
-                                    animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
-                                    label = "Scale"
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .scale(glowScale)
-                                        .background(
-                                            Brush.radialGradient(
-                                                listOf(
-                                                    (if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary).copy(alpha = 0.15f),
-                                                    Color.Transparent
-                                                )
-                                            ),
-                                            CircleShape
-                                        )
-                                )
-                            }
 
-                            // Pulsing Mic Icon for recording feedback
-                            if (uiState.isRecording && !uiState.isPaused) {
-                                LiveMicIcon(
-                                    isRecording = true,
-                                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-20).dp)
-                                )
-                            }
+                // ─── Recording status card ───────────────────────────────────
+                RecordingStatusCard(
+                    uiState = uiState,
+                    performanceMode = performanceMode,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp)
+                )
 
-                            // Waveform / Amplitude visualization
-                            if (uiState.isRecording) {
-                                WaveformAnimationExpressive(amplitude = uiState.maxAmplitude)
-                            } else {
-                                RecordingRippleAnimationExpressive(performanceMode)
-                            }
-                            
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = formatDuration(uiState.durationMillis),
-                                    style = MaterialTheme.typography.displayLarge.copy(
-                                        fontSize = 84.sp,
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.Monospace,
-                                        letterSpacing = (-4.5).sp
-                                    ),
-                                    color = if (uiState.isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                                )
-                                
-                                AnimatedVisibility(
-                                    visible = uiState.isRecording,
-                                    enter = fadeIn() + scaleIn(),
-                                    exit = fadeOut() + scaleOut()
-                                ) {
-                                    ExpressiveStatePill(
-                                        text = if (uiState.isPaused) "SESSION PAUSED" else "LIVE CAPTURE",
-                                        icon = if (uiState.isPaused) Icons.Rounded.Pause else Icons.Rounded.GraphicEq,
-                                        color = if (uiState.isPaused) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.padding(top = 16.dp)
-                                    )
-                                }
-                            }
-                        }
+                Spacer(Modifier.height(8.dp))
 
-                        if (uiState.marks.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier.padding(top = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                uiState.marks.takeLast(3).forEach { mark ->
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                        shape = CircleShape
-                                    ) {
-                                        Text(
-                                            formatDuration(mark),
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                // ─── Recordings list ─────────────────────────────────────────
+                RecordingsSection(
+                    uiState = uiState,
+                    performanceMode = performanceMode,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp),
+                    onTogglePlay = { file ->
+                        vibrationManager?.vibrateClick()
+                        viewModel.togglePlayback(file)
+                    },
+                    onDelete = { file ->
+                        vibrationManager?.vibrateClick()
+                        viewModel.deleteRecording(file)
+                    },
+                    onRename = { file, name ->
+                        vibrationManager?.vibrateSuccess()
+                        viewModel.renameRecording(file, name)
                     }
-                }
-
-                // Audio Archive List with Staggered Entrance
-                Column(
-                    modifier = Modifier.weight(1f).padding(horizontal = 24.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                            shape = SmallExpressiveShape
-                        ) {
-                            Text(
-                                "AUDIO ARCHIVE",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 2.sp
-                            )
-                        }
-                        Text(
-                            "${uiState.recordings.size} CAPTURES",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
-                    
-                    if (uiState.recordings.isEmpty()) {
-                        EmptyArchiveView()
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize().then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 100.dp)),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(bottom = 120.dp)
-                        ) {
-                            itemsIndexed(uiState.recordings, key = { _, it -> it.file.absolutePath }) { index, recordingItem ->
-                                StaggeredEntrance(index = index) {
-                                    RecordingCardExpressive(
-                                        file = recordingItem.file,
-                                        isPlaying = uiState.playingFile == recordingItem.file && uiState.isPlaying,
-                                        playbackPosition = if (uiState.playingFile == recordingItem.file) uiState.playbackPosition else 0,
-                                        playbackDuration = if (uiState.playingFile == recordingItem.file) uiState.playbackDuration else 0,
-                                        marks = recordingItem.marks,
-                                        onTogglePlay = { 
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.togglePlayback(recordingItem.file) 
-                                        },
-                                        onDelete = { 
-                                            vibrationManager?.vibrateClick()
-                                            viewModel.deleteRecording(recordingItem.file) 
-                                        },
-                                        onRename = { 
-                                            vibrationManager?.vibrateSuccess()
-                                            viewModel.renameRecording(recordingItem.file, it) 
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                )
             }
         }
 
@@ -373,269 +206,523 @@ fun VoiceRecorderScreen(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Floating Toolbar
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WaveformAnimationExpressive(amplitude: Int) {
-    val infiniteTransition = rememberInfiniteTransition(label = "LiquidSphere")
-    
-    val baseRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing)),
-        label = "BaseRotation"
+private fun RecorderFloatingToolbar(
+    uiState: RecordingState,
+    onRecord: () -> Unit,
+    onPauseResume: () -> Unit,
+    onMark: () -> Unit,
+    onOpenFolder: () -> Unit
+) {
+    ToolzHorizontalFloatingToolbar(
+        expanded = true,
+        modifier = Modifier.padding(bottom = 16.dp),
+        content = {
+            // Primary record / stop button
+            FilledIconButton(
+                onClick = onRecord,
+                modifier = Modifier.size(56.dp),
+                shape = MediumExpressiveShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = if (uiState.isRecording)
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = if (uiState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic,
+                    contentDescription = if (uiState.isRecording) "Stop" else "Record",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+        },
+        trailingContent = {
+            if (uiState.isRecording) {
+                clickableItem(
+                    onClick = onPauseResume,
+                    icon = {
+                        Icon(
+                            imageVector = if (uiState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                            contentDescription = null
+                        )
+                    },
+                    label = if (uiState.isPaused) "Resume" else "Pause"
+                )
+                clickableItem(
+                    onClick = onMark,
+                    icon = { Icon(Icons.Rounded.BookmarkAdd, contentDescription = null) },
+                    label = "Mark"
+                )
+            }
+            clickableItem(
+                onClick = onOpenFolder,
+                icon = { Icon(Icons.Rounded.FolderOpen, contentDescription = null) },
+                label = "Folder"
+            )
+        }
     )
-    
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recording Status Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RecordingStatusCard(
+    uiState: RecordingState,
+    performanceMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val recordingColor = if (uiState.isRecording)
+        MaterialTheme.colorScheme.error
+    else
+        MaterialTheme.colorScheme.primary
+
+    ElevatedCard(
+        modifier = modifier,
+        shape = LargeExpressiveShape,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+
+            // Timer
+            Text(
+                text = formatDuration(uiState.durationMillis),
+                style = MaterialTheme.typography.displayMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-1.5).sp
+                ),
+                color = if (uiState.isRecording)
+                    MaterialTheme.colorScheme.error
+                else
+                    MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            // Waveform visualization
+            AnimatedContent(
+                targetState = uiState.isRecording,
+                transitionSpec = {
+                    fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                },
+                label = "WaveformSwitch"
+            ) { isRecording ->
+                if (isRecording) {
+                    RecorderWaveform(
+                        amplitude = uiState.maxAmplitude,
+                        isPaused = uiState.isPaused,
+                        color = recordingColor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    )
+                } else {
+                    IdleWaveform(
+                        performanceMode = performanceMode,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // State chip
+            AnimatedVisibility(
+                visible = uiState.isRecording,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(
+                            text = if (uiState.isPaused) "Paused" else "Recording",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (uiState.isPaused)
+                                Icons.Rounded.Pause
+                            else
+                                Icons.Rounded.FiberManualRecord,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = recordingColor
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = recordingColor.copy(alpha = 0.1f),
+                        labelColor = recordingColor,
+                        leadingIconContentColor = recordingColor
+                    ),
+                    border = AssistChipDefaults.assistChipBorder(
+                        enabled = true,
+                        borderColor = recordingColor.copy(alpha = 0.25f)
+                    )
+                )
+            }
+
+            // Mark chips
+            AnimatedVisibility(
+                visible = uiState.marks.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.Bookmark,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        uiState.marks.takeLast(5).forEach { mark ->
+                            SuggestionChip(
+                                onClick = {},
+                                label = {
+                                    Text(
+                                        text = formatDuration(mark),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            )
+                        }
+                        if (uiState.marks.size > 5) {
+                            Text(
+                                "+${uiState.marks.size - 5}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Waveforms
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RecorderWaveform(
+    amplitude: Int,
+    isPaused: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val barCount = 28
     val normAmplitude = (amplitude.toFloat() / 32768f).coerceIn(0f, 1f)
     val animatedAmplitude by animateFloatAsState(
-        targetValue = normAmplitude,
-        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
-        label = "Amplitude"
+        targetValue = if (isPaused) 0f else normAmplitude,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+        label = "amp"
+    )
+    val infiniteTransition = rememberInfiniteTransition(label = "wavePhase")
+    val phase by if (!isPaused) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * Math.PI).toFloat(),
+            animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing)),
+            label = "phase"
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
+
+    Canvas(modifier = modifier) {
+        val barWidth = size.width / (barCount * 2f - 1f)
+        val maxBarHeight = size.height
+
+        for (i in 0 until barCount) {
+            val sinVal = sin(phase + i * 0.45f)
+            val barFrac = (0.08f + animatedAmplitude * 0.65f + sinVal * 0.15f * animatedAmplitude)
+                .coerceIn(0.06f, 1f)
+            val barHeight = maxBarHeight * barFrac
+            val left = i * barWidth * 2f
+            val top = (size.height - barHeight) / 2f
+
+            drawRoundRect(
+                color = color.copy(alpha = 0.3f + animatedAmplitude * 0.5f),
+                topLeft = Offset(left, top),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun IdleWaveform(
+    performanceMode: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    if (performanceMode) {
+        // Static gentle bars in performance mode
+        Canvas(modifier = modifier) {
+            val barCount = 28
+            val barWidth = size.width / (barCount * 2f - 1f)
+            val heights = listOf(0.15f, 0.25f, 0.18f, 0.3f, 0.2f, 0.12f, 0.22f)
+            for (i in 0 until barCount) {
+                val frac = heights[i % heights.size]
+                val barHeight = size.height * frac
+                val left = i * barWidth * 2f
+                val top = (size.height - barHeight) / 2f
+                drawRoundRect(
+                    color = color.copy(alpha = 0.2f),
+                    topLeft = Offset(left, top),
+                    size = Size(barWidth, barHeight),
+                    cornerRadius = CornerRadius(barWidth / 2f)
+                )
+            }
+        }
+        return
+    }
+
+    val barCount = 28
+    val infiniteTransition = rememberInfiniteTransition(label = "idleWave")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing)),
+        label = "idlePhase"
     )
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = this.center
-            val radius = (size.minDimension / 3f) + (animatedAmplitude * size.minDimension / 6f)
-            
-            // Outer fluid layer
-            rotate(baseRotation) {
-                drawCircle(
-                    brush = Brush.sweepGradient(
-                        colors = listOf(
-                            Color.Red.copy(alpha = 0.1f),
-                            Color.Red.copy(alpha = 0.4f),
-                            Color.Red.copy(alpha = 0.1f)
-                        )
-                    ),
-                    radius = radius * 1.4f,
-                    center = center,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-            }
-            
-            // Core liquid body
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.Red.copy(alpha = 0.8f),
-                        Color.Red.copy(alpha = 0.2f),
-                        Color.Transparent
-                    ),
-                    center = center,
-                    radius = radius * 1.2f
-                ),
-                radius = radius,
-                center = center
+    Canvas(modifier = modifier) {
+        val barWidth = size.width / (barCount * 2f - 1f)
+        for (i in 0 until barCount) {
+            val sinVal = sin(phase.toDouble() + i * 0.4).toFloat()
+            val frac = (0.08f + sinVal * 0.12f + 0.06f).coerceIn(0.04f, 0.35f)
+            val barHeight = size.height * frac
+            val left = i * barWidth * 2f
+            val top = (size.height - barHeight) / 2f
+            drawRoundRect(
+                color = color.copy(alpha = 0.2f),
+                topLeft = Offset(left, top),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f)
             )
-            
-            // Animated "waves" inside core
-            repeat(3) { i ->
-                val waveRotation = baseRotation * (1f + i * 0.2f) * (if (i % 2 == 0) 1f else -1f)
-                rotate(waveRotation) {
-                    drawArc(
-                        color = Color.White.copy(alpha = 0.3f),
-                        startAngle = 0f,
-                        sweepAngle = 90f + (animatedAmplitude * 40f),
-                        useCenter = false,
-                        style = Stroke(width = (2 + i).dp.toPx(), cap = StrokeCap.Round),
-                        size = Size(radius * 1.8f, radius * 1.8f),
-                        topLeft = Offset(center.x - radius * 0.9f, center.y - radius * 0.9f)
-                    )
-                }
-            }
         }
-        
-        // Inner "breathing" core
-        Box(
-            modifier = Modifier
-                .size((80 + animatedAmplitude * 40).dp)
-                .graphicsLayer {
-                    alpha = 0.4f + animatedAmplitude * 0.6f
-                    scaleX = 0.9f + animatedAmplitude * 0.2f
-                    scaleY = 0.9f + animatedAmplitude * 0.2f
-                }
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color.White, Color.Transparent)
-                    ),
-                    CircleShape
-                )
-        )
     }
 }
 
-@Composable
-private fun RecordingRippleAnimationExpressive(performanceMode: Boolean) {
-    if (performanceMode) return
-    val infiniteTransition = rememberInfiniteTransition(label = "OrganicRipple")
-    
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
-        repeat(3) { index ->
-            val duration = 2500 + (index * 600)
-            val delay = index * 800
-            
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 0.6f,
-                targetValue = 2.2f,
-                animationSpec = infiniteRepeatable(
-                    tween(duration, delayMillis = delay, easing = FastOutSlowInEasing),
-                    RepeatMode.Restart
-                ),
-                label = "RippleScale$index"
-            )
-            
-            val alpha by infiniteTransition.animateFloat(
-                initialValue = 0.4f,
-                targetValue = 0f,
-                animationSpec = infiniteRepeatable(
-                    tween(duration, delayMillis = delay, easing = LinearOutSlowInEasing),
-                    RepeatMode.Restart
-                ),
-                label = "RippleAlpha$index"
-            )
+// ─────────────────────────────────────────────────────────────────────────────
+// Recordings Section
+// ─────────────────────────────────────────────────────────────────────────────
 
-            Box(
+@Composable
+private fun RecordingsSection(
+    uiState: RecordingState,
+    performanceMode: Boolean,
+    modifier: Modifier = Modifier,
+    onTogglePlay: (File) -> Unit,
+    onDelete: (File) -> Unit,
+    onRename: (File, String) -> Unit
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Recordings",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "${uiState.recordings.size}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        if (uiState.recordings.isEmpty()) {
+            EmptyRecordingsView()
+        } else {
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        this.alpha = alpha
+                    .then(
+                        if (performanceMode) Modifier
+                        else Modifier.fadingEdges(top = 8.dp, bottom = 100.dp)
+                    ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 120.dp)
+            ) {
+                itemsIndexed(
+                    uiState.recordings,
+                    key = { _, item -> item.file.absolutePath }
+                ) { index, item ->
+                    StaggeredEntrance(index = index) {
+                        RecordingCard(
+                            file = item.file,
+                            isPlaying = uiState.playingFile == item.file && uiState.isPlaying,
+                            playbackPosition = if (uiState.playingFile == item.file) uiState.playbackPosition else 0,
+                            playbackDuration = if (uiState.playingFile == item.file) uiState.playbackDuration else 0,
+                            marks = item.marks,
+                            onTogglePlay = { onTogglePlay(item.file) },
+                            onDelete = { onDelete(item.file) },
+                            onRename = { onRename(item.file, it) }
+                        )
                     }
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                Color.Transparent
-                            )
-                        ),
-                        CircleShape
-                    )
-                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape)
-            )
+                }
+            }
         }
-        
-        // Central pulse
-        val centerScale by infiniteTransition.animateFloat(
-            initialValue = 0.95f,
-            targetValue = 1.05f,
-            animationSpec = infiniteRepeatable(
-                tween(1500, easing = EaseInOutSine),
-                RepeatMode.Reverse
-            ),
-            label = "CenterPulse"
-        )
-        
-        Box(
-            modifier = Modifier
-                .size(140.dp)
-                .scale(centerScale)
-                .background(
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                    CircleShape
-                )
-                .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), CircleShape)
-        )
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Recording Card
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun RecordingCardExpressive(
+private fun RecordingCard(
     file: File,
     isPlaying: Boolean,
     playbackPosition: Int,
     playbackDuration: Int,
-    marks: List<Long> = emptyList(),
+    marks: List<Long>,
     onTogglePlay: () -> Unit,
     onDelete: () -> Unit,
     onRename: (String) -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf(file.nameWithoutExtension) }
+    var newName by remember(file) { mutableStateOf(file.nameWithoutExtension) }
 
     ExpressiveCard(
-        onClick = { onTogglePlay() },
-        modifier = Modifier.fillMaxWidth().pointerInput(Unit) {
-            detectTapGestures(onLongPress = { showRenameDialog = true }, onTap = { onTogglePlay() })
-        },
+        onClick = onTogglePlay,
+        onLongClick = { showRenameDialog = true },
         shape = SquircleShape,
-        containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
-        elevation = 0.dp
+        containerColor = if (isPlaying)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+        else
+            MaterialTheme.colorScheme.surfaceContainerLow,
+        border = if (isPlaying)
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+        else
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(56.dp),
+                // Play/Stop icon
+                FilledTonalIconButton(
+                    onClick = onTogglePlay,
+                    modifier = Modifier.size(48.dp),
                     shape = SmallExpressiveShape,
-                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = if (isPlaying)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = if (isPlaying)
+                            MaterialTheme.colorScheme.onPrimary
+                        else
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (isPlaying) {
-                            ExpressiveLoadingIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                    AnimatedContent(
+                        targetState = isPlaying,
+                        transitionSpec = {
+                            fadeIn(tween(150)) togetherWith fadeOut(tween(100))
+                        },
+                        label = "PlayIcon"
+                    ) { playing ->
+                        if (playing) {
+                            Icon(Icons.Rounded.Pause, contentDescription = "Pause", modifier = Modifier.size(22.dp))
                         } else {
-                            Icon(
-                                Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", modifier = Modifier.size(22.dp))
                         }
                     }
                 }
-                Spacer(Modifier.width(20.dp))
+
+                Spacer(Modifier.width(14.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        file.nameWithoutExtension, 
-                        style = MaterialTheme.typography.bodyLarge, 
-                        fontWeight = FontWeight.Black, 
+                        text = file.nameWithoutExtension,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        SimpleDateFormat("dd MMM yyyy • HH:mm", Locale.getDefault()).format(Date(file.lastModified())).uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp
+                        text = SimpleDateFormat("d MMM yyyy · HH:mm", Locale.getDefault())
+                            .format(Date(file.lastModified())),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                
-                IconButton(onClick = { showDeleteDialog = true }, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
+
+                IconButton(
+                    onClick = { showDeleteDialog = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
-            
-            if (playbackDuration > 0 && (isPlaying || (playbackPosition > 0 && !isPlaying))) {
-                Spacer(Modifier.height(20.dp))
-                // Official Linear Wavy Progress Indicator with Marks
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.Center) {
-                    val width = maxWidth
-                    ToolzWavyLinearProgressIndicator(
-                        progress = { playbackPosition.toFloat() / playbackDuration.toFloat() },
-                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+
+            // Playback progress (only shown when this card is active)
+            AnimatedVisibility(
+                visible = playbackDuration > 0 && (isPlaying || playbackPosition > 0),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(modifier = Modifier.padding(top = 14.dp)) {
+                    PlaybackProgressWithMarks(
+                        progress = if (playbackDuration > 0) playbackPosition.toFloat() / playbackDuration.toFloat() else 0f,
+                        marks = marks,
+                        playbackDuration = playbackDuration,
+                        isPlaying = isPlaying
                     )
-                    
-                    // Marks Visualization on Progress Bar
-                    marks.forEach { mark ->
-                        val ratio = mark.toFloat() / playbackDuration.toFloat()
-                        if (ratio in 0f..1f) {
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = width * ratio - 2.dp)
-                                    .size(4.dp, 16.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
-                                    .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                            )
-                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = formatDuration(playbackPosition.toLong()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = formatDuration(playbackDuration.toLong()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                }
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(formatDuration(playbackPosition.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    Text(formatDuration(playbackDuration.toLong()), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                 }
             }
         }
@@ -644,86 +731,146 @@ private fun RecordingCardExpressive(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("PURGE CAPTURE?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            text = { Text("This audio data will be permanently removed from secure storage.") },
+            title = { Text("Delete recording?") },
+            text = { Text("\"${file.nameWithoutExtension}\" will be permanently deleted.") },
             confirmButton = {
-                ToolzExpressiveButton(onClick = { onDelete(); showDeleteDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
-                    Text("DELETE", fontWeight = FontWeight.Black)
+                ToolzExpressiveButton(
+                    onClick = { onDelete(); showDeleteDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Delete")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
             },
-            shape = SquircleShape,
-            containerColor = MaterialTheme.colorScheme.surface
+            shape = SquircleShape
         )
     }
 
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("RENAME SESSION", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            title = { Text("Rename") },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = BouncyShape,
+                    label = { Text("Recording name") },
+                    shape = SmallExpressiveShape,
                     singleLine = true
                 )
             },
             confirmButton = {
                 ToolzExpressiveButton(onClick = { onRename(newName); showRenameDialog = false }) {
-                    Text("SAVE", fontWeight = FontWeight.Black)
+                    Text("Save")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("CANCEL", fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
             },
-            shape = SquircleShape,
-            containerColor = MaterialTheme.colorScheme.surface
+            shape = SquircleShape
         )
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Playback Progress with Mark indicators
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun EmptyArchiveView() {
-    StaggeredEntrance(index = 0) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(
-                    modifier = Modifier.size(160.dp),
-                    shape = ExtraLargeExpressiveShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.MicNone,
-                            null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                        )
-                    }
+private fun PlaybackProgressWithMarks(
+    progress: Float,
+    marks: List<Long>,
+    playbackDuration: Int,
+    isPlaying: Boolean
+) {
+    val density = LocalDensity.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // Progress bar
+        ToolzWavyLinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(CircleShape),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        )
+
+        // Mark notches drawn on top
+        if (marks.isNotEmpty() && playbackDuration > 0) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                marks.forEach { mark ->
+                    val ratio = (mark.toFloat() / playbackDuration.toFloat()).coerceIn(0f, 1f)
+                    val x = ratio * size.width
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.9f),
+                        start = Offset(x, size.height * 0.1f),
+                        end = Offset(x, size.height * 0.9f),
+                        strokeWidth = with(density) { 2.dp.toPx() },
+                        cap = StrokeCap.Round
+                    )
                 }
-                Spacer(Modifier.height(32.dp))
-                Text(
-                    "NO CAPTURES FOUND",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                    letterSpacing = 2.sp
-                )
-                Text(
-                    "START RECORDING TO POPULATE ARCHIVE",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    modifier = Modifier.padding(top = 8.dp)
-                )
             }
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty State
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun EmptyRecordingsView() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(88.dp),
+                shape = LargeExpressiveShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.MicNone,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
+            Text(
+                text = "No recordings yet",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Tap the mic button to start",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings Sheet
+// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -737,32 +884,81 @@ fun VoiceRecorderSettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
         shape = ExtraLargeExpressiveShape
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 48.dp)) {
-            Text("AUDIO CONFIGURATION", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp, modifier = Modifier.padding(vertical = 16.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
 
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = SquircleShape, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("SENSITIVITY (GAIN)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
-                    Text("${String.format("%.1f", state.gainLevel)}x", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    ExpressiveSlider(value = state.gainLevel, onValueChange = onGainChange, valueRange = 0.5f..3.0f, modifier = Modifier.padding(top = 12.dp))
+            // Gain
+            ElevatedCard(shape = SquircleShape) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Input Gain", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(
+                            "${String.format("%.1f", state.gainLevel)}×",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    ExpressiveSlider(
+                        value = state.gainLevel,
+                        onValueChange = onGainChange,
+                        valueRange = 0.5f..3.0f,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
 
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = SquircleShape, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                Row(modifier = Modifier.padding(24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            // Background recording
+            ElevatedCard(shape = SquircleShape) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("PERSISTENT RECORDING", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
-                        Text("Allow capture in background", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                        Text(
+                            "Background recording",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "Keep recording when app is in background",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    ExpressiveSwitch(checked = state.isBackgroundEnabled, onCheckedChange = onBackgroundToggle)
+                    Spacer(Modifier.width(12.dp))
+                    ExpressiveSwitch(
+                        checked = state.isBackgroundEnabled,
+                        onCheckedChange = onBackgroundToggle
+                    )
                 }
             }
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 private fun formatDuration(millis: Long): String {
     val minutes = TimeUnit.MILLISECONDS.toMinutes(millis)

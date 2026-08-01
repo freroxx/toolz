@@ -242,7 +242,7 @@ Have a bug report, feature suggestion, or want to contribute? Open an issue or p
 
 ## 📄 License
 
-Toolz is open source. See the repository for license details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ---
 
