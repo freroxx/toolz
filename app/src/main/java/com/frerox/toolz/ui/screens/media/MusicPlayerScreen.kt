@@ -360,18 +360,11 @@ fun MusicPlayerScreen(
                             if (state.performanceMode) {
                                 EnterTransition.None togetherWith ExitTransition.None
                             } else {
-                                val targetLabel = tabs.getOrNull(targetState)
-                                val initialLabel = tabs.getOrNull(initialState)
-
-                                if (targetLabel == "Karaoke" || initialLabel == "Karaoke") {
-                                    fadeIn(tween(350)) togetherWith fadeOut(tween(250))
-                                } else {
-                                    val dir = if (targetState > initialState) 1 else -1
-                                    (slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { dir * it / 4 } + fadeIn(tween(220)))
-                                        .togetherWith(
-                                            slideOutHorizontally(tween(200, easing = FastOutSlowInEasing)) { -dir * it / 4 } + fadeOut(tween(150))
-                                        )
-                                }
+                                val dir = if (targetState > initialState) 1 else -1
+                                (slideInHorizontally(tween(400, easing = EaseOutQuart)) { dir * it } + fadeIn(tween(300)))
+                                    .togetherWith(
+                                        slideOutHorizontally(tween(400, easing = EaseOutQuart)) { -dir * it / 3 } + fadeOut(tween(300))
+                                    )
                             }
                         },
                         label = "TabContent"
@@ -3833,17 +3826,42 @@ fun FullPlayerView(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (state.showVisualizer) {
-                                    AudioVisualizerHalo(
-                                        visualizerData = visualizerData,
-                                        isPlaying = state.isPlaying,
-                                        artMaxSize = artMaxSize,
-                                        shape = state.artShape,
-                                        thumbnailUri = track.thumbnailUri,
-                                        trackKey = track.uri,
-                                        rotation = if (rotationFeatureOn) rotationAnimatable.value else 0f,
-                                        sensitivity = state.visualizerSensitivity,
-                                        autoSensitivity = state.visualizerAutoSensitivity
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        AudioVisualizerHalo(
+                                            visualizerData = visualizerData,
+                                            isPlaying = state.isPlaying,
+                                            artMaxSize = artMaxSize,
+                                            shape = state.artShape,
+                                            thumbnailUri = track.thumbnailUri,
+                                            trackKey = track.uri,
+                                            rotation = if (rotationFeatureOn) rotationAnimatable.value else 0f,
+                                            sensitivity = state.visualizerSensitivity,
+                                            autoSensitivity = state.visualizerAutoSensitivity
+                                        )
+
+                                        if (state.visualizerNeedsPermission) {
+                                            val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+                                            Surface(
+                                                onClick = { micPermission.launchPermissionRequest() },
+                                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                                                shape = RoundedCornerShape(16.dp),
+                                                modifier = Modifier.padding(horizontal = 32.dp).zIndex(10f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.MicOff, null, modifier = Modifier.size(18.dp))
+                                                    Text(
+                                                        "Tap to grant mic access for visualizer",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 } else if (!state.performanceMode) {
                                     val haloAlpha by animateFloatAsState(if (state.isPlaying) 0.32f else 0.08f, tween(900), label = "haloAlpha")
                                     val haloScale by animateFloatAsState(if (state.isPlaying) 1.04f else 1f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessLow), label = "haloScale")
@@ -4404,22 +4422,49 @@ private fun SegmentToggle(
                 modifier = Modifier.padding(vertical = 16.dp)
             )
 
-            Text(
-                "Playback Speed",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "Playback Speed",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "${"%.2f".format(state.playbackSpeed)}x",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            ExpressiveSlider(
+                value = state.playbackSpeed,
+                onValueChange = onSetPlaybackSpeed,
+                valueRange = 0.5f..2.5f,
+                modifier = Modifier.fillMaxWidth()
             )
 
             val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-            val speedLabels = speeds.map { "${it}x" }
-            val currentSpeedIndex = speeds.indexOf(state.playbackSpeed).coerceAtLeast(0)
-            ToolzConnectedButtonGroup(
-                selectedIndex = currentSpeedIndex,
-                options = speedLabels,
-                onOptionSelected = { onSetPlaybackSpeed(speeds[it]) },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(speeds) { speed ->
+                    ExpressiveFilterChip(
+                        selected = state.playbackSpeed == speed,
+                        onClick = { onSetPlaybackSpeed(speed) },
+                        label = { Text("${speed}x", fontWeight = FontWeight.Bold) },
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                }
+            }
 
             Spacer(Modifier.height(24.dp))
             Column(
