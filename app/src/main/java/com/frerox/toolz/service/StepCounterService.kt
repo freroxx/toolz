@@ -113,6 +113,7 @@ class StepCounterService : Service(), SensorEventListener {
     private var isGpsEnabled = false
     private var hasActivityPermission = false
     private var isBatterySaveActive = true
+    private var isCounterEnabled = true
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     private val todayStr: String get() = dateFormat.format(Date())
@@ -138,7 +139,9 @@ class StepCounterService : Service(), SensorEventListener {
             debugCallback?.onLogReceived(entry)
             
             // Update motion status
-            val status = if (currentEngineMode == "STRICT") {
+            val status = if (!isCounterEnabled) {
+                "PAUSED"
+            } else if (currentEngineMode == "STRICT") {
                 dspEngine?.state?.name ?: "IDLE"
             } else {
                 if (simpleEngine?.isSuspended == true) "SUSPENDED" else "ACTIVE"
@@ -162,6 +165,7 @@ class StepCounterService : Service(), SensorEventListener {
     // ------------------------------------------------------------------
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
+            if (!isCounterEnabled) return
             val location = result.lastLocation ?: return
             
             // Speedometer Anti-Cheat — if speed > 10 m/s, user is likely driving
@@ -209,6 +213,7 @@ class StepCounterService : Service(), SensorEventListener {
         if (currentEngineMode == "STRICT") {
             dspEngine = StrictEngine(
                 onStepEmitted = { delta ->
+                    if (!isCounterEnabled) return@StrictEngine
                     logToDebug("STRICT: Emitted $delta steps")
                     serviceScope.launch {
                         val today = todayStr
@@ -224,6 +229,7 @@ class StepCounterService : Service(), SensorEventListener {
         } else {
             simpleEngine = SimpleStepEngine(
                 onStepDetected = { countDelta, _ ->
+                    if (!isCounterEnabled) return@SimpleStepEngine
                     logToDebug("SIMPLE: Emitted $countDelta steps")
                     serviceScope.launch {
                         val today = todayStr
@@ -248,8 +254,6 @@ class StepCounterService : Service(), SensorEventListener {
             return START_STICKY
         }
 
-        // (Initialization of today's baseline is no longer needed here as the delta logic handles it)
-
         // Start foreground with correct type — Android 14+ requires ACTIVITY_RECOGNITION
         startForegroundWithCorrectType(steps = 0)
 
@@ -268,7 +272,17 @@ class StepCounterService : Service(), SensorEventListener {
                 val useGps = t2.second
                 val batterySave = t2.third
 
-                if (!counterEnabled) stopSelf()
+                isCounterEnabled = counterEnabled
+
+                if (!counterEnabled) {
+                    sensorManager?.unregisterListener(this@StepCounterService)
+                    stopGpsTracking()
+                    dspEngine?.resetEngine()
+                    simpleEngine?.reset()
+                    logToDebug("Engine PAUSED by user settings — stopped all sensors")
+                    stopSelf()
+                    return@combine
+                }
 
                 currentGoal = goal
                 isNotificationEnabled = globalEnabled && stepEnabled
@@ -310,28 +324,25 @@ class StepCounterService : Service(), SensorEventListener {
     }
 
     private fun registerSensor() {
-        // ALWAYS use GAME delay for engines to ensure we don't miss peaks.
-        // SENSOR_DELAY_NORMAL (200ms) is too slow for DSP.
+        if (!isCounterEnabled) {
+            sensorManager?.unregisterListener(this)
+            return
+        }
+
         val delay = SensorManager.SENSOR_DELAY_GAME
-        
-        logToDebug("Registering sensors: GAME delay (~20ms/50Hz)")
+        logToDebug("Registering sensors ($currentEngineMode): GAME delay (~20ms/50Hz)")
         sensorManager?.unregisterListener(this)
 
-        if (currentEngineMode == "STRICT") {
-            accelSensor?.let { sensor ->
+        accelSensor?.let { sensor ->
+            sensorManager?.registerListener(this, sensor, delay, sensorHandler)
+        }
+
+        if (currentEngineMode == "SIMPLE") {
+            gyroSensor?.let { sensor ->
                 sensorManager?.registerListener(this, sensor, delay, sensorHandler)
             }
-            // StrictEngine ONLY uses accelerometer. Gyro and Step Counter are NOT registered.
-        } else {
-            if (stepSensor != null) {
-                sensorManager?.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
-            } else {
-                accelSensor?.let { sensor ->
-                    sensorManager?.registerListener(this, sensor, delay, sensorHandler)
-                }
-                gyroSensor?.let { sensor ->
-                    sensorManager?.registerListener(this, sensor, delay, sensorHandler)
-                }
+            stepSensor?.let { sensor ->
+                sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
             }
         }
     }
@@ -340,6 +351,8 @@ class StepCounterService : Service(), SensorEventListener {
     // Sensor Events
     // ------------------------------------------------------------------
     override fun onSensorChanged(event: SensorEvent) {
+        if (!isCounterEnabled) return
+
         when (event.sensor.type) {
             Sensor.TYPE_STEP_COUNTER -> {
                 onStepCounterEvent(event.values[0].toLong())
