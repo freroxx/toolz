@@ -632,7 +632,7 @@ class SettingsRepository @Inject constructor(
     val musicLyricsSeekEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_SEEK_ENABLED] ?: true }
     val musicLyricsFont: Flow<String> = dataStore.data.map { it[MUSIC_LYRICS_FONT] ?: "SANS_SERIF" }
     val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: true }
-    val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: false }
+    val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: true }
     val karaokeWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_WORD_SYNC_ENABLED] ?: true }
     val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: false }
     // Mode supersedes the legacy boolean. Default is AUTO.
