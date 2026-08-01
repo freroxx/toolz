@@ -193,13 +193,13 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
             LaunchedEffect(offlineState) {
                 if (offlineState != lastOfflineState) {
+                    lastOfflineState = offlineState
                     offlineOverlayReady = false
                     offlineOverlayVisible = true
                     delay(1200)
                     offlineOverlayReady = true
                     delay(1000)
                     offlineOverlayVisible = false
-                    lastOfflineState = offlineState
                 }
             }
 
