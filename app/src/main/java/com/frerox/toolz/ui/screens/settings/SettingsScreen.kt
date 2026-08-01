@@ -731,11 +731,11 @@ fun SettingsScreen(
                                 if (musicAudioFocus) {
                                     SettingsToggleItem(
                                         title = "Allow Ducking",
-                                        subtitle = "Lower volume instead of pausing for transient sounds",
+                                        subtitle = "Lower volume instead of pausing",
                                         icon = Icons.AutoMirrored.Rounded.VolumeDown,
                                         checked = audioFocusDucking,
                                         onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) },
-                                        modifier = Modifier.padding(start = 16.dp)
+                                        modifier = Modifier.padding(start = 32.dp).scale(0.9f)
                                     )
                                 }
                             }
