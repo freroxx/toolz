@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.StickyNote2
+import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -603,26 +604,6 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "INTERACTION" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "INTERACTION") null else "INTERACTION" }
                         ) {
-                            if (matches(searchQuery, "vpn", "dns", "live", "notification", "network")) {
-                                val liveVpn by viewModel.liveVpnNotifications.collectAsState(initial = true)
-                                val liveDns by viewModel.liveDnsNotifications.collectAsState(initial = true)
-                                
-                                SettingsToggleItem(
-                                    title = "Live VPN Notifications",
-                                    subtitle = "Show active VPN status in system tray",
-                                    icon = Icons.Rounded.VpnLock,
-                                    checked = liveVpn,
-                                    onCheckedChange = { viewModel.setLiveVpnNotifications(it) }
-                                )
-                                SettingsToggleItem(
-                                    title = "Live DNS Notifications",
-                                    subtitle = "Alert on DNS latency changes",
-                                    icon = Icons.Rounded.Dns,
-                                    checked = liveDns,
-                                    onCheckedChange = { viewModel.setLiveDnsNotifications(it) }
-                                )
-                            }
-
                             if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill", "hud")) {
                                 SettingsToggleItem(
                                     title = "Smart Overlay (Pill)",
@@ -738,7 +719,8 @@ fun SettingsScreen(
                                 )
                             }
 
-                            if (matches(searchQuery, "audio", "focus", "pause", "smart")) {
+                            if (matches(searchQuery, "audio", "focus", "pause", "smart", "ducking")) {
+                                val audioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = true)
                                 SettingsToggleItem(
                                     title = "Smart Audio Focus",
                                     subtitle = "Auto-pause for other apps",
@@ -746,6 +728,16 @@ fun SettingsScreen(
                                     checked = musicAudioFocus,
                                     onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                                 )
+                                if (musicAudioFocus) {
+                                    SettingsToggleItem(
+                                        title = "Allow Ducking",
+                                        subtitle = "Lower volume instead of pausing for transient sounds",
+                                        icon = Icons.AutoMirrored.Rounded.VolumeDown,
+                                        checked = audioFocusDucking,
+                                        onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) },
+                                        modifier = Modifier.padding(start = 16.dp)
+                                    )
+                                }
                             }
 
                             if (matches(searchQuery, "karaoke", "mic", "sing", "audio")) {
@@ -1670,11 +1662,12 @@ fun SettingsToggleItem(
     icon: ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     Surface(
         onClick = { if (enabled) onCheckedChange(!checked) },
-        modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f),
+        modifier = modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.6f),
         enabled = enabled,
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
