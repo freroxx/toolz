@@ -54,7 +54,24 @@ class UpdateReceiver : BroadcastReceiver() {
             if (apkFile.exists()) {
                 InstallHelper.installApk(context, apkFile)
             }
+        } else if (intent.action == "com.frerox.toolz.DOWNLOAD_UPDATE") {
+            val url = intent.getStringExtra("url") ?: return
+            val version = intent.getStringExtra("version") ?: "New"
+            downloadApk(context, version, url)
         }
+    }
+
+    private fun downloadApk(context: Context, version: String, url: String) {
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val request = DownloadManager.Request(android.net.Uri.parse(url))
+            .setTitle("Toolz System Update")
+            .setDescription("Downloading version $version")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, "toolz_update_$version.apk")
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        downloadManager.enqueue(request)
     }
 
     private fun showReadyToInstallNotification(context: Context, apkFile: File) {
