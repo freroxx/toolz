@@ -255,6 +255,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Player Settings
     private val MUSIC_AUDIO_FOCUS = booleanPreferencesKey("music_audio_focus")
+    private val MUSIC_AUDIO_FOCUS_DUCKING = booleanPreferencesKey("music_audio_focus_ducking")
     private val MUSIC_SHAKE_TO_SKIP = booleanPreferencesKey("music_shake_to_skip")
     private val MUSIC_SHAKE_SENSITIVITY = floatPreferencesKey("music_shake_sensitivity")
     private val MUSIC_PLAYBACK_SPEED = floatPreferencesKey("music_playback_speed")
@@ -595,6 +596,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Flows
     val musicAudioFocus: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
+    val musicAudioFocusDucking: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS_DUCKING] ?: true }
     val musicShakeToSkip: Flow<Boolean> = dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
     val musicShakeSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_SHAKE_SENSITIVITY] ?: 0.3f }
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
@@ -748,11 +750,11 @@ class SettingsRepository @Inject constructor(
     ) { enabled, offline -> if (offline) false else enabled }
 
     val aiSearchChatEnabled: Flow<Boolean> = combine(
-        dataStore.data.map { it[AI_SEARCH_CHAT_ENABLED] ?: true },
+        dataStore.data.map { it[AI_SEARCH_CHAT_ENABLED] ?: false },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
-    val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
+    val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: false }
 
     val aiClipboardMonitoringEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: false },
@@ -915,6 +917,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Setters
     suspend fun setMusicAudioFocus(enabled: Boolean) { dataStore.edit { it[MUSIC_AUDIO_FOCUS] = enabled } }
+    suspend fun setMusicAudioFocusDucking(enabled: Boolean) { dataStore.edit { it[MUSIC_AUDIO_FOCUS_DUCKING] = enabled } }
     suspend fun setMusicShakeToSkip(enabled: Boolean) { dataStore.edit { it[MUSIC_SHAKE_TO_SKIP] = enabled } }
     suspend fun setMusicShakeSensitivity(sensitivity: Float) { dataStore.edit { it[MUSIC_SHAKE_SENSITIVITY] = sensitivity } }
     suspend fun setMusicPlaybackSpeed(speed: Float) { dataStore.edit { it[MUSIC_PLAYBACK_SPEED] = speed } }
