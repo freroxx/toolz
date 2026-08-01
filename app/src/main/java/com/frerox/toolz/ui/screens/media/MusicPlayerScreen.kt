@@ -1024,48 +1024,79 @@ private fun PillTabRow(
 
 @Composable
 private fun PermissionPlaceholder(onAllow: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(40.dp)
+            modifier = Modifier
+                .padding(horizontal = 48.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            ExpressivePulseIndicator(
-                modifier = Modifier.size(140.dp),
-                color = MaterialTheme.colorScheme.primary
-            )
+            StaggeredEntrance(index = 0) {
+                Surface(
+                    modifier = Modifier.size(120.dp),
+                    shape = LargeExpressiveShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 2.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.LibraryMusic,
+                            null,
+                            modifier = Modifier.size(64.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            StaggeredEntrance(index = 1) {
+                Text(
+                    "Storage Access",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
-            Icon(
-                Icons.Rounded.FolderSpecial,
-                null,
-                modifier = Modifier.size(60.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            )
-            Spacer(Modifier.height(32.dp))
-            Text(
-                "Storage Access",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Toolz needs access to find and play music on your device.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(Modifier.height(36.dp))
-            ToolzExpressiveButton(
-                onClick = onAllow,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxWidth(0.75f)
-                    .height(58.dp)
-            ) {
-                Icon(Icons.Rounded.Lock, null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("GRANT ACCESS", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+
+            StaggeredEntrance(index = 2) {
+                Text(
+                    "Toolz needs access to find and play music on your device.",
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                    lineHeight = 24.sp
+                )
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            StaggeredEntrance(index = 3) {
+                ToolzExpressiveButton(
+                    onClick = onAllow,
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                ) {
+                    Icon(Icons.Rounded.LockOpen, null, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "GRANT ACCESS",
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
         }
     }
