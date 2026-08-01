@@ -170,6 +170,7 @@ class MusicPlayerViewModel @Inject constructor(
     private var pendingAction     : (() -> Unit)? = null
     private var equalizer         : Equalizer?  = null
     private var visualizer        : Visualizer? = null
+    private var attachedSessionId : Int = C.AUDIO_SESSION_ID_UNSET
 
     // Reused across every onFftDataCapture callback (fires up to ~60x/sec)
     // to avoid allocating fresh FloatArrays on the audio capture thread.
@@ -177,7 +178,7 @@ class MusicPlayerViewModel @Inject constructor(
     // are alternated as the published result so the buffer currently held
     // by `_visualizerData.value` (being read on the UI thread) is never the
     // same object this thread is about to write into next.
-    private val spectrumScratch = FloatArray(64)
+    private var spectrumScratch = FloatArray(64)
     private val spectrumBufA = FloatArray(64)
     private val spectrumBufB = FloatArray(64)
     private var useSpectrumBufA = true
@@ -209,7 +210,7 @@ class MusicPlayerViewModel @Inject constructor(
             if (isPlaying) {
                 startProgressUpdate()
                 startPlayerService()
-                startVisualizer()
+                if (_uiState.value.showVisualizer) startVisualizer()
                 initEqualizer()
                 hapticClick()
             } else {
@@ -232,9 +233,12 @@ class MusicPlayerViewModel @Inject constructor(
          */
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // Immediately clear catalog resolve state – the player now owns the item.
-            // `isResolvingCatalog` should only be true while we are resolving
-            // a URL *before* handing it to the player, not after.
             _uiState.update { it.copy(isResolvingCatalog = false) }
+
+            // Invalidate the session ID on track change to force a re-attach
+            // when the player becomes ready, and clear current data.
+            attachedSessionId = C.AUDIO_SESSION_ID_UNSET
+            _visualizerData.value = FloatArray(0)
 
             val uri       = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
             val metadata  = mediaItem?.mediaMetadata
@@ -311,11 +315,10 @@ class MusicPlayerViewModel @Inject constructor(
                         _uiState.update { it.copy(currentTrack = updated) }
                     }
 
-                    // Extra safety net for the visualizer: if a skip left it
-                    // unattached (e.g. the retry loop was still waiting on a
-                    // session id while the track buffered), the track
-                    // becoming READY is the clearest possible signal to try
-                    // again right now rather than waiting on a poll.
+                    // Extra safety net for the visualizer: if a skip or transition left it
+                    // unattached or attached to a stale session, the track
+                    // becoming READY is the clearest possible signal to sync
+                    // right now.
                     if (_uiState.value.showVisualizer && player.isPlaying) {
                         startVisualizer()
                     }
@@ -819,9 +822,16 @@ class MusicPlayerViewModel @Inject constructor(
             if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, showVisualizer is off")
             return
         }
+
+        val currentSessionId = player.audioSessionId
         if (visualizer != null) {
-            if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, already attached")
-            return
+            if (attachedSessionId == currentSessionId && currentSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, already attached to session $currentSessionId")
+                return
+            } else {
+                if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: session mismatch ($attachedSessionId -> $currentSessionId), detaching...")
+                detachVisualizer()
+            }
         }
 
         // android.media.audiofx.Visualizer throws SecurityException without
@@ -848,20 +858,16 @@ class MusicPlayerViewModel @Inject constructor(
             while (currentCoroutineContext().isActive &&
                 _uiState.value.showVisualizer &&
                 !_uiState.value.visualizerNeedsPermission &&
-                visualizer == null
+                (visualizer == null || attachedSessionId == C.AUDIO_SESSION_ID_UNSET)
             ) {
                 val sessionId = player.audioSessionId
-                if (sessionId != 0 && sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                if (sessionId > 0) {
                     if (attachVisualizer(sessionId)) {
                         if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attach loop: attached OK on session $sessionId")
                         return@launch
                     }
                 }
-                // Was 120ms — a valid session id after play/skip usually
-                // shows up within a frame or two, so polling this much
-                // slower than that was pure added latency on top of
-                // whatever ExoPlayer itself needed to buffer.
-                delay(30L)
+                delay(100L) // Slower poll, we now also trigger on STATE_READY
             }
         }
     }
@@ -884,6 +890,7 @@ class MusicPlayerViewModel @Inject constructor(
         val maxRate = Visualizer.getMaxCaptureRate()
         if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attachVisualizer: sessionId=$sessionId maxCaptureRate=$maxRate")
         fftCaptureCount = 0
+        attachedSessionId = sessionId
         return runCatching {
             visualizer = Visualizer(sessionId).apply {
                 // 1024 is plenty of resolution for 64 log-spaced output
@@ -988,6 +995,7 @@ class MusicPlayerViewModel @Inject constructor(
             visualizer?.release()
         }
         visualizer = null
+        attachedSessionId = C.AUDIO_SESSION_ID_UNSET
     }
 
     private fun stopVisualizer() {
