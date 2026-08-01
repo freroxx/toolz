@@ -83,17 +83,7 @@ class SettingsViewModel @Inject constructor(
     val pillCaffeinateEnabled = repository.pillCaffeinateEnabled
     val pillFlashlightEnabled = repository.pillFlashlightEnabled
     val pillCatalogDownloadEnabled = repository.pillCatalogDownloadEnabled
-    val liveVpnNotifications = repository.liveVpnNotifications
-    val liveDnsNotifications = repository.liveDnsNotifications
     val caffeinateAutoSummaryNotification = repository.caffeinateAutoSummaryNotification
-
-    fun setLiveVpnNotifications(enabled: Boolean) {
-        viewModelScope.launch { repository.setLiveVpnNotifications(enabled) }
-    }
-
-    fun setLiveDnsNotifications(enabled: Boolean) {
-        viewModelScope.launch { repository.setLiveDnsNotifications(enabled) }
-    }
 
     fun setCaffeinateAutoSummaryNotification(enabled: Boolean) {
         viewModelScope.launch { repository.setCaffeinateAutoSummaryNotification(enabled) }
@@ -104,6 +94,7 @@ class SettingsViewModel @Inject constructor(
     val offlineModeEnabled = repository.offlineModeEnabled
 
     val musicAudioFocus = repository.musicAudioFocus
+    val musicAudioFocusDucking = repository.musicAudioFocusDucking
     val musicShakeToSkip = repository.musicShakeToSkip
     val musicShakeSensitivity = repository.musicShakeSensitivity
     val musicPlaybackSpeed = repository.musicPlaybackSpeed
@@ -180,6 +171,7 @@ class SettingsViewModel @Inject constructor(
     fun setOfflineModeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setOfflineModeEnabled(enabled) }
 
     fun setMusicAudioFocus(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocus(enabled) }
+    fun setMusicAudioFocusDucking(enabled: Boolean) = viewModelScope.launch { repository.setMusicAudioFocusDucking(enabled) }
     fun setMusicShakeToSkip(enabled: Boolean) = viewModelScope.launch { repository.setMusicShakeToSkip(enabled) }
     fun setMusicShakeSensitivity(sensitivity: Float) = viewModelScope.launch { repository.setMusicShakeSensitivity(sensitivity) }
     fun setMusicPlaybackSpeed(speed: Float) = viewModelScope.launch { repository.setMusicPlaybackSpeed(speed) }
