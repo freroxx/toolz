@@ -108,6 +108,8 @@ import com.frerox.toolz.util.VibrationManager
 import com.frerox.toolz.worker.NotificationCleanupWorker
 import com.frerox.toolz.worker.UpdateCheckWorker
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import java.util.concurrent.TimeUnit
@@ -300,11 +302,14 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         }
 
         lifecycleScope.launch {
-            settingsRepository.flashlightNotificationsEnabled.collect { enabled ->
+            combine(
+                settingsRepository.flashlightNotificationsEnabled,
+                flashlightRepository.isOn
+            ) { notifEnabled, flashOn -> notifEnabled to flashOn }.collect { (notifEnabled, flashOn) ->
                 val intent = Intent(this@MainActivity, FlashlightService::class.java)
-                if (enabled) {
+                if (flashOn) {
                     startForegroundService(intent)
-                } else if (!flashlightRepository.isOn.value) {
+                } else if (!notifEnabled) {
                     stopService(intent)
                 }
             }
