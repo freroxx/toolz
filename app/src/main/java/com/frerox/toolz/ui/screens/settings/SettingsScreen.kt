@@ -734,8 +734,7 @@ fun SettingsScreen(
                                         subtitle = "Lower volume instead of pausing",
                                         icon = Icons.AutoMirrored.Rounded.VolumeDown,
                                         checked = audioFocusDucking,
-                                        onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) },
-                                        modifier = Modifier.padding(start = 16.dp)
+                                        onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) }
                                     )
                                 }
                             }
