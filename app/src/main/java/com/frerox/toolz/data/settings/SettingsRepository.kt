@@ -596,7 +596,7 @@ class SettingsRepository @Inject constructor(
 
     // Music Flows
     val musicAudioFocus: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
-    val musicAudioFocusDucking: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS_DUCKING] ?: true }
+    val musicAudioFocusDucking: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS_DUCKING] ?: false }
     val musicShakeToSkip: Flow<Boolean> = dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
     val musicShakeSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_SHAKE_SENSITIVITY] ?: 0.3f }
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
