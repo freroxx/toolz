@@ -115,13 +115,13 @@ class MusicRepository @Inject constructor(
                 val path = cursor.getString(dataColumn)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
 
-                val albumArtUri = if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null
-
                 val existingTrack = musicDao.getTrackByUri(contentUri.toString())
                     ?: (path?.let { musicDao.getTrackByPath(it) })
                     ?: musicDao.findDuplicate(title, artist, duration, path)
 
                 if (existingTrack == null) {
+                    val embeddedThumb = getEmbeddedArtworkUri(contentUri)
+                    val thumbnailUri = embeddedThumb ?: (if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null)
                     tracks.add(
                         MusicTrack(
                             uri = contentUri.toString(),
@@ -130,7 +130,7 @@ class MusicRepository @Inject constructor(
                             album = album,
                             albumId = albumId,
                             duration = duration,
-                            thumbnailUri = albumArtUri,
+                            thumbnailUri = thumbnailUri,
                             isFavorite = false,
                             lastPlayed = 0L,
                             playCount = 0,
@@ -139,20 +139,29 @@ class MusicRepository @Inject constructor(
                         )
                     )
                 } else {
-                    // Update existing track and fix potential buggy thumbnailUri (where it was set to the audio file Uri)
+                    // Update existing track and fix potential buggy thumbnailUri
                     val currentThumb = existingTrack.thumbnailUri
+                    val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
                     val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
+
+                    val needsArtworkCheck = currentThumb == null || isBuggyThumb || isMediaStoreThumb
+                    
+                    var newThumb = currentThumb
+                    if (needsArtworkCheck) {
+                        val embeddedThumb = getEmbeddedArtworkUri(contentUri)
+                        newThumb = embeddedThumb ?: (if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null)
+                    }
 
                     val needsUpdate = existingTrack.uri != contentUri.toString() ||
                             existingTrack.path != path ||
-                            currentThumb == null || isBuggyThumb
+                            newThumb != currentThumb
 
                     if (needsUpdate) {
                         musicDao.updateTrack(existingTrack.copy(
                             uri = contentUri.toString(),
                             path = path,
                             albumId = albumId,
-                            thumbnailUri = if (currentThumb == null || isBuggyThumb) albumArtUri else currentThumb
+                            thumbnailUri = newThumb
                         ))
                     }
                 }
@@ -160,7 +169,59 @@ class MusicRepository @Inject constructor(
         }
 
         tracks.forEach { musicDao.insertTrack(it) }
+        fixAllThumbnails()
         tracks
+    }
+
+    suspend fun fixAllThumbnails() = withContext(Dispatchers.IO) {
+        val allTracks = musicDao.getAllTracksSync()
+        allTracks.forEach { track ->
+            val currentThumb = track.thumbnailUri
+            val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
+            val isBuggyThumb = currentThumb != null && (currentThumb == track.uri || currentThumb == track.path)
+            val isCatalogDownload = track.sourceUrl != null && track.path != null
+            
+            val needsFix = currentThumb == null || isMediaStoreThumb || isBuggyThumb || isCatalogDownload
+
+            if (needsFix) {
+                val fileUri = track.path?.let { 
+                    if (it.startsWith("content://") || it.startsWith("file://")) Uri.parse(it)
+                    else Uri.fromFile(File(it))
+                } ?: Uri.parse(track.uri)
+
+                val newThumb = getEmbeddedArtworkUri(fileUri)
+                if (newThumb != null && newThumb != currentThumb) {
+                    musicDao.updateTrack(track.copy(thumbnailUri = newThumb))
+                } else if (currentThumb == null && track.albumId >= 0) {
+                    // Fallback to MediaStore if still no embedded thumb but we have an albumId
+                    val mediaStoreThumb = getAlbumArtUri(track.albumId)?.toString()
+                    if (mediaStoreThumb != null) {
+                        musicDao.updateTrack(track.copy(thumbnailUri = mediaStoreThumb))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun getEmbeddedArtworkUri(uri: Uri): String? {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            val artwork = retriever.embeddedPicture
+            if (artwork != null) {
+                val fileName = "thumb_${uri.toString().hashCode()}.jpg"
+                val file = File(context.cacheDir, fileName)
+                FileOutputStream(file).use { it.write(artwork) }
+                return Uri.fromFile(file).toString()
+            }
+        } catch (e: Exception) {
+            // Ignore extraction errors
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {}
+        }
+        return null
     }
 
     private fun getAlbumArtUri(albumId: Long): Uri? {
@@ -196,8 +257,9 @@ class MusicRepository @Inject constructor(
                             tracks.add(extractMetadata(file.uri))
                         } else {
                             val currentThumb = existingTrack.thumbnailUri
+                            val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
                             val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
-                            if (currentThumb == null || isBuggyThumb) {
+                            if (currentThumb == null || isBuggyThumb || isMediaStoreThumb) {
                                 val meta = extractMetadata(file.uri)
                                 musicDao.updateTrack(existingTrack.copy(
                                     thumbnailUri = meta.thumbnailUri,
@@ -236,14 +298,7 @@ class MusicRepository @Inject constructor(
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "Unknown Album"
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
 
-            val artwork = retriever.embeddedPicture
-            var thumbnailUri: String? = null
-            if (artwork != null) {
-                val fileName = "thumb_${uri.toString().hashCode()}.jpg"
-                val file = File(context.cacheDir, fileName)
-                FileOutputStream(file).use { it.write(artwork) }
-                thumbnailUri = Uri.fromFile(file).toString()
-            }
+            val thumbnailUri = getEmbeddedArtworkUri(uri)
 
             MusicTrack(
                 uri = uri.toString(),
