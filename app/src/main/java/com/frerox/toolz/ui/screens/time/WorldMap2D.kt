@@ -458,7 +458,7 @@ fun WorldMap2D(
                         vectorPath?.let { path ->
                             drawPath(path, colors.land)
                             drawPath(path, colors.landBorder,
-                                style = Stroke(1.2.dp.toPx() / zoom.coerceAtLeast(0.1f)))
+                                style = Stroke(0.8.dp.toPx() / zoom.coerceAtLeast(0.1f)))
                         }
                     }
 
