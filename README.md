@@ -19,83 +19,84 @@
 
 ## ✨ Why Toolz?
 
-Toolz is designed to feel like a real daily driver, not a demo shelf. Instead of juggling dozens of single-purpose apps, you get:
+Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggling dozens of bloated closed-source single-purpose apps, you get:
 
-- **One app for everything**: timers, notes, PDFs, media, utilities, sensors, and device tools
-- **Smart dashboard** with quick access, pinned tools, recent tools, and a universal floating status pill
-- **Strong local capabilities** for vaults, clipboard history, PDF work, conversion, measurement, and sensors
-- **Optional AI** that actually helps, including assistant flows, smart matching, and document summaries
-- **Native Android integrations** like Autofill, notification listening, accessibility-powered focus controls, quick settings tiles, and app widgets
+- **Zero Bloat, One Home** — Ditch the folder of 40+ single-purpose apps. Toolz provides a unified library of polished utilities in one optimized APK.
+- **Privacy as a Standard** — Core tools work 100% offline. Sensitive data like passwords, notes, and notifications are stored locally using industrial-grade SQLCipher encryption.
+- **Deep System Integration** — Native Quick Settings tiles, Homescreen Widgets, and Autofill support ensure the toolkit feels like a native extension of your Android OS, an ecosystem built for power users.
+- **Polished tools** — Every tool is built for accuracy, utilizing FFmpeg for media, ML Kit for vision, and GPS-calibrated sensors for navigation.
+- **Unified Dashboard** — A smart dashboard with pinned favorites and a floating "status pill" keeps your active timers, music, or recordings accessible from anywhere.
 
 ---
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **40+ precision instruments** organized across 8 categories:
+Toolz includes **45+ precision instruments** organized across 8 categories:
 
 ### ⏱️ Time & Productivity
-- **Timer** — Classic countdown with notifications and quick presets
-- **Stopwatch** — Lap tracking and performance timing
-- **Pomodoro** — 25/5/15 minute cycles with session tracking
-- **World Clock** — Timezone management and international time display
-- **Calendar** — Event management and scheduling
-- **Todo** — Task management with priorities, due dates, and filters
-- **Caffeinate** — Keep screen awake for focused work sessions
+- **Timer** — Precise countdown engine with background persistence and physics-based alarms
+- **Stopwatch** — High-resolution performance timing with lap tracking and millisecond accuracy
+- **Pomodoro** — Deep focus cycles (25/5/15) with session tracking and non-intrusive notifications
+- **World Clock** — Global time synchronization and timezone management for international teams
+- **Calendar** — Native scheduling and event management with Material 3 expressive design
+- **Todo List** — Priority-driven task management with physics-based interactions and due date filters
+- **Caffeinate** — System-level screen-awake utility with quick settings tile integration
+- **Focus Flow** — Productivity analyzer that tracks app usage and provides actionable flow scores
 
-### 🤖 Smart Flow & AI
-- **AI Assistant** — Configurable providers (ChatGPT, Claude, Groq, DeepSeek, OpenRouter, Gemini) with model selection
-- **Smart Search** — Intent-matching dashboard search that routes you to the right tool
-- **Web Search** — DuckDuckGo HTML results, bookmarks, quick links, DNS/ad-block controls
-- **Quick Capture** — Notepad and Todo for notes, reminders, and lightweight planning
+### 🚀 AI & Utilities
+- **AI Assistant** — Optional conversational agent for document summaries and contextual guidance
+- **Smart Search** — Intent-matching dashboard search that routes queries directly to the correct tool
+- **Web Search** — Privacy-focused browser with ad-blocking, custom DNS controls, and tab management
+- **Notepad** — Multimedia capture tool for notes, reminders, and audio-linked memos
 
 ### 💾 Media & PDF
-- **Music Player** — Local playback with lyrics, Media3 controls, and catalog/download flow
-- **Voice Recorder** — Audio capture with playback and library management
-- **File Converter** — Video, audio, image, PDF conversion with FFmpeg-backed processing
-- **PDF Reader** — Open files directly, scan documents with OCR, extract text, AI summaries
-- **File Cleaner** — Remove unused files and reclaim storage
+- **Music Player** — Local audio hub with lyrics, playlist management, and Media3 background playback
+- **Voice Recorder** — Studio-quality audio capture with pause/resume and searchable library
+- **File Converter** — FFmpeg-powered media transformation for video, audio, and image formats
+- **PDF Reader** — Native document viewer with text extraction and document summary support
+- **File Cleaner** — Storage management utility to reclaim space and remove redundant cache
+- **Sound Meter** — Real-time decibel analysis for monitoring environmental noise levels
 
 ### 🔦 Light & Optics
-- **Flashlight** — Quick access to device LED
-- **Screen Light** — Adjustable screen brightness without changing settings
-- **Magnifier** — Digital magnification for reading small text
-- **QR/Barcode Scanner** — Scan codes with instant results
-- **QR Generator** — Create QR codes from text or URLs
-- **Light Meter** — Measure ambient light levels
+- **Flashlight** — Dynamic LED control with steady, strobe, SOS, and disco modes
+- **Screen Light** — High-brightness display utility with adjustable color temperature for soft lighting
+- **Magnifier** — Digital zoom tool for reading micro-text and inspecting hardware components
+- **Scanner** — High-speed recognition engine for QR codes and industrial barcodes
+- **QR Generator** — Create shareable codes from text, credentials, or network configurations
+- **Light Meter** — Photometric sensor utility for measuring ambient Lux levels
 
 ### 📐 Sensors & Navigation
-- **Compass** — Digital compass with heading display
-- **Bubble Level** — Spirit level for leveling objects
-- **Speedometer** — Real-time speed tracking
-- **Altimeter** — Altitude and elevation data
-- **Step Counter** — Pedometer with activity tracking
-- **Ruler** — On-screen measurement tool
-- **Sound Meter** — Decibel level measurement
+- **Compass** — Magnetic orientation tool with bearing tracking and heading visualization
+- **Bubble Level** — Dual-axis spirit level for high-precision alignment and leveling
+- **Speedometer** — GPS-based velocity tracking with peak speed and distance metrics
+- **Altimeter** — Elevation tracking utilizing barometric pressure and GPS data
+- **Step Counter** — Fitness pedometer with daily goals, trends, and distance analysis
+- **Ruler** — Calibrated on-screen measurement for physical objects
+- **Color Picker** — Visual color extraction tool that identifies HEX/RGB values via the camera
 
 ### 🧮 Math & Conversion
-- **Calculator** — Standard and scientific modes with history
-- **Unit Converter** — Convert between hundreds of units (distance, weight, temperature, etc.)
-- **Tip Calculator** — Quick tip calculations and bill splitting
-- **BMI Calculator** — Body metrics with healthy ranges, TDEE, and nutrition guidance
-- **Equation Solver** — Solve mathematical equations
-- **Color Picker** — Extract colors from images or create custom palettes
+- **Calculator** — Scientific math engine with expression history and modular layouts
+- **Unit Converter** — Universal conversion for hundreds of units across distance, weight, and energy
+- **Tip Calculator** — Rapid bill splitting and tip calculation for group dining
+- **BMI Calculator** — Health metric analyzer with TDEE and nutrition guidance
+- **Equation Solver** — Advanced solver for linear, quadratic, and complex mathematical equations
 
 ### 🔐 Security & Privacy
-- **Password Vault** — Encrypted SQLCipher storage, biometric unlock, Autofill integration, password generation, CSV import, vault health checks
-- **Password Generator** — Create strong passwords with customizable rules
-- **Clipboard History** — Archive and retrieve past clipboard items
-- **Notification Vault** — Capture selected notifications into searchable local archive
-- **Smart Encrypter** — Encrypt/decrypt text and files locally
+- **Password Vault** — SQLCipher-encrypted storage for credentials with biometric unlock and autofill integration
+- **Password Generator** — High-entropy random key generator with customizable complexity rules
+- **Clipboard History** — Local archive for managing and retrieving past clipboard segments
+- **Notification Vault** — Searchable local log of system notifications for privacy auditing
+- **Smart Encrypter** — AES-256 text and file encryption utility for secure data transfer
 
 ### 📊 Device & System
-- **Device Info** — Comprehensive system information (processor, RAM, storage, battery health)
-- **Battery Info** — Detailed battery statistics and health metrics
-- **Periodic Table** — Interactive periodic table with element properties
-- **Flip Coin** — Random coin flip decision maker
-- **Wi-Fi Tweaks** — Advanced network settings and diagnostics
-- **Network Power Suite** — DNS configuration, ad-blocking, network monitoring
+- **Device Info** — Deep hardware diagnostics and system property inspection
+- **Battery Info** — Comprehensive statistics on health, cycles, and charging temperature
+- **Periodic Table** — Interactive scientific reference for element properties and data
+- **Flip Coin** — Physics-simulated decision maker for random selection
+- **Network Tweaks** — Wi-Fi diagnostics and advanced connectivity optimization tools
+- **Network Power Suite** — System-level DNS configuration, ad-blocking, and network monitoring
 
-### 🏠 Widgets & Quick Settings
+### 🏠 Widgets & Quick Settings (Experimental)
 - **Homescreen Widgets** — Flashlight, notes, steps, compass, flip coin, music player
 - **Quick Settings Tiles** — Clipboard and Caffeinate fast access
 
@@ -126,7 +127,7 @@ Toolz includes a built-in updater that checks GitHub releases and update manifes
 ### Requirements
 
 - **Android Studio** (latest)
-- **Android SDK** — compileSdk 36, targetSdk 36
+- **Android SDK** — compileSdk 37, targetSdk 36
 - **JDK 17**
 - **Device/Emulator** — Android 12+ (minSdk 31)
 
@@ -175,7 +176,7 @@ Toolz uses different Android permissions depending on which tools you enable. Th
 | **Focus Flow** | Usage Access, Accessibility, Overlay | App usage analysis, app limits, advanced focus controls |
 | **Notification Vault** | Notification Listener | Capture and organize notifications |
 | **Password Vault** | Biometric Auth, Autofill | Secure unlock and credential filling |
-| **Search, AI, Updates** | Internet/Network | DuckDuckGo search, AI providers, update checks, music catalog |
+| **Search, Assistant, Updates** | Internet/Network | DuckDuckGo search, Assistant providers, update checks, music catalog |
 | **Camera Tools** | Camera, Flashlight | Scanning, magnifier, light detection |
 | **Audio Tools** | Microphone, Media | Voice recording, playback, music library |
 | **Motion Tools** | Activity Recognition, Location, Sensors | Step counting, compass, altitude, speed |
@@ -183,8 +184,8 @@ Toolz uses different Android permissions depending on which tools you enable. Th
 
 ### Important Notes
 
-- **Toolz is not fully offline.** Many tools work entirely on-device, but connected features (AI, web search, catalog downloads, updates) require network access by default, however it does feature an offline mode that turns the app fully offline
-- **AI is optional.** You can use all core utilities without configuring personal provider keys
+- **Toolz is not fully offline.** Many tools work entirely on-device, but connected features (Assistant, web search, catalog downloads, updates) require network access by default, however it does feature an offline mode that turns the app fully offline
+- **Assistant features are optional.** You can use all core utilities without configuring personal provider keys
 - **No tracking, no ads.** Toolz is built for privacy-conscious users who want full control over their data
 
 ---
@@ -192,7 +193,7 @@ Toolz uses different Android permissions depending on which tools you enable. Th
 ## ✨ Quick Start Tips
 
 1. **Pin Your Favorites** — Long-press tools on the dashboard to keep your most-used items front and center
-2. **Use Smart Search** — The dashboard search is powered by AI intent matching; describe what you want in natural language
+2. **Use Smart Search** — The dashboard search is optimized for intent matching; describe what you want in plain language
 3. **Enable Widgets** — Add homescreen widgets for quick access to flashlight, notes, music, and more
 4. **Set Up Your Vault** — Configure your password vault with biometric unlock for seamless Autofill
 5. **Explore Focus Flow** — Track your app usage and set meaningful productivity goals
