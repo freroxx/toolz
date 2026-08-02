@@ -101,34 +101,6 @@ Toolz includes **30+ precision instruments** organized across 8 categories:
 
 ---
 
-## 🎯 Standout Features
-
-### Focus Flow
-Tracks app usage, scores productivity, supports daily app limits, and can use accessibility-powered hard locks for advanced focus modes.
-
-### Password Vault
-Stores credentials in an encrypted SQLCipher-backed database with biometric unlock, Autofill support, password generation, CSV import, and vault health checks.
-
-### Notification Vault
-Captures selected notifications into a searchable local archive with filters and app-level controls.
-
-### PDF Reader
-Opens PDF files directly from Android share/open flows, scans documents with OCR (supports Latin, Chinese, Japanese, Korean, Devanagari), extracts text, and supports AI-assisted summaries.
-
-### File Converter
-Handles video, audio, image, and PDF conversion workflows with FFmpeg-backed processing and PDF-to-image support.
-
-### Music Player
-Supports local playback, synced lyrics, Media3 controls, karaoke mode, visualizer, sleep timer, and a catalog/download flow for expanding your library.
-
-### Smart Dashboard
-Responsive grid layout with tool pinning, recent tools access, category filtering, and unified search powered by AI intent matching.
-
-### Backup & Restore
-Export and import your data (notes, passwords, settings, AI history, etc.) with manifest versioning and integrity checks.
-
----
-
 ## 📥 Install Toolz
 
 Toolz is distributed through **GitHub Releases**:
