@@ -458,7 +458,7 @@ fun WorldMap2D(
                         vectorPath?.let { path ->
                             drawPath(path, colors.land)
                             drawPath(path, colors.landBorder,
-                                style = Stroke(0.6.dp.toPx() / zoom.coerceAtLeast(0.1f)))
+                                style = Stroke(1.2.dp.toPx() / zoom.coerceAtLeast(0.1f)))
                         }
                     }
 
@@ -495,12 +495,18 @@ fun WorldMap2D(
                 } catch (e: Exception) {
                     // Fallback: simplified low-poly world (continents as basic polygons)
                     // Format: lon,lat,lon,lat...|next_poly...
-                    // Americas
-                    "-120,70,-60,70,-40,10,-80,-50,-100,-50,-80,10,-120,70|" +
-                    // Eurasia + Africa
-                    "-20,70,140,70,150,0,40,-30,20,-30,0,10,-20,70|" +
+                    // Antarctica
+                    "-180,-90,180,-90,180,-65,-180,-65,-180,-90|" +
+                    // South America
+                    "-80,-55,-40,-10,-50,10,-80,10,-80,-55|" +
+                    // North America
+                    "-170,70,-60,70,-60,10,-100,15,-170,70|" +
+                    // Africa
+                    "-20,35,50,35,50,-35,10,-35,-20,35|" +
+                    // Eurasia
+                    "-10,70,180,70,180,10,-10,10,-10,70|" +
                     // Australia
-                    "110,-15,150,-15,150,-40,110,-40,110,-15"
+                    "110,-10,155,-10,155,-45,110,-45,110,-10"
                 }
                 val p = Path()
                 text.split("|").forEach { poly ->
