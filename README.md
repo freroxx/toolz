@@ -11,7 +11,7 @@
 <p align="center">
   <img alt="Latest release" src="https://img.shields.io/github/v/release/freroxx/toolz?display_name=tag" />
   <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white" />
-  <img alt="Kotlin 2.1.10" src="https://img.shields.io/badge/Kotlin-2.1.10-7F52FF?logo=kotlin&logoColor=white" />
+  <img alt="Kotlin 2.4.0" src="https://img.shields.io/badge/Kotlin-2.4.0-7F52FF?logo=kotlin&logoColor=white" />
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4?logo=jetpackcompose&logoColor=white" />
 </p>
 
@@ -180,7 +180,7 @@ Import the project into Android Studio, let Gradle sync, and the debug APK will 
 
 ## 🛠️ Tech Stack
 
-- **Kotlin 2.1.10** — Modern Android development
+- **Kotlin 2.4.0** — Modern Android development
 - **Jetpack Compose** — Declarative UI framework with Material 3 Expressive design
 - **Hilt** — Dependency injection
 - **Room + SQLCipher** — Encrypted local storage
