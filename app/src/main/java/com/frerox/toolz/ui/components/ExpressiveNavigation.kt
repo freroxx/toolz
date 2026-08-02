@@ -273,6 +273,7 @@ fun ToolzFloatingToolbar(
     onNavigate: (String) -> Unit = {},
     offlineState: com.frerox.toolz.util.OfflineState = com.frerox.toolz.util.OfflineState.ONLINE,
     settingsRepository: com.frerox.toolz.data.settings.SettingsRepository? = null,
+    showToolzPill: Boolean = true,
 ) {
     val haptic = rememberToolzHapticFeedback()
     val performanceMode = LocalPerformanceMode.current
@@ -298,7 +299,7 @@ fun ToolzFloatingToolbar(
     val pillFlashlightEnabled by settingsRepository?.pillFlashlightEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
     val pillCatalogDownloadEnabled by settingsRepository?.pillCatalogDownloadEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
 
-    val hasActiveService = (pillMusicEnabled && (musicState?.isPlaying == true || musicState?.currentTrack != null)) ||
+    val hasActiveService = showToolzPill && ((pillMusicEnabled && (musicState?.isPlaying == true || musicState?.currentTrack != null)) ||
                           (pillTimerEnabled && (timerState?.isRunning == true || timerState?.isRinging == true || (timerState?.remainingTime ?: 0L) > 0L)) ||
                           (pillStopwatchEnabled && stopwatchState?.isRunning == true) ||
                           (pillPomodoroEnabled && pomodoroState?.isRunning == true) ||
@@ -308,9 +309,9 @@ fun ToolzFloatingToolbar(
                           (pillStepsEnabled && stepsState?.isEnabledInSettings == true) ||
                           (pillCatalogDownloadEnabled && catalogState?.downloadingTracks?.isNotEmpty() == true) ||
                           (pillTodoEnabled && todoState?.tasks?.isNotEmpty() == true) ||
-                          (pillFocusEnabled && focusScore > 0)
+                          (pillFocusEnabled && focusScore > 0))
 
-    val showPillContent = hasActiveService || fillThePill
+    val showPillContent = showToolzPill && (hasActiveService || fillThePill)
 
     val toolbarWidth by animateDpAsState(
         targetValue = if (showPillContent) 340.dp else 260.dp,
