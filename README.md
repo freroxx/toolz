@@ -24,7 +24,7 @@ Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggli
 - **Zero Bloat, One Home** — Ditch the folder of 40+ single-purpose apps. Toolz provides a unified library of polished utilities in one optimized APK.
 - **Privacy as a Standard** — Core tools work 100% offline. Sensitive data like passwords, notes, and notifications are stored locally using industrial-grade SQLCipher encryption.
 - **Deep System Integration** — Native Quick Settings tiles, Homescreen Widgets, and Autofill support ensure the toolkit feels like a native extension of your Android OS, an ecosystem built for power users.
-- **Polished tools** — Every tool is built for accuracy, utilizing FFmpeg for media, ML Kit for vision, and GPS-calibrated sensors for navigation.
+- **Polished tools** — Every tool is built for accuracy, utilizing FFmpeg for media, ML Kit for vision, and GPS-calibrated sensors for navigation... All wrapped inside a Material 3 expressive customisable experience.
 - **Unified Dashboard** — A smart dashboard with pinned favorites and a floating "status pill" keeps your active timers, music, or recordings accessible from anywhere.
 
 ---
