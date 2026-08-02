@@ -276,7 +276,8 @@ fun DashboardScreen(
             fillThePill = fillThePill,
             onNavigate = navigate,
             offlineState = offlineState,
-            settingsRepository = settingsRepository
+            settingsRepository = settingsRepository,
+            showToolzPill = showPill
         )
     }
 }
