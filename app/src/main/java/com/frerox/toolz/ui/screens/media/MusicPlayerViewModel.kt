@@ -1103,6 +1103,16 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             repository.scanDeviceForMusic()
+            repository.fixAllThumbnails()
+            _uiState.update { it.copy(isLoading = false) }
+            hapticSuccess()
+        }
+    }
+
+    fun fixThumbnails() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            repository.fixAllThumbnails()
             _uiState.update { it.copy(isLoading = false) }
             hapticSuccess()
         }
