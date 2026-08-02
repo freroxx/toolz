@@ -31,7 +31,7 @@ Toolz is designed to feel like a real daily driver, not a demo shelf. Instead of
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **30+ precision instruments** organized across 8 categories:
+Toolz includes **40+ precision instruments** organized across 8 categories:
 
 ### ⏱️ Time & Productivity
 - **Timer** — Classic countdown with notifications and quick presets
