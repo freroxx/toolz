@@ -177,9 +177,7 @@ fun WorldMap2D(
 ) {
     val context = LocalContext.current
 
-    // ── Vector map path ───────────────────────────────────────────────────────
     var vectorPath by remember { mutableStateOf<Path?>(null) }
-    var pathBuiltForSize by remember { mutableStateOf(Size.Zero) }
 
     // ── Satellite bitmap — equirectangular NASA Blue Marble ───────────────────
     var satelliteBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -430,11 +428,6 @@ fun WorldMap2D(
         val isSat   = mapMode == MapMode.SATELLITE
         val colors  = if (isSat) WorldMapColors.Satellite else mapColors
 
-        // ── Build vector path lazily (first draw, or if canvas size changed) ─
-        if (pathBuiltForSize != size && !isSat) {
-            pathBuiltForSize = size
-        }
-
         // ── Ocean background ──────────────────────────────────────────────────
         drawRect(color = colors.ocean, size = size)
 
@@ -490,13 +483,25 @@ fun WorldMap2D(
     }
 
     // ── Build vector path on background thread ────────────────────────────────
-    LaunchedEffect(gs.canvasW, gs.canvasH) {
-        val cW = gs.canvasW; val cH = gs.canvasH
+    LaunchedEffect(canvasSize) {
+        val cW = canvasSize.width; val cH = canvasSize.height
         if (cW <= 0f || cH <= 0f) return@LaunchedEffect
         val (w, h) = getMapDimensions(cW, cH)
         withContext(Dispatchers.IO) {
             try {
-                val text = context.assets.open("world_map.txt").bufferedReader().use { it.readText() }
+                // Try to load from assets, with a basic fallback if missing
+                val text = try {
+                    context.assets.open("world_map.txt").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    // Fallback: simplified low-poly world (continents as basic polygons)
+                    // Format: lon,lat,lon,lat...|next_poly...
+                    // Americas
+                    "-120,70,-60,70,-40,10,-80,-50,-100,-50,-80,10,-120,70|" +
+                    // Eurasia + Africa
+                    "-20,70,140,70,150,0,40,-30,20,-30,0,10,-20,70|" +
+                    // Australia
+                    "110,-15,150,-15,150,-40,110,-40,110,-15"
+                }
                 val p = Path()
                 text.split("|").forEach { poly ->
                     val cs = poly.split(",")
